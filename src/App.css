@@ -1,0 +1,166 @@
+.app {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.hint {
+  margin-top: -4px;
+  color: #5f6a7d;
+}
+
+.toolbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 14px 0 18px;
+}
+
+.toolbar button,
+.import-label {
+  border: 1px solid #ccd3de;
+  background: #fff;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 14px;
+}
+
+.import-label input {
+  display: none;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.card {
+  border: 1px solid #e1e6ef;
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+textarea,
+select,
+button {
+  font: inherit;
+}
+
+textarea,
+select {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #ccd3de;
+  border-radius: 6px;
+  padding: 8px;
+  margin-top: 8px;
+}
+
+.parsed-box {
+  margin-top: 8px;
+}
+
+.parsed-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.parsed-controls select {
+  max-width: 220px;
+  margin-top: 0;
+}
+
+.parsed-controls button {
+  border: 1px solid #ccd3de;
+  background: #fff;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.table-wrap {
+  overflow: auto;
+  margin-top: 8px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto; /* Включаем автоширину колонок в зависимости от содержимого */
+}
+
+th,
+td {
+  border: 1px solid #d7dce5;
+  padding: 6px;
+  text-align: left;
+  vertical-align: top;
+  overflow: auto; /* Включаем прокрутку для длинного текста */
+}
+
+.warning {
+  color: #8c5a00;
+  margin-top: 8px;
+}
+
+.error {
+  color: #b00020;
+  margin-top: 8px;
+}
+
+@media (max-width: 1100px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.table-wrap table th:nth-child(2),
+.table-wrap table td:nth-child(2) {
+  width: auto; /* Убираем фиксированную ширину для автонастройки */
+}
+
+/* Стили для ручки изменения ширины */
+.table-wrap th {
+  position: relative;
+}
+.resizer {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 12px;
+  cursor: col-resize;
+  z-index: 5;
+  background: transparent;
+}
+.resizer:hover {
+  background: rgba(0,0,0,0.06);
+}
+
+/* Подсветка несоответствия типа и примера */
+.mismatch {
+  border: 2px solid #b00020;
+  box-sizing: border-box;
+}
+.mismatch-icon {
+  display: inline-block;
+  margin-left: 6px;
+  color: #fff;
+  background: #b00020;
+  width: 18px;
+  height: 18px;
+  line-height: 18px;
+  text-align: center;
+  border-radius: 50%;
+  font-weight: bold;
+  font-size: 12px;
+  vertical-align: middle;
+}

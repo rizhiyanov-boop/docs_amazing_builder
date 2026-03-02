@@ -1,203 +1,3 @@
-import { useEffect, useMemo, useState, useRef } from 'react';
-import './App.css';
-import { parseToRows } from './parsers';
-import { renderHtmlDocument } from './renderHtml';
-import { renderWikiDocument } from './renderWiki';
-import type { DocSection, ParsedSection, ParseFormat, ProjectData } from './types';
-
-const STORAGE_KEY = 'doc-builder-project-v1';
-
-function createInitialSections(): DocSection[] {
-  return [
-    { id: 'goal', title: 'Цель', enabled: true, kind: 'text', value: '', required: true },
-    { id: 'external-url', title: 'Внешний URL', enabled: true, kind: 'text', value: '' },
-    {
-      id: 'request',
-      title: 'Request (cURL)',
-      enabled: true,
-      kind: 'parsed',
-      format: 'curl',
-      input: '',
-      rows: [],
-      error: ''
-    },
-    {
-      id: 'body',
-      title: 'Body / Выходные параметры',
-      enabled: true,
-      kind: 'parsed',
-      format: 'json',
-      input: '',
-      rows: [],
-      error: ''
-    },
-    { id: 'errors', title: 'Ошибки', enabled: true, kind: 'text', value: '' },
-    { id: 'non-functional', title: 'Нефункциональные требования', enabled: true, kind: 'text', value: '' },
-    {
-      id: 'future',
-      title: 'Доработки, планирующиеся на следующих этапах',
-      enabled: false,
-      kind: 'text',
-      value: ''
-    }
-  ];
-}
-
-function validateSection(section: DocSection): string {
-  if (section.kind !== 'parsed') return '';
-  if (!section.input || !section.input.trim()) return 'Введите исходные данные для парсинга';
-  if (section.error) return `Секция заблокирована: ${section.error}`;
-  if (section.rows.length === 0) return 'Нет распарсенных строк';
-  return '';
-}
-
-function asProjectData(sections: DocSection[]): ProjectData {
-  return { version: 1, updatedAt: new Date().toISOString(), sections };
-}
-
-function loadProject(): DocSection[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return createInitialSections();
-    const parsed = JSON.parse(raw) as ProjectData;
-    if (!parsed.sections || !Array.isArray(parsed.sections)) return createInitialSections();
-    return parsed.sections;
-  } catch {
-    return createInitialSections();
-  }
-}
-
-function downloadText(filename: string, content: string): void {
-  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(link.href);
-}
-
-function App() {
-  const [sections, setSections] = useState<DocSection[]>(() => loadProject());
-  const [importError, setImportError] = useState('');
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(asProjectData(sections)));
-  }, [sections]);
-
-  const validationMap = useMemo(() => {
-    const result = new Map<string, string>();
-    for (const section of sections) result.set(section.id, validateSection(section));
-    return result;
-  }, [sections]);
-
-  const htmlOutput = useMemo(() => renderHtmlDocument(sections), [sections]);
-  const wikiOutput = useMemo(() => renderWikiDocument(sections), [sections]);
-
-  function updateSection(id: string, updater: (section: DocSection) => DocSection): void {
-    setSections((prev) => prev.map((section) => (section.id === id ? updater(section) : section)));
-  }
-
-  function runParser(section: ParsedSection): void {
-    try {
-      const rows = parseToRows(section.format, section.input);
-      updateSection(section.id, (current) => {
-        if (current.kind !== 'parsed') return current;
-        return { ...current, rows, error: '' };
-      });
-    } catch (error) {
-      updateSection(section.id, (current) => {
-        if (current.kind !== 'parsed') return current;
-        return {
-          ...current,
-          rows: [],
-          error: error instanceof Error ? error.message : 'Ошибка парсинга'
-        };
-      });
-    }
-  }
-
-  function exportProjectJson(): void {
-    downloadText('doc-project.json', JSON.stringify(asProjectData(sections), null, 2));
-  }
-
-  function importProjectJson(file: File | undefined): void {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const text = String(reader.result || '');
-        const parsed = JSON.parse(text) as ProjectData;
-        if (!parsed.sections || !Array.isArray(parsed.sections)) throw new Error('Неверный формат');
-        setSections(parsed.sections);
-        setImportError('');
-      } catch (error) {
-        setImportError(error instanceof Error ? error.message : 'Ошибка импорта');
-      }
-    };
-    reader.readAsText(file);
-  }
-
-  return (
-    <div className="app">
-      <h1>Конструктор документации API</h1>
-      <p className="hint">MVP: локальная работа, мягкая валидация, экспорт в HTML и Confluence Wiki Markup.</p>
-
-      <div className="toolbar">
-        <button onClick={() => downloadText('documentation.html', htmlOutput)}>Экспорт HTML</button>
-        <button onClick={() => downloadText('documentation.wiki', wikiOutput)}>Экспорт Wiki</button>
-        <button onClick={exportProjectJson}>Экспорт проекта JSON</button>
-        <button
-          onClick={() => {
-            if (!confirm('Сбросить все секции и очистить проект? Это действие необратимо.')) return;
-            setSections(createInitialSections());
-            localStorage.removeItem(STORAGE_KEY);
-          }}
-        >
-          Сбросить всё
-        </button>
-        <label className="import-label">
-          Импорт проекта JSON
-          <input
-            type="file"
-            accept="application/json"
-            onChange={(event) => importProjectJson(event.target.files?.[0])}
-          />
-        </label>
-      </div>
-
-      {importError && <p className="error">Ошибка импорта: {importError}</p>}
-
-      <div className="grid">
-        <section>
-          <h2>Секции документа</h2>
-          {sections.map((section) => (
-            <article key={section.id} className="card">
-              <div className="card-head">
-                <h3>{section.title}</h3>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={section.enabled}
-                    onChange={(event) =>
-                      updateSection(section.id, (current) => ({ ...current, enabled: event.target.checked }))
-                    }
-                  />{' '}
-                  Использовать
-                </label>
-              </div>
-
-              {section.kind === 'text' && (
-                <textarea
-                  rows={5}
-                  value={section.value}
-                  onChange={(event) =>
-                    updateSection(section.id, (current) =>
-                      current.kind === 'text' ? { ...current, value: event.target.value } : current
-                    )
-                  }
-                  placeholder="Введите текст секции"
-                />
-              )}
 
               {section.kind === 'parsed' && (
                 <div className="parsed-box">
@@ -205,209 +5,401 @@ function App() {
                     <select
                       value={section.format}
                       onChange={(event) =>
-                        updateSection(section.id, (current) =>
-                          current.kind === 'parsed'
-                            ? { ...current, format: event.target.value as ParseFormat, rows: [], error: '' }
-                            : current
-                        )
-                      }
-                    >
-                      <option value="json">JSON</option>
-                      <option value="xml">XML</option>
-                      {section.id === 'request' && <option value="curl">cURL (REST)</option>}
-                    </select>
-                    <button onClick={() => runParser(section)}>Парсить в таблицу</button>
-                  </div>
-                  <textarea
-                    rows={8}
-                    value={section.input}
-                    onChange={(event) =>
-                      updateSection(section.id, (current) =>
-                        current.kind === 'parsed' ? { ...current, input: event.target.value, error: '' } : current
-                      )
-                    }
-                    placeholder="Вставьте JSON, XML или cURL"
-                  />
+                        import { useEffect, useMemo, useState } from 'react';
+                        import './App.css';
+                        import { parseToRows } from './parsers';
+                        import { renderHtmlDocument } from './renderHtml';
+                        import { renderWikiDocument } from './renderWiki';
+                        import type { DocSection, ParsedSection, ParseFormat, ProjectData } from './types';
 
-                  {section.error && <p className="error">{section.error}</p>}
+                        const STORAGE_KEY = 'doc-builder-project-v2';
 
-                  {section.rows.length > 0 && section.format === 'curl' ? (
-                    <div className="curl-groups">
-                      {/* Group rows with their original indices so updates map back correctly */}
-                      {(() => {
-                        const indexed = section.rows.map((r, i) => ({ r, i }));
-                        const headerRows = indexed.filter(({ r }) => (r as any).source === 'header');
-                        const bodyRows = indexed.filter(({ r }) => (r as any).source === 'body');
+                        type TabKey = 'editor' | 'html' | 'wiki' | 'split';
+                        type AutosaveState = 'idle' | 'saving' | 'saved' | 'error';
 
-                        // replaced by <SmallTable /> components below
+                        function createInitialSections(): DocSection[] {
+                          return [
+                            { id: 'goal', title: 'Цель', enabled: true, kind: 'text', value: '', required: true },
+                            { id: 'external-url', title: 'Внешний URL', enabled: true, kind: 'text', value: '' },
+                            { id: 'request', title: 'Request (cURL)', enabled: true, kind: 'parsed', format: 'curl', input: '', rows: [], error: '' },
+                            { id: 'body', title: 'Body / Выходные параметры', enabled: true, kind: 'parsed', format: 'json', input: '', rows: [], error: '' },
+                            { id: 'errors', title: 'Ошибки', enabled: true, kind: 'text', value: '' },
+                            { id: 'non-functional', title: 'Нефункциональные требования', enabled: true, kind: 'text', value: '' },
+                            { id: 'future', title: 'Доработки, планирующиеся на следующих этапах', enabled: false, kind: 'text', value: '' }
+                          ];
+                        }
 
-                        return (
-                          <div>
-                            <SmallTable title="Headers" items={headerRows} section={section} updateSection={updateSection} />
-                            <SmallTable title="Body" items={bodyRows} section={section} updateSection={updateSection} />
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  ) : (
-                    section.rows.length > 0 && <ParsedTable section={section} updateSection={updateSection} />
-                  )}
-                </div>
-              )}
+                        function validateSection(section: DocSection): string {
+                          if (section.kind !== 'parsed') return '';
+                          if (!section.input || !section.input.trim()) return 'Введите исходные данные для парсинга';
+                          if (section.error) return `Секция заблокирована: ${section.error}`;
+                          if (section.rows.length === 0) return 'Нет распарсенных строк';
+                          return '';
+                        }
 
-              {validationMap.get(section.id) && <p className="warning">{validationMap.get(section.id)}</p>}
-            </article>
-          ))}
-        </section>
+                        function asProjectData(sections: DocSection[]): ProjectData {
+                          return { version: 2, updatedAt: new Date().toISOString(), sections };
+                        }
 
-        <section>
-          <h2>Результат генерации</h2>
-          <h3>HTML</h3>
-          <textarea readOnly rows={14} value={htmlOutput} />
-          <h3>Confluence Wiki Markup</h3>
-          <textarea readOnly rows={14} value={wikiOutput} />
-        </section>
-      </div>
-    </div>
-  );
-}
+                        function loadProject(): DocSection[] {
+                          try {
+                            const raw = localStorage.getItem(STORAGE_KEY);
+                            if (!raw) return createInitialSections();
+                            const parsed = JSON.parse(raw) as ProjectData;
+                            if (!parsed.sections || !Array.isArray(parsed.sections)) return createInitialSections();
+                            return parsed.sections;
+                          } catch {
+                            return createInitialSections();
+                          }
+                        }
 
-// Компонент таблицы с возможностью вручную менять ширину колонок перетаскиванием
-function ParsedTable({
-  section,
-  updateSection
-}: {
-  section: ParsedSection;
-  updateSection: (id: string, updater: (section: DocSection) => DocSection) => void;
-}) {
-  const tableRef = useRef<HTMLTableElement | null>(null);
-  const colRefs = useRef<HTMLCollectionOf<HTMLTableColElement> | null>(null);
+                        function downloadText(filename: string, content: string): void {
+                          const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+                          const link = document.createElement('a');
+                          link.href = URL.createObjectURL(blob);
+                          link.download = filename;
+                          link.click();
+                          URL.revokeObjectURL(link.href);
+                        }
 
-  // Устанавливаем обработчики для ручек изменения ширины колонок
-  useColumnResizer(tableRef, section.rows);
+                        function reorderSections(list: DocSection[], fromId: string, toId: string): DocSection[] {
+                          if (fromId === toId) return list;
+                          const next = [...list];
+                          const fromIndex = next.findIndex((s) => s.id === fromId);
+                          const toIndex = next.findIndex((s) => s.id === toId);
+                          if (fromIndex === -1 || toIndex === -1) return list;
+                          const [removed] = next.splice(fromIndex, 1);
+                          next.splice(toIndex, 0, removed);
+                          return next;
+                        }
 
-  // Попытка получить исходные значения из section.input (для JSON / cURL)
-  let sourceJson: any = null;
-  let headerScalars: Record<string, string> = {};
-  let headerObjects: Record<string, any> = {};
-  let curlBody: any = null;
-  if (section.format === 'json') {
-    try {
-      sourceJson = JSON.parse(section.input);
-    } catch {
-      sourceJson = null;
-    }
-  } else if (section.format === 'curl') {
-    try {
-      const normalized = section.input.replace(/\r\n/g, ' ').replace(/\n/g, ' ');
-      const headerMatches = Array.from(normalized.matchAll(/(?:-H|--header)\s+['"]([^'\"]+)['"]/g));
-      for (const match of headerMatches) {
-        const hv = match[1];
-        const si = hv.indexOf(':');
-        const name = si > -1 ? hv.slice(0, si).trim() : hv.trim();
-        const value = si > -1 ? hv.slice(si + 1).trim() : '';
-        // try parse header value as JSON
-        const looksLikeJson = /^\s*[\[{].*[\]}]\s*$/.test(value);
-        if (looksLikeJson) {
-          try {
-            const parsed = JSON.parse(value);
-            headerObjects[name] = parsed;
-          } catch {
-            headerScalars[name] = value;
-          }
-        } else {
-          headerScalars[name] = value;
-        }
-      }
-      const dataMatch = normalized.match(/(?:--data-raw|--data|-d)\s+(['"])([\s\S]*?)\1/);
-      if (dataMatch) {
-        const payload = dataMatch[2].trim();
-        try {
-          curlBody = JSON.parse(payload);
-        } catch {
-          curlBody = payload;
-        }
-      }
-    } catch {
-      headerScalars = {};
-      headerObjects = {};
-      curlBody = null;
-    }
-  }
+                        function formatTime(date: Date): string {
+                          return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        }
 
-  const getValueByField = (field: string): any => {
-    if (section.format === 'json' && sourceJson != null) {
-      const parts = field.split('.');
-      let cur: any = sourceJson;
-      for (const part of parts) {
-        const arrMatch = part.match(/(\w+)\[(\d+)\]$/);
-        if (arrMatch) {
-          const key = arrMatch[1];
-          const idx = Number(arrMatch[2]);
-          if (cur && typeof cur === 'object' && key in cur) {
-            cur = cur[key];
-            if (Array.isArray(cur)) cur = cur[idx];
-            else return undefined;
-          } else return undefined;
-        } else {
-          if (cur && typeof cur === 'object' && part in cur) cur = cur[part];
-          else return undefined;
-        }
-      }
-      return cur;
-    }
-    if (section.format === 'curl') {
-      // header exact match
-      if (field in headerScalars) return headerScalars[field];
-      // header objects: check prefix
-      const dotIdx = field.indexOf('.');
-      if (dotIdx > -1) {
-        const prefix = field.slice(0, dotIdx);
-        const rest = field.slice(dotIdx + 1);
-        if (prefix in headerObjects) {
-          let cur: any = headerObjects[prefix];
-          const parts = rest.split('.');
-          for (const part of parts) {
-            const arrMatch = part.match(/(\w+)\[(\d+)\]$/);
-            if (arrMatch) {
-              const key = arrMatch[1];
-              const idx = Number(arrMatch[2]);
-              if (cur && typeof cur === 'object' && key in cur) {
-                cur = cur[key];
-                if (Array.isArray(cur)) cur = cur[idx];
-                else return undefined;
-              } else return undefined;
-            } else {
-              if (cur && typeof cur === 'object' && part in cur) cur = cur[part];
+                        export default function App() {
+                          const [sections, setSections] = useState<DocSection[]>(() => loadProject());
+                          const [selectedId, setSelectedId] = useState<string>(() => createInitialSections()[0].id);
+                          const [tab, setTab] = useState<TabKey>('editor');
+                          const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+                          const [autosave, setAutosave] = useState<{ state: AutosaveState; at?: string }>({ state: 'idle' });
+                          const [importError, setImportError] = useState('');
+                          const [draggingId, setDraggingId] = useState<string | null>(null);
+
+                          useEffect(() => {
+                            if (!sections.find((s) => s.id === selectedId) && sections[0]) {
+                              setSelectedId(sections[0].id);
+                            }
+                          }, [sections, selectedId]);
+
+                          const validationMap = useMemo(() => {
+                            const map = new Map<string, string>();
+                            for (const section of sections) map.set(section.id, validateSection(section));
+                            return map;
+                          }, [sections]);
+
+                          const selectedSection = sections.find((s) => s.id === selectedId) ?? sections[0];
+
+                          const htmlOutput = useMemo(() => renderHtmlDocument(sections), [sections]);
+                          const wikiOutput = useMemo(() => renderWikiDocument(sections), [sections]);
+
+                          useEffect(() => {
+                            document.documentElement.dataset.theme = theme;
+                          }, [theme]);
+
+                          useEffect(() => {
+                            setAutosave({ state: 'saving' });
+                            try {
+                              localStorage.setItem(STORAGE_KEY, JSON.stringify(asProjectData(sections)));
+                              setAutosave({ state: 'saved', at: formatTime(new Date()) });
+                            } catch {
+                              setAutosave({ state: 'error' });
+                            }
+                          }, [sections]);
+
+                          function updateSection(id: string, updater: (section: DocSection) => DocSection): void {
+                            setSections((prev) => prev.map((section) => (section.id === id ? updater(section) : section)));
+                          }
+
+                          function runParser(section: ParsedSection): void {
+                            try {
+                              const rows = parseToRows(section.format, section.input);
+                              updateSection(section.id, (current) => {
+                                if (current.kind !== 'parsed') return current;
+                                return { ...current, rows, error: '' };
+                              });
+                            } catch (error) {
+                              updateSection(section.id, (current) => {
+                                if (current.kind !== 'parsed') return current;
+                                return {
+                                  ...current,
+                                  rows: [],
+                                  error: error instanceof Error ? error.message : 'Ошибка парсинга'
+                                };
+                              });
+                            }
+                          }
+
+                          function exportProjectJson(): void {
+                            downloadText('doc-project.json', JSON.stringify(asProjectData(sections), null, 2));
+                          }
+
+                          function importProjectJson(file: File | undefined): void {
+                            if (!file) return;
+                            const reader = new FileReader();
+                            reader.onload = () => {
+                              try {
+                                const text = String(reader.result || '');
+                                const parsed = JSON.parse(text) as ProjectData;
+                                if (!parsed.sections || !Array.isArray(parsed.sections)) throw new Error('Неверный формат');
+                                setSections(parsed.sections);
+                                setSelectedId(parsed.sections[0]?.id ?? selectedId);
+                                setImportError('');
+                              } catch (error) {
+                                setImportError(error instanceof Error ? error.message : 'Ошибка импорта');
+                              }
+                            };
+                            reader.readAsText(file);
+                          }
+
+                          function resetProject(): void {
+                            if (!confirm('Сбросить проект? Все несохраненные данные будут потеряны.')) return;
+                            const seed = createInitialSections();
+                            setSections(seed);
+                            setSelectedId(seed[0].id);
+                            localStorage.removeItem(STORAGE_KEY);
+                          }
+
+                          function renderParsedTable(section: ParsedSection) {
+                            if (section.rows.length === 0) return <div className="muted">Нет распарсенных строк</div>;
+                            return (
+                              <div className="table-wrap">
+                                <table>
+                                  <thead>
+                                    <tr>
+                                      <th>Поле</th>
+                                      <th>Тип</th>
+                                      <th>Обязательность</th>
+                                      <th>Описание</th>
+                                      <th>Пример</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {section.rows.map((r, i) => (
+                                      <tr key={`${r.field}-${i}`}>
+                                        <td>{r.field}</td>
+                                        <td className="mono">{r.type}</td>
+                                        <td>{r.required}</td>
+                                        <td>{r.description || '—'}</td>
+                                        <td className="mono">{r.example || '—'}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div className="shell">
+                              <header className="topbar">
+                                <div className="brand">
+                                  <span className="logo" aria-hidden>
+                                    API
+                                  </span>
+                                  <div>
+                                    <div className="title">Doc Builder</div>
+                                    <div className="subtitle">Модернизированный интерфейс</div>
+                                  </div>
+                                </div>
+                                <div className="actions">
+                                  <button className="ghost" onClick={resetProject}>Новый</button>
+                                  <label className="ghost file-input">
+                                    Импорт
+                                    <input type="file" accept="application/json" onChange={(e) => importProjectJson(e.target.files?.[0])} />
+                                  </label>
+                                  <button className="ghost" onClick={exportProjectJson}>Экспорт JSON</button>
+                                  <button onClick={() => downloadText('documentation.html', htmlOutput)}>Экспорт HTML</button>
+                                  <button onClick={() => downloadText('documentation.wiki', wikiOutput)}>Экспорт Wiki</button>
+                                  <button className="ghost" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+                                    {theme === 'dark' ? 'Светлая' : 'Тёмная'} тема
+                                  </button>
+                                  <div className={`badge ${autosave.state}`}>
+                                    {autosave.state === 'saving' && 'Сохранение...'}
+                                    {autosave.state === 'saved' && `Сохранено в ${autosave.at ?? ''}`}
+                                    {autosave.state === 'error' && 'Ошибка сохранения'}
+                                    {autosave.state === 'idle' && 'Готово'}
+                                  </div>
+                                </div>
+                              </header>
+
+                              {importError && <div className="alert error">Ошибка импорта: {importError}</div>}
+
+                              <div className="layout">
+                                <aside className="sidebar">
+                                  <div className="sidebar-head">
+                                    <div className="muted">Секции</div>
+                                    <button className="ghost small" onClick={() => setSections((prev) => [...prev, { id: `custom-${Date.now()}`, title: 'Новая секция', enabled: true, kind: 'text', value: '' }])}>
+                                      + Добавить
+                                    </button>
+                                  </div>
+                                  <div className="section-list">
+                                    {sections.map((section) => {
+                                      const error = validationMap.get(section.id);
+                                      return (
+                                        <div
+                                          key={section.id}
+                                          className={`section-item ${selectedSection?.id === section.id ? 'active' : ''} ${error ? 'warn' : ''} ${!section.enabled ? 'disabled' : ''}`}
+                                          draggable
+                                          onDragStart={() => setDraggingId(section.id)}
+                                          onDragOver={(e) => e.preventDefault()}
+                                          onDrop={() => {
+                                            if (draggingId) setSections((prev) => reorderSections(prev, draggingId, section.id));
+                                            setDraggingId(null);
+                                          }}
+                                          onClick={() => setSelectedId(section.id)}
+                                        >
+                                          <div className="section-title">{section.title}</div>
+                                          <div className="chips">
+                                            {section.kind === 'parsed' && <span className="chip">{section.format.toUpperCase()}</span>}
+                                            {!section.enabled && <span className="chip muted">off</span>}
+                                            {error && <span className="chip danger">err</span>}
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </aside>
+
+                                <main className="workspace">
+                                  <div className="tabs">
+                                    {['editor', 'html', 'wiki', 'split'].map((key) => (
+                                      <button
+                                        key={key}
+                                        className={tab === key ? 'tab active' : 'tab'}
+                                        onClick={() => setTab(key as TabKey)}
+                                      >
+                                        {key === 'editor' && 'Редактор'}
+                                        {key === 'html' && 'HTML'}
+                                        {key === 'wiki' && 'Wiki'}
+                                        {key === 'split' && 'Split'}
+                                      </button>
+                                    ))}
+                                  </div>
+
+                                  {selectedSection ? (
+                                    <div className={`panes ${tab === 'split' ? 'split' : ''}`}>
+                                      {(tab === 'editor' || tab === 'split') && (
+                                        <section className="panel">
+                                          <div className="panel-head">
+                                            <div>
+                                              <div className="panel-title">{selectedSection.title}</div>
+                                              <div className="panel-sub">ID: {selectedSection.id}</div>
+                                            </div>
+                                            <label className="switch">
+                                              <input
+                                                type="checkbox"
+                                                checked={selectedSection.enabled}
+                                                onChange={(e) => updateSection(selectedSection.id, (curr) => ({ ...curr, enabled: e.target.checked }))}
+                                              />
+                                              <span>Активна</span>
+                                            </label>
+                                          </div>
+
+                                          {selectedSection.kind === 'text' && (
+                                            <div className="stack">
+                                              <label className="field">
+                                                <div className="label">Содержимое</div>
+                                                <textarea
+                                                  rows={10}
+                                                  value={selectedSection.value}
+                                                  onChange={(e) => updateSection(selectedSection.id, (curr) => (curr.kind === 'text' ? { ...curr, value: e.target.value } : curr))}
+                                                  placeholder="Опишите цель, ограничения, ошибки и т.д."
+                                                />
+                                              </label>
+                                            </div>
+                                          )}
+
+                                          {selectedSection.kind === 'parsed' && (
+                                            <div className="stack">
+                                              <div className="row gap">
+                                                <label className="field">
+                                                  <div className="label">Формат</div>
+                                                  <select
+                                                    value={selectedSection.format}
+                                                    onChange={(e) =>
+                                                      updateSection(selectedSection.id, (curr) =>
+                                                        curr.kind === 'parsed'
+                                                          ? { ...curr, format: e.target.value as ParseFormat, rows: [], error: '' }
+                                                          : curr
+                                                      )
+                                                    }
+                                                  >
+                                                    <option value="json">JSON</option>
+                                                    <option value="xml">XML</option>
+                                                    <option value="curl">cURL</option>
+                                                  </select>
+                                                </label>
+                                                <button className="primary" onClick={() => runParser(selectedSection)}>Парсить</button>
+                                              </div>
+
+                                              <label className="field">
+                                                <div className="label">Исходные данные</div>
+                                                <textarea
+                                                  rows={12}
+                                                  value={selectedSection.input}
+                                                  onChange={(e) =>
+                                                    updateSection(selectedSection.id, (curr) =>
+                                                      curr.kind === 'parsed' ? { ...curr, input: e.target.value, error: '' } : curr
+                                                    )
+                                                  }
+                                                  placeholder="Вставьте JSON, XML или cURL"
+                                                />
+                                              </label>
+
+                                              {selectedSection.error && <div className="alert error">{selectedSection.error}</div>}
+                                              {!selectedSection.error && validationMap.get(selectedSection.id) === '' && selectedSection.rows.length > 0 && (
+                                                <div className="alert success">Распарсено {selectedSection.rows.length} строк</div>
+                                              )}
+
+                                              {renderParsedTable(selectedSection)}
+                                            </div>
+                                          )}
+                                        </section>
+                                      )}
+
+                                      {(tab === 'html' || tab === 'split') && (
+                                        <section className="panel">
+                                          <div className="panel-head">
+                                            <div className="panel-title">Предпросмотр HTML</div>
+                                            <button className="ghost small" onClick={() => downloadText('documentation.html', htmlOutput)}>
+                                              Скачать
+                                            </button>
+                                          </div>
+                                          <div className="preview-frame" dangerouslySetInnerHTML={{ __html: htmlOutput }} />
+                                        </section>
+                                      )}
+
+                                      {(tab === 'wiki' || tab === 'split') && (
+                                        <section className="panel">
+                                          <div className="panel-head">
+                                            <div className="panel-title">Предпросмотр Wiki</div>
+                                            <button className="ghost small" onClick={() => downloadText('documentation.wiki', wikiOutput)}>
+                                              Скачать
+                                            </button>
+                                          </div>
+                                          <textarea className="code" readOnly value={wikiOutput} rows={tab === 'split' ? 14 : 24} />
+                                        </section>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div className="muted">Секция не выбрана</div>
+                                  )}
+                                </main>
+                              </div>
+                            </div>
+                          );
               else return undefined;
-            }
-          }
-          return cur;
-        }
-      }
-
-      // body top-level or nested (fields produced without 'body.' prefix)
-      if (curlBody != null) {
-        if (typeof curlBody === 'string') {
-          if (field === 'body') return curlBody;
-        } else {
-          const parts = field.split('.');
-          let cur: any = curlBody;
-          for (const part of parts) {
-            const arrMatch = part.match(/(\w+)\[(\d+)\]$/);
-            if (arrMatch) {
-              const key = arrMatch[1];
-              const idx = Number(arrMatch[2]);
-              if (cur && typeof cur === 'object' && key in cur) {
-                cur = cur[key];
-                if (Array.isArray(cur)) cur = cur[idx];
-                else return undefined;
-              } else return undefined;
-            } else {
-              if (cur && typeof cur === 'object' && part in cur) cur = cur[part];
-              else return undefined;
-            }
-          }
           return cur;
         }
       }

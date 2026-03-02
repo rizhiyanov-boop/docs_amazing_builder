@@ -275,6 +275,7 @@ button.primary {
   border-radius: 10px;
   padding: 10px;
   background: var(--card);
+  color: var(--text);
   cursor: grab;
   display: flex;
   align-items: center;
@@ -298,7 +299,8 @@ button.primary {
 }
 
 .section-item.disabled {
-  opacity: 0.6;
+  opacity: 0.72;
+  color: var(--muted);
 }
 
 .section-title {

@@ -32,19 +32,30 @@
 
 4. Откройте адрес из терминала (обычно `http://localhost:5173`).
 
-### Вариант 2: если используете portable Node из текущего workspace
+### Вариант 2: portable Node (без админ‑прав)
 
 1. Перейдите в проект:
 
    `cd doc-builder`
 
-2. Запуск dev-сервера через portable npm:
+2. Скачайте и распакуйте portable Node 22 в `.tools` (один раз):
 
-   `..\.tools\node\node-v22.14.0-win-x64\npm.cmd run dev`
+   ```powershell
+   curl -o node22.zip https://nodejs.org/dist/v22.14.0/node-v22.14.0-win-x64.zip
+   Expand-Archive -Path .\node22.zip -DestinationPath .\.tools\node22 -Force
+   ```
 
-3. Сборка production:
+3. Установите зависимости через portable npm (без симлинков):
 
-   `..\.tools\node\node-v22.14.0-win-x64\npm.cmd run build`
+   `..\.tools\node22\node-v22.14.0-win-x64\npm.cmd install --no-bin-links`
+
+4. Запуск dev-сервера:
+
+   `..\.tools\node22\node-v22.14.0-win-x64\npm.cmd run dev`
+
+5. Сборка production:
+
+   `..\.tools\node22\node-v22.14.0-win-x64\npm.cmd run build`
 
 ## Как пользоваться
 
@@ -62,13 +73,13 @@
 
 ## Быстрый smoke-тест генерации
 
-- Команда:
+- Команда (portable Node, без админ‑прав):
 
-  `npm run smoke:test`
+   `..\.tools\node22\node-v22.14.0-win-x64\node.exe scripts\smoke-test.mjs`
 
 - Результат:
-  - [output/smoke-test.html](output/smoke-test.html)
-  - [output/smoke-test.wiki](output/smoke-test.wiki)
+   - [output/smoke-test.html](output/smoke-test.html)
+   - [output/smoke-test.wiki](output/smoke-test.wiki)
 
 ## Основные файлы
 

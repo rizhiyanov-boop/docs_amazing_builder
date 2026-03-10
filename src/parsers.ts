@@ -26,7 +26,7 @@ function inferType(value: unknown): string {
       }
     }
     // float / scientific
-    if (!Number.isNaN(Number(s)) && /[\.eE]/.test(s)) return 'number';
+    if (!Number.isNaN(Number(s)) && /[.eE]/.test(s)) return 'number';
     if (/^(true|false)$/i.test(s)) return 'boolean';
     return 'string';
   }
@@ -159,14 +159,14 @@ function parseCurl(input: string): ParsedRow[] {
       remaining = normalized.replace(dataMatch[0], '');
       try {
         const payloadRows = flattenJson(JSON.parse(bodyPayload));
-        rows.push(...payloadRows.map(r => ({ ...r, description: r.description || 'Тело запроса из cURL (JSON)', source: 'body' })));
+        rows.push(...payloadRows.map((r): ParsedRow => ({ ...r, description: r.description || 'Тело запроса из cURL (JSON)', source: 'body' })));
       } catch {
         rows.push({ field: 'body', type: 'string', required: '±', description: 'Тело запроса из cURL (не JSON)', example: bodyPayload.slice(0, 120), source: 'body' });
       }
     }
 
     // Now parse headers from the remaining string (without body)
-    const headerMatches = Array.from(remaining.matchAll(/(?:-H|--header)\s+['"]([^'\"]+)['"]/g));
+    const headerMatches = Array.from(remaining.matchAll(/(?:-H|--header)\s+['"]([^'"]+)['"]/g));
       for (const match of headerMatches) {
         const headerValue = match[1];
         const separatorIndex = headerValue.indexOf(':');
@@ -177,13 +177,16 @@ function parseCurl(input: string): ParsedRow[] {
         let pushed = false;
         if (value) {
           // heuristics: only attempt JSON parse if it looks like JSON
-          const looksLikeJson = /^\s*[\[{].*[\]}]\s*$/.test(value);
+          const trimmedValue = value.trim();
+          const looksLikeJson =
+            (trimmedValue.startsWith('{') && trimmedValue.endsWith('}')) ||
+            (trimmedValue.startsWith('[') && trimmedValue.endsWith(']'));
           if (looksLikeJson) {
             try {
               const parsed = JSON.parse(value);
               if (typeof parsed === 'object' && parsed !== null) {
                 const nested = flattenJson(parsed, name);
-                rows.push(...nested.map(r => ({ ...r, description: `Заголовок ${name} (распарсено)`, source: 'header' })));
+                rows.push(...nested.map((r): ParsedRow => ({ ...r, description: `Заголовок ${name} (распарсено)`, source: 'header' })));
                 pushed = true;
               }
             } catch {

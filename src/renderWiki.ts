@@ -9,6 +9,10 @@ function escapeWiki(value: string): string {
   return value.replaceAll('|', '&#124;');
 }
 
+function isDualModelSection(section: ParsedSection): boolean {
+  return section.id === 'request' || section.id === 'response';
+}
+
 function toWikiCell(value: string): string {
   const normalized = escapeWiki(value)
     .replaceAll('\r\n', '\n')
@@ -37,28 +41,22 @@ function shouldRenderTextSection(section: TextSection): boolean {
 
 function shouldRenderParsedSection(section: ParsedSection): boolean {
   if (!section.enabled) return false;
-  if (section.id === 'request') return Boolean(section.error) || Boolean(section.clientError) || requestHasRows(section);
+  if (isDualModelSection(section)) return Boolean(section.error) || Boolean(section.clientError) || requestHasRows(section);
   return Boolean(section.error) || section.rows.length > 0;
 }
 
 function renderDefaultTable(rows: ParsedRow[]): string[] {
   const lines = ['||Поле||Тип||Обязательность||Описание||Пример||'];
   for (const row of rows) {
-    const cells = [
-      toWikiCell(row.field),
-      toWikiCell(row.type),
-      toWikiCell(row.required),
-      toWikiCell(row.description),
-      toWikiExampleCell(row.example)
-    ];
+    const cells = [toWikiCell(row.field), toWikiCell(row.type), toWikiCell(row.required), toWikiCell(row.description), toWikiExampleCell(row.example)];
     lines.push(`|${cells.join('|')}|`);
   }
   return lines;
 }
 
-function renderRequestTable(rows: ParsedRow[], section: ParsedSection): string[] {
+function renderStructuredTable(rows: ParsedRow[], section: ParsedSection): string[] {
   const columns = getRequestColumnOrder(section, rows);
-  const headerCells = columns.map((column) => getRequestColumnLabel(column));
+  const headerCells = columns.map((column) => getRequestColumnLabel(section, column));
   const lines = [`||${headerCells.join('||')}||`];
 
   for (const row of rows) {
@@ -100,7 +98,7 @@ function renderRequestSection(section: ParsedSection): string[] {
     lines.push('');
     lines.push('h3. Headers');
     lines.push('');
-    lines.push(...renderRequestTable(headers, section));
+    lines.push(...renderStructuredTable(headers, section));
   }
   if (requestError) {
     lines.push('');
@@ -109,16 +107,27 @@ function renderRequestSection(section: ParsedSection): string[] {
     lines.push('');
     lines.push('h3. Параметры');
     lines.push('');
-    lines.push(...renderRequestTable(otherRows, section));
+    lines.push(...renderStructuredTable(otherRows, section));
   }
 
   return lines;
 }
 
-function renderParsedSection(section: ParsedSection): string[] {
-  if (section.id === 'request') {
-    return renderRequestSection(section);
+function renderResponseSection(section: ParsedSection): string[] {
+  const lines: string[] = [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`];
+
+  if (section.error || section.clientError) {
+    lines.push(`*Секция заблокирована:* ${toWikiCell(section.error || section.clientError || '')}`);
+    return lines;
   }
+
+  lines.push(...renderStructuredTable(getRequestRows(section), section));
+  return lines;
+}
+
+function renderParsedSection(section: ParsedSection): string[] {
+  if (section.id === 'request') return renderRequestSection(section);
+  if (section.id === 'response') return renderResponseSection(section);
 
   const lines: string[] = [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`];
 
@@ -152,3 +161,4 @@ export function renderWikiDocument(sections: DocSection[]): string {
 
   return lines.join('\n');
 }
+

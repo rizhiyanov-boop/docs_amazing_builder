@@ -9,7 +9,7 @@ export const DEFAULT_REQUEST_COLUMN_ORDER: RequestColumnKey[] = [
   'example'
 ];
 
-const REQUEST_COLUMN_LABELS: Record<RequestColumnKey, string> = {
+const BASE_COLUMN_LABELS: Record<RequestColumnKey, string> = {
   field: 'Поле',
   type: 'Тип',
   required: 'Обязательность',
@@ -18,12 +18,18 @@ const REQUEST_COLUMN_LABELS: Record<RequestColumnKey, string> = {
   example: 'Пример'
 };
 
-export function getRequestColumnLabel(column: RequestColumnKey): string {
-  return REQUEST_COLUMN_LABELS[column];
+export function getRequestColumnLabel(section: ParsedSection, column: RequestColumnKey): string {
+  if (column === 'clientField') {
+    return section.id === 'response' ? 'Client response' : 'Client request';
+  }
+
+  return BASE_COLUMN_LABELS[column];
 }
 
 export function getRequestColumnOrder(section: ParsedSection, rows: ParsedRow[]): RequestColumnKey[] {
-  if (section.id !== 'request') return DEFAULT_REQUEST_COLUMN_ORDER.filter((column) => column !== 'clientField');
+  if (section.id !== 'request' && section.id !== 'response') {
+    return DEFAULT_REQUEST_COLUMN_ORDER.filter((column) => column !== 'clientField');
+  }
 
   const hasClientField = rows.some((row) => Boolean(row.clientField?.trim()));
   const allowed = DEFAULT_REQUEST_COLUMN_ORDER.filter((column) => hasClientField || column !== 'clientField');

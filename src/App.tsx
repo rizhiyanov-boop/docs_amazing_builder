@@ -53,7 +53,24 @@ function createInitialSections(): DocSection[] {
       clientError: '',
       clientMappings: {}
     },
-    { id: 'body', title: 'Body / Выходные параметры', enabled: true, kind: 'parsed', format: 'json', lastSyncedFormat: 'json', input: '', rows: [], error: '' },
+    {
+      id: 'response',
+      title: 'Response',
+      enabled: true,
+      kind: 'parsed',
+      format: 'json',
+      lastSyncedFormat: 'json',
+      input: '',
+      rows: [],
+      error: '',
+      domainModelEnabled: false,
+      clientFormat: 'json',
+      clientLastSyncedFormat: 'json',
+      clientInput: '',
+      clientRows: [],
+      clientError: '',
+      clientMappings: {}
+    },
     { id: 'errors', title: 'Ошибки', enabled: true, kind: 'text', value: '' },
     { id: 'non-functional', title: 'Нефункциональные требования', enabled: true, kind: 'text', value: '' },
     { id: 'future', title: 'Доработки, планирующиеся на следующих этапах', enabled: false, kind: 'text', value: '' }
@@ -64,20 +81,33 @@ function isRequestSection(section: ParsedSection): boolean {
   return section.id === 'request';
 }
 
+function isResponseSection(section: ParsedSection): boolean {
+  return section.id === 'response';
+}
+
+function isDualModelSection(section: ParsedSection): boolean {
+  return isRequestSection(section) || isResponseSection(section);
+}
+
+function getSectionSideLabel(section: ParsedSection, target: ParseTarget): string {
+  const kind = isResponseSection(section) ? 'response' : 'request';
+  return `${target === 'client' ? 'Client' : 'Server'} ${kind}`;
+}
+
 function getSectionRows(section: ParsedSection): ParsedRow[] {
-  return isRequestSection(section) ? getEditorRequestRows(section) : section.rows;
+  return isDualModelSection(section) ? getEditorRequestRows(section) : section.rows;
 }
 
 function validateSection(section: DocSection): string {
   if (section.kind !== 'parsed') return '';
 
-  if (isRequestSection(section)) {
+  if (isDualModelSection(section)) {
     const hasServerInput = Boolean(section.input.trim());
     const hasClientInput = section.domainModelEnabled ? Boolean(section.clientInput?.trim()) : false;
 
     if (!hasServerInput && !hasClientInput) return 'Введите исходные данные для парсинга';
     if (section.error) return `Секция заблокирована: ${section.error}`;
-    if (section.clientError) return `Client request заблокирован: ${section.clientError}`;
+    if (section.clientError) return `${getSectionSideLabel(section, 'client')} заблокирован: ${section.clientError}`;
     if (getSectionRows(section).length === 0) return 'Нет распарсенных строк';
     return '';
   }
@@ -176,14 +206,14 @@ export default function App() {
   const selectedSection = sections.find((section) => section.id === selectedId) ?? sections[0];
   const selectedServerDriftRows = selectedSection?.kind === 'parsed' ? getInputDriftRows(selectedSection.rows) : [];
   const selectedClientDriftRows =
-    selectedSection?.kind === 'parsed' && isRequestSection(selectedSection) ? getInputDriftRows(selectedSection.clientRows ?? []) : [];
+    selectedSection?.kind === 'parsed' && isDualModelSection(selectedSection) ? getInputDriftRows(selectedSection.clientRows ?? []) : [];
   const selectedServerDuplicateValues = selectedSection?.kind === 'parsed' ? Array.from(getDuplicateValueSet(selectedSection.rows)) : [];
   const selectedClientDuplicateValues =
-    selectedSection?.kind === 'parsed' && isRequestSection(selectedSection) ? Array.from(getDuplicateValueSet(selectedSection.clientRows ?? [])) : [];
+    selectedSection?.kind === 'parsed' && isDualModelSection(selectedSection) ? Array.from(getDuplicateValueSet(selectedSection.clientRows ?? [])) : [];
   const selectedServerFormatDrift =
     selectedSection?.kind === 'parsed' ? Boolean(selectedSection.rows.length > 0 && selectedSection.lastSyncedFormat && selectedSection.lastSyncedFormat !== selectedSection.format) : false;
   const selectedClientFormatDrift =
-    selectedSection?.kind === 'parsed' && isRequestSection(selectedSection)
+    selectedSection?.kind === 'parsed' && isDualModelSection(selectedSection)
       ? Boolean((selectedSection.clientRows ?? []).length > 0 && selectedSection.clientLastSyncedFormat && selectedSection.clientLastSyncedFormat !== (selectedSection.clientFormat ?? 'json'))
       : false;
 
@@ -253,7 +283,7 @@ export default function App() {
       const rows = parseToRows(format, input);
       updateSection(section.id, (current) => {
         if (current.kind !== 'parsed') return current;
-        if (target === 'client' && isRequestSection(current)) {
+        if (target === 'client' && isDualModelSection(current)) {
           return { ...current, clientRows: rows, clientError: '', clientLastSyncedFormat: current.clientFormat ?? 'json' };
         }
         return { ...current, rows, error: '', lastSyncedFormat: current.format };
@@ -262,7 +292,7 @@ export default function App() {
       updateSection(section.id, (current) => {
         if (current.kind !== 'parsed') return current;
         const message = error instanceof Error ? error.message : 'Ошибка парсинга';
-        if (target === 'client' && isRequestSection(current)) {
+        if (target === 'client' && isDualModelSection(current)) {
           return { ...current, clientRows: [], clientError: message };
         }
         return { ...current, rows: [], error: message };
@@ -309,12 +339,12 @@ export default function App() {
       required: OPTIONAL_MARK,
       description: '',
       example: '',
-      source: isRequestSection(section) ? 'body' : 'parsed'
+      source: isDualModelSection(section) ? 'body' : 'parsed'
     };
 
     updateSection(section.id, (current) => {
       if (current.kind !== 'parsed') return current;
-      if (target === 'client' && isRequestSection(current)) {
+      if (target === 'client' && isDualModelSection(current)) {
         return { ...current, clientRows: [...(current.clientRows ?? []), manualRow] };
       }
       return { ...current, rows: [...current.rows, manualRow] };
@@ -325,7 +355,7 @@ export default function App() {
     updateSection(section.id, (current) => {
       if (current.kind !== 'parsed') return current;
 
-      if (target === 'client' && isRequestSection(current)) {
+      if (target === 'client' && isDualModelSection(current)) {
         const clientRows = current.clientRows ?? [];
         return {
           ...current,
@@ -387,10 +417,6 @@ export default function App() {
       });
 
       if (!updated) return current;
-
-      if (isRequestSection(current)) {
-        return { ...current, rows };
-      }
 
       return { ...current, rows };
     });
@@ -487,7 +513,7 @@ export default function App() {
             value={mappedValue}
             onChange={(e) =>
               updateSection(section.id, (current) => {
-                if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
+                if (current.kind !== 'parsed' || !isDualModelSection(current)) return current;
 
                 const nextMappings = { ...(current.clientMappings ?? {}) };
                 if (e.target.value) {
@@ -523,7 +549,7 @@ export default function App() {
               aria-label="Сбросить маппинг"
               onClick={() =>
                 updateSection(section.id, (current) => {
-                  if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
+                  if (current.kind !== 'parsed' || !isDualModelSection(current)) return current;
                   const nextMappings = { ...(current.clientMappings ?? {}) };
                   delete nextMappings[getParsedRowKey(row)];
                   return { ...current, clientMappings: nextMappings };
@@ -547,11 +573,11 @@ export default function App() {
   function renderParsedTable(section: ParsedSection) {
     const rows = getSectionRows(section);
     const duplicateFieldSet = getDuplicateValueSet(section.rows);
-    const duplicateClientFieldSet = isRequestSection(section) ? getDuplicateValueSet(section.clientRows ?? []) : new Set<string>();
+    const duplicateClientFieldSet = isDualModelSection(section) ? getDuplicateValueSet(section.clientRows ?? []) : new Set<string>();
 
     if (rows.length === 0) return <div className="muted">Нет распарсенных строк</div>;
 
-    if (isRequestSection(section)) {
+    if (isDualModelSection(section)) {
       const columns = getRequestColumnOrder(section, rows);
 
       return (
@@ -569,7 +595,7 @@ export default function App() {
                     onDrop={() => {
                       if (!draggedColumn) return;
                       updateSection(section.id, (current) => {
-                        if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
+                        if (current.kind !== 'parsed' || !isDualModelSection(current)) return current;
                         const currentRows = getSectionRows(current);
                         const currentOrder = getRequestColumnOrder(current, currentRows);
                         return { ...current, requestColumnOrder: moveRequestColumn(currentOrder, draggedColumn, column) };
@@ -578,7 +604,7 @@ export default function App() {
                     }}
                     onDragEnd={() => setDraggedColumn(null)}
                   >
-                    {getRequestColumnLabel(column)}
+                    {getRequestColumnLabel(section, column)}
                   </th>
                 ))}
               </tr>
@@ -707,6 +733,8 @@ export default function App() {
 
   function renderRequestEditor(section: ParsedSection) {
     const rows = getSectionRows(section);
+    const serverLabel = getSectionSideLabel(section, 'server');
+    const clientLabel = getSectionSideLabel(section, 'client');
     return (
       <div className="stack">
         <label className="switch">
@@ -715,7 +743,7 @@ export default function App() {
             checked={Boolean(section.domainModelEnabled)}
             onChange={(e) =>
               updateSection(section.id, (current) => {
-                if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
+                if (current.kind !== 'parsed' || !isDualModelSection(current)) return current;
                 if (e.target.checked) {
                   return {
                     ...current,
@@ -744,7 +772,7 @@ export default function App() {
         </label>
 
         <details className="expander" open>
-          <summary className="expander-summary">Server request</summary>
+          <summary className="expander-summary">{serverLabel}</summary>
           <div className="expander-body">
             <div className="row gap">
               <label className="field">
@@ -787,7 +815,7 @@ export default function App() {
 
         {section.domainModelEnabled && (
           <details className="expander" open>
-            <summary className="expander-summary">Client request</summary>
+            <summary className="expander-summary">{clientLabel}</summary>
             <div className="expander-body">
               <div className="row gap">
                 <label className="field">
@@ -796,7 +824,7 @@ export default function App() {
                     value={section.clientFormat ?? 'json'}
                     onChange={(e) =>
                       updateSection(section.id, (current) =>
-                        current.kind === 'parsed' && isRequestSection(current)
+                        current.kind === 'parsed' && isDualModelSection(current)
                           ? { ...current, clientFormat: e.target.value as ParseFormat, clientError: '' }
                           : current
                       )
@@ -819,20 +847,20 @@ export default function App() {
                   value={section.clientInput ?? ''}
                   onChange={(e) =>
                     updateSection(section.id, (current) =>
-                      current.kind === 'parsed' && isRequestSection(current)
+                      current.kind === 'parsed' && isDualModelSection(current)
                         ? { ...current, clientInput: e.target.value, clientError: '' }
                         : current
                     )
                   }
-                  placeholder="Вставьте JSON, XML или cURL для client request"
+                  placeholder={`Вставьте JSON, XML или cURL для ${clientLabel.toLowerCase()}`}
                 />
               </label>
             </div>
           </details>
         )}
 
-        {section.error && <div className="alert error">Server request: {section.error}</div>}
-        {section.clientError && <div className="alert error">Client request: {section.clientError}</div>}
+        {section.error && <div className="alert error">{serverLabel}: {section.error}</div>}
+        {section.clientError && <div className="alert error">{clientLabel}: {section.clientError}</div>}
         {!section.error && !section.clientError && validationMap.get(section.id) === '' && rows.length > 0 && (
           <div className="alert success">Распарсено {rows.length} строк</div>
         )}
@@ -898,18 +926,18 @@ export default function App() {
             selectedSection.lastSyncedFormat
           )}
         {selectedSection?.kind === 'parsed' &&
-          isRequestSection(selectedSection) &&
+          isDualModelSection(selectedSection) &&
           renderSourceAlert(
             `${selectedSection.id}-client`,
             selectedClientDriftRows.length > 0 || selectedClientFormatDrift || selectedClientDuplicateValues.length > 0,
             selectedSection.clientRows ?? [],
             selectedClientDuplicateValues,
-            'Дубликат client request',
+            `Дубликат ${getSectionSideLabel(selectedSection, 'client').toLowerCase()}`,
             selectedClientFormatDrift,
             selectedSection.clientFormat ?? 'json',
             () => syncInputFromRows(selectedSection, 'client'),
             selectedSection.clientLastSyncedFormat,
-            'Client request отличается от источника'
+            `${getSectionSideLabel(selectedSection, 'client')} отличается от источника`
           )}
       </div>
 
@@ -1018,7 +1046,7 @@ export default function App() {
 
                   {selectedSection.kind === 'parsed' && (
                     <>
-                      {isRequestSection(selectedSection) ? (
+                      {isDualModelSection(selectedSection) ? (
                         renderRequestEditor(selectedSection)
                       ) : (
                         <div className="stack">

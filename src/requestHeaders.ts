@@ -1,4 +1,4 @@
-import type { ParsedRow, ParsedSection } from './types';
+﻿import type { ParsedRow, ParsedSection } from './types';
 
 export const OPTIONAL_MARK = '\u00B1';
 
@@ -11,9 +11,11 @@ export const DEFAULT_REQUEST_HEADERS: ParsedRow[] = [
   { field: 'traceparent', sourceField: 'traceparent', origin: 'generated', type: 'string', required: '-', description: 'TraceParent для распределенного трейсинга', example: '', source: 'header' }
 ];
 
-const REQUEST_HEADER_ORDER = new Map(
-  DEFAULT_REQUEST_HEADERS.map((header, index) => [header.field.toLowerCase(), index])
-);
+const REQUEST_HEADER_ORDER = new Map(DEFAULT_REQUEST_HEADERS.map((header, index) => [header.field.toLowerCase(), index]));
+
+function isDualModelSection(section: ParsedSection): boolean {
+  return section.id === 'request' || section.id === 'response';
+}
 
 function getRowKey(row: ParsedRow): string {
   return row.sourceField?.trim() || row.field.trim();
@@ -84,7 +86,7 @@ function isMappableRow(row: ParsedRow): boolean {
 }
 
 function getValidClientMappings(section: ParsedSection): Record<string, string> {
-  if (section.id !== 'request') return {};
+  if (!isDualModelSection(section)) return {};
 
   const clientKeys = new Set((section.clientRows ?? []).map((row) => getRowKey(row)));
   const serverKeys = new Set(
@@ -99,9 +101,9 @@ function getValidClientMappings(section: ParsedSection): Record<string, string> 
 }
 
 function mergeRequestRows(section: ParsedSection, includeDefaultHeaders: boolean): ParsedRow[] {
-  const serverRows = includeDefaultHeaders ? withDefaultHeaders(section.rows) : section.rows;
+  const serverRows = includeDefaultHeaders && section.id === 'request' ? withDefaultHeaders(section.rows) : section.rows;
 
-  if (section.id !== 'request' || !section.domainModelEnabled) return serverRows;
+  if (!isDualModelSection(section) || !section.domainModelEnabled) return serverRows;
 
   const clientRows = section.clientRows ?? [];
   const clientByKey = new Map(clientRows.map((row) => [getRowKey(row), row]));
@@ -139,38 +141,38 @@ function mergeRequestRows(section: ParsedSection, includeDefaultHeaders: boolean
 }
 
 export function getRequestRows(section: ParsedSection): ParsedRow[] {
-  if (section.id !== 'request') return section.rows;
+  if (!isDualModelSection(section)) return section.rows;
   return mergeRequestRows(section, true);
 }
 
 export function getEditorRequestRows(section: ParsedSection): ParsedRow[] {
-  if (section.id !== 'request') return section.rows;
+  if (!isDualModelSection(section)) return section.rows;
 
   const hiddenRequestHeaders = new Set(DEFAULT_REQUEST_HEADERS.map((header) => header.field.toLowerCase()));
   return mergeRequestRows(
     {
       ...section,
-      rows: section.rows.filter(
-        (row) => !(row.source === 'header' && hiddenRequestHeaders.has(row.field.trim().toLowerCase()))
-      )
+      rows:
+        section.id === 'request'
+          ? section.rows.filter((row) => !(row.source === 'header' && hiddenRequestHeaders.has(row.field.trim().toLowerCase())))
+          : section.rows
     },
     false
   );
 }
 
 export function getMappingOptions(section: ParsedSection, displayField: string): ParsedRow[] {
-  if (section.id !== 'request' || !section.domainModelEnabled) return [];
+  if (!isDualModelSection(section) || !section.domainModelEnabled) return [];
 
-  return [...(section.clientRows ?? [])]
-    .sort((left, right) => {
-      const scoreDiff = getSimilarityScore(displayField, right.field) - getSimilarityScore(displayField, left.field);
-      if (scoreDiff !== 0) return scoreDiff;
-      return left.field.localeCompare(right.field);
-    });
+  return [...(section.clientRows ?? [])].sort((left, right) => {
+    const scoreDiff = getSimilarityScore(displayField, right.field) - getSimilarityScore(displayField, left.field);
+    if (scoreDiff !== 0) return scoreDiff;
+    return left.field.localeCompare(right.field);
+  });
 }
 
 export function getPreviouslyUsedClientKeys(section: ParsedSection, currentRow: ParsedRow): Set<string> {
-  if (section.id !== 'request') return new Set();
+  if (!isDualModelSection(section)) return new Set();
 
   const currentKey = getParsedRowKey(currentRow);
   const currentValue = getMappedClientField(section, currentRow);
@@ -217,3 +219,4 @@ export function hasInputDrift(rows: ParsedRow[]): boolean {
 export function getInputDriftRows(rows: ParsedRow[]): ParsedRow[] {
   return rows.filter((row) => row.origin === 'manual' || (row.origin === 'parsed' && row.sourceField && row.field !== row.sourceField));
 }
+

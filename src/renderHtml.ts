@@ -1,4 +1,4 @@
-import { getRequestColumnLabel, getRequestColumnOrder } from './requestColumns';
+﻿import { getRequestColumnLabel, getRequestColumnOrder } from './requestColumns';
 import { getRequestRows, requestHasRows, splitRequestRows } from './requestHeaders';
 import { resolveSectionTitle } from './sectionTitles';
 import { getThemeTokens } from './theme';
@@ -13,13 +13,17 @@ function escapeHtml(value: string): string {
     .replaceAll('"', '&quot;');
 }
 
+function isDualModelSection(section: ParsedSection): boolean {
+  return section.id === 'request' || section.id === 'response';
+}
+
 function shouldRenderTextSection(section: TextSection): boolean {
   return section.enabled && Boolean(section.value.trim());
 }
 
 function shouldRenderParsedSection(section: ParsedSection): boolean {
   if (!section.enabled) return false;
-  if (section.id === 'request') return Boolean(section.error) || Boolean(section.clientError) || requestHasRows(section);
+  if (isDualModelSection(section)) return Boolean(section.error) || Boolean(section.clientError) || requestHasRows(section);
   return Boolean(section.error) || section.rows.length > 0;
 }
 
@@ -46,9 +50,9 @@ function renderDefaultTable(rows: ParsedRow[]): string {
   return `<table border="1" cellspacing="0" cellpadding="6"><thead><tr>${headerCells.join('')}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
-function renderRequestTable(rows: ParsedRow[], section: ParsedSection): string {
+function renderStructuredTable(rows: ParsedRow[], section: ParsedSection): string {
   const columns = getRequestColumnOrder(section, rows);
-  const headerCells = columns.map((column) => `<th>${escapeHtml(getRequestColumnLabel(column))}</th>`);
+  const headerCells = columns.map((column) => `<th>${escapeHtml(getRequestColumnLabel(section, column))}</th>`);
   const body = rows
     .map((row) => {
       const cellMap = {
@@ -85,24 +89,34 @@ function renderRequestSection(section: ParsedSection): string {
   }
   if (headers.length > 0) {
     blocks.push('<h3>Headers</h3>');
-    blocks.push(renderRequestTable(headers, section));
+    blocks.push(renderStructuredTable(headers, section));
   }
   if (requestError) {
     blocks.push(`<p><strong>Секция заблокирована:</strong> ${escapeHtml(requestError)}</p>`);
   } else if (otherRows.length > 0) {
     blocks.push('<h3>Параметры</h3>');
-    blocks.push(renderRequestTable(otherRows, section));
+    blocks.push(renderStructuredTable(otherRows, section));
   }
 
   return blocks.join('');
 }
 
+function renderResponseSection(section: ParsedSection): string {
+  const title = resolveSectionTitle(section.title);
+  const rows = getRequestRows(section);
+
+  if (section.error || section.clientError) {
+    return `<h2>${escapeHtml(title)}</h2><p><strong>Секция заблокирована:</strong> ${escapeHtml(section.error || section.clientError || '')}</p>`;
+  }
+
+  return `<h2>${escapeHtml(title)}</h2>${renderStructuredTable(rows, section)}`;
+}
+
 function renderParsedSection(section: ParsedSection): string {
   const title = resolveSectionTitle(section.title);
 
-  if (section.id === 'request') {
-    return renderRequestSection(section);
-  }
+  if (section.id === 'request') return renderRequestSection(section);
+  if (section.id === 'response') return renderResponseSection(section);
 
   if (section.error) {
     return `<h2>${escapeHtml(title)}</h2><p><strong>Секция заблокирована:</strong> ${escapeHtml(section.error)}</p>`;
@@ -148,3 +162,4 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
     '</html>'
   ].join('\n');
 }
+

@@ -1,4 +1,4 @@
-import { DEFAULT_REQUEST_COLUMN_ORDER } from './requestColumns';
+﻿import { DEFAULT_REQUEST_COLUMN_ORDER } from './requestColumns';
 import type { DocSection, ParsedRow } from './types';
 
 export const DEFAULT_SECTION_TITLE = 'Новая секция';
@@ -11,6 +11,10 @@ function normalizeRow(row: ParsedRow): ParsedRow {
   };
 }
 
+function isDualModelSectionId(id: string): boolean {
+  return id === 'request' || id === 'response';
+}
+
 export function resolveSectionTitle(title: string): string {
   const trimmed = title.trim();
   return trimmed || DEFAULT_SECTION_TITLE;
@@ -18,35 +22,41 @@ export function resolveSectionTitle(title: string): string {
 
 export function sanitizeSections(sections: DocSection[]): DocSection[] {
   return sections.map((section) => {
-    if (section.kind !== 'parsed') {
+    const normalizedSection =
+      section.kind === 'parsed' && section.id === 'body'
+        ? { ...section, id: 'response', title: section.title === 'Body / Выходные параметры' ? 'Response' : section.title }
+        : section;
+
+    if (normalizedSection.kind !== 'parsed') {
       return {
-        ...section,
-        title: resolveSectionTitle(section.title)
+        ...normalizedSection,
+        title: resolveSectionTitle(normalizedSection.title)
       };
     }
 
-    if (section.id !== 'request') {
+    if (!isDualModelSectionId(normalizedSection.id)) {
       return {
-        ...section,
-        title: resolveSectionTitle(section.title),
-        lastSyncedFormat: section.lastSyncedFormat ?? section.format,
-        rows: section.rows.map(normalizeRow)
+        ...normalizedSection,
+        title: resolveSectionTitle(normalizedSection.title),
+        lastSyncedFormat: normalizedSection.lastSyncedFormat ?? normalizedSection.format,
+        rows: normalizedSection.rows.map(normalizeRow)
       };
     }
 
     return {
-      ...section,
-      title: resolveSectionTitle(section.title),
-      lastSyncedFormat: section.lastSyncedFormat ?? section.format,
-      rows: section.rows.map(normalizeRow),
-      domainModelEnabled: section.domainModelEnabled ?? false,
-      clientFormat: section.clientFormat ?? 'json',
-      clientLastSyncedFormat: section.clientLastSyncedFormat ?? section.clientFormat ?? 'json',
-      clientInput: section.clientInput ?? '',
-      clientRows: (section.clientRows ?? []).map(normalizeRow),
-      clientError: section.clientError ?? '',
-      clientMappings: section.clientMappings ?? {},
-      requestColumnOrder: section.requestColumnOrder ?? DEFAULT_REQUEST_COLUMN_ORDER
+      ...normalizedSection,
+      title: resolveSectionTitle(normalizedSection.title),
+      lastSyncedFormat: normalizedSection.lastSyncedFormat ?? normalizedSection.format,
+      rows: normalizedSection.rows.map(normalizeRow),
+      domainModelEnabled: normalizedSection.domainModelEnabled ?? false,
+      clientFormat: normalizedSection.clientFormat ?? 'json',
+      clientLastSyncedFormat: normalizedSection.clientLastSyncedFormat ?? normalizedSection.clientFormat ?? 'json',
+      clientInput: normalizedSection.clientInput ?? '',
+      clientRows: (normalizedSection.clientRows ?? []).map(normalizeRow),
+      clientError: normalizedSection.clientError ?? '',
+      clientMappings: normalizedSection.clientMappings ?? {},
+      requestColumnOrder: normalizedSection.requestColumnOrder ?? DEFAULT_REQUEST_COLUMN_ORDER
     };
   });
 }
+

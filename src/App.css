@@ -1,85 +1,10 @@
-.app {
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 20px;
-}
-
-.hint {
-  margin-top: -4px;
-  color: #5f6a7d;
-}
-
-.toolbar {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin: 14px 0 18px;
-}
-
-.toolbar button,
-.import-label {
-  border: 1px solid #ccd3de;
-  background: #fff;
-  border-radius: 6px;
-  padding: 8px 10px;
-  font-size: 14px;
-}
-
-.import-label input {
-  display: none;
-}
-
-.grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-}
-
-.card {
-  border: 1px solid #e1e6ef;
-  border-radius: 10px;
-  padding: 12px;
-  margin-bottom: 12px;
-}
-
-.card-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-textarea,
-select,
-button {
-  font: inherit;
-}
-
-textarea,
-select {
-  width: 100%;
-  box-sizing: border-box;
-  border: 1px solid #ccd3de;
-  border-radius: 6px;
-  padding: 8px;
-  margin-top: 8px;
-}
-
-.parsed-box {
-  margin-top: 8px;
-}
-
-.parsed-controls {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
 
 :root {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   color-scheme: light dark;
-  background-color: #0b1021;
-  color: #e5e7eb;
+  background-color: var(--bg);
+  color: var(--text);
   --bg: #0b1021;
   --panel: #0f172a;
   --card: #111827;
@@ -92,20 +17,11 @@ select {
   --success: #22c55e;
   --danger: #ef4444;
   --warning: #f59e0b;
-}
-
-:root[data-theme='light'] {
-  background-color: #f8fafc;
-  color: #0f172a;
-  --bg: #f8fafc;
-  --panel: #ffffff;
-  --card: #ffffff;
-  --text: #0f172a;
-  --muted: #6b7280;
-  --accent: linear-gradient(135deg, #7c3aed, #06b6d4);
-  --accent-solid: #7c3aed;
-  --border: #e5e7eb;
-  --shadow: 0 12px 30px rgba(0, 0, 0, 0.08);
+  --input-bg: #0c1429;
+  --input-text: #e5e7eb;
+  --scrollbar-track: #0f172a;
+  --scrollbar-thumb: #475569;
+  --scrollbar-thumb-hover: #64748b;
 }
 
 * {
@@ -153,16 +69,6 @@ body {
   font-weight: 700;
   color: #0b1021;
   letter-spacing: 0.04em;
-}
-
-.title {
-  font-weight: 600;
-  font-size: 18px;
-}
-
-.subtitle {
-  color: var(--muted);
-  font-size: 13px;
 }
 
 .actions {
@@ -431,8 +337,8 @@ input[type='text'] {
   width: 100%;
   border-radius: 10px;
   border: 1px solid var(--border);
-  background: #0c1429;
-  color: var(--text);
+  background: var(--input-bg);
+  color: var(--input-text);
   padding: 10px 12px;
   font-family: inherit;
   font-size: 14px;
@@ -440,7 +346,7 @@ input[type='text'] {
 }
 
 select {
-  background: var(--card);
+  background: var(--input-bg);
 }
 
 .alert {
@@ -498,17 +404,60 @@ tr:nth-child(odd) td {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 12px;
-  background: #0d152a;
+  background: var(--input-bg);
   max-height: 520px;
   overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+.preview-frame::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.preview-frame::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+.preview-frame::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 8px;
+  border: 2px solid var(--scrollbar-track);
+}
+
+.preview-frame::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
 }
 
 .code {
-  background: #0d152a;
+  background: var(--input-bg);
+  color: var(--input-text);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+.code::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.code::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+.code::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 8px;
+  border: 2px solid var(--scrollbar-track);
+}
+
+.code::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
 }
 
 .muted {
@@ -535,3 +484,4 @@ tr:nth-child(odd) td {
     justify-content: flex-end;
   }
 }
+

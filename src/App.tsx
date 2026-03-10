@@ -3,6 +3,9 @@ import './App.css';
 import { parseToRows } from './parsers';
 import { renderHtmlDocument } from './renderHtml';
 import { renderWikiDocument } from './renderWiki';
+import { DEFAULT_SECTION_TITLE, resolveSectionTitle, sanitizeSections } from './sectionTitles';
+import { applyThemeToRoot } from './theme';
+import type { ThemeName } from './theme';
 import type { DocSection, ParsedSection, ParseFormat, ProjectData } from './types';
 
 const STORAGE_KEY = 'doc-builder-project-v2';
@@ -35,7 +38,7 @@ function validateSection(section: DocSection): string {
 }
 
 function asProjectData(sections: DocSection[]): ProjectData {
-  return { version: 2, updatedAt: new Date().toISOString(), sections };
+  return { version: 2, updatedAt: new Date().toISOString(), sections: sanitizeSections(sections) };
 }
 
 function loadProject(): DocSection[] {
@@ -44,7 +47,7 @@ function loadProject(): DocSection[] {
     if (!raw) return createInitialSections();
     const parsed = JSON.parse(raw) as ProjectData;
     if (!parsed.sections || !Array.isArray(parsed.sections)) return createInitialSections();
-    return parsed.sections;
+    return sanitizeSections(parsed.sections);
   } catch {
     return createInitialSections();
   }
@@ -78,7 +81,7 @@ export default function App() {
   const [sections, setSections] = useState<DocSection[]>(() => loadProject());
   const [selectedId, setSelectedId] = useState<string>(() => createInitialSections()[0].id);
   const [tab, setTab] = useState<TabKey>('editor');
-  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+  const [theme, setTheme] = useState<ThemeName>('dark');
   const [autosave, setAutosave] = useState<AutosaveInfo>({ state: 'idle' });
   const [importError, setImportError] = useState('');
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -97,11 +100,11 @@ export default function App() {
 
   const selectedSection = sections.find((s) => s.id === selectedId) ?? sections[0];
 
-  const htmlOutput = useMemo(() => renderHtmlDocument(sections), [sections]);
+  const htmlOutput = useMemo(() => renderHtmlDocument(sections, theme), [sections, theme]);
   const wikiOutput = useMemo(() => renderWikiDocument(sections), [sections]);
 
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
+    applyThemeToRoot(theme);
   }, [theme]);
 
   useEffect(() => {
@@ -116,6 +119,10 @@ export default function App() {
 
   function updateSection(id: string, updater: (section: DocSection) => DocSection): void {
     setSections((prev) => prev.map((section) => (section.id === id ? updater(section) : section)));
+  }
+
+  function updateSectionTitle(id: string, title: string): void {
+    updateSection(id, (section) => ({ ...section, title }));
   }
 
   function runParser(section: ParsedSection): void {
@@ -149,8 +156,9 @@ export default function App() {
         const text = String(reader.result || '');
         const parsed = JSON.parse(text) as ProjectData;
         if (!parsed.sections || !Array.isArray(parsed.sections)) throw new Error('Неверный формат');
-        setSections(parsed.sections);
-        setSelectedId(parsed.sections[0]?.id ?? selectedId);
+        const sanitizedSections = sanitizeSections(parsed.sections);
+        setSections(sanitizedSections);
+        setSelectedId(sanitizedSections[0]?.id ?? selectedId);
         setImportError('');
       } catch (error) {
         setImportError(error instanceof Error ? error.message : 'Ошибка импорта');
@@ -197,6 +205,10 @@ export default function App() {
     );
   }
 
+  const toggleTheme = () => {
+    setTheme((current) => (current === 'dark' ? 'light' : 'dark'));
+  };
+
   return (
     <div className="shell">
       <header className="topbar">
@@ -205,8 +217,7 @@ export default function App() {
             API
           </span>
           <div>
-            <h1 className="title">Doc Builder</h1>
-            <div className="subtitle">Модернизированный интерфейс</div>
+            <h1>Doc Builder</h1>
           </div>
         </div>
         <div className="actions">
@@ -218,7 +229,7 @@ export default function App() {
           <button className="ghost" onClick={exportProjectJson}>Экспорт JSON</button>
           <button onClick={() => downloadText('documentation.html', htmlOutput)}>Экспорт HTML</button>
           <button onClick={() => downloadText('documentation.wiki', wikiOutput)}>Экспорт Wiki</button>
-          <button className="ghost" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+          <button className="ghost" onClick={toggleTheme}>
             {theme === 'dark' ? 'Светлая' : 'Тёмная'} тема
           </button>
           <div className={`badge ${autosave.state}`} aria-live="polite">
@@ -238,7 +249,7 @@ export default function App() {
             <div className="muted">Секции</div>
             <button
               className="ghost small"
-              onClick={() => setSections((prev) => [...prev, { id: `custom-${Date.now()}`, title: 'Новая секция', enabled: true, kind: 'text', value: '' }])}
+              onClick={() => setSections((prev) => [...prev, { id: `custom-${Date.now()}`, title: DEFAULT_SECTION_TITLE, enabled: true, kind: 'text', value: '' }])}
             >
               + Добавить
             </button>
@@ -261,7 +272,7 @@ export default function App() {
                   }}
                   onClick={() => setSelectedId(section.id)}
                 >
-                  <div className="section-title">{section.title}</div>
+                  <div className="section-title">{resolveSectionTitle(section.title)}</div>
                   <div className="chips">
                     {section.kind === 'parsed' && <span className="chip">{section.format.toUpperCase()}</span>}
                     {!section.enabled && <span className="chip muted">off</span>}
@@ -297,7 +308,7 @@ export default function App() {
                 <section className="panel">
                   <div className="panel-head">
                     <div>
-                      <div className="panel-title">{selectedSection.title}</div>
+                      <div className="panel-title">{resolveSectionTitle(selectedSection.title)}</div>
                       <div className="panel-sub">ID: {selectedSection.id}</div>
                     </div>
                     <label className="switch">
@@ -309,6 +320,17 @@ export default function App() {
                       <span>Активна</span>
                     </label>
                   </div>
+
+                  <label className="field">
+                    <div className="label">Название блока</div>
+                    <input
+                      type="text"
+                      value={selectedSection.title}
+                      onChange={(e) => updateSectionTitle(selectedSection.id, e.target.value)}
+                      onBlur={(e) => updateSectionTitle(selectedSection.id, resolveSectionTitle(e.target.value))}
+                      placeholder={DEFAULT_SECTION_TITLE}
+                    />
+                  </label>
 
                   {selectedSection.kind === 'text' && (
                     <div className="stack">

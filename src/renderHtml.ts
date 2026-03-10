@@ -1,3 +1,6 @@
+import { resolveSectionTitle } from './sectionTitles';
+import { getThemeTokens } from './theme';
+import type { ThemeName } from './theme';
 import type { DocSection, ParsedSection, TextSection } from './types';
 
 function escapeHtml(value: string): string {
@@ -8,21 +11,25 @@ function escapeHtml(value: string): string {
     .replaceAll('"', '&quot;');
 }
 
+function shouldRenderTextSection(section: TextSection): boolean {
+  return section.enabled && Boolean(section.value.trim());
+}
+
+function shouldRenderParsedSection(section: ParsedSection): boolean {
+  return section.enabled && (Boolean(section.error) || section.rows.length > 0);
+}
+
 function renderTextSection(section: TextSection): string {
-  if (!section.enabled) {
-    return `<h2>${escapeHtml(section.title)}</h2><p><em>Не используется</em></p>`;
-  }
-  const content = section.value.trim() ? escapeHtml(section.value) : '<em>Не заполнено</em>';
-  return `<h2>${escapeHtml(section.title)}</h2><p>${content}</p>`;
+  const title = resolveSectionTitle(section.title);
+  const content = escapeHtml(section.value.trim());
+  return `<h2>${escapeHtml(title)}</h2><p>${content}</p>`;
 }
 
 function renderParsedSection(section: ParsedSection): string {
-  if (!section.enabled) {
-    return `<h2>${escapeHtml(section.title)}</h2><p><em>Не используется</em></p>`;
-  }
+  const title = resolveSectionTitle(section.title);
 
   if (section.error) {
-    return `<h2>${escapeHtml(section.title)}</h2><p><strong>Секция заблокирована:</strong> ${escapeHtml(section.error)}</p>`;
+    return `<h2>${escapeHtml(title)}</h2><p><strong>Секция заблокирована:</strong> ${escapeHtml(section.error)}</p>`;
   }
 
   const rows = section.rows
@@ -32,16 +39,43 @@ function renderParsedSection(section: ParsedSection): string {
     )
     .join('');
 
-  return `<h2>${escapeHtml(section.title)}</h2><table border="1" cellspacing="0" cellpadding="6"><thead><tr><th>Поле</th><th>Тип</th><th>Обязательность</th><th>Описание</th><th>Пример</th></tr></thead><tbody>${rows}</tbody></table>`;
+  return `<h2>${escapeHtml(title)}</h2><table border="1" cellspacing="0" cellpadding="6"><thead><tr><th>Поле</th><th>Тип</th><th>Обязательность</th><th>Описание</th><th>Пример</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
-export function renderHtmlDocument(sections: DocSection[]): string {
-  const blocks = sections.map((section) => {
+export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'dark'): string {
+  const blocks = sections.flatMap((section) => {
     if (section.kind === 'text') {
-      return renderTextSection(section);
+      return shouldRenderTextSection(section) ? [renderTextSection(section)] : [];
     }
-    return renderParsedSection(section);
+
+    return shouldRenderParsedSection(section) ? [renderParsedSection(section)] : [];
   });
 
-  return ['<!doctype html>', '<html><body>', '<h1>Документация API</h1>', ...blocks, '</body></html>'].join('\n');
+  const tokens = getThemeTokens(theme);
+
+  return [
+    '<!doctype html>',
+    '<html>',
+    '<head>',
+    '<meta charset="utf-8" />',
+    `<style>
+      body { margin: 0; padding: 16px; font-family: Inter, system-ui, sans-serif; background: ${tokens.previewBg}; color: ${tokens.previewText}; }
+      h1, h2 { margin: 0 0 12px; }
+      p { margin: 0 0 12px; }
+      table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+      th, td { border: 1px solid ${tokens.previewBorder}; padding: 8px; text-align: left; vertical-align: top; }
+      th { background: ${tokens.previewTableHead}; }
+      html, body { scrollbar-width: thin; scrollbar-color: ${tokens.scrollbarThumb} ${tokens.scrollbarTrack}; }
+      ::-webkit-scrollbar { width: 10px; height: 10px; }
+      ::-webkit-scrollbar-track { background: ${tokens.scrollbarTrack}; }
+      ::-webkit-scrollbar-thumb { background: ${tokens.scrollbarThumb}; border-radius: 8px; border: 2px solid ${tokens.scrollbarTrack}; }
+      ::-webkit-scrollbar-thumb:hover { background: ${tokens.scrollbarThumbHover}; }
+    </style>`,
+    '</head>',
+    '<body>',
+    '<h1>Документация API</h1>',
+    ...blocks,
+    '</body>',
+    '</html>'
+  ].join('\n');
 }

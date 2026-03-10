@@ -392,6 +392,15 @@ th {
   font-weight: 600;
 }
 
+.draggable-column {
+  cursor: grab;
+  user-select: none;
+}
+
+.draggable-column:active {
+  cursor: grabbing;
+}
+
 tr:nth-child(odd) td {
   background: rgba(255, 255, 255, 0.02);
 }
@@ -469,6 +478,32 @@ tr:nth-child(odd) td {
   gap: 6px;
   align-items: center;
   color: var(--muted);
+}
+
+.expander {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+
+.expander-summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 12px 14px;
+  font-weight: 600;
+}
+
+.expander-summary::-webkit-details-marker {
+  display: none;
+}
+
+.expander-body {
+  border-top: 1px solid var(--border);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 @media (max-width: 1024px) {

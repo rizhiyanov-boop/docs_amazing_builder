@@ -1,4 +1,5 @@
-import { getRequestRows, splitRequestRows } from './requestHeaders';
+﻿import { getRequestColumnLabel, getRequestColumnOrder } from './requestColumns';
+import { getRequestRows, requestHasRows, splitRequestRows } from './requestHeaders';
 import { resolveSectionTitle } from './sectionTitles';
 import type { DocSection, ParsedRow, ParsedSection, TextSection } from './types';
 
@@ -36,17 +37,49 @@ function shouldRenderTextSection(section: TextSection): boolean {
 
 function shouldRenderParsedSection(section: ParsedSection): boolean {
   if (!section.enabled) return false;
-  if (section.id === 'request') return Boolean(section.error) || getRequestRows(section).length > 0;
+  if (section.id === 'request') return Boolean(section.error) || Boolean(section.clientError) || requestHasRows(section);
   return Boolean(section.error) || section.rows.length > 0;
 }
 
-function renderTable(rows: ParsedRow[]): string[] {
+function renderDefaultTable(rows: ParsedRow[]): string[] {
   const lines = ['||Поле||Тип||Обязательность||Описание||Пример||'];
   for (const row of rows) {
-    lines.push(
-      `|${toWikiCell(row.field)}|${toWikiCell(row.type)}|${toWikiCell(row.required)}|${toWikiCell(row.description)}|${toWikiExampleCell(row.example)}|`
-    );
+    const cells = [
+      toWikiCell(row.field),
+      toWikiCell(row.type),
+      toWikiCell(row.required),
+      toWikiCell(row.description),
+      toWikiExampleCell(row.example)
+    ];
+    lines.push(`|${cells.join('|')}|`);
   }
+  return lines;
+}
+
+function renderRequestTable(rows: ParsedRow[], section: ParsedSection): string[] {
+  const columns = getRequestColumnOrder(section, rows);
+  const headerCells = columns.map((column) => getRequestColumnLabel(column));
+  const lines = [`||${headerCells.join('||')}||`];
+
+  for (const row of rows) {
+    const cellMap = {
+      field: row.field,
+      clientField: row.clientField ?? '',
+      type: row.type,
+      required: row.required,
+      description: row.description,
+      example: row.example
+    };
+
+    const cells = columns.map((column) => {
+      const value = cellMap[column];
+      if (column === 'example') return toWikiExampleCell(value);
+      return toWikiCell(value);
+    });
+
+    lines.push(`|${cells.join('|')}|`);
+  }
+
   return lines;
 }
 
@@ -57,19 +90,26 @@ function renderTextSection(section: TextSection): string[] {
 function renderRequestSection(section: ParsedSection): string[] {
   const lines: string[] = [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`];
   const { headers, otherRows, urlRow } = splitRequestRows(getRequestRows(section));
+  const requestError = section.error || section.clientError;
 
   if (urlRow) {
+    lines.push('');
     lines.push(`*URL:* ${toWikiCell(urlRow.example)}`);
   }
   if (headers.length > 0) {
+    lines.push('');
     lines.push('h3. Headers');
-    lines.push(...renderTable(headers));
+    lines.push('');
+    lines.push(...renderRequestTable(headers, section));
   }
-  if (section.error) {
-    lines.push(`*Секция заблокирована:* ${toWikiCell(section.error)}`);
+  if (requestError) {
+    lines.push('');
+    lines.push(`*Секция заблокирована:* ${toWikiCell(requestError)}`);
   } else if (otherRows.length > 0) {
+    lines.push('');
     lines.push('h3. Параметры');
-    lines.push(...renderTable(otherRows));
+    lines.push('');
+    lines.push(...renderRequestTable(otherRows, section));
   }
 
   return lines;
@@ -87,7 +127,7 @@ function renderParsedSection(section: ParsedSection): string[] {
     return lines;
   }
 
-  lines.push(...renderTable(section.rows));
+  lines.push(...renderDefaultTable(section.rows));
   return lines;
 }
 

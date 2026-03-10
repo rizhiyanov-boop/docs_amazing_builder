@@ -1,28 +1,45 @@
-import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import './App.css';
 import { parseToRows } from './parsers';
-import { DEFAULT_REQUEST_HEADERS } from './requestHeaders';
+import { getRequestColumnLabel, getRequestColumnOrder, moveRequestColumn } from './requestColumns';
+import { getEditorRequestRows, getMappedClientField, getMappingOptions, isRequestMappingRow } from './requestHeaders';
 import { renderHtmlDocument } from './renderHtml';
 import { renderWikiDocument } from './renderWiki';
 import { DEFAULT_SECTION_TITLE, resolveSectionTitle, sanitizeSections } from './sectionTitles';
 import { applyThemeToRoot } from './theme';
 import type { ThemeName } from './theme';
-import type { DocSection, ParsedSection, ParseFormat, ProjectData } from './types';
+import type { DocSection, ParsedRow, ParsedSection, ParseFormat, ProjectData, RequestColumnKey } from './types';
 
 const STORAGE_KEY = 'doc-builder-project-v2';
 
 type TabKey = 'editor' | 'html' | 'wiki' | 'split';
 type AutosaveState = 'idle' | 'saving' | 'saved' | 'error';
+type ParseTarget = 'server' | 'client';
 
 type AutosaveInfo = { state: AutosaveState; at?: string };
-
 type TableValidation = Map<string, string>;
 
 function createInitialSections(): DocSection[] {
   return [
     { id: 'goal', title: 'Цель', enabled: true, kind: 'text', value: '', required: true },
     { id: 'external-url', title: 'Внешний URL', enabled: true, kind: 'text', value: '' },
-    { id: 'request', title: 'Request', enabled: true, kind: 'parsed', format: 'curl', input: '', rows: [], error: '' },
+    {
+      id: 'request',
+      title: 'Request',
+      enabled: true,
+      kind: 'parsed',
+      format: 'curl',
+      input: '',
+      rows: [],
+      error: '',
+      domainModelEnabled: false,
+      clientFormat: 'json',
+      clientInput: '',
+      clientRows: [],
+      clientError: '',
+      clientMappings: {}
+    },
     { id: 'body', title: 'Body / Выходные параметры', enabled: true, kind: 'parsed', format: 'json', input: '', rows: [], error: '' },
     { id: 'errors', title: 'Ошибки', enabled: true, kind: 'text', value: '' },
     { id: 'non-functional', title: 'Нефункциональные требования', enabled: true, kind: 'text', value: '' },
@@ -30,9 +47,29 @@ function createInitialSections(): DocSection[] {
   ];
 }
 
+function isRequestSection(section: ParsedSection): boolean {
+  return section.id === 'request';
+}
+
+function getSectionRows(section: ParsedSection): ParsedRow[] {
+  return isRequestSection(section) ? getEditorRequestRows(section) : section.rows;
+}
+
 function validateSection(section: DocSection): string {
   if (section.kind !== 'parsed') return '';
-  if (!section.input || !section.input.trim()) return 'Введите исходные данные для парсинга';
+
+  if (isRequestSection(section)) {
+    const hasServerInput = Boolean(section.input.trim());
+    const hasClientInput = section.domainModelEnabled ? Boolean(section.clientInput?.trim()) : false;
+
+    if (!hasServerInput && !hasClientInput) return 'Введите исходные данные для парсинга';
+    if (section.error) return `Секция заблокирована: ${section.error}`;
+    if (section.clientError) return `Client request заблокирован: ${section.clientError}`;
+    if (getSectionRows(section).length === 0) return 'Нет распарсенных строк';
+    return '';
+  }
+
+  if (!section.input.trim()) return 'Введите исходные данные для парсинга';
   if (section.error) return `Секция заблокирована: ${section.error}`;
   if (section.rows.length === 0) return 'Нет распарсенных строк';
   return '';
@@ -66,8 +103,8 @@ function downloadText(filename: string, content: string): void {
 function reorderSections(list: DocSection[], fromId: string, toId: string): DocSection[] {
   if (fromId === toId) return list;
   const next = [...list];
-  const fromIndex = next.findIndex((s) => s.id === fromId);
-  const toIndex = next.findIndex((s) => s.id === toId);
+  const fromIndex = next.findIndex((section) => section.id === fromId);
+  const toIndex = next.findIndex((section) => section.id === toId);
   if (fromIndex === -1 || toIndex === -1) return list;
   const [removed] = next.splice(fromIndex, 1);
   next.splice(toIndex, 0, removed);
@@ -90,9 +127,10 @@ export default function App() {
   const [autosave, setAutosave] = useState<AutosaveInfo>({ state: 'idle' });
   const [importError, setImportError] = useState('');
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [draggedColumn, setDraggedColumn] = useState<RequestColumnKey | null>(null);
 
   useEffect(() => {
-    if (!sections.find((s) => s.id === selectedId) && sections[0]) {
+    if (!sections.find((section) => section.id === selectedId) && sections[0]) {
       setSelectedId(sections[0].id);
     }
   }, [sections, selectedId]);
@@ -103,7 +141,7 @@ export default function App() {
     return map;
   }, [sections]);
 
-  const selectedSection = sections.find((s) => s.id === selectedId) ?? sections[0];
+  const selectedSection = sections.find((section) => section.id === selectedId) ?? sections[0];
 
   const htmlOutput = useMemo(() => renderHtmlDocument(sections, theme), [sections, theme]);
   const wikiOutput = useMemo(() => renderWikiDocument(sections), [sections]);
@@ -139,30 +177,34 @@ export default function App() {
 
       if (selectedId === id) {
         const fallback = next[deletedIndex] ?? next[deletedIndex - 1] ?? next[0];
-        if (fallback) {
-          setSelectedId(fallback.id);
-        }
+        if (fallback) setSelectedId(fallback.id);
       }
 
       return next;
     });
   }
 
-  function runParser(section: ParsedSection): void {
+  function runParser(section: ParsedSection, target: ParseTarget = 'server'): void {
+    const format = target === 'client' ? section.clientFormat ?? 'json' : section.format;
+    const input = target === 'client' ? section.clientInput ?? '' : section.input;
+
     try {
-      const rows = parseToRows(section.format, section.input);
+      const rows = parseToRows(format, input);
       updateSection(section.id, (current) => {
         if (current.kind !== 'parsed') return current;
+        if (target === 'client' && isRequestSection(current)) {
+          return { ...current, clientRows: rows, clientError: '' };
+        }
         return { ...current, rows, error: '' };
       });
     } catch (error) {
       updateSection(section.id, (current) => {
         if (current.kind !== 'parsed') return current;
-        return {
-          ...current,
-          rows: [],
-          error: error instanceof Error ? error.message : 'Ошибка парсинга'
-        };
+        const message = error instanceof Error ? error.message : 'Ошибка парсинга';
+        if (target === 'client' && isRequestSection(current)) {
+          return { ...current, clientRows: [], clientError: message };
+        }
+        return { ...current, rows: [], error: message };
       });
     }
   }
@@ -198,14 +240,101 @@ export default function App() {
     localStorage.removeItem(STORAGE_KEY);
   }
 
+  function renderRequestCell(section: ParsedSection, row: ParsedRow, column: RequestColumnKey): ReactNode {
+    const cellMap = {
+      field: row.field || '—',
+      clientField: row.clientField || '—',
+      type: row.type || '—',
+      required: row.required || '—',
+      description: row.description || '—',
+      example: row.example || '—'
+    } satisfies Record<RequestColumnKey, string>;
+
+    if (column === 'clientField' && isRequestMappingRow(row) && section.domainModelEnabled) {
+      return (
+        <select
+          value={getMappedClientField(section, row.field)}
+          onChange={(e) =>
+            updateSection(section.id, (current) => {
+              if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
+
+              const nextMappings = { ...(current.clientMappings ?? {}) };
+              if (e.target.value) {
+                nextMappings[row.field] = e.target.value;
+              } else {
+                delete nextMappings[row.field];
+              }
+
+              return { ...current, clientMappings: nextMappings };
+            })
+          }
+        >
+          <option value="">—</option>
+          {getMappingOptions(section, row.field).map((option) => (
+            <option key={option.field} value={option.field}>
+              {option.field}
+            </option>
+          ))}
+        </select>
+      );
+    }
+
+    return cellMap[column];
+  }
+
   function renderParsedTable(section: ParsedSection) {
-    const hiddenRequestHeaders = new Set(DEFAULT_REQUEST_HEADERS.map((header) => header.field.toLowerCase()));
-    const rows =
-      section.id === 'request'
-        ? section.rows.filter((row) => !(row.source === 'header' && hiddenRequestHeaders.has(row.field.trim().toLowerCase())))
-        : section.rows;
+    const rows = getSectionRows(section);
 
     if (rows.length === 0) return <div className="muted">Нет распарсенных строк</div>;
+
+    if (isRequestSection(section)) {
+      const columns = getRequestColumnOrder(section, rows);
+
+      return (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                {columns.map((column) => (
+                  <th
+                    key={column}
+                    className="draggable-column"
+                    draggable
+                    onDragStart={() => setDraggedColumn(column)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => {
+                      if (!draggedColumn) return;
+                      updateSection(section.id, (current) => {
+                        if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
+                        const currentRows = getSectionRows(current);
+                        const currentOrder = getRequestColumnOrder(current, currentRows);
+                        return { ...current, requestColumnOrder: moveRequestColumn(currentOrder, draggedColumn, column) };
+                      });
+                      setDraggedColumn(null);
+                    }}
+                    onDragEnd={() => setDraggedColumn(null)}
+                  >
+                    {getRequestColumnLabel(column)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => (
+                <tr key={`${row.field}-${row.clientField ?? 'server'}-${index}`}>
+                  {columns.map((column) => (
+                    <td key={`${column}-${index}`} className={column === 'type' || column === 'example' ? 'mono' : undefined}>
+                      {renderRequestCell(section, row, column)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
     return (
       <div className="table-wrap">
         <table>
@@ -219,17 +348,155 @@ export default function App() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, i) => (
-              <tr key={`${r.field}-${i}`}>
-                <td>{r.field}</td>
-                <td className="mono">{r.type}</td>
-                <td>{r.required}</td>
-                <td>{r.description || '—'}</td>
-                <td className="mono">{r.example || '—'}</td>
+            {rows.map((row, index) => (
+              <tr key={`${row.field}-${row.clientField ?? 'server'}-${index}`}>
+                <td>{row.field || '—'}</td>
+                <td className="mono">{row.type}</td>
+                <td>{row.required}</td>
+                <td>{row.description || '—'}</td>
+                <td className="mono">{row.example || '—'}</td>
               </tr>
             ))}
           </tbody>
         </table>
+      </div>
+    );
+  }
+
+  function renderRequestEditor(section: ParsedSection) {
+    const rows = getSectionRows(section);
+
+    return (
+      <div className="stack">
+        <label className="switch">
+          <input
+            type="checkbox"
+            checked={Boolean(section.domainModelEnabled)}
+            onChange={(e) =>
+              updateSection(section.id, (current) => {
+                if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
+                if (e.target.checked) {
+                  return {
+                    ...current,
+                    domainModelEnabled: true,
+                    clientFormat: current.clientFormat ?? 'json',
+                    clientInput: current.clientInput ?? '',
+                    clientRows: current.clientRows ?? [],
+                    clientError: current.clientError ?? '',
+                    clientMappings: current.clientMappings ?? {}
+                  };
+                }
+
+                return {
+                  ...current,
+                  domainModelEnabled: false,
+                  clientFormat: 'json',
+                  clientInput: '',
+                  clientRows: [],
+                  clientError: '',
+                  clientMappings: {}
+                };
+              })
+            }
+          />
+          <span>Доменная модель</span>
+        </label>
+
+        <details className="expander" open>
+          <summary className="expander-summary">Server request</summary>
+          <div className="expander-body">
+            <div className="row gap">
+              <label className="field">
+                <div className="label">Формат</div>
+                <select
+                  value={section.format}
+                  onChange={(e) =>
+                    updateSection(section.id, (current) =>
+                      current.kind === 'parsed'
+                        ? { ...current, format: e.target.value as ParseFormat, rows: [], error: '' }
+                        : current
+                    )
+                  }
+                >
+                  <option value="json">JSON</option>
+                  <option value="xml">XML</option>
+                  <option value="curl">cURL</option>
+                </select>
+              </label>
+              <button className="primary" type="button" onClick={() => runParser(section, 'server')}>
+                Парсить
+              </button>
+            </div>
+
+            <label className="field">
+              <div className="label">Исходные данные</div>
+              <textarea
+                rows={12}
+                value={section.input}
+                onChange={(e) =>
+                  updateSection(section.id, (current) =>
+                    current.kind === 'parsed' ? { ...current, input: e.target.value, error: '' } : current
+                  )
+                }
+                placeholder="Вставьте JSON, XML или cURL"
+              />
+            </label>
+          </div>
+        </details>
+
+        {section.domainModelEnabled && (
+          <details className="expander" open>
+            <summary className="expander-summary">Client request</summary>
+            <div className="expander-body">
+              <div className="row gap">
+                <label className="field">
+                  <div className="label">Формат</div>
+                  <select
+                    value={section.clientFormat ?? 'json'}
+                    onChange={(e) =>
+                      updateSection(section.id, (current) =>
+                        current.kind === 'parsed' && isRequestSection(current)
+                          ? { ...current, clientFormat: e.target.value as ParseFormat, clientRows: [], clientError: '', clientMappings: {} }
+                          : current
+                      )
+                    }
+                  >
+                    <option value="json">JSON</option>
+                    <option value="xml">XML</option>
+                    <option value="curl">cURL</option>
+                  </select>
+                </label>
+                <button className="primary" type="button" onClick={() => runParser(section, 'client')}>
+                  Парсить
+                </button>
+              </div>
+
+              <label className="field">
+                <div className="label">Исходные данные</div>
+                <textarea
+                  rows={12}
+                  value={section.clientInput ?? ''}
+                  onChange={(e) =>
+                    updateSection(section.id, (current) =>
+                      current.kind === 'parsed' && isRequestSection(current)
+                        ? { ...current, clientInput: e.target.value, clientError: '' }
+                        : current
+                    )
+                  }
+                  placeholder="Вставьте JSON, XML или cURL для client request"
+                />
+              </label>
+            </div>
+          </details>
+        )}
+
+        {section.error && <div className="alert error">Server request: {section.error}</div>}
+        {section.clientError && <div className="alert error">Client request: {section.clientError}</div>}
+        {!section.error && !section.clientError && validationMap.get(section.id) === '' && rows.length > 0 && (
+          <div className="alert success">Распарсено {rows.length} строк</div>
+        )}
+
+        {renderParsedTable(section)}
       </div>
     );
   }
@@ -250,12 +517,16 @@ export default function App() {
           </div>
         </div>
         <div className="actions">
-          <button className="ghost" onClick={resetProject}>Новый</button>
+          <button className="ghost" onClick={resetProject}>
+            Новый
+          </button>
           <label className="ghost file-input" aria-label="Импортировать проект JSON">
             Импорт
             <input type="file" accept="application/json" onChange={(e) => importProjectJson(e.target.files?.[0])} />
           </label>
-          <button className="ghost" onClick={exportProjectJson}>Экспорт JSON</button>
+          <button className="ghost" onClick={exportProjectJson}>
+            Экспорт JSON
+          </button>
           <button onClick={() => downloadText('documentation.html', htmlOutput)}>Экспорт HTML</button>
           <button onClick={() => downloadText('documentation.wiki', wikiOutput)}>Экспорт Wiki</button>
           <button className="ghost" onClick={toggleTheme}>
@@ -278,7 +549,9 @@ export default function App() {
             <div className="muted">Секции</div>
             <button
               className="ghost small"
-              onClick={() => setSections((prev) => [...prev, { id: `custom-${Date.now()}`, title: DEFAULT_SECTION_TITLE, enabled: true, kind: 'text', value: '' }])}
+              onClick={() =>
+                setSections((prev) => [...prev, { id: `custom-${Date.now()}`, title: DEFAULT_SECTION_TITLE, enabled: true, kind: 'text', value: '' }])
+              }
             >
               + Добавить
             </button>
@@ -347,12 +620,12 @@ export default function App() {
                         </button>
                       )}
                       <label className="switch">
-                      <input
-                        type="checkbox"
-                        checked={selectedSection.enabled}
-                        onChange={(e) => updateSection(selectedSection.id, (curr) => ({ ...curr, enabled: e.target.checked }))}
-                      />
-                      <span>Активна</span>
+                        <input
+                          type="checkbox"
+                          checked={selectedSection.enabled}
+                          onChange={(e) => updateSection(selectedSection.id, (current) => ({ ...current, enabled: e.target.checked }))}
+                        />
+                        <span>Активна</span>
                       </label>
                     </div>
                   </div>
@@ -375,7 +648,9 @@ export default function App() {
                         <textarea
                           rows={10}
                           value={selectedSection.value}
-                          onChange={(e) => updateSection(selectedSection.id, (curr) => (curr.kind === 'text' ? { ...curr, value: e.target.value } : curr))}
+                          onChange={(e) =>
+                            updateSection(selectedSection.id, (current) => (current.kind === 'text' ? { ...current, value: e.target.value } : current))
+                          }
                           placeholder="Опишите цель, ограничения, ошибки и т.д."
                         />
                       </label>
@@ -383,49 +658,55 @@ export default function App() {
                   )}
 
                   {selectedSection.kind === 'parsed' && (
-                    <div className="stack">
-                      <div className="row gap">
-                        <label className="field">
-                          <div className="label">Формат</div>
-                          <select
-                            value={selectedSection.format}
-                            onChange={(e) =>
-                              updateSection(selectedSection.id, (curr) =>
-                                curr.kind === 'parsed' ? { ...curr, format: e.target.value as ParseFormat, rows: [], error: '' } : curr
-                              )
-                            }
-                          >
-                            <option value="json">JSON</option>
-                            <option value="xml">XML</option>
-                            <option value="curl">cURL</option>
-                          </select>
-                        </label>
-                        <button className="primary" onClick={() => runParser(selectedSection)}>Парсить</button>
-                      </div>
+                    <>
+                      {isRequestSection(selectedSection) ? (
+                        renderRequestEditor(selectedSection)
+                      ) : (
+                        <div className="stack">
+                          <div className="row gap">
+                            <label className="field">
+                              <div className="label">Формат</div>
+                              <select
+                                value={selectedSection.format}
+                                onChange={(e) =>
+                                  updateSection(selectedSection.id, (current) =>
+                                    current.kind === 'parsed' ? { ...current, format: e.target.value as ParseFormat, rows: [], error: '' } : current
+                                  )
+                                }
+                              >
+                                <option value="json">JSON</option>
+                                <option value="xml">XML</option>
+                                <option value="curl">cURL</option>
+                              </select>
+                            </label>
+                            <button className="primary" type="button" onClick={() => runParser(selectedSection)}>
+                              Парсить
+                            </button>
+                          </div>
 
-                      <label className="field">
-                        <div className="label">Исходные данные</div>
-                        <textarea
-                          rows={12}
-                          value={selectedSection.input}
-                          onChange={(e) =>
-                            updateSection(selectedSection.id, (curr) =>
-                              curr.kind === 'parsed' ? { ...curr, input: e.target.value, error: '' } : curr
-                            )
-                          }
-                          placeholder="Вставьте JSON, XML или cURL"
-                        />
-                      </label>
+                          <label className="field">
+                            <div className="label">Исходные данные</div>
+                            <textarea
+                              rows={12}
+                              value={selectedSection.input}
+                              onChange={(e) =>
+                                updateSection(selectedSection.id, (current) =>
+                                  current.kind === 'parsed' ? { ...current, input: e.target.value, error: '' } : current
+                                )
+                              }
+                              placeholder="Вставьте JSON, XML или cURL"
+                            />
+                          </label>
 
-                      {selectedSection.error && <div className="alert error">{selectedSection.error}</div>}
-                      {!selectedSection.error && validationMap.get(selectedSection.id) === '' && selectedSection.rows.length > 0 && (
-                        <div className="alert success">
-                          Распарсено {selectedSection.rows.length} строк
+                          {selectedSection.error && <div className="alert error">{selectedSection.error}</div>}
+                          {!selectedSection.error && validationMap.get(selectedSection.id) === '' && selectedSection.rows.length > 0 && (
+                            <div className="alert success">Распарсено {selectedSection.rows.length} строк</div>
+                          )}
+
+                          {renderParsedTable(selectedSection)}
                         </div>
                       )}
-
-                      {renderParsedTable(selectedSection)}
-                    </div>
+                    </>
                   )}
                 </section>
               )}
@@ -438,12 +719,7 @@ export default function App() {
                       Скачать
                     </button>
                   </div>
-                  <iframe
-                    className="preview-frame"
-                    title="HTML preview"
-                    sandbox="allow-same-origin"
-                    srcDoc={htmlOutput}
-                  />
+                  <iframe className="preview-frame" title="HTML preview" sandbox="allow-same-origin" srcDoc={htmlOutput} />
                 </section>
               )}
 
@@ -467,3 +743,4 @@ export default function App() {
     </div>
   );
 }
+

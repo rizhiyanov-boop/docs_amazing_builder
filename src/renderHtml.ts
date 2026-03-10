@@ -1,4 +1,5 @@
-import { getRequestRows, splitRequestRows } from './requestHeaders';
+import { getRequestColumnLabel, getRequestColumnOrder } from './requestColumns';
+import { getRequestRows, requestHasRows, splitRequestRows } from './requestHeaders';
 import { resolveSectionTitle } from './sectionTitles';
 import { getThemeTokens } from './theme';
 import type { ThemeName } from './theme';
@@ -18,7 +19,7 @@ function shouldRenderTextSection(section: TextSection): boolean {
 
 function shouldRenderParsedSection(section: ParsedSection): boolean {
   if (!section.enabled) return false;
-  if (section.id === 'request') return Boolean(section.error) || getRequestRows(section).length > 0;
+  if (section.id === 'request') return Boolean(section.error) || Boolean(section.clientError) || requestHasRows(section);
   return Boolean(section.error) || section.rows.length > 0;
 }
 
@@ -26,15 +27,45 @@ function renderCell(value: string): string {
   return escapeHtml(value.trim()) || '&mdash;';
 }
 
-function renderTable(rows: ParsedRow[]): string {
+function renderDefaultTable(rows: ParsedRow[]): string {
+  const headerCells = ['<th>Поле</th>', '<th>Тип</th>', '<th>Обязательность</th>', '<th>Описание</th>', '<th>Пример</th>'];
+
   const body = rows
-    .map(
-      (row) =>
-        `<tr><td>${renderCell(row.field)}</td><td>${renderCell(row.type)}</td><td>${renderCell(row.required)}</td><td>${renderCell(row.description)}</td><td>${renderCell(row.example)}</td></tr>`
-    )
+    .map((row) => {
+      const cells = [
+        `<td>${renderCell(row.field)}</td>`,
+        `<td>${renderCell(row.type)}</td>`,
+        `<td>${renderCell(row.required)}</td>`,
+        `<td>${renderCell(row.description)}</td>`,
+        `<td>${renderCell(row.example)}</td>`
+      ];
+      return `<tr>${cells.join('')}</tr>`;
+    })
     .join('');
 
-  return `<table border="1" cellspacing="0" cellpadding="6"><thead><tr><th>Поле</th><th>Тип</th><th>Обязательность</th><th>Описание</th><th>Пример</th></tr></thead><tbody>${body}</tbody></table>`;
+  return `<table border="1" cellspacing="0" cellpadding="6"><thead><tr>${headerCells.join('')}</tr></thead><tbody>${body}</tbody></table>`;
+}
+
+function renderRequestTable(rows: ParsedRow[], section: ParsedSection): string {
+  const columns = getRequestColumnOrder(section, rows);
+  const headerCells = columns.map((column) => `<th>${escapeHtml(getRequestColumnLabel(column))}</th>`);
+  const body = rows
+    .map((row) => {
+      const cellMap = {
+        field: row.field || '—',
+        clientField: row.clientField || '—',
+        type: row.type || '—',
+        required: row.required || '—',
+        description: row.description || '—',
+        example: row.example || '—'
+      };
+
+      const cells = columns.map((column) => `<td>${renderCell(cellMap[column])}</td>`);
+      return `<tr>${cells.join('')}</tr>`;
+    })
+    .join('');
+
+  return `<table border="1" cellspacing="0" cellpadding="6"><thead><tr>${headerCells.join('')}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
 function renderTextSection(section: TextSection): string {
@@ -47,19 +78,20 @@ function renderRequestSection(section: ParsedSection): string {
   const title = resolveSectionTitle(section.title);
   const { headers, otherRows, urlRow } = splitRequestRows(getRequestRows(section));
   const blocks = [`<h2>${escapeHtml(title)}</h2>`];
+  const requestError = section.error || section.clientError;
 
   if (urlRow) {
     blocks.push(`<p><strong>URL:</strong> ${renderCell(urlRow.example)}</p>`);
   }
   if (headers.length > 0) {
     blocks.push('<h3>Headers</h3>');
-    blocks.push(renderTable(headers));
+    blocks.push(renderRequestTable(headers, section));
   }
-  if (section.error) {
-    blocks.push(`<p><strong>Секция заблокирована:</strong> ${escapeHtml(section.error)}</p>`);
+  if (requestError) {
+    blocks.push(`<p><strong>Секция заблокирована:</strong> ${escapeHtml(requestError)}</p>`);
   } else if (otherRows.length > 0) {
     blocks.push('<h3>Параметры</h3>');
-    blocks.push(renderTable(otherRows));
+    blocks.push(renderRequestTable(otherRows, section));
   }
 
   return blocks.join('');
@@ -76,7 +108,7 @@ function renderParsedSection(section: ParsedSection): string {
     return `<h2>${escapeHtml(title)}</h2><p><strong>Секция заблокирована:</strong> ${escapeHtml(section.error)}</p>`;
   }
 
-  return `<h2>${escapeHtml(title)}</h2>${renderTable(section.rows)}`;
+  return `<h2>${escapeHtml(title)}</h2>${renderDefaultTable(section.rows)}`;
 }
 
 export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'dark'): string {

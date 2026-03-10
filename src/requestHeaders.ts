@@ -2,16 +2,30 @@
 
 export const OPTIONAL_MARK = '\u00B1';
 
+export type RequestAuthInfo = {
+  schemeLabel: string;
+  headerName: string;
+  example: string;
+  details: Array<{ label: string; value: string }>;
+};
+
+export const DEFAULT_BEARER_TOKEN_EXAMPLE = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.<payload>.<signature>';
+export const DEFAULT_BASIC_USERNAME = 'api-user';
+export const DEFAULT_BASIC_PASSWORD = 'secret-password';
+export const DEFAULT_API_KEY_HEADER = 'X-API-Key';
+export const DEFAULT_API_KEY_EXAMPLE = 'sk_live_51QExampleKey';
+
 export const DEFAULT_REQUEST_HEADERS: ParsedRow[] = [
-  { field: 'X-CLIENT-ID', sourceField: 'X-CLIENT-ID', origin: 'generated', type: 'string', required: '-', description: 'ID клиента', example: '', source: 'header' },
-  { field: 'X-USER-ID', sourceField: 'X-USER-ID', origin: 'generated', type: 'string', required: '-', description: 'ID пользователя', example: '', source: 'header' },
-  { field: 'X-SOURCE-SYSTEM', sourceField: 'X-SOURCE-SYSTEM', origin: 'generated', type: 'string', required: '-', description: 'Система-инициатор', example: '', source: 'header' },
-  { field: 'X-BP-ID', sourceField: 'X-BP-ID', origin: 'generated', type: 'string', required: '-', description: 'ID бизнес-процесса', example: '', source: 'header' },
-  { field: 'X-BP-NAME', sourceField: 'X-BP-NAME', origin: 'generated', type: 'string', required: '-', description: 'Название бизнес-процесса', example: '', source: 'header' },
-  { field: 'traceparent', sourceField: 'traceparent', origin: 'generated', type: 'string', required: '-', description: 'TraceParent для распределенного трейсинга', example: '', source: 'header' }
+  { field: 'X-CLIENT-ID', sourceField: 'X-CLIENT-ID', origin: 'generated', enabled: true, type: 'string', required: '-', description: 'ID клиента', example: '', source: 'header' },
+  { field: 'X-USER-ID', sourceField: 'X-USER-ID', origin: 'generated', enabled: true, type: 'string', required: '-', description: 'ID пользователя', example: '', source: 'header' },
+  { field: 'X-SOURCE-SYSTEM', sourceField: 'X-SOURCE-SYSTEM', origin: 'generated', enabled: true, type: 'string', required: '-', description: 'Система-инициатор', example: '', source: 'header' },
+  { field: 'X-BP-ID', sourceField: 'X-BP-ID', origin: 'generated', enabled: true, type: 'string', required: '-', description: 'ID бизнес-процесса', example: '', source: 'header' },
+  { field: 'X-BP-NAME', sourceField: 'X-BP-NAME', origin: 'generated', enabled: true, type: 'string', required: '-', description: 'Название бизнес-процесса', example: '', source: 'header' },
+  { field: 'traceparent', sourceField: 'traceparent', origin: 'generated', enabled: true, type: 'string', required: '-', description: 'TraceParent для распределенного трейсинга', example: '', source: 'header' }
 ];
 
 const REQUEST_HEADER_ORDER = new Map(DEFAULT_REQUEST_HEADERS.map((header, index) => [header.field.toLowerCase(), index]));
+const DEFAULT_REQUEST_HEADER_NAMES = new Set(DEFAULT_REQUEST_HEADERS.map((header) => header.field.toLowerCase()));
 
 function isDualModelSection(section: ParsedSection): boolean {
   return section.id === 'request' || section.id === 'response';
@@ -56,29 +70,137 @@ function getSimilarityScore(left: string, right: string): number {
   return commonPrefix;
 }
 
-function withDefaultHeaders(rows: ParsedRow[]): ParsedRow[] {
-  const presentHeaders = new Set(
-    rows
-      .filter((row) => row.source === 'header')
-      .map((row) => row.field.trim().toLowerCase())
-  );
-
-  const merged = [...rows];
-  for (const header of DEFAULT_REQUEST_HEADERS) {
-    if (!presentHeaders.has(header.field.toLowerCase())) {
-      merged.push(header);
-    }
-  }
-
-  return merged.sort((left, right) => {
-    const leftOrder = left.source === 'header' ? REQUEST_HEADER_ORDER.get(left.field.toLowerCase()) : undefined;
-    const rightOrder = right.source === 'header' ? REQUEST_HEADER_ORDER.get(right.field.toLowerCase()) : undefined;
+function sortHeaders(rows: ParsedRow[]): ParsedRow[] {
+  return [...rows].sort((left, right) => {
+    const leftOrder = REQUEST_HEADER_ORDER.get(left.field.trim().toLowerCase());
+    const rightOrder = REQUEST_HEADER_ORDER.get(right.field.trim().toLowerCase());
 
     if (leftOrder !== undefined && rightOrder !== undefined) return leftOrder - rightOrder;
     if (leftOrder !== undefined) return -1;
     if (rightOrder !== undefined) return 1;
-    return 0;
+    return left.field.localeCompare(right.field);
   });
+}
+
+function mergeDefaultHeaders(rows: ParsedRow[]): ParsedRow[] {
+  const normalizedRows = rows.map((row) => ({ ...row, enabled: row.enabled ?? true }));
+  const byName = new Map(normalizedRows.filter((row) => row.source === 'header').map((row) => [row.field.trim().toLowerCase(), row]));
+  const merged = [...normalizedRows.filter((row) => row.source !== 'header')];
+
+  const headerRows: ParsedRow[] = [];
+
+  for (const header of DEFAULT_REQUEST_HEADERS) {
+    const existing = byName.get(header.field.toLowerCase());
+    if (existing) {
+      headerRows.push({ ...existing, enabled: existing.enabled ?? true });
+      byName.delete(header.field.toLowerCase());
+    } else {
+      headerRows.push({ ...header });
+    }
+  }
+
+  headerRows.push(...Array.from(byName.values()));
+  return [...sortHeaders(headerRows), ...merged];
+}
+
+function filterEnabledRows(rows: ParsedRow[]): ParsedRow[] {
+  return rows.filter((row) => row.source !== 'header' || row.enabled !== false);
+}
+
+function getRequestAuthInfoInternal(section: ParsedSection): RequestAuthInfo | null {
+  if (section.id !== 'request') return null;
+
+  if (section.authType === 'bearer') {
+    const tokenExample = section.authTokenExample?.trim() || DEFAULT_BEARER_TOKEN_EXAMPLE;
+    return {
+      schemeLabel: 'Bearer token',
+      headerName: 'Authorization',
+      example: `Bearer ${tokenExample}`,
+      details: [
+        { label: 'Схема', value: 'Bearer token' },
+        { label: 'Header', value: 'Authorization' },
+        { label: 'Пример', value: `Bearer ${tokenExample}` }
+      ]
+    };
+  }
+
+  if (section.authType === 'basic') {
+    const username = section.authUsername?.trim() || DEFAULT_BASIC_USERNAME;
+    const password = section.authPassword?.trim() || DEFAULT_BASIC_PASSWORD;
+    return {
+      schemeLabel: 'Basic auth',
+      headerName: 'Authorization',
+      example: 'Basic <base64(username:password)>',
+      details: [
+        { label: 'Схема', value: 'Basic auth' },
+        { label: 'Header', value: 'Authorization' },
+        { label: 'Логин', value: username },
+        { label: 'Пароль', value: password },
+        { label: 'Пример', value: 'Basic <base64(username:password)>' }
+      ]
+    };
+  }
+
+  if (section.authType === 'api-key') {
+    const headerName = section.authHeaderName?.trim() || DEFAULT_API_KEY_HEADER;
+    const apiKeyExample = section.authApiKeyExample?.trim() || DEFAULT_API_KEY_EXAMPLE;
+    return {
+      schemeLabel: 'API key',
+      headerName,
+      example: apiKeyExample,
+      details: [
+        { label: 'Схема', value: 'API key' },
+        { label: 'Header', value: headerName },
+        { label: 'Пример', value: apiKeyExample }
+      ]
+    };
+  }
+
+  return null;
+}
+
+function getRequestAuthRows(section: ParsedSection): ParsedRow[] {
+  const authInfo = getRequestAuthInfoInternal(section);
+  if (!authInfo) return [];
+
+  return [
+    {
+      field: authInfo.headerName,
+      sourceField: authInfo.headerName,
+      origin: 'generated',
+      enabled: true,
+      type: 'string',
+      required: '+',
+      description: `Авторизация: ${authInfo.schemeLabel}`,
+      example: authInfo.example,
+      source: 'header'
+    }
+  ];
+}
+
+function getRequestServerRows(section: ParsedSection, options?: { includeDisabledHeaders?: boolean; includeAuth?: boolean }): ParsedRow[] {
+  const includeDisabledHeaders = options?.includeDisabledHeaders ?? false;
+  const includeAuth = options?.includeAuth ?? true;
+
+  if (section.id !== 'request') {
+    return includeDisabledHeaders ? section.rows : filterEnabledRows(section.rows);
+  }
+
+  const rowsWithDefaults = mergeDefaultHeaders(section.rows);
+  const visibleRows = includeDisabledHeaders ? rowsWithDefaults : filterEnabledRows(rowsWithDefaults);
+  if (!includeAuth) return visibleRows;
+
+  const authRows = getRequestAuthRows(section);
+  const existingHeaderNames = new Set(visibleRows.filter((row) => row.source === 'header').map((row) => row.field.trim().toLowerCase()));
+  const nextRows = [...visibleRows];
+
+  for (const header of authRows) {
+    if (!existingHeaderNames.has(header.field.trim().toLowerCase())) {
+      nextRows.unshift(header);
+    }
+  }
+
+  return nextRows;
 }
 
 function isMappableRow(row: ParsedRow): boolean {
@@ -100,8 +222,8 @@ function getValidClientMappings(section: ParsedSection): Record<string, string> 
   );
 }
 
-function mergeRequestRows(section: ParsedSection, includeDefaultHeaders: boolean): ParsedRow[] {
-  const serverRows = includeDefaultHeaders && section.id === 'request' ? withDefaultHeaders(section.rows) : section.rows;
+function mergeRequestRows(section: ParsedSection): ParsedRow[] {
+  const serverRows = getRequestServerRows(section, { includeDisabledHeaders: false, includeAuth: true });
 
   if (!isDualModelSection(section) || !section.domainModelEnabled) return serverRows;
 
@@ -142,23 +264,25 @@ function mergeRequestRows(section: ParsedSection, includeDefaultHeaders: boolean
 
 export function getRequestRows(section: ParsedSection): ParsedRow[] {
   if (!isDualModelSection(section)) return section.rows;
-  return mergeRequestRows(section, true);
+  return mergeRequestRows(section);
 }
 
 export function getEditorRequestRows(section: ParsedSection): ParsedRow[] {
   if (!isDualModelSection(section)) return section.rows;
+  return mergeRequestRows(section).filter((row) => row.source !== 'header' && row.source !== 'url');
+}
 
-  const hiddenRequestHeaders = new Set(DEFAULT_REQUEST_HEADERS.map((header) => header.field.toLowerCase()));
-  return mergeRequestRows(
-    {
-      ...section,
-      rows:
-        section.id === 'request'
-          ? section.rows.filter((row) => !(row.source === 'header' && hiddenRequestHeaders.has(row.field.trim().toLowerCase())))
-          : section.rows
-    },
-    false
-  );
+export function getRequestHeaderRows(section: ParsedSection): ParsedRow[] {
+  return sortHeaders(getRequestServerRows(section, { includeDisabledHeaders: true, includeAuth: true }).filter((row) => row.source === 'header'));
+}
+
+export function isDefaultRequestHeader(row: ParsedRow): boolean {
+  return DEFAULT_REQUEST_HEADER_NAMES.has(row.field.trim().toLowerCase());
+}
+
+export function isAuthHeader(section: ParsedSection, row: ParsedRow): boolean {
+  const authInfo = getRequestAuthInfoInternal(section);
+  return Boolean(authInfo && row.field.trim().toLowerCase() === authInfo.headerName.trim().toLowerCase());
 }
 
 export function getMappingOptions(section: ParsedSection, displayField: string): ParsedRow[] {
@@ -220,3 +344,6 @@ export function getInputDriftRows(rows: ParsedRow[]): ParsedRow[] {
   return rows.filter((row) => row.origin === 'manual' || (row.origin === 'parsed' && row.sourceField && row.field !== row.sourceField));
 }
 
+export function getRequestAuthInfo(section: ParsedSection): RequestAuthInfo | null {
+  return getRequestAuthInfoInternal(section);
+}

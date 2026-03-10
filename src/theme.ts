@@ -15,6 +15,12 @@ type ThemeTokens = {
   scrollbarTrack: string;
   scrollbarThumb: string;
   scrollbarThumbHover: string;
+  buttonBg: string;
+  buttonText: string;
+  buttonShadow: string;
+  buttonShadowHover: string;
+  activeBg: string;
+  activeText: string;
   previewBg: string;
   previewText: string;
   previewBorder: string;
@@ -37,6 +43,12 @@ const THEMES: Record<ThemeName, ThemeTokens> = {
     scrollbarTrack: '#0f172a',
     scrollbarThumb: '#475569',
     scrollbarThumbHover: '#64748b',
+    buttonBg: 'linear-gradient(135deg, #6366f1, #22d3ee)',
+    buttonText: '#0b1021',
+    buttonShadow: '0 10px 20px rgba(99, 102, 241, 0.25)',
+    buttonShadowHover: '0 14px 28px rgba(99, 102, 241, 0.35)',
+    activeBg: 'rgba(99, 102, 241, 0.12)',
+    activeText: '#e5e7eb',
     previewBg: '#0d152a',
     previewText: '#e5e7eb',
     previewBorder: '#334155',
@@ -54,9 +66,15 @@ const THEMES: Record<ThemeName, ThemeTokens> = {
     shadow: '0 12px 30px rgba(0, 0, 0, 0.08)',
     inputBg: '#ffffff',
     inputText: '#000000',
-    scrollbarTrack: '#eef2f7',
-    scrollbarThumb: '#94a3b8',
-    scrollbarThumbHover: '#64748b',
+    scrollbarTrack: '#ffffff',
+    scrollbarThumb: '#ffffff',
+    scrollbarThumbHover: '#f3f4f6',
+    buttonBg: '#111111',
+    buttonText: '#ffffff',
+    buttonShadow: '0 10px 20px rgba(17, 17, 17, 0.18)',
+    buttonShadowHover: '0 14px 28px rgba(17, 17, 17, 0.24)',
+    activeBg: '#111111',
+    activeText: '#ffffff',
     previewBg: '#ffffff',
     previewText: '#111827',
     previewBorder: '#e5e7eb',
@@ -85,4 +103,10 @@ export function applyThemeToRoot(theme: ThemeName, root: HTMLElement = document.
   root.style.setProperty('--scrollbar-track', tokens.scrollbarTrack);
   root.style.setProperty('--scrollbar-thumb', tokens.scrollbarThumb);
   root.style.setProperty('--scrollbar-thumb-hover', tokens.scrollbarThumbHover);
+  root.style.setProperty('--button-bg', tokens.buttonBg);
+  root.style.setProperty('--button-text', tokens.buttonText);
+  root.style.setProperty('--button-shadow', tokens.buttonShadow);
+  root.style.setProperty('--button-shadow-hover', tokens.buttonShadowHover);
+  root.style.setProperty('--active-bg', tokens.activeBg);
+  root.style.setProperty('--active-text', tokens.activeText);
 }

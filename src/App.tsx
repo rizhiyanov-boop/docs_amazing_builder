@@ -3,14 +3,32 @@ import type { ReactNode } from 'react';
 import './App.css';
 import { parseToRows } from './parsers';
 import { getRequestColumnLabel, getRequestColumnOrder, moveRequestColumn } from './requestColumns';
-import { getEditorRequestRows, getInputDriftRows, getMappedClientField, getMappingOptions, getParsedRowKey, getPreviouslyUsedClientKeys, isRequestMappingRow, OPTIONAL_MARK } from './requestHeaders';
+import {
+  DEFAULT_API_KEY_EXAMPLE,
+  DEFAULT_API_KEY_HEADER,
+  DEFAULT_BASIC_PASSWORD,
+  DEFAULT_BASIC_USERNAME,
+  DEFAULT_BEARER_TOKEN_EXAMPLE,
+  getEditorRequestRows,
+  getInputDriftRows,
+  getMappedClientField,
+  getMappingOptions,
+  getParsedRowKey,
+  getRequestHeaderRows,
+  getPreviouslyUsedClientKeys,
+  isAuthHeader,
+  isDefaultRequestHeader,
+  isRequestMappingRow,
+  OPTIONAL_MARK,
+  getRequestAuthInfo
+} from './requestHeaders';
 import { renderHtmlDocument } from './renderHtml';
 import { renderWikiDocument } from './renderWiki';
 import { DEFAULT_SECTION_TITLE, resolveSectionTitle, sanitizeSections } from './sectionTitles';
 import { buildInputFromRows } from './sourceSync';
 import { applyThemeToRoot } from './theme';
 import type { ThemeName } from './theme';
-import type { DocSection, ParsedRow, ParsedSection, ParseFormat, ProjectData, RequestColumnKey } from './types';
+import type { DocSection, ParsedRow, ParsedSection, ParseFormat, ProjectData, RequestAuthType, RequestColumnKey } from './types';
 
 const STORAGE_KEY = 'doc-builder-project-v2';
 
@@ -25,11 +43,45 @@ type EditableFieldState = {
   rowKey: string;
   draft: string;
 };
+type EditableRequestCellState = {
+  sectionId: string;
+  rowKey: string;
+  column: 'type' | 'required' | 'description' | 'example';
+  draft: string;
+};
 type EditableTitleState = {
   sectionId: string;
   draft: string;
 };
 type DriftAlertState = Record<string, boolean>;
+type EditableFieldOptions = {
+  allowEdit?: boolean;
+  onDelete?: () => void;
+};
+
+const TYPE_OPTIONS_COMMON = ['string', 'int', 'long', 'boolean', 'number', 'object', 'array', 'array_object', 'null'];
+const TYPE_OPTIONS_EXTENDED = [
+  'short',
+  'float',
+  'double',
+  'decimal',
+  'date',
+  'datetime',
+  'timestamp',
+  'uuid',
+  'enum',
+  'map',
+  'binary',
+  'file',
+  'array_string',
+  'array_int',
+  'array_long',
+  'array_number',
+  'array_boolean',
+  'array_array',
+  'array_null'
+];
+const REQUIRED_OPTIONS = ['+', OPTIONAL_MARK, '-'];
 
 function createInitialSections(): DocSection[] {
   return [
@@ -51,7 +103,13 @@ function createInitialSections(): DocSection[] {
       clientInput: '',
       clientRows: [],
       clientError: '',
-      clientMappings: {}
+      clientMappings: {},
+      authType: 'none',
+      authHeaderName: DEFAULT_API_KEY_HEADER,
+      authTokenExample: DEFAULT_BEARER_TOKEN_EXAMPLE,
+      authUsername: DEFAULT_BASIC_USERNAME,
+      authPassword: DEFAULT_BASIC_PASSWORD,
+      authApiKeyExample: DEFAULT_API_KEY_EXAMPLE
     },
     {
       id: 'response',
@@ -96,6 +154,10 @@ function getSectionSideLabel(section: ParsedSection, target: ParseTarget): strin
 
 function getSectionRows(section: ParsedSection): ParsedRow[] {
   return isDualModelSection(section) ? getEditorRequestRows(section) : section.rows;
+}
+
+function getRequestHeaderRowsForEditor(section: ParsedSection): ParsedRow[] {
+  return isRequestSection(section) ? getRequestHeaderRows(section) : [];
 }
 
 function validateSection(section: DocSection): string {
@@ -178,6 +240,45 @@ function getDuplicateValueSet(rows: ParsedRow[]): Set<string> {
   );
 }
 
+function typeRequiresJsonExample(type: string): boolean {
+  return [
+    'object',
+    'map',
+    'array',
+    'array_object',
+    'array_string',
+    'array_int',
+    'array_long',
+    'array_number',
+    'array_boolean',
+    'array_array',
+    'array_null'
+  ].includes(type);
+}
+
+function validateExampleValue(example: string, type: string): string {
+  const trimmed = example.trim();
+  if (!trimmed) return '';
+
+  const looksLikeJson = (trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'));
+  const mustBeJson = typeRequiresJsonExample(type) || looksLikeJson;
+
+  if (!mustBeJson) return '';
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (type.startsWith('array') && !Array.isArray(parsed)) {
+      return 'Для выбранного типа пример должен быть JSON-массивом';
+    }
+    if ((type === 'object' || type === 'map' || type === 'array_object') && (parsed === null || Array.isArray(parsed) || typeof parsed !== 'object')) {
+      return 'Для выбранного типа пример должен быть JSON-объектом';
+    }
+    return '';
+  } catch {
+    return 'Пример должен быть валидным JSON';
+  }
+}
+
 export default function App() {
   const [sections, setSections] = useState<DocSection[]>(() => loadProject());
   const [selectedId, setSelectedId] = useState<string>(() => createInitialSections()[0].id);
@@ -188,6 +289,8 @@ export default function App() {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [draggedColumn, setDraggedColumn] = useState<RequestColumnKey | null>(null);
   const [editingField, setEditingField] = useState<EditableFieldState | null>(null);
+  const [editingRequestCell, setEditingRequestCell] = useState<EditableRequestCellState | null>(null);
+  const [requestCellError, setRequestCellError] = useState('');
   const [editingTitle, setEditingTitle] = useState<EditableTitleState | null>(null);
   const [expandedDriftAlerts, setExpandedDriftAlerts] = useState<DriftAlertState>({});
 
@@ -351,6 +454,60 @@ export default function App() {
     });
   }
 
+  function addRequestHeader(section: ParsedSection): void {
+    const manualHeader: ParsedRow = {
+      field: `X-CUSTOM-${Date.now()}`,
+      origin: 'manual',
+      enabled: true,
+      type: 'string',
+      required: '-',
+      description: '',
+      example: '',
+      source: 'header'
+    };
+
+    updateSection(section.id, (current) => {
+      if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
+      return { ...current, rows: [...current.rows, manualHeader] };
+    });
+  }
+
+  function updateServerRow(sectionId: string, rowKey: string, updater: (row: ParsedRow) => ParsedRow): void {
+    updateSection(sectionId, (current) => {
+      if (current.kind !== 'parsed') return current;
+
+      let updated = false;
+      const rows = current.rows.map((row) => {
+        if (!updated && getParsedRowKey(row) === rowKey) {
+          updated = true;
+          return updater(row);
+        }
+        return row;
+      });
+
+      return updated ? { ...current, rows } : current;
+    });
+  }
+
+  function deleteRequestHeader(sectionId: string, rowKey: string): void {
+    updateSection(sectionId, (current) => {
+      if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
+      return { ...current, rows: current.rows.filter((row) => getParsedRowKey(row) !== rowKey) };
+    });
+  }
+
+  function deleteParsedRow(sectionId: string, rowKey: string, target: ParseTarget = 'server'): void {
+    updateSection(sectionId, (current) => {
+      if (current.kind !== 'parsed') return current;
+
+      if (target === 'client' && isDualModelSection(current)) {
+        return { ...current, clientRows: (current.clientRows ?? []).filter((row) => getParsedRowKey(row) !== rowKey) };
+      }
+
+      return { ...current, rows: current.rows.filter((row) => getParsedRowKey(row) !== rowKey) };
+    });
+  }
+
   function syncInputFromRows(section: ParsedSection, target: ParseTarget = 'server'): void {
     updateSection(section.id, (current) => {
       if (current.kind !== 'parsed') return current;
@@ -369,9 +526,16 @@ export default function App() {
         };
       }
 
+      const serverRows = isRequestSection(current)
+        ? [
+            ...getRequestHeaderRowsForEditor(current).filter((row) => row.enabled !== false),
+            ...current.rows.filter((row) => row.source !== 'header')
+          ]
+        : current.rows;
+
       return {
         ...current,
-        input: buildInputFromRows(current.format, current.rows),
+        input: buildInputFromRows(current.format, serverRows),
         lastSyncedFormat: current.format,
         rows: current.rows.map((row) =>
           row.origin === 'generated'
@@ -393,6 +557,55 @@ export default function App() {
 
   function cancelFieldEditing(): void {
     setEditingField(null);
+  }
+
+  function startRequestCellEditing(section: ParsedSection, row: ParsedRow, column: 'type' | 'required' | 'description' | 'example'): void {
+    if (!row.field.trim()) return;
+    setRequestCellError('');
+    setEditingRequestCell({
+      sectionId: section.id,
+      rowKey: getParsedRowKey(row),
+      column,
+      draft: row[column] || ''
+    });
+  }
+
+  function cancelRequestCellEditing(): void {
+    setEditingRequestCell(null);
+    setRequestCellError('');
+  }
+
+  function applyRequestCellValue(
+    sectionId: string,
+    rowKey: string,
+    column: 'type' | 'required' | 'description' | 'example',
+    draft: string
+  ): boolean {
+    if (column === 'example') {
+      const section = sections.find((item) => item.id === sectionId);
+      const row = section?.kind === 'parsed' ? section.rows.find((item) => getParsedRowKey(item) === rowKey) : undefined;
+      const message = validateExampleValue(draft, row?.type ?? 'string');
+      if (message) {
+        setRequestCellError(message);
+        return false;
+      }
+    }
+
+    updateServerRow(sectionId, rowKey, (current) => ({
+      ...current,
+      [column]: draft
+    }));
+    setRequestCellError('');
+    return true;
+  }
+
+  function saveRequestCellEditing(): void {
+    if (!editingRequestCell) return;
+
+    const { sectionId, rowKey, column, draft } = editingRequestCell;
+    const saved = applyRequestCellValue(sectionId, rowKey, column, draft);
+    if (!saved) return;
+    setEditingRequestCell(null);
   }
 
   function saveFieldEditing(): void {
@@ -424,7 +637,8 @@ export default function App() {
     setEditingField(null);
   }
 
-  function renderEditableFieldCell(section: ParsedSection, row: ParsedRow): ReactNode {
+  function renderEditableFieldCell(section: ParsedSection, row: ParsedRow, options: EditableFieldOptions = {}): ReactNode {
+    const allowEdit = options.allowEdit ?? true;
     if (!row.field.trim()) return '—';
 
     const isEditing =
@@ -450,11 +664,122 @@ export default function App() {
     }
 
     return (
-      <div className="field-display" onDoubleClick={() => startFieldEditing(section, row)}>
+      <div className="field-display" onDoubleClick={() => allowEdit && startFieldEditing(section, row)}>
         <span>{row.field}</span>
-        <button className="icon-button" type="button" onClick={() => startFieldEditing(section, row)} aria-label="Редактировать поле">
-          ✎
-        </button>
+        <span className="field-actions">
+          {allowEdit && (
+            <button className="icon-button" type="button" onClick={() => startFieldEditing(section, row)} aria-label="Редактировать поле">
+              ✎
+            </button>
+          )}
+          {options.onDelete && (
+            <button className="icon-button danger" type="button" onClick={options.onDelete} aria-label="Удалить поле">
+              ×
+            </button>
+          )}
+        </span>
+      </div>
+    );
+  }
+
+  function renderEditableRequestCell(
+    section: ParsedSection,
+    row: ParsedRow,
+    column: 'type' | 'required' | 'description' | 'example'
+  ): ReactNode {
+    const isEditing =
+      editingRequestCell?.sectionId === section.id &&
+      editingRequestCell.rowKey === getParsedRowKey(row) &&
+      editingRequestCell.column === column;
+
+    if (isEditing) {
+      if (column === 'type') {
+        return (
+          <div className="field-edit inline-edit type-edit">
+            <select
+              autoFocus
+              value={editingRequestCell.draft}
+              onChange={(e) => {
+                const nextValue = e.target.value;
+                setEditingRequestCell((current) => (current ? { ...current, draft: nextValue } : current));
+                if (applyRequestCellValue(section.id, getParsedRowKey(row), 'type', nextValue)) {
+                  setEditingRequestCell(null);
+                }
+              }}
+              onBlur={cancelRequestCellEditing}
+            >
+              <optgroup label="Частые">
+                {TYPE_OPTIONS_COMMON.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Еще типы">
+                {TYPE_OPTIONS_EXTENDED.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+          </div>
+        );
+      }
+
+      if (column === 'required') {
+        return (
+          <div className="field-edit inline-edit">
+            <select
+              autoFocus
+              value={editingRequestCell.draft}
+              onChange={(e) => {
+                const nextValue = e.target.value;
+                setEditingRequestCell((current) => (current ? { ...current, draft: nextValue } : current));
+                if (applyRequestCellValue(section.id, getParsedRowKey(row), 'required', nextValue)) {
+                  setEditingRequestCell(null);
+                }
+              }}
+              onBlur={cancelRequestCellEditing}
+            >
+              {REQUIRED_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </div>
+        );
+      }
+
+      return (
+        <div className="field-edit inline-edit">
+          <textarea
+            autoFocus
+            value={editingRequestCell.draft}
+            onChange={(e) => setEditingRequestCell((current) => (current ? { ...current, draft: e.target.value } : current))}
+            onBlur={saveRequestCellEditing}
+            rows={column === 'example' ? 4 : 1}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) saveRequestCellEditing();
+              if (e.key === 'Escape') cancelRequestCellEditing();
+            }}
+          />
+        </div>
+      );
+    }
+
+    const value = row[column] || '—';
+    const canEdit = Boolean(row.field.trim());
+
+    return (
+      <div className="field-display" onDoubleClick={() => canEdit && startRequestCellEditing(section, row, column)}>
+        <span>{value}</span>
+        <span className="field-actions">
+          <button className="icon-button" type="button" onClick={() => startRequestCellEditing(section, row, column)} aria-label="Редактировать ячейку">
+            ✎
+          </button>
+        </span>
       </div>
     );
   }
@@ -564,7 +889,12 @@ export default function App() {
     }
 
     if (column === 'field') {
-      return renderEditableFieldCell(section, row);
+      const canDelete = row.source !== 'header' && row.source !== 'url';
+      return renderEditableFieldCell(section, row, canDelete ? { onDelete: () => deleteParsedRow(section.id, getParsedRowKey(row), 'server') } : {});
+    }
+
+    if (column === 'type' || column === 'required' || column === 'description' || column === 'example') {
+      return renderEditableRequestCell(section, row, column);
     }
 
     return cellMap[column];
@@ -572,7 +902,7 @@ export default function App() {
 
   function renderParsedTable(section: ParsedSection) {
     const rows = getSectionRows(section);
-    const duplicateFieldSet = getDuplicateValueSet(section.rows);
+    const duplicateFieldSet = getDuplicateValueSet(section.rows.filter((row) => row.source !== 'header'));
     const duplicateClientFieldSet = isDualModelSection(section) ? getDuplicateValueSet(section.clientRows ?? []) : new Set<string>();
 
     if (rows.length === 0) return <div className="muted">Нет распарсенных строк</div>;
@@ -651,7 +981,13 @@ export default function App() {
                 key={`${row.field}-${row.clientField ?? 'server'}-${index}`}
                 className={rowHasMismatch(row, duplicateFieldSet, duplicateClientFieldSet) ? 'mismatch-row' : undefined}
               >
-                <td>{renderEditableFieldCell(section, row)}</td>
+                <td>
+                  {renderEditableFieldCell(
+                    section,
+                    row,
+                    { onDelete: () => deleteParsedRow(section.id, getParsedRowKey(row)) }
+                  )}
+                </td>
                 <td className="mono">{row.type}</td>
                 <td>{row.required}</td>
                 <td>{row.description || '—'}</td>
@@ -660,6 +996,106 @@ export default function App() {
             ))}
           </tbody>
         </table>
+      </div>
+    );
+  }
+
+  function renderRequestHeadersTable(section: ParsedSection): ReactNode {
+    const headers = getRequestHeaderRowsForEditor(section);
+
+    return (
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Вкл.</th>
+              <th>Header</th>
+              <th>Обязательность</th>
+              <th>Описание</th>
+              <th>Пример</th>
+            </tr>
+          </thead>
+          <tbody>
+            {headers.map((row, index) => {
+              const rowKey = getParsedRowKey(row);
+              const isDefault = isDefaultRequestHeader(row);
+              const isAuto = isAuthHeader(section, row);
+              const isPersisted = section.rows.some((item) => getParsedRowKey(item) === rowKey);
+
+              return (
+                <tr key={`${rowKey}-${index}`}>
+                  <td>
+                    {isAuto ? (
+                      <span className="chip">auto</span>
+                    ) : (
+                      <input
+                        type="checkbox"
+                        checked={row.enabled !== false}
+                        onChange={(e) => {
+                          if (isPersisted) {
+                            updateServerRow(section.id, rowKey, (current) => ({ ...current, enabled: e.target.checked }));
+                            return;
+                          }
+
+                          updateSection(section.id, (current) => {
+                            if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
+                            return {
+                              ...current,
+                              rows: [
+                                ...current.rows,
+                                {
+                                  ...row,
+                                  enabled: e.target.checked
+                                }
+                              ]
+                            };
+                          });
+                        }}
+                      />
+                    )}
+                  </td>
+                  <td>
+                    {renderEditableFieldCell(
+                      section,
+                      row,
+                      isAuto || isDefault
+                        ? { allowEdit: false }
+                        : { onDelete: () => deleteRequestHeader(section.id, rowKey) }
+                    )}
+                  </td>
+                  <td>{row.required || '—'}</td>
+                  <td>
+                    {isAuto || isDefault ? (
+                      row.description || '—'
+                    ) : (
+                      <input
+                        type="text"
+                        value={isPersisted ? section.rows.find((item) => getParsedRowKey(item) === rowKey)?.description ?? row.description : row.description}
+                        onChange={(e) => updateServerRow(section.id, rowKey, (current) => ({ ...current, description: e.target.value }))}
+                      />
+                    )}
+                  </td>
+                  <td className="mono">
+                    {isAuto || isDefault ? (
+                      row.example || '—'
+                    ) : (
+                      <input
+                        type="text"
+                        value={isPersisted ? section.rows.find((item) => getParsedRowKey(item) === rowKey)?.example ?? row.example : row.example}
+                        onChange={(e) => updateServerRow(section.id, rowKey, (current) => ({ ...current, example: e.target.value }))}
+                      />
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <div className="table-actions">
+          <button className="ghost small" type="button" onClick={() => addRequestHeader(section)}>
+            + Header
+          </button>
+        </div>
       </div>
     );
   }
@@ -731,6 +1167,134 @@ export default function App() {
     );
   }
 
+  function renderRequestAuthEditor(section: ParsedSection): ReactNode {
+    if (!isRequestSection(section)) return null;
+
+    return (
+      <details className="expander" open>
+        <summary className="expander-summary">Авторизация</summary>
+        <div className="expander-body">
+          <label className="field">
+            <div className="label">Способ</div>
+            <select
+              value={section.authType ?? 'none'}
+              onChange={(e) =>
+                updateSection(section.id, (current) =>
+                  current.kind === 'parsed' && isRequestSection(current)
+                    ? {
+                        ...current,
+                        authType: e.target.value as RequestAuthType,
+                        authHeaderName: current.authHeaderName || DEFAULT_API_KEY_HEADER,
+                        authTokenExample: current.authTokenExample || DEFAULT_BEARER_TOKEN_EXAMPLE,
+                        authUsername: current.authUsername || DEFAULT_BASIC_USERNAME,
+                        authPassword: current.authPassword || DEFAULT_BASIC_PASSWORD,
+                        authApiKeyExample: current.authApiKeyExample || DEFAULT_API_KEY_EXAMPLE
+                      }
+                    : current
+                )
+              }
+            >
+              <option value="none">Без авторизации</option>
+              <option value="bearer">Bearer token</option>
+              <option value="basic">Basic auth</option>
+              <option value="api-key">API key</option>
+            </select>
+          </label>
+
+          {section.authType === 'bearer' && (
+            <label className="field">
+              <div className="label">Пример токена</div>
+              <input
+                type="text"
+                value={section.authTokenExample ?? ''}
+                onChange={(e) =>
+                  updateSection(section.id, (current) =>
+                    current.kind === 'parsed' && isRequestSection(current)
+                      ? { ...current, authTokenExample: e.target.value }
+                      : current
+                  )
+                }
+                placeholder={DEFAULT_BEARER_TOKEN_EXAMPLE}
+              />
+            </label>
+          )}
+
+          {section.authType === 'basic' && (
+            <div className="row gap auth-grid">
+              <label className="field">
+                <div className="label">Логин</div>
+                <input
+                  type="text"
+                  value={section.authUsername ?? ''}
+                  onChange={(e) =>
+                    updateSection(section.id, (current) =>
+                      current.kind === 'parsed' && isRequestSection(current)
+                        ? { ...current, authUsername: e.target.value }
+                        : current
+                    )
+                  }
+                  placeholder={DEFAULT_BASIC_USERNAME}
+                />
+              </label>
+              <label className="field">
+                <div className="label">Пароль</div>
+                <input
+                  type="text"
+                  value={section.authPassword ?? ''}
+                  onChange={(e) =>
+                    updateSection(section.id, (current) =>
+                      current.kind === 'parsed' && isRequestSection(current)
+                        ? { ...current, authPassword: e.target.value }
+                        : current
+                    )
+                  }
+                  placeholder={DEFAULT_BASIC_PASSWORD}
+                />
+              </label>
+            </div>
+          )}
+
+          {section.authType === 'api-key' && (
+            <div className="row gap auth-grid">
+              <label className="field">
+                <div className="label">Имя header</div>
+                <input
+                  type="text"
+                  value={section.authHeaderName ?? 'X-API-Key'}
+                  onChange={(e) =>
+                    updateSection(section.id, (current) =>
+                      current.kind === 'parsed' && isRequestSection(current)
+                        ? { ...current, authHeaderName: e.target.value }
+                        : current
+                    )
+                  }
+                  placeholder={DEFAULT_API_KEY_HEADER}
+                />
+              </label>
+              <label className="field">
+                <div className="label">Пример API key</div>
+                <input
+                  type="text"
+                  value={section.authApiKeyExample ?? ''}
+                  onChange={(e) =>
+                    updateSection(section.id, (current) =>
+                      current.kind === 'parsed' && isRequestSection(current)
+                        ? { ...current, authApiKeyExample: e.target.value }
+                        : current
+                    )
+                  }
+                  placeholder={DEFAULT_API_KEY_EXAMPLE}
+                />
+              </label>
+            </div>
+          )}
+
+          {getRequestAuthInfo(section) && <div className="muted">Настройка автоматически попадет в headers и в итоговую документацию.</div>}
+        </div>
+      </details>
+    );
+  }
+
   function renderRequestEditor(section: ParsedSection) {
     const rows = getSectionRows(section);
     const serverLabel = getSectionSideLabel(section, 'server');
@@ -770,6 +1334,16 @@ export default function App() {
           />
           <span>Доменная модель</span>
         </label>
+
+        {isRequestSection(section) && (
+          <>
+            {renderRequestAuthEditor(section)}
+            <div className="stack">
+              <div className="label">Headers</div>
+              {renderRequestHeadersTable(section)}
+            </div>
+          </>
+        )}
 
         <details className="expander" open>
           <summary className="expander-summary">{serverLabel}</summary>
@@ -861,6 +1435,7 @@ export default function App() {
 
         {section.error && <div className="alert error">{serverLabel}: {section.error}</div>}
         {section.clientError && <div className="alert error">{clientLabel}: {section.clientError}</div>}
+        {requestCellError && <div className="alert error">{requestCellError}</div>}
         {!section.error && !section.clientError && validationMap.get(section.id) === '' && rows.length > 0 && (
           <div className="alert success">Распарсено {rows.length} строк</div>
         )}

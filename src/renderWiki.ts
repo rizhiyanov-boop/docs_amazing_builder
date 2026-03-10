@@ -1,5 +1,5 @@
 ﻿import { getRequestColumnLabel, getRequestColumnOrder } from './requestColumns';
-import { getRequestRows, requestHasRows, splitRequestRows } from './requestHeaders';
+import { getRequestAuthInfo, getRequestRows, requestHasRows, splitRequestRows } from './requestHeaders';
 import { resolveSectionTitle } from './sectionTitles';
 import type { DocSection, ParsedRow, ParsedSection, TextSection } from './types';
 
@@ -89,10 +89,19 @@ function renderRequestSection(section: ParsedSection): string[] {
   const lines: string[] = [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`];
   const { headers, otherRows, urlRow } = splitRequestRows(getRequestRows(section));
   const requestError = section.error || section.clientError;
+  const authInfo = getRequestAuthInfo(section);
 
   if (urlRow) {
     lines.push('');
     lines.push(`*URL:* ${toWikiCell(urlRow.example)}`);
+  }
+  if (authInfo) {
+    lines.push('');
+    lines.push('h3. Authorization');
+    lines.push('');
+    for (const detail of authInfo.details) {
+      lines.push(`*${escapeWiki(detail.label)}:* ${toWikiCell(detail.value)}`);
+    }
   }
   if (headers.length > 0) {
     lines.push('');
@@ -112,7 +121,6 @@ function renderRequestSection(section: ParsedSection): string[] {
 
   return lines;
 }
-
 function renderResponseSection(section: ParsedSection): string[] {
   const lines: string[] = [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`];
 
@@ -161,4 +169,3 @@ export function renderWikiDocument(sections: DocSection[]): string {
 
   return lines.join('\n');
 }
-

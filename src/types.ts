@@ -1,5 +1,6 @@
 export type ParseFormat = 'json' | 'xml' | 'curl';
 export type RequestColumnKey = 'field' | 'type' | 'required' | 'clientField' | 'description' | 'example';
+export type RequestAuthType = 'none' | 'bearer' | 'basic' | 'api-key';
 
 export type SectionKind = 'text' | 'parsed';
 
@@ -7,6 +8,7 @@ export interface ParsedRow {
   field: string;
   sourceField?: string;
   origin?: 'parsed' | 'manual' | 'generated';
+  enabled?: boolean;
   clientField?: string;
   clientSourceField?: string;
   clientOrigin?: 'parsed' | 'manual' | 'generated';
@@ -45,6 +47,12 @@ export interface ParsedSection extends BaseSection {
   clientError?: string;
   clientMappings?: Record<string, string>;
   requestColumnOrder?: RequestColumnKey[];
+  authType?: RequestAuthType;
+  authHeaderName?: string;
+  authTokenExample?: string;
+  authUsername?: string;
+  authPassword?: string;
+  authApiKeyExample?: string;
 }
 
 export type DocSection = TextSection | ParsedSection;

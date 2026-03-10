@@ -1,10 +1,10 @@
+import { OPTIONAL_MARK } from './requestHeaders';
 import type { ParseFormat, ParsedRow } from './types';
 
 function inferType(value: unknown): string {
   if (Array.isArray(value)) return 'array';
   if (value === null) return 'null';
 
-  // Numbers (actual JS numbers)
   if (typeof value === 'number') {
     if (Number.isInteger(value)) {
       return value >= -2147483648 && value <= 2147483647 ? 'int' : 'long';
@@ -12,7 +12,6 @@ function inferType(value: unknown): string {
     return 'number';
   }
 
-  // Strings that may represent numbers/booleans
   if (typeof value === 'string') {
     const s = value.trim();
     if (/^-?\d+$/.test(s)) {
@@ -25,7 +24,6 @@ function inferType(value: unknown): string {
         return 'long';
       }
     }
-    // float / scientific
     if (!Number.isNaN(Number(s)) && /[.eE]/.test(s)) return 'number';
     if (/^(true|false)$/i.test(s)) return 'boolean';
     return 'string';
@@ -45,24 +43,25 @@ function flattenJson(value: unknown, basePath = ''): ParsedRow[] {
         {
           field: basePath || '$',
           type: 'array',
-          required: '±',
+          required: OPTIONAL_MARK,
           description: '',
           example: '[]'
         }
       ];
     }
+
     const first = value[0];
     const isArrayOfObjects = first && typeof first === 'object' && !Array.isArray(first);
     const rows: ParsedRow[] = [
       {
         field: basePath || '$',
         type: isArrayOfObjects ? 'array_object' : 'array',
-        required: '±',
+        required: OPTIONAL_MARK,
         description: '',
         example: JSON.stringify(first).slice(0, 120)
       }
     ];
-    // keep flattening first element to show nested fields (Variant 1)
+
     rows.push(...flattenJson(first, `${basePath}[0]`));
     return rows;
   }
@@ -73,13 +72,12 @@ function flattenJson(value: unknown, basePath = ''): ParsedRow[] {
     for (const [key, nested] of entries) {
       const nextPath = basePath ? `${basePath}.${key}` : key;
       if (nested && typeof nested === 'object') {
-        // Let flattenJson handle objects/arrays (so we don't duplicate a summary row)
         rows.push(...flattenJson(nested, nextPath));
       } else {
         rows.push({
           field: nextPath,
           type: inferType(nested),
-          required: '±',
+          required: OPTIONAL_MARK,
           description: '',
           example: nested === undefined ? '' : JSON.stringify(nested).slice(0, 120)
         });
@@ -92,7 +90,7 @@ function flattenJson(value: unknown, basePath = ''): ParsedRow[] {
     {
       field: basePath || '$',
       type: inferType(value),
-      required: '±',
+      required: OPTIONAL_MARK,
       description: '',
       example: String(value)
     }
@@ -100,8 +98,7 @@ function flattenJson(value: unknown, basePath = ''): ParsedRow[] {
 }
 
 function parseJson(input: string): ParsedRow[] {
-  const parsed = JSON.parse(input);
-  return flattenJson(parsed);
+  return flattenJson(JSON.parse(input));
 }
 
 function parseXml(input: string): ParsedRow[] {
@@ -117,7 +114,7 @@ function parseXml(input: string): ParsedRow[] {
     rows.push({
       field: path,
       type: 'element',
-      required: '±',
+      required: OPTIONAL_MARK,
       description: '',
       example: element.textContent?.trim().slice(0, 120) ?? ''
     });
@@ -126,7 +123,7 @@ function parseXml(input: string): ParsedRow[] {
       rows.push({
         field: `${path}.@${attr.name}`,
         type: 'attribute',
-        required: '±',
+        required: OPTIONAL_MARK,
         description: '',
         example: attr.value
       });
@@ -149,85 +146,109 @@ function parseXml(input: string): ParsedRow[] {
 function parseCurl(input: string): ParsedRow[] {
   const normalized = input.replace(/\r\n/g, ' ').replace(/\n/g, ' ');
   const rows: ParsedRow[] = [];
-    // First extract body (data) to avoid it being matched as header content
-    let bodyPayload: string | null = null;
-    const dataMatch = normalized.match(/(?:--data-raw|--data|-d)\s+(['"])([\s\S]*?)\1/);
-    let remaining = normalized;
-    if (dataMatch) {
-      bodyPayload = dataMatch[2].trim();
-      // remove the matched data segment from the string to prevent header regex catching it
-      remaining = normalized.replace(dataMatch[0], '');
-      try {
-        const payloadRows = flattenJson(JSON.parse(bodyPayload));
-        rows.push(...payloadRows.map((r): ParsedRow => ({ ...r, description: r.description || 'Тело запроса из cURL (JSON)', source: 'body' })));
-      } catch {
-        rows.push({ field: 'body', type: 'string', required: '±', description: 'Тело запроса из cURL (не JSON)', example: bodyPayload.slice(0, 120), source: 'body' });
+  let extractedAny = false;
+
+  let bodyPayload: string | null = null;
+  const dataMatch = normalized.match(/(?:--data-raw|--data|-d)\s+(['"])([\s\S]*?)\1/);
+  let remaining = normalized;
+  if (dataMatch) {
+    extractedAny = true;
+    bodyPayload = dataMatch[2].trim();
+    remaining = normalized.replace(dataMatch[0], '');
+
+    try {
+      const payloadRows = flattenJson(JSON.parse(bodyPayload));
+      rows.push(
+        ...payloadRows.map(
+          (row): ParsedRow => ({
+            ...row,
+            description: row.description || 'Тело запроса из cURL (JSON)',
+            source: 'body'
+          })
+        )
+      );
+    } catch {
+      rows.push({
+        field: 'body',
+        type: 'string',
+        required: OPTIONAL_MARK,
+        description: 'Тело запроса из cURL (не JSON)',
+        example: bodyPayload.slice(0, 120),
+        source: 'body'
+      });
+    }
+  }
+
+  const headerMatches = Array.from(remaining.matchAll(/(?:-H|--header)\s+['"]([^'"]+)['"]/g));
+  if (headerMatches.length > 0) {
+    extractedAny = true;
+  }
+
+  for (const match of headerMatches) {
+    const headerValue = match[1];
+    const separatorIndex = headerValue.indexOf(':');
+    const name = separatorIndex > -1 ? headerValue.slice(0, separatorIndex).trim() : headerValue.trim();
+    const value = separatorIndex > -1 ? headerValue.slice(separatorIndex + 1).trim() : '';
+
+    let pushed = false;
+    if (value) {
+      const trimmedValue = value.trim();
+      const looksLikeJson =
+        (trimmedValue.startsWith('{') && trimmedValue.endsWith('}')) ||
+        (trimmedValue.startsWith('[') && trimmedValue.endsWith(']'));
+
+      if (looksLikeJson) {
+        try {
+          const parsed = JSON.parse(value);
+          if (typeof parsed === 'object' && parsed !== null) {
+            const nested = flattenJson(parsed, name);
+            rows.push(
+              ...nested.map(
+                (row): ParsedRow => ({
+                  ...row,
+                  description: `Заголовок ${name} (распарсено)`,
+                  source: 'header'
+                })
+              )
+            );
+            pushed = true;
+          }
+        } catch {
+          // fall through to scalar handling
+        }
+      }
+
+      if (!pushed) {
+        const low = value.toLowerCase();
+        if (low === 'true' || low === 'false') {
+          rows.push({ field: name, type: 'boolean', required: '-', description: `Заголовок ${name}`, example: low, source: 'header' });
+          pushed = true;
+        } else if (/^-?\d+$/.test(value)) {
+          try {
+            const bi = BigInt(value);
+            const min = BigInt(-2147483648);
+            const max = BigInt(2147483647);
+            rows.push({ field: name, type: bi >= min && bi <= max ? 'int' : 'long', required: '-', description: `Заголовок ${name}`, example: value, source: 'header' });
+            pushed = true;
+          } catch {
+            rows.push({ field: name, type: 'long', required: '-', description: `Заголовок ${name}`, example: value, source: 'header' });
+            pushed = true;
+          }
+        } else if (!Number.isNaN(Number(value))) {
+          rows.push({ field: name, type: 'number', required: '-', description: `Заголовок ${name}`, example: value, source: 'header' });
+          pushed = true;
+        }
       }
     }
 
-    // Now parse headers from the remaining string (without body)
-    const headerMatches = Array.from(remaining.matchAll(/(?:-H|--header)\s+['"]([^'"]+)['"]/g));
-      for (const match of headerMatches) {
-        const headerValue = match[1];
-        const separatorIndex = headerValue.indexOf(':');
-        const name = separatorIndex > -1 ? headerValue.slice(0, separatorIndex).trim() : headerValue.trim();
-        const value = separatorIndex > -1 ? headerValue.slice(separatorIndex + 1).trim() : '';
+    if (!pushed) {
+      rows.push({ field: name, type: 'string', required: '-', description: `Заголовок ${name}`, example: value, source: 'header' });
+    }
+  }
 
-        // Try to parse header value as JSON/scalar to infer better type
-        let pushed = false;
-        if (value) {
-          // heuristics: only attempt JSON parse if it looks like JSON
-          const trimmedValue = value.trim();
-          const looksLikeJson =
-            (trimmedValue.startsWith('{') && trimmedValue.endsWith('}')) ||
-            (trimmedValue.startsWith('[') && trimmedValue.endsWith(']'));
-          if (looksLikeJson) {
-            try {
-              const parsed = JSON.parse(value);
-              if (typeof parsed === 'object' && parsed !== null) {
-                const nested = flattenJson(parsed, name);
-                rows.push(...nested.map((r): ParsedRow => ({ ...r, description: `Заголовок ${name} (распарсено)`, source: 'header' })));
-                pushed = true;
-              }
-            } catch {
-              // fallthrough
-            }
-          }
-          if (!pushed) {
-            const low = value.toLowerCase();
-            if (low === 'true' || low === 'false') {
-              rows.push({ field: name, type: 'boolean', required: '-', description: `Заголовок ${name}`, example: low, source: 'header' });
-              pushed = true;
-            } else {
-              const intMatch = /^-?\d+$/.exec(value);
-              if (intMatch) {
-                try {
-                  const bi = BigInt(value);
-                  const min = BigInt(-2147483648);
-                  const max = BigInt(2147483647);
-                  rows.push({ field: name, type: bi >= min && bi <= max ? 'int' : 'long', required: '-', description: `Заголовок ${name}`, example: value, source: 'header' });
-                  pushed = true;
-                } catch {
-                  rows.push({ field: name, type: 'long', required: '-', description: `Заголовок ${name}`, example: value, source: 'header' });
-                  pushed = true;
-                }
-              } else if (!Number.isNaN(Number(value))) {
-                rows.push({ field: name, type: 'number', required: '-', description: `Заголовок ${name}`, example: value, source: 'header' });
-                pushed = true;
-              }
-            }
-          }
-        }
-
-        if (!pushed) {
-          rows.push({ field: name, type: 'string', required: '-', description: `Заголовок ${name}`, example: value, source: 'header' });
-        }
-      }
-
-  
-
-  const urlMatch = normalized.match(/curl\s+(?:-X\s+\w+\s+)?['"](https?:\/\/[^'"]+)['"]/i);
+  const urlMatch = normalized.match(/curl\s+(?:-X\s+\w+\s+)?['"]?(https?:\/\/[^'"\s]+)['"]?/i);
   if (urlMatch) {
+    extractedAny = true;
     rows.push({
       field: 'request.url',
       type: 'string',
@@ -238,7 +259,7 @@ function parseCurl(input: string): ParsedRow[] {
     });
   }
 
-  if (rows.length === 0) {
+  if (!extractedAny) {
     throw new Error('Не удалось извлечь данные из cURL. Проверьте формат команды.');
   }
 
@@ -250,11 +271,7 @@ export function parseToRows(format: ParseFormat, input: string): ParsedRow[] {
     throw new Error('Поле ввода пустое');
   }
 
-  if (format === 'json') {
-    return parseJson(input);
-  }
-  if (format === 'xml') {
-    return parseXml(input);
-  }
+  if (format === 'json') return parseJson(input);
+  if (format === 'xml') return parseXml(input);
   return parseCurl(input);
 }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import './App.css';
 import { parseToRows } from './parsers';
+import { DEFAULT_REQUEST_HEADERS } from './requestHeaders';
 import { renderHtmlDocument } from './renderHtml';
 import { renderWikiDocument } from './renderWiki';
 import { DEFAULT_SECTION_TITLE, resolveSectionTitle, sanitizeSections } from './sectionTitles';
@@ -21,7 +22,7 @@ function createInitialSections(): DocSection[] {
   return [
     { id: 'goal', title: 'Цель', enabled: true, kind: 'text', value: '', required: true },
     { id: 'external-url', title: 'Внешний URL', enabled: true, kind: 'text', value: '' },
-    { id: 'request', title: 'Request (cURL)', enabled: true, kind: 'parsed', format: 'curl', input: '', rows: [], error: '' },
+    { id: 'request', title: 'Request', enabled: true, kind: 'parsed', format: 'curl', input: '', rows: [], error: '' },
     { id: 'body', title: 'Body / Выходные параметры', enabled: true, kind: 'parsed', format: 'json', input: '', rows: [], error: '' },
     { id: 'errors', title: 'Ошибки', enabled: true, kind: 'text', value: '' },
     { id: 'non-functional', title: 'Нефункциональные требования', enabled: true, kind: 'text', value: '' },
@@ -77,6 +78,10 @@ function formatTime(date: Date): string {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+function isCustomSection(section: DocSection): boolean {
+  return section.id.startsWith('custom-');
+}
+
 export default function App() {
   const [sections, setSections] = useState<DocSection[]>(() => loadProject());
   const [selectedId, setSelectedId] = useState<string>(() => createInitialSections()[0].id);
@@ -123,6 +128,24 @@ export default function App() {
 
   function updateSectionTitle(id: string, title: string): void {
     updateSection(id, (section) => ({ ...section, title }));
+  }
+
+  function deleteSection(id: string): void {
+    setSections((prev) => {
+      const deletedIndex = prev.findIndex((section) => section.id === id);
+      if (deletedIndex === -1) return prev;
+
+      const next = prev.filter((section) => section.id !== id);
+
+      if (selectedId === id) {
+        const fallback = next[deletedIndex] ?? next[deletedIndex - 1] ?? next[0];
+        if (fallback) {
+          setSelectedId(fallback.id);
+        }
+      }
+
+      return next;
+    });
   }
 
   function runParser(section: ParsedSection): void {
@@ -176,7 +199,13 @@ export default function App() {
   }
 
   function renderParsedTable(section: ParsedSection) {
-    if (section.rows.length === 0) return <div className="muted">Нет распарсенных строк</div>;
+    const hiddenRequestHeaders = new Set(DEFAULT_REQUEST_HEADERS.map((header) => header.field.toLowerCase()));
+    const rows =
+      section.id === 'request'
+        ? section.rows.filter((row) => !(row.source === 'header' && hiddenRequestHeaders.has(row.field.trim().toLowerCase())))
+        : section.rows;
+
+    if (rows.length === 0) return <div className="muted">Нет распарсенных строк</div>;
     return (
       <div className="table-wrap">
         <table>
@@ -190,7 +219,7 @@ export default function App() {
             </tr>
           </thead>
           <tbody>
-            {section.rows.map((r, i) => (
+            {rows.map((r, i) => (
               <tr key={`${r.field}-${i}`}>
                 <td>{r.field}</td>
                 <td className="mono">{r.type}</td>
@@ -311,14 +340,21 @@ export default function App() {
                       <div className="panel-title">{resolveSectionTitle(selectedSection.title)}</div>
                       <div className="panel-sub">ID: {selectedSection.id}</div>
                     </div>
-                    <label className="switch">
+                    <div className="row gap">
+                      {isCustomSection(selectedSection) && (
+                        <button className="ghost small" type="button" onClick={() => deleteSection(selectedSection.id)}>
+                          Удалить
+                        </button>
+                      )}
+                      <label className="switch">
                       <input
                         type="checkbox"
                         checked={selectedSection.enabled}
                         onChange={(e) => updateSection(selectedSection.id, (curr) => ({ ...curr, enabled: e.target.checked }))}
                       />
                       <span>Активна</span>
-                    </label>
+                      </label>
+                    </div>
                   </div>
 
                   <label className="field">
@@ -383,7 +419,9 @@ export default function App() {
 
                       {selectedSection.error && <div className="alert error">{selectedSection.error}</div>}
                       {!selectedSection.error && validationMap.get(selectedSection.id) === '' && selectedSection.rows.length > 0 && (
-                        <div className="alert success">Распарсено {selectedSection.rows.length} строк</div>
+                        <div className="alert success">
+                          Распарсено {selectedSection.rows.length} строк
+                        </div>
                       )}
 
                       {renderParsedTable(selectedSection)}

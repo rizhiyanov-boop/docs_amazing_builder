@@ -3,10 +3,11 @@ import type { ReactNode } from 'react';
 import './App.css';
 import { parseToRows } from './parsers';
 import { getRequestColumnLabel, getRequestColumnOrder, moveRequestColumn } from './requestColumns';
-import { getEditorRequestRows, getMappedClientField, getMappingOptions, isRequestMappingRow } from './requestHeaders';
+import { getEditorRequestRows, getInputDriftRows, getMappedClientField, getMappingOptions, getParsedRowKey, getPreviouslyUsedClientKeys, isRequestMappingRow, OPTIONAL_MARK } from './requestHeaders';
 import { renderHtmlDocument } from './renderHtml';
 import { renderWikiDocument } from './renderWiki';
 import { DEFAULT_SECTION_TITLE, resolveSectionTitle, sanitizeSections } from './sectionTitles';
+import { buildInputFromRows } from './sourceSync';
 import { applyThemeToRoot } from './theme';
 import type { ThemeName } from './theme';
 import type { DocSection, ParsedRow, ParsedSection, ParseFormat, ProjectData, RequestColumnKey } from './types';
@@ -19,6 +20,16 @@ type ParseTarget = 'server' | 'client';
 
 type AutosaveInfo = { state: AutosaveState; at?: string };
 type TableValidation = Map<string, string>;
+type EditableFieldState = {
+  sectionId: string;
+  rowKey: string;
+  draft: string;
+};
+type EditableTitleState = {
+  sectionId: string;
+  draft: string;
+};
+type DriftAlertState = Record<string, boolean>;
 
 function createInitialSections(): DocSection[] {
   return [
@@ -30,17 +41,19 @@ function createInitialSections(): DocSection[] {
       enabled: true,
       kind: 'parsed',
       format: 'curl',
+      lastSyncedFormat: 'curl',
       input: '',
       rows: [],
       error: '',
       domainModelEnabled: false,
       clientFormat: 'json',
+      clientLastSyncedFormat: 'json',
       clientInput: '',
       clientRows: [],
       clientError: '',
       clientMappings: {}
     },
-    { id: 'body', title: 'Body / Выходные параметры', enabled: true, kind: 'parsed', format: 'json', input: '', rows: [], error: '' },
+    { id: 'body', title: 'Body / Выходные параметры', enabled: true, kind: 'parsed', format: 'json', lastSyncedFormat: 'json', input: '', rows: [], error: '' },
     { id: 'errors', title: 'Ошибки', enabled: true, kind: 'text', value: '' },
     { id: 'non-functional', title: 'Нефункциональные требования', enabled: true, kind: 'text', value: '' },
     { id: 'future', title: 'Доработки, планирующиеся на следующих этапах', enabled: false, kind: 'text', value: '' }
@@ -119,6 +132,22 @@ function isCustomSection(section: DocSection): boolean {
   return section.id.startsWith('custom-');
 }
 
+function getDuplicateValueSet(rows: ParsedRow[]): Set<string> {
+  const counts = new Map<string, number>();
+
+  for (const row of rows) {
+    const value = row.field.trim();
+    if (!value) continue;
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+
+  return new Set(
+    Array.from(counts.entries())
+      .filter(([, count]) => count > 1)
+      .map(([value]) => value)
+  );
+}
+
 export default function App() {
   const [sections, setSections] = useState<DocSection[]>(() => loadProject());
   const [selectedId, setSelectedId] = useState<string>(() => createInitialSections()[0].id);
@@ -128,6 +157,9 @@ export default function App() {
   const [importError, setImportError] = useState('');
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [draggedColumn, setDraggedColumn] = useState<RequestColumnKey | null>(null);
+  const [editingField, setEditingField] = useState<EditableFieldState | null>(null);
+  const [editingTitle, setEditingTitle] = useState<EditableTitleState | null>(null);
+  const [expandedDriftAlerts, setExpandedDriftAlerts] = useState<DriftAlertState>({});
 
   useEffect(() => {
     if (!sections.find((section) => section.id === selectedId) && sections[0]) {
@@ -142,6 +174,18 @@ export default function App() {
   }, [sections]);
 
   const selectedSection = sections.find((section) => section.id === selectedId) ?? sections[0];
+  const selectedServerDriftRows = selectedSection?.kind === 'parsed' ? getInputDriftRows(selectedSection.rows) : [];
+  const selectedClientDriftRows =
+    selectedSection?.kind === 'parsed' && isRequestSection(selectedSection) ? getInputDriftRows(selectedSection.clientRows ?? []) : [];
+  const selectedServerDuplicateValues = selectedSection?.kind === 'parsed' ? Array.from(getDuplicateValueSet(selectedSection.rows)) : [];
+  const selectedClientDuplicateValues =
+    selectedSection?.kind === 'parsed' && isRequestSection(selectedSection) ? Array.from(getDuplicateValueSet(selectedSection.clientRows ?? [])) : [];
+  const selectedServerFormatDrift =
+    selectedSection?.kind === 'parsed' ? Boolean(selectedSection.rows.length > 0 && selectedSection.lastSyncedFormat && selectedSection.lastSyncedFormat !== selectedSection.format) : false;
+  const selectedClientFormatDrift =
+    selectedSection?.kind === 'parsed' && isRequestSection(selectedSection)
+      ? Boolean((selectedSection.clientRows ?? []).length > 0 && selectedSection.clientLastSyncedFormat && selectedSection.clientLastSyncedFormat !== (selectedSection.clientFormat ?? 'json'))
+      : false;
 
   const htmlOutput = useMemo(() => renderHtmlDocument(sections, theme), [sections, theme]);
   const wikiOutput = useMemo(() => renderWikiDocument(sections), [sections]);
@@ -166,6 +210,23 @@ export default function App() {
 
   function updateSectionTitle(id: string, title: string): void {
     updateSection(id, (section) => ({ ...section, title }));
+  }
+
+  function startTitleEditing(section: DocSection): void {
+    setEditingTitle({
+      sectionId: section.id,
+      draft: section.title
+    });
+  }
+
+  function cancelTitleEditing(): void {
+    setEditingTitle(null);
+  }
+
+  function saveTitleEditing(): void {
+    if (!editingTitle) return;
+    updateSectionTitle(editingTitle.sectionId, resolveSectionTitle(editingTitle.draft));
+    setEditingTitle(null);
   }
 
   function deleteSection(id: string): void {
@@ -193,9 +254,9 @@ export default function App() {
       updateSection(section.id, (current) => {
         if (current.kind !== 'parsed') return current;
         if (target === 'client' && isRequestSection(current)) {
-          return { ...current, clientRows: rows, clientError: '' };
+          return { ...current, clientRows: rows, clientError: '', clientLastSyncedFormat: current.clientFormat ?? 'json' };
         }
-        return { ...current, rows, error: '' };
+        return { ...current, rows, error: '', lastSyncedFormat: current.format };
       });
     } catch (error) {
       updateSection(section.id, (current) => {
@@ -240,6 +301,169 @@ export default function App() {
     localStorage.removeItem(STORAGE_KEY);
   }
 
+  function addManualRow(section: ParsedSection, target: ParseTarget = 'server'): void {
+    const manualRow: ParsedRow = {
+      field: `newField${Date.now()}`,
+      origin: 'manual',
+      type: 'string',
+      required: OPTIONAL_MARK,
+      description: '',
+      example: '',
+      source: isRequestSection(section) ? 'body' : 'parsed'
+    };
+
+    updateSection(section.id, (current) => {
+      if (current.kind !== 'parsed') return current;
+      if (target === 'client' && isRequestSection(current)) {
+        return { ...current, clientRows: [...(current.clientRows ?? []), manualRow] };
+      }
+      return { ...current, rows: [...current.rows, manualRow] };
+    });
+  }
+
+  function syncInputFromRows(section: ParsedSection, target: ParseTarget = 'server'): void {
+    updateSection(section.id, (current) => {
+      if (current.kind !== 'parsed') return current;
+
+      if (target === 'client' && isRequestSection(current)) {
+        const clientRows = current.clientRows ?? [];
+        return {
+          ...current,
+          clientInput: buildInputFromRows(current.clientFormat ?? 'json', clientRows),
+          clientLastSyncedFormat: current.clientFormat ?? 'json',
+          clientRows: clientRows.map((row) =>
+            row.origin === 'generated'
+              ? row
+              : { ...row, sourceField: row.field, origin: row.origin === 'manual' ? 'parsed' : row.origin }
+          )
+        };
+      }
+
+      return {
+        ...current,
+        input: buildInputFromRows(current.format, current.rows),
+        lastSyncedFormat: current.format,
+        rows: current.rows.map((row) =>
+          row.origin === 'generated'
+            ? row
+            : { ...row, sourceField: row.field, origin: row.origin === 'manual' ? 'parsed' : row.origin }
+        )
+      };
+    });
+  }
+
+  function startFieldEditing(section: ParsedSection, row: ParsedRow): void {
+    if (!row.field.trim()) return;
+    setEditingField({
+      sectionId: section.id,
+      rowKey: getParsedRowKey(row),
+      draft: row.field
+    });
+  }
+
+  function cancelFieldEditing(): void {
+    setEditingField(null);
+  }
+
+  function saveFieldEditing(): void {
+    if (!editingField) return;
+
+    const nextField = editingField.draft.trim();
+    if (!nextField) {
+      setEditingField(null);
+      return;
+    }
+
+    updateSection(editingField.sectionId, (current) => {
+      if (current.kind !== 'parsed') return current;
+
+      let updated = false;
+      const rows = current.rows.map((row) => {
+        if (!updated && getParsedRowKey(row) === editingField.rowKey) {
+          updated = true;
+          return { ...row, field: nextField };
+        }
+        return row;
+      });
+
+      if (!updated) return current;
+
+      if (isRequestSection(current)) {
+        return { ...current, rows };
+      }
+
+      return { ...current, rows };
+    });
+
+    setEditingField(null);
+  }
+
+  function renderEditableFieldCell(section: ParsedSection, row: ParsedRow): ReactNode {
+    if (!row.field.trim()) return '—';
+
+    const isEditing =
+      editingField?.sectionId === section.id &&
+      editingField.rowKey === getParsedRowKey(row);
+
+    if (isEditing) {
+      return (
+        <div className="field-edit">
+          <input
+            type="text"
+            autoFocus
+            value={editingField.draft}
+            onChange={(e) => setEditingField((current) => (current ? { ...current, draft: e.target.value } : current))}
+            onBlur={saveFieldEditing}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') saveFieldEditing();
+              if (e.key === 'Escape') cancelFieldEditing();
+            }}
+          />
+        </div>
+      );
+    }
+
+    return (
+      <div className="field-display" onDoubleClick={() => startFieldEditing(section, row)}>
+        <span>{row.field}</span>
+        <button className="icon-button" type="button" onClick={() => startFieldEditing(section, row)} aria-label="Редактировать поле">
+          ✎
+        </button>
+      </div>
+    );
+  }
+
+  function renderEditableSectionTitle(section: DocSection): ReactNode {
+    const isEditing = editingTitle?.sectionId === section.id;
+
+    if (isEditing) {
+      return (
+        <div className="field-edit title-edit">
+          <input
+            type="text"
+            autoFocus
+            value={editingTitle.draft}
+            onChange={(e) => setEditingTitle((current) => (current ? { ...current, draft: e.target.value } : current))}
+            onBlur={saveTitleEditing}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') saveTitleEditing();
+              if (e.key === 'Escape') cancelTitleEditing();
+            }}
+          />
+        </div>
+      );
+    }
+
+    return (
+      <div className="field-display title-display" onDoubleClick={() => startTitleEditing(section)}>
+        <span>{resolveSectionTitle(section.title)}</span>
+        <button className="icon-button" type="button" onClick={() => startTitleEditing(section)} aria-label="Редактировать название блока">
+          ✎
+        </button>
+      </div>
+    );
+  }
+
   function renderRequestCell(section: ParsedSection, row: ParsedRow, column: RequestColumnKey): ReactNode {
     const cellMap = {
       field: row.field || '—',
@@ -251,32 +475,70 @@ export default function App() {
     } satisfies Record<RequestColumnKey, string>;
 
     if (column === 'clientField' && isRequestMappingRow(row) && section.domainModelEnabled) {
+      const options = getMappingOptions(section, row.field);
+      const previouslyUsedKeys = getPreviouslyUsedClientKeys(section, row);
+      const primaryOptions = options.filter((option) => !previouslyUsedKeys.has(getParsedRowKey(option)));
+      const previouslyUsedOptions = options.filter((option) => previouslyUsedKeys.has(getParsedRowKey(option)));
+      const mappedValue = getMappedClientField(section, row);
+
       return (
-        <select
-          value={getMappedClientField(section, row.field)}
-          onChange={(e) =>
-            updateSection(section.id, (current) => {
-              if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
+        <div className="mapping-cell">
+          <select
+            value={mappedValue}
+            onChange={(e) =>
+              updateSection(section.id, (current) => {
+                if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
 
-              const nextMappings = { ...(current.clientMappings ?? {}) };
-              if (e.target.value) {
-                nextMappings[row.field] = e.target.value;
-              } else {
-                delete nextMappings[row.field];
+                const nextMappings = { ...(current.clientMappings ?? {}) };
+                if (e.target.value) {
+                  nextMappings[getParsedRowKey(row)] = e.target.value;
+                } else {
+                  delete nextMappings[getParsedRowKey(row)];
+                }
+
+                return { ...current, clientMappings: nextMappings };
+              })
+            }
+          >
+            <option value="">—</option>
+            {primaryOptions.map((option) => (
+              <option key={getParsedRowKey(option)} value={getParsedRowKey(option)}>
+                {option.field}
+              </option>
+            ))}
+            {previouslyUsedOptions.length > 0 && (
+              <optgroup label="Ранее использованные">
+                {previouslyUsedOptions.map((option) => (
+                  <option key={getParsedRowKey(option)} value={getParsedRowKey(option)}>
+                    {option.field}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+          {mappedValue && (
+            <button
+              className="icon-button"
+              type="button"
+              aria-label="Сбросить маппинг"
+              onClick={() =>
+                updateSection(section.id, (current) => {
+                  if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
+                  const nextMappings = { ...(current.clientMappings ?? {}) };
+                  delete nextMappings[getParsedRowKey(row)];
+                  return { ...current, clientMappings: nextMappings };
+                })
               }
-
-              return { ...current, clientMappings: nextMappings };
-            })
-          }
-        >
-          <option value="">—</option>
-          {getMappingOptions(section, row.field).map((option) => (
-            <option key={option.field} value={option.field}>
-              {option.field}
-            </option>
-          ))}
-        </select>
+            >
+              ×
+            </button>
+          )}
+        </div>
       );
+    }
+
+    if (column === 'field') {
+      return renderEditableFieldCell(section, row);
     }
 
     return cellMap[column];
@@ -284,6 +546,8 @@ export default function App() {
 
   function renderParsedTable(section: ParsedSection) {
     const rows = getSectionRows(section);
+    const duplicateFieldSet = getDuplicateValueSet(section.rows);
+    const duplicateClientFieldSet = isRequestSection(section) ? getDuplicateValueSet(section.clientRows ?? []) : new Set<string>();
 
     if (rows.length === 0) return <div className="muted">Нет распарсенных строк</div>;
 
@@ -321,7 +585,10 @@ export default function App() {
             </thead>
             <tbody>
               {rows.map((row, index) => (
-                <tr key={`${row.field}-${row.clientField ?? 'server'}-${index}`}>
+                <tr
+                  key={`${row.field}-${row.clientField ?? 'server'}-${index}`}
+                  className={rowHasMismatch(row, duplicateFieldSet, duplicateClientFieldSet) ? 'mismatch-row' : undefined}
+                >
                   {columns.map((column) => (
                     <td key={`${column}-${index}`} className={column === 'type' || column === 'example' ? 'mono' : undefined}>
                       {renderRequestCell(section, row, column)}
@@ -331,6 +598,11 @@ export default function App() {
               ))}
             </tbody>
           </table>
+          <div className="table-actions">
+            <button className="ghost small" type="button" onClick={() => addManualRow(section, 'server')}>
+              + Параметр
+            </button>
+          </div>
         </div>
       );
     }
@@ -349,8 +621,11 @@ export default function App() {
           </thead>
           <tbody>
             {rows.map((row, index) => (
-              <tr key={`${row.field}-${row.clientField ?? 'server'}-${index}`}>
-                <td>{row.field || '—'}</td>
+              <tr
+                key={`${row.field}-${row.clientField ?? 'server'}-${index}`}
+                className={rowHasMismatch(row, duplicateFieldSet, duplicateClientFieldSet) ? 'mismatch-row' : undefined}
+              >
+                <td>{renderEditableFieldCell(section, row)}</td>
                 <td className="mono">{row.type}</td>
                 <td>{row.required}</td>
                 <td>{row.description || '—'}</td>
@@ -363,9 +638,75 @@ export default function App() {
     );
   }
 
+  function rowHasMismatch(row: ParsedRow, duplicateFieldSet: Set<string>, duplicateClientFieldSet: Set<string>): boolean {
+    const clientSourceField = row.clientSourceField?.trim();
+    const serverMismatch =
+      Boolean(row.field.trim()) &&
+      (row.origin === 'manual' || (row.origin === 'parsed' && row.sourceField && row.field !== row.sourceField));
+    const clientMismatch =
+      Boolean(row.field.trim()) &&
+      (row.clientOrigin === 'manual' || (row.clientOrigin === 'parsed' && row.clientSourceField && row.clientField && row.clientField !== row.clientSourceField));
+    const serverDuplicate = Boolean(row.field.trim()) && duplicateFieldSet.has(row.field.trim());
+    const clientDuplicate = clientSourceField ? duplicateClientFieldSet.has(clientSourceField) : false;
+
+    return Boolean(serverMismatch || clientMismatch || serverDuplicate || clientDuplicate);
+  }
+
+  function renderSourceAlert(
+    alertKey: string,
+    visible: boolean,
+    rows: ParsedRow[],
+    duplicateValues: string[],
+    duplicateLabel: string,
+    formatDrift: boolean,
+    currentFormat: ParseFormat,
+    onFix: () => void,
+    syncedFormat?: ParseFormat,
+    message = 'Параметры отличаются от исходного источника'
+  ): ReactNode {
+    if (!visible) return null;
+
+    const driftRows = getInputDriftRows(rows);
+    const canFix = driftRows.length > 0 || formatDrift;
+    const expanded = expandedDriftAlerts[alertKey] ?? false;
+    const driftItems = driftRows.map((row) => (row.sourceField && row.field !== row.sourceField ? `${row.sourceField} -> ${row.field}` : row.field));
+    const duplicateItems = duplicateValues.map((value) => `${duplicateLabel}: ${value}`);
+    const allItems = [...driftItems, ...duplicateItems];
+    const visibleRows = expanded ? allItems : allItems.slice(0, 3);
+
+    return (
+      <div className="sync-alert" role="status">
+        <div className="sync-alert-title">{message}</div>
+        {formatDrift && syncedFormat && (
+          <div className="sync-alert-item">{`Формат: ${syncedFormat.toUpperCase()} -> ${currentFormat.toUpperCase()}`}</div>
+        )}
+        <div className="sync-alert-list">
+          {visibleRows.map((item) => (
+            <div key={item} className="sync-alert-item">
+              {item}
+            </div>
+          ))}
+        </div>
+        {allItems.length > 3 && (
+          <button
+            className="ghost small"
+            type="button"
+            onClick={() => setExpandedDriftAlerts((current) => ({ ...current, [alertKey]: !expanded }))}
+          >
+            {expanded ? 'Свернуть' : `Показать еще ${allItems.length - 3}`}
+          </button>
+        )}
+        {canFix && (
+          <button className="ghost small" type="button" onClick={onFix}>
+            Исправить источник
+          </button>
+        )}
+      </div>
+    );
+  }
+
   function renderRequestEditor(section: ParsedSection) {
     const rows = getSectionRows(section);
-
     return (
       <div className="stack">
         <label className="switch">
@@ -413,7 +754,7 @@ export default function App() {
                   onChange={(e) =>
                     updateSection(section.id, (current) =>
                       current.kind === 'parsed'
-                        ? { ...current, format: e.target.value as ParseFormat, rows: [], error: '' }
+                        ? { ...current, format: e.target.value as ParseFormat, error: '' }
                         : current
                     )
                   }
@@ -456,7 +797,7 @@ export default function App() {
                     onChange={(e) =>
                       updateSection(section.id, (current) =>
                         current.kind === 'parsed' && isRequestSection(current)
-                          ? { ...current, clientFormat: e.target.value as ParseFormat, clientRows: [], clientError: '', clientMappings: {} }
+                          ? { ...current, clientFormat: e.target.value as ParseFormat, clientError: '' }
                           : current
                       )
                     }
@@ -543,6 +884,35 @@ export default function App() {
 
       {importError && <div className="alert error">Ошибка импорта: {importError}</div>}
 
+      <div className="sync-alert-stack">
+        {selectedSection?.kind === 'parsed' &&
+          renderSourceAlert(
+            `${selectedSection.id}-server`,
+            selectedServerDriftRows.length > 0 || selectedServerFormatDrift || selectedServerDuplicateValues.length > 0,
+            selectedSection.rows,
+            selectedServerDuplicateValues,
+            'Дубликат поля',
+            selectedServerFormatDrift,
+            selectedSection.format,
+            () => syncInputFromRows(selectedSection, 'server'),
+            selectedSection.lastSyncedFormat
+          )}
+        {selectedSection?.kind === 'parsed' &&
+          isRequestSection(selectedSection) &&
+          renderSourceAlert(
+            `${selectedSection.id}-client`,
+            selectedClientDriftRows.length > 0 || selectedClientFormatDrift || selectedClientDuplicateValues.length > 0,
+            selectedSection.clientRows ?? [],
+            selectedClientDuplicateValues,
+            'Дубликат client request',
+            selectedClientFormatDrift,
+            selectedSection.clientFormat ?? 'json',
+            () => syncInputFromRows(selectedSection, 'client'),
+            selectedSection.clientLastSyncedFormat,
+            'Client request отличается от источника'
+          )}
+      </div>
+
       <div className="layout">
         <aside className="sidebar" role="listbox" aria-label="Секции">
           <div className="sidebar-head">
@@ -610,7 +980,7 @@ export default function App() {
                 <section className="panel">
                   <div className="panel-head">
                     <div>
-                      <div className="panel-title">{resolveSectionTitle(selectedSection.title)}</div>
+                      <div className="panel-title">{renderEditableSectionTitle(selectedSection)}</div>
                       <div className="panel-sub">ID: {selectedSection.id}</div>
                     </div>
                     <div className="row gap">
@@ -629,17 +999,6 @@ export default function App() {
                       </label>
                     </div>
                   </div>
-
-                  <label className="field">
-                    <div className="label">Название блока</div>
-                    <input
-                      type="text"
-                      value={selectedSection.title}
-                      onChange={(e) => updateSectionTitle(selectedSection.id, e.target.value)}
-                      onBlur={(e) => updateSectionTitle(selectedSection.id, resolveSectionTitle(e.target.value))}
-                      placeholder={DEFAULT_SECTION_TITLE}
-                    />
-                  </label>
 
                   {selectedSection.kind === 'text' && (
                     <div className="stack">
@@ -670,7 +1029,7 @@ export default function App() {
                                 value={selectedSection.format}
                                 onChange={(e) =>
                                   updateSection(selectedSection.id, (current) =>
-                                    current.kind === 'parsed' ? { ...current, format: e.target.value as ParseFormat, rows: [], error: '' } : current
+                                    current.kind === 'parsed' ? { ...current, format: e.target.value as ParseFormat, error: '' } : current
                                   )
                                 }
                               >
@@ -697,7 +1056,11 @@ export default function App() {
                               placeholder="Вставьте JSON, XML или cURL"
                             />
                           </label>
-
+                          <div className="row gap">
+                            <button className="ghost small" type="button" onClick={() => addManualRow(selectedSection)}>
+                              + Параметр
+                            </button>
+                          </div>
                           {selectedSection.error && <div className="alert error">{selectedSection.error}</div>}
                           {!selectedSection.error && validationMap.get(selectedSection.id) === '' && selectedSection.rows.length > 0 && (
                             <div className="alert success">Распарсено {selectedSection.rows.length} строк</div>

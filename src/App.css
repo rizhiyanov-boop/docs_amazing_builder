@@ -373,6 +373,14 @@ select {
   overflow-x: auto;
 }
 
+.table-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -399,6 +407,106 @@ th {
 
 .draggable-column:active {
   cursor: grabbing;
+}
+
+.field-display {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.field-edit {
+  min-width: 220px;
+}
+
+.title-display {
+  min-width: 0;
+}
+
+.title-display span {
+  font-weight: 600;
+}
+
+.title-edit {
+  min-width: min(420px, 100%);
+}
+
+.mapping-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mapping-cell select {
+  min-width: 0;
+}
+
+.icon-button {
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  box-shadow: none;
+}
+
+.icon-button:hover {
+  transform: none;
+}
+
+.sync-alert {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  width: min(100%, 420px);
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--warning);
+  background: color-mix(in srgb, var(--panel) 88%, var(--warning) 12%);
+  box-shadow: var(--shadow);
+}
+
+.sync-alert-stack {
+  position: fixed;
+  top: 16px;
+  right: 24px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(420px, calc(100vw - 32px));
+  pointer-events: none;
+}
+
+.sync-alert-stack .sync-alert {
+  pointer-events: auto;
+}
+
+.sync-alert-title {
+  font-weight: 600;
+}
+
+.sync-alert-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sync-alert-item {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mismatch-row td {
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+}
+
+.mismatch-row:nth-child(odd) td {
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
 }
 
 tr:nth-child(odd) td {
@@ -517,6 +625,12 @@ tr:nth-child(odd) td {
 
   .actions {
     justify-content: flex-end;
+  }
+
+  .sync-alert-stack {
+    top: 12px;
+    right: 12px;
+    width: calc(100vw - 24px);
   }
 }
 

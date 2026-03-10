@@ -1,6 +1,14 @@
 import { OPTIONAL_MARK } from './requestHeaders';
 import type { ParseFormat, ParsedRow } from './types';
 
+function createParsedRow(row: Omit<ParsedRow, 'sourceField' | 'origin'>): ParsedRow {
+  return {
+    ...row,
+    sourceField: row.field,
+    origin: 'parsed'
+  };
+}
+
 function inferType(value: unknown): string {
   if (Array.isArray(value)) return 'array';
   if (value === null) return 'null';
@@ -13,19 +21,19 @@ function inferType(value: unknown): string {
   }
 
   if (typeof value === 'string') {
-    const s = value.trim();
-    if (/^-?\d+$/.test(s)) {
+    const trimmed = value.trim();
+    if (/^-?\d+$/.test(trimmed)) {
       try {
-        const bi = BigInt(s);
+        const bigIntValue = BigInt(trimmed);
         const min = BigInt(-2147483648);
         const max = BigInt(2147483647);
-        return bi >= min && bi <= max ? 'int' : 'long';
+        return bigIntValue >= min && bigIntValue <= max ? 'int' : 'long';
       } catch {
         return 'long';
       }
     }
-    if (!Number.isNaN(Number(s)) && /[.eE]/.test(s)) return 'number';
-    if (/^(true|false)$/i.test(s)) return 'boolean';
+    if (!Number.isNaN(Number(trimmed)) && /[.eE]/.test(trimmed)) return 'number';
+    if (/^(true|false)$/i.test(trimmed)) return 'boolean';
     return 'string';
   }
 
@@ -40,26 +48,26 @@ function flattenJson(value: unknown, basePath = ''): ParsedRow[] {
   if (Array.isArray(value)) {
     if (value.length === 0) {
       return [
-        {
+        createParsedRow({
           field: basePath || '$',
           type: 'array',
           required: OPTIONAL_MARK,
           description: '',
           example: '[]'
-        }
+        })
       ];
     }
 
     const first = value[0];
     const isArrayOfObjects = first && typeof first === 'object' && !Array.isArray(first);
     const rows: ParsedRow[] = [
-      {
+      createParsedRow({
         field: basePath || '$',
         type: isArrayOfObjects ? 'array_object' : 'array',
         required: OPTIONAL_MARK,
         description: '',
         example: JSON.stringify(first).slice(0, 120)
-      }
+      })
     ];
 
     rows.push(...flattenJson(first, `${basePath}[0]`));
@@ -74,26 +82,28 @@ function flattenJson(value: unknown, basePath = ''): ParsedRow[] {
       if (nested && typeof nested === 'object') {
         rows.push(...flattenJson(nested, nextPath));
       } else {
-        rows.push({
-          field: nextPath,
-          type: inferType(nested),
-          required: OPTIONAL_MARK,
-          description: '',
-          example: nested === undefined ? '' : JSON.stringify(nested).slice(0, 120)
-        });
+        rows.push(
+          createParsedRow({
+            field: nextPath,
+            type: inferType(nested),
+            required: OPTIONAL_MARK,
+            description: '',
+            example: nested === undefined ? '' : JSON.stringify(nested).slice(0, 120)
+          })
+        );
       }
     }
     return rows;
   }
 
   return [
-    {
+    createParsedRow({
       field: basePath || '$',
       type: inferType(value),
       required: OPTIONAL_MARK,
       description: '',
       example: String(value)
-    }
+    })
   ];
 }
 
@@ -111,22 +121,26 @@ function parseXml(input: string): ParsedRow[] {
   const rows: ParsedRow[] = [];
 
   function walk(element: Element, path = element.tagName): void {
-    rows.push({
-      field: path,
-      type: 'element',
-      required: OPTIONAL_MARK,
-      description: '',
-      example: element.textContent?.trim().slice(0, 120) ?? ''
-    });
-
-    for (const attr of Array.from(element.attributes)) {
-      rows.push({
-        field: `${path}.@${attr.name}`,
-        type: 'attribute',
+    rows.push(
+      createParsedRow({
+        field: path,
+        type: 'element',
         required: OPTIONAL_MARK,
         description: '',
-        example: attr.value
-      });
+        example: element.textContent?.trim().slice(0, 120) ?? ''
+      })
+    );
+
+    for (const attr of Array.from(element.attributes)) {
+      rows.push(
+        createParsedRow({
+          field: `${path}.@${attr.name}`,
+          type: 'attribute',
+          required: OPTIONAL_MARK,
+          description: '',
+          example: attr.value
+        })
+      );
     }
 
     for (const child of Array.from(element.children)) {
@@ -148,34 +162,33 @@ function parseCurl(input: string): ParsedRow[] {
   const rows: ParsedRow[] = [];
   let extractedAny = false;
 
-  let bodyPayload: string | null = null;
   const dataMatch = normalized.match(/(?:--data-raw|--data|-d)\s+(['"])([\s\S]*?)\1/);
   let remaining = normalized;
   if (dataMatch) {
     extractedAny = true;
-    bodyPayload = dataMatch[2].trim();
+    const bodyPayload = dataMatch[2].trim();
     remaining = normalized.replace(dataMatch[0], '');
 
     try {
       const payloadRows = flattenJson(JSON.parse(bodyPayload));
       rows.push(
-        ...payloadRows.map(
-          (row): ParsedRow => ({
-            ...row,
-            description: row.description || 'Тело запроса из cURL (JSON)',
-            source: 'body'
-          })
-        )
+        ...payloadRows.map((row) => ({
+          ...row,
+          description: row.description || 'Тело запроса из cURL (JSON)',
+          source: 'body' as const
+        }))
       );
     } catch {
-      rows.push({
-        field: 'body',
-        type: 'string',
-        required: OPTIONAL_MARK,
-        description: 'Тело запроса из cURL (не JSON)',
-        example: bodyPayload.slice(0, 120),
-        source: 'body'
-      });
+      rows.push(
+        createParsedRow({
+          field: 'body',
+          type: 'string',
+          required: OPTIONAL_MARK,
+          description: 'Тело запроса из cURL (не JSON)',
+          example: bodyPayload.slice(0, 120),
+          source: 'body'
+        })
+      );
     }
   }
 
@@ -203,13 +216,11 @@ function parseCurl(input: string): ParsedRow[] {
           if (typeof parsed === 'object' && parsed !== null) {
             const nested = flattenJson(parsed, name);
             rows.push(
-              ...nested.map(
-                (row): ParsedRow => ({
-                  ...row,
-                  description: `Заголовок ${name} (распарсено)`,
-                  source: 'header'
-                })
-              )
+              ...nested.map((row) => ({
+                ...row,
+                description: `Заголовок ${name} (распарсено)`,
+                source: 'header' as const
+              }))
             );
             pushed = true;
           }
@@ -219,44 +230,91 @@ function parseCurl(input: string): ParsedRow[] {
       }
 
       if (!pushed) {
-        const low = value.toLowerCase();
-        if (low === 'true' || low === 'false') {
-          rows.push({ field: name, type: 'boolean', required: '-', description: `Заголовок ${name}`, example: low, source: 'header' });
+        const lowerValue = value.toLowerCase();
+        if (lowerValue === 'true' || lowerValue === 'false') {
+          rows.push(
+            createParsedRow({
+              field: name,
+              type: 'boolean',
+              required: '-',
+              description: `Заголовок ${name}`,
+              example: lowerValue,
+              source: 'header'
+            })
+          );
           pushed = true;
         } else if (/^-?\d+$/.test(value)) {
           try {
-            const bi = BigInt(value);
+            const bigIntValue = BigInt(value);
             const min = BigInt(-2147483648);
             const max = BigInt(2147483647);
-            rows.push({ field: name, type: bi >= min && bi <= max ? 'int' : 'long', required: '-', description: `Заголовок ${name}`, example: value, source: 'header' });
+            rows.push(
+              createParsedRow({
+                field: name,
+                type: bigIntValue >= min && bigIntValue <= max ? 'int' : 'long',
+                required: '-',
+                description: `Заголовок ${name}`,
+                example: value,
+                source: 'header'
+              })
+            );
             pushed = true;
           } catch {
-            rows.push({ field: name, type: 'long', required: '-', description: `Заголовок ${name}`, example: value, source: 'header' });
+            rows.push(
+              createParsedRow({
+                field: name,
+                type: 'long',
+                required: '-',
+                description: `Заголовок ${name}`,
+                example: value,
+                source: 'header'
+              })
+            );
             pushed = true;
           }
         } else if (!Number.isNaN(Number(value))) {
-          rows.push({ field: name, type: 'number', required: '-', description: `Заголовок ${name}`, example: value, source: 'header' });
+          rows.push(
+            createParsedRow({
+              field: name,
+              type: 'number',
+              required: '-',
+              description: `Заголовок ${name}`,
+              example: value,
+              source: 'header'
+            })
+          );
           pushed = true;
         }
       }
     }
 
     if (!pushed) {
-      rows.push({ field: name, type: 'string', required: '-', description: `Заголовок ${name}`, example: value, source: 'header' });
+      rows.push(
+        createParsedRow({
+          field: name,
+          type: 'string',
+          required: '-',
+          description: `Заголовок ${name}`,
+          example: value,
+          source: 'header'
+        })
+      );
     }
   }
 
   const urlMatch = normalized.match(/curl\s+(?:-X\s+\w+\s+)?['"]?(https?:\/\/[^'"\s]+)['"]?/i);
   if (urlMatch) {
     extractedAny = true;
-    rows.push({
-      field: 'request.url',
-      type: 'string',
-      required: '+',
-      description: 'URL запроса',
-      example: urlMatch[1],
-      source: 'url'
-    });
+    rows.push(
+      createParsedRow({
+        field: 'request.url',
+        type: 'string',
+        required: '+',
+        description: 'URL запроса',
+        example: urlMatch[1],
+        source: 'url'
+      })
+    );
   }
 
   if (!extractedAny) {

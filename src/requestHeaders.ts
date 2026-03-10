@@ -1,19 +1,23 @@
-﻿import type { ParsedRow, ParsedSection } from './types';
+import type { ParsedRow, ParsedSection } from './types';
 
 export const OPTIONAL_MARK = '\u00B1';
 
 export const DEFAULT_REQUEST_HEADERS: ParsedRow[] = [
-  { field: 'X-CLIENT-ID', type: 'string', required: '-', description: 'ID клиента', example: '', source: 'header' },
-  { field: 'X-USER-ID', type: 'string', required: '-', description: 'ID пользователя', example: '', source: 'header' },
-  { field: 'X-SOURCE-SYSTEM', type: 'string', required: '-', description: 'Система-инициатор', example: '', source: 'header' },
-  { field: 'X-BP-ID', type: 'string', required: '-', description: 'ID бизнес-процесса', example: '', source: 'header' },
-  { field: 'X-BP-NAME', type: 'string', required: '-', description: 'Название бизнес-процесса', example: '', source: 'header' },
-  { field: 'traceparent', type: 'string', required: '-', description: 'TraceParent для распределенного трейсинга', example: '', source: 'header' }
+  { field: 'X-CLIENT-ID', sourceField: 'X-CLIENT-ID', origin: 'generated', type: 'string', required: '-', description: 'ID клиента', example: '', source: 'header' },
+  { field: 'X-USER-ID', sourceField: 'X-USER-ID', origin: 'generated', type: 'string', required: '-', description: 'ID пользователя', example: '', source: 'header' },
+  { field: 'X-SOURCE-SYSTEM', sourceField: 'X-SOURCE-SYSTEM', origin: 'generated', type: 'string', required: '-', description: 'Система-инициатор', example: '', source: 'header' },
+  { field: 'X-BP-ID', sourceField: 'X-BP-ID', origin: 'generated', type: 'string', required: '-', description: 'ID бизнес-процесса', example: '', source: 'header' },
+  { field: 'X-BP-NAME', sourceField: 'X-BP-NAME', origin: 'generated', type: 'string', required: '-', description: 'Название бизнес-процесса', example: '', source: 'header' },
+  { field: 'traceparent', sourceField: 'traceparent', origin: 'generated', type: 'string', required: '-', description: 'TraceParent для распределенного трейсинга', example: '', source: 'header' }
 ];
 
 const REQUEST_HEADER_ORDER = new Map(
   DEFAULT_REQUEST_HEADERS.map((header, index) => [header.field.toLowerCase(), index])
 );
+
+function getRowKey(row: ParsedRow): string {
+  return row.sourceField?.trim() || row.field.trim();
+}
 
 function normalizeKey(value: string): string {
   return value.toLowerCase().replaceAll(/[^a-z0-9]+/g, '');
@@ -82,9 +86,15 @@ function isMappableRow(row: ParsedRow): boolean {
 function getValidClientMappings(section: ParsedSection): Record<string, string> {
   if (section.id !== 'request') return {};
 
-  const clientFields = new Set((section.clientRows ?? []).map((row) => row.field));
+  const clientKeys = new Set((section.clientRows ?? []).map((row) => getRowKey(row)));
+  const serverKeys = new Set(
+    section.rows
+      .filter((row) => isMappableRow(row))
+      .map((row) => getRowKey(row))
+  );
+
   return Object.fromEntries(
-    Object.entries(section.clientMappings ?? {}).filter(([, clientField]) => clientFields.has(clientField))
+    Object.entries(section.clientMappings ?? {}).filter(([serverKey, clientKey]) => serverKeys.has(serverKey) && clientKeys.has(clientKey))
   );
 }
 
@@ -94,29 +104,34 @@ function mergeRequestRows(section: ParsedSection, includeDefaultHeaders: boolean
   if (section.id !== 'request' || !section.domainModelEnabled) return serverRows;
 
   const clientRows = section.clientRows ?? [];
+  const clientByKey = new Map(clientRows.map((row) => [getRowKey(row), row]));
   const mappings = getValidClientMappings(section);
-  const mappedClientFields = new Set(Object.values(mappings));
+  const mappedClientKeys = new Set(Object.values(mappings));
 
   const mergedServerRows = serverRows.map((row) => {
     if (!isMappableRow(row)) return row;
 
-    const mappedClientField = mappings[row.field];
-    if (!mappedClientField) return row;
+    const mappedClientKey = mappings[getRowKey(row)];
+    if (!mappedClientKey) return row;
 
-    const clientRow = clientRows.find((candidate) => candidate.field === mappedClientField);
+    const clientRow = clientByKey.get(mappedClientKey);
     if (!clientRow) return row;
 
     return {
       ...row,
-      clientField: clientRow.field
+      clientField: clientRow.field,
+      clientSourceField: clientRow.sourceField,
+      clientOrigin: clientRow.origin
     };
   });
 
   const unmappedClientRows = clientRows
-    .filter((row) => !mappedClientFields.has(row.field))
+    .filter((row) => !mappedClientKeys.has(getRowKey(row)))
     .map((row) => ({
       ...row,
       clientField: row.field,
+      clientSourceField: row.sourceField,
+      clientOrigin: row.origin,
       field: ''
     }));
 
@@ -143,23 +158,28 @@ export function getEditorRequestRows(section: ParsedSection): ParsedRow[] {
   );
 }
 
-export function getMappingOptions(section: ParsedSection, serverField: string): ParsedRow[] {
+export function getMappingOptions(section: ParsedSection, displayField: string): ParsedRow[] {
   if (section.id !== 'request' || !section.domainModelEnabled) return [];
 
-  const mappings = getValidClientMappings(section);
-  const reservedClientFields = new Set(
-    Object.entries(mappings)
-      .filter(([mappedServerField]) => mappedServerField !== serverField)
-      .map(([, clientField]) => clientField)
-  );
-
   return [...(section.clientRows ?? [])]
-    .filter((row) => !reservedClientFields.has(row.field))
     .sort((left, right) => {
-      const scoreDiff = getSimilarityScore(serverField, right.field) - getSimilarityScore(serverField, left.field);
+      const scoreDiff = getSimilarityScore(displayField, right.field) - getSimilarityScore(displayField, left.field);
       if (scoreDiff !== 0) return scoreDiff;
       return left.field.localeCompare(right.field);
     });
+}
+
+export function getPreviouslyUsedClientKeys(section: ParsedSection, currentRow: ParsedRow): Set<string> {
+  if (section.id !== 'request') return new Set();
+
+  const currentKey = getParsedRowKey(currentRow);
+  const currentValue = getMappedClientField(section, currentRow);
+
+  return new Set(
+    Object.entries(getValidClientMappings(section))
+      .filter(([rowKey, clientKey]) => rowKey !== currentKey && clientKey !== currentValue)
+      .map(([, clientKey]) => clientKey)
+  );
 }
 
 export function requestHasRows(section: ParsedSection): boolean {
@@ -182,6 +202,18 @@ export function isRequestMappingRow(row: ParsedRow): boolean {
   return isMappableRow(row) && Boolean(row.field.trim());
 }
 
-export function getMappedClientField(section: ParsedSection, serverField: string): string {
-  return getValidClientMappings(section)[serverField] ?? '';
+export function getMappedClientField(section: ParsedSection, row: ParsedRow): string {
+  return getValidClientMappings(section)[getRowKey(row)] ?? '';
+}
+
+export function getParsedRowKey(row: ParsedRow): string {
+  return getRowKey(row);
+}
+
+export function hasInputDrift(rows: ParsedRow[]): boolean {
+  return rows.some((row) => row.origin === 'manual' || (row.origin === 'parsed' && row.sourceField && row.field !== row.sourceField));
+}
+
+export function getInputDriftRows(rows: ParsedRow[]): ParsedRow[] {
+  return rows.filter((row) => row.origin === 'manual' || (row.origin === 'parsed' && row.sourceField && row.field !== row.sourceField));
 }

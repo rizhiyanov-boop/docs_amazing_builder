@@ -5,7 +5,11 @@ export type SectionKind = 'text' | 'parsed';
 
 export interface ParsedRow {
   field: string;
+  sourceField?: string;
+  origin?: 'parsed' | 'manual' | 'generated';
   clientField?: string;
+  clientSourceField?: string;
+  clientOrigin?: 'parsed' | 'manual' | 'generated';
   type: string;
   required: string;
   description: string;
@@ -29,11 +33,13 @@ export interface TextSection extends BaseSection {
 export interface ParsedSection extends BaseSection {
   kind: 'parsed';
   format: ParseFormat;
+  lastSyncedFormat?: ParseFormat;
   input: string;
   rows: ParsedRow[];
   error: string;
   domainModelEnabled?: boolean;
   clientFormat?: ParseFormat;
+  clientLastSyncedFormat?: ParseFormat;
   clientInput?: string;
   clientRows?: ParsedRow[];
   clientError?: string;

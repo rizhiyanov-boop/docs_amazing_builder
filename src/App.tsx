@@ -1461,6 +1461,7 @@ export default function App() {
           </div>
         </div>
         <div className="actions">
+          <div className="actions-main">
           <button className="ghost" onClick={resetProject}>
             Новый
           </button>
@@ -1473,14 +1474,26 @@ export default function App() {
           </button>
           <button onClick={() => downloadText('documentation.html', htmlOutput)}>Экспорт HTML</button>
           <button onClick={() => downloadText('documentation.wiki', wikiOutput)}>Экспорт Wiki</button>
-          <button className="ghost" onClick={toggleTheme}>
-            {theme === 'dark' ? 'Светлая' : 'Тёмная'} тема
-          </button>
+          </div>
+          <div className="actions-side">
+          <label className="theme-toggle" aria-label="Переключить тему">
+            <input type="checkbox" checked={theme === 'light'} onChange={toggleTheme} />
+            <span className="theme-toggle-icon" aria-hidden>
+              ☾
+            </span>
+            <span className="theme-toggle-track" aria-hidden>
+              <span className="theme-toggle-thumb" />
+            </span>
+            <span className="theme-toggle-icon" aria-hidden>
+              ☀
+            </span>
+          </label>
           <div className={`badge ${autosave.state}`} aria-live="polite">
             {autosave.state === 'saving' && 'Сохранение...'}
             {autosave.state === 'saved' && `Сохранено в ${autosave.at ?? ''}`}
             {autosave.state === 'error' && 'Ошибка сохранения'}
             {autosave.state === 'idle' && 'Готово'}
+          </div>
           </div>
         </div>
       </header>
@@ -1678,14 +1691,19 @@ export default function App() {
               )}
 
               {(tab === 'html' || tab === 'split') && (
-                <section className="panel">
+                <section className={tab === 'html' ? 'panel panel-html-preview' : 'panel'}>
                   <div className="panel-head">
                     <div className="panel-title">Предпросмотр HTML</div>
                     <button className="ghost small" onClick={() => downloadText('documentation.html', htmlOutput)}>
                       Скачать
                     </button>
                   </div>
-                  <iframe className="preview-frame" title="HTML preview" sandbox="allow-same-origin" srcDoc={htmlOutput} />
+                  <iframe
+                    className={tab === 'html' ? 'preview-frame preview-frame-full' : 'preview-frame'}
+                    title="HTML preview"
+                    sandbox="allow-same-origin"
+                    srcDoc={htmlOutput}
+                  />
                 </section>
               )}
 

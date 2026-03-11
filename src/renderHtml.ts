@@ -37,17 +37,32 @@ function renderTextValue(value: string): string {
   return escapeHtml(trimmed).replaceAll('\n', '<br/>');
 }
 
+function renderProseValue(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '<span class="muted">Не заполнено</span>';
+
+  const paragraphs = trimmed
+    .split(/\n\s*\n/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .map((paragraph) => `<p>${escapeHtml(paragraph).replaceAll('\n', '<br/>')}</p>`);
+
+  return paragraphs.join('');
+}
+
 function renderTag(label: string, kind = ''): string {
   return `<span class="tag ${kind}">${escapeHtml(label)}</span>`;
 }
 
-function renderButton(label: string, href: string): string {
-  return `<a class="btn" href="${escapeHtml(href)}">${escapeHtml(label)}</a>`;
+function renderButton(label: string, href: string, kind = 'ghost'): string {
+  return `<a class="doc-btn ${kind}" href="${escapeHtml(href)}">${escapeHtml(label)}</a>`;
 }
 
 function renderUrl(value: string, label = 'URL'): string {
   if (!value.trim()) return '';
-  return `<div class="url"><span>${escapeHtml(label)}: ${escapeHtml(value)}</span><a class="smallbtn" href="#">Copy</a></div>`;
+  return `<div class="url"><span>${escapeHtml(label)}: ${escapeHtml(value)}</span><button class="smallbtn" type="button" data-copy-text="${escapeHtml(
+    value
+  )}">Copy</button></div>`;
 }
 
 function renderCodeBlock(id: string, title: string, content: string): string {
@@ -55,7 +70,9 @@ function renderCodeBlock(id: string, title: string, content: string): string {
   return [
     '<details open>',
     `<summary>${escapeHtml(title)} <span class="sumhint">example</span></summary>`,
-    `<pre><div class="pretools"><a class="smallbtn" href="#${escapeHtml(id)}">Copy</a></div><code id="${escapeHtml(id)}">${escapeHtml(content.trim())}</code></pre>`,
+    `<pre><div class="pretools"><button class="smallbtn" type="button" data-copy-target="${escapeHtml(
+      id
+    )}">Copy</button></div><code id="${escapeHtml(id)}">${escapeHtml(content.trim())}</code></pre>`,
     '</details>'
   ].join('');
 }
@@ -98,7 +115,7 @@ function wrapCard(id: string, title: string, meta: string, body: string, path = 
     '<div class="cardhead">',
     '<div class="methodtitle">',
     `<h2>${escapeHtml(title)}</h2>`,
-    `<div class="methodmeta">${meta}</div>`,
+    meta ? `<div class="methodmeta">${meta}</div>` : '',
     '</div>',
     path ? `<div>${renderUrl(path, method || 'Path')}</div>` : '<div></div>',
     '</div>',
@@ -109,8 +126,7 @@ function wrapCard(id: string, title: string, meta: string, body: string, path = 
 
 function renderTextSection(section: TextSection): string {
   const title = resolveSectionTitle(section.title);
-  const meta = [renderTag('TEXT'), section.required ? renderTag('Required') : ''].join('');
-  return wrapCard(section.id, title, meta, `<p class="muted">${renderTextValue(section.value)}</p>`);
+  return wrapCard(section.id, title, '', `<div class="section-text">${renderProseValue(section.value)}</div>`);
 }
 
 function renderInfoNote(label: string, value: string): string {
@@ -139,7 +155,7 @@ function renderRequestSection(section: ParsedSection): string {
   const title = resolveSectionTitle(section.title);
   const { headers, otherRows, urlRow } = splitRequestRows(getRequestRows(section));
   const requestError = section.error || section.clientError;
-  const meta = [renderTag('REQUEST', 'post'), renderTag(section.format.toUpperCase())].join('');
+  const meta = renderTag(section.format.toUpperCase());
   const body = [
     renderInfoNote('Назначение', title),
     renderAuthDetails(section),
@@ -163,7 +179,7 @@ function renderResponseSection(section: ParsedSection): string {
   const title = resolveSectionTitle(section.title);
   const rows = getRequestRows(section);
   const responseError = section.error || section.clientError;
-  const meta = [renderTag('RESPONSE', 'get'), renderTag(section.format.toUpperCase())].join('');
+  const meta = renderTag(section.format.toUpperCase());
   const body = [
     renderInfoNote('Назначение', title),
     rows.length > 0
@@ -181,7 +197,7 @@ function renderResponseSection(section: ParsedSection): string {
 
 function renderGenericParsedSection(section: ParsedSection): string {
   const title = resolveSectionTitle(section.title);
-  const meta = [renderTag('PARSED'), renderTag(section.format.toUpperCase())].join('');
+  const meta = renderTag(section.format.toUpperCase());
   const body = [
     `<details open><summary>Schema <span class="sumhint">${section.rows.length} rows</span></summary>${renderDefaultTable(section.rows)}</details>`,
     renderCodeBlock(`${section.id}-example`, `${title} example`, section.input),
@@ -208,26 +224,28 @@ function getVisibleSections(sections: DocSection[]): DocSection[] {
 function renderSidebar(sections: DocSection[]): string {
   const items = sections
     .map((section) => {
-      const badge = section.kind === 'parsed' ? `<span class="badge">${escapeHtml(section.format.toUpperCase())}</span>` : '<span class="badge">TEXT</span>';
-      return `<a class="navitem" href="#${escapeHtml(section.id)}">${badge}<span>${escapeHtml(resolveSectionTitle(section.title))}</span></a>`;
+      const badge = section.kind === 'parsed' ? `<span class="chip">${escapeHtml(section.format.toUpperCase())}</span>` : '';
+      return `<a class="section-item" data-section-link="${escapeHtml(section.id)}" href="#${escapeHtml(section.id)}">${badge}<span class="section-title">${escapeHtml(
+        resolveSectionTitle(section.title)
+      )}</span></a>`;
     })
     .join('');
 
-  return [
-    '<nav>',
-    '<p class="navtitle">Содержание</p>',
-    `<div class="navlist">${items}</div>`,
-    '<div class="note warn" style="margin-top:14px"><b>Навигация</b><br/>Request и Response собраны как основные блоки, остальные секции идут отдельными карточками.</div>',
-    '</nav>'
-  ].join('');
+  return [`<aside class="sidebar"><div class="sidebar-head"><strong>Секции</strong></div><div class="section-list">${items}</div></aside>`].join('');
 }
 
 export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'dark'): string {
   const visibleSections = getVisibleSections(sections);
   const blocks = visibleSections.map((section) => (section.kind === 'text' ? renderTextSection(section) : renderParsedSection(section)));
-  const tokens = getThemeTokens(theme);
+  const darkTokens = getThemeTokens('dark');
+  const lightTokens = getThemeTokens('light');
   const requestSection = sections.find((section) => section.kind === 'parsed' && section.id === 'request') as ParsedSection | undefined;
   const authInfo = requestSection ? getRequestAuthInfo(requestSection) : null;
+  const themeConfig = {
+    dark: darkTokens,
+    light: lightTokens
+  };
+  const initialTheme = theme;
 
   return [
     '<!doctype html>',
@@ -238,239 +256,525 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
     '<title>API Integration</title>',
     `<style>
       :root{
-        --bg:${tokens.previewBg};
-        --panel:${tokens.panel};
-        --card:${tokens.card};
-        --muted:${tokens.muted};
-        --text:${tokens.previewText};
-        --accent:${tokens.accentSolid};
-        --accent2:${theme === 'dark' ? '#7cf0c8' : '#0ea5a4'};
-        --border:${tokens.previewBorder};
-        --codebg:${tokens.inputBg};
-        --warn:#ffd166;
-        --bad:#ff6b6b;
-        --good:#7cf0c8;
-        --shadow:${tokens.shadow};
-        --radius:16px;
-        --radius2:12px;
-        --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-        --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
+        --bg:${themeConfig[initialTheme].bg};
+        --panel:${themeConfig[initialTheme].panel};
+        --card:${themeConfig[initialTheme].card};
+        --text:${themeConfig[initialTheme].previewText};
+        --muted:${themeConfig[initialTheme].muted};
+        --accent:${themeConfig[initialTheme].accent};
+        --accent-solid:${themeConfig[initialTheme].accentSolid};
+        --border:${themeConfig[initialTheme].border};
+        --shadow:${themeConfig[initialTheme].shadow};
+        --input-bg:${themeConfig[initialTheme].inputBg};
+        --input-text:${themeConfig[initialTheme].inputText};
+        --scrollbar-track:${themeConfig[initialTheme].scrollbarTrack};
+        --scrollbar-thumb:${themeConfig[initialTheme].scrollbarThumb};
+        --scrollbar-thumb-hover:${themeConfig[initialTheme].scrollbarThumbHover};
+        --button-bg:${themeConfig[initialTheme].buttonBg};
+        --button-text:${themeConfig[initialTheme].buttonText};
+        --button-shadow:${themeConfig[initialTheme].buttonShadow};
+        --button-shadow-hover:${themeConfig[initialTheme].buttonShadowHover};
+        --active-bg:${themeConfig[initialTheme].activeBg};
+        --active-text:${themeConfig[initialTheme].activeText};
+        --preview-table-head:${themeConfig[initialTheme].previewTableHead};
+        --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       }
       *{box-sizing:border-box}
       html,body{height:100%}
-      html, body { scrollbar-width: thin; scrollbar-color: ${tokens.scrollbarThumb} ${tokens.scrollbarTrack}; }
+      html, body {
+        scrollbar-width: thin;
+        scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+      }
       ::-webkit-scrollbar { width: 10px; height: 10px; }
-      ::-webkit-scrollbar-track { background: ${tokens.scrollbarTrack}; }
-      ::-webkit-scrollbar-thumb { background: ${tokens.scrollbarThumb}; border-radius: 999px; border: 2px solid ${tokens.scrollbarTrack}; }
-      ::-webkit-scrollbar-thumb:hover { background: ${tokens.scrollbarThumbHover}; }
+      ::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+      ::-webkit-scrollbar-thumb {
+        background: var(--scrollbar-thumb);
+        border-radius: 8px;
+        border: 2px solid var(--scrollbar-track);
+      }
+      ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
       body{
         margin:0;
-        font-family:var(--sans);
-        color:var(--text);
-        background: radial-gradient(1100px 600px at 20% -10%, color-mix(in srgb, var(--accent) 25%, transparent), transparent 60%),
-                    radial-gradient(900px 500px at 90% 0%, color-mix(in srgb, var(--accent2) 18%, transparent), transparent 55%),
-                    linear-gradient(180deg, var(--bg), color-mix(in srgb, var(--bg) 70%, #070b14 30%) 70%);
+        background: var(--bg);
+        color: var(--text);
+        font-family: Inter, system-ui, -apple-system, sans-serif;
       }
-      a{color:var(--accent); text-decoration:none}
-      a:hover{text-decoration:none}
-      .wrap{max-width:1200px; margin:0 auto; padding:24px 18px 44px}
-      header{
-        display:flex; gap:16px; align-items:flex-start; justify-content:space-between;
-        padding:16px; border:1px solid var(--border); border-radius:var(--radius);
-        background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
-        box-shadow: var(--shadow);
+      body[data-theme="light"]{
+        background:
+          radial-gradient(circle at top left, rgba(255, 255, 255, 0.9), transparent 32%),
+          linear-gradient(180deg, #f8f5ef 0%, #f3efe6 100%);
       }
-      .title h1{margin:0 0 4px; font-size:20px; letter-spacing:.2px}
-      .title p{margin:0; color:var(--muted); line-height:1.45; font-size:13px}
-      .pillrow{display:flex; flex-wrap:wrap; gap:8px; margin-top:10px}
-      .pill{
-        font-size:12px; padding:6px 10px; border-radius:999px;
-        border:1px solid var(--border); background:rgba(255,255,255,.04);
-        color:var(--muted);
+      a{color:inherit;text-decoration:none}
+      .shell{
+        min-height:100vh;
+        display:flex;
+        flex-direction:column;
+        gap:16px;
+        padding:20px 24px 40px;
       }
-      .pill strong{color:var(--text); font-weight:600}
-      .tools{display:flex; flex-direction:column; gap:10px; min-width:280px; align-items:flex-end}
-      .btn{
+      .topbar{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:16px;
+        background:var(--panel);
         border:1px solid var(--border);
-        background:rgba(255,255,255,.05);
+        border-radius:14px;
+        padding:14px 16px;
+        box-shadow:var(--shadow);
+      }
+      .brand{display:flex;align-items:center;gap:12px}
+      .logo{
+        width:44px;height:44px;border-radius:12px;background-image:var(--accent);
+        display:grid;place-items:center;font-weight:700;color:var(--button-text);letter-spacing:.04em;
+      }
+      .brand h1{margin:0 0 6px;font-size:18px;line-height:1.2}
+      .brand p{margin:0;color:var(--muted);font-size:13px;line-height:1.45}
+      .actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:flex-end}
+      .toolbar-stack{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+      .toolbar-meta,.toolbar-nav{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:flex-end}
+      .doc-btn, .smallbtn{
+        border:none;
+        border-radius:10px;
+        padding:10px 14px;
+        font-size:14px;
+        font-weight:600;
+        background:var(--button-bg);
+        color:var(--button-text);
+        cursor:pointer;
+        box-shadow:var(--button-shadow);
+      }
+      .doc-btn:hover, .smallbtn:hover{box-shadow:var(--button-shadow-hover)}
+      .doc-btn.ghost, .smallbtn{
+        background:transparent;
         color:var(--text);
-        padding:8px 12px;
-        border-radius:999px;
+        border:1px solid var(--border);
+        box-shadow:none;
+      }
+      body[data-theme="light"] .doc-btn.ghost:hover,
+      body[data-theme="light"] .smallbtn:hover{
+        background:#f1ece2;
+        color:#171717;
+        border-color:#cfc6b6;
+      }
+      body[data-theme="dark"] .doc-btn.ghost:hover,
+      body[data-theme="dark"] .smallbtn:hover{
+        background:rgba(255,255,255,.04);
+      }
+      .badge{
+        padding:7px 10px;
+        border-radius:10px;
+        border:1px solid var(--border);
+        color:var(--muted);
         font-size:12px;
+        background:var(--panel);
+      }
+      .theme-toggle{
+        display:inline-flex;
+        align-items:center;
+        gap:10px;
+        padding:8px 12px;
+        border:1px solid var(--border);
+        border-radius:999px;
+        background:var(--panel);
+        color:var(--text);
         cursor:pointer;
       }
-      .btn:hover{background:rgba(255,255,255,.08)}
-      .layout{display:grid; grid-template-columns: 280px 1fr; gap:16px; margin-top:16px}
-      @media (max-width: 980px){
-        .layout{grid-template-columns: 1fr}
-        .tools{min-width:unset; align-items:flex-start}
-      }
-      nav{
-        position:sticky; top:16px;
-        border:1px solid var(--border); border-radius:var(--radius);
-        background:rgba(16,31,58,.65);
-        backdrop-filter: blur(10px);
-        box-shadow: var(--shadow);
-        padding:14px;
-        height: fit-content;
-      }
-      nav .navtitle{font-size:13px; color:var(--muted); margin:0 0 10px}
-      .navlist{display:flex; flex-direction:column; gap:8px}
-      .navitem{
-        display:flex; gap:8px; align-items:center;
-        padding:9px 10px; border-radius:12px;
-        border:1px solid transparent;
-        color:var(--text);
-      }
-      .navitem:hover{border-color: var(--border); background:rgba(255,255,255,.04)}
-      .badge{
-        font-family:var(--mono);
-        font-size:11px;
-        padding:3px 6px;
-        border-radius:8px;
-        border:1px solid var(--border);
-        background:rgba(0,0,0,.18);
+      .theme-toggle-label{
+        font-size:12px;
         color:var(--muted);
-        min-width:54px;
-        text-align:center;
+        user-select:none;
       }
-      main{display:flex; flex-direction:column; gap:14px}
-      .card{
+      .theme-toggle input{
+        position:absolute;
+        opacity:0;
+        pointer-events:none;
+      }
+      .theme-toggle-track{
+        width:42px;
+        height:24px;
+        border-radius:999px;
+        background:color-mix(in srgb, var(--border) 80%, transparent);
         border:1px solid var(--border);
-        border-radius:var(--radius);
-        background:rgba(16,31,58,.65);
-        backdrop-filter: blur(10px);
-        box-shadow: var(--shadow);
+        padding:2px;
+        display:inline-flex;
+        align-items:center;
+      }
+      .theme-toggle-thumb{
+        width:18px;
+        height:18px;
+        border-radius:999px;
+        background:var(--text);
+        transform:translateX(0);
+        transition:transform 140ms ease, background 140ms ease;
+      }
+      .theme-toggle input:checked + .theme-toggle-track{
+        background:var(--button-bg);
+        border-color:color-mix(in srgb, var(--button-text) 16%, var(--border));
+      }
+      .theme-toggle input:checked + .theme-toggle-track .theme-toggle-thumb{
+        transform:translateX(18px);
+        background:var(--button-text);
+      }
+      .layout{display:grid;grid-template-columns:280px 1fr;gap:16px}
+      .sidebar{
+        background:var(--panel);
+        border:1px solid var(--border);
+        border-radius:14px;
+        padding:12px;
+        box-shadow:var(--shadow);
+        display:flex;
+        flex-direction:column;
+        gap:10px;
+        position:sticky;
+        top:20px;
+        height:fit-content;
+      }
+      .sidebar-head{display:flex;justify-content:space-between;align-items:center;padding:2px 2px 6px}
+      .section-list{display:flex;flex-direction:column;gap:8px}
+      .section-item{
+        border:1px solid var(--border);
+        border-radius:10px;
+        padding:9px 10px;
+        background:var(--card);
+        color:var(--text);
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        gap:8px;
+        text-align:left;
+        transition:border-color 120ms ease, background 120ms ease, transform 120ms ease;
+      }
+      .section-item:hover{border-color:var(--accent-solid);transform:translateY(-1px)}
+      .section-item.current{
+        border-color:var(--active-bg);
+        background:var(--active-bg);
+        color:var(--active-text);
+        box-shadow:var(--button-shadow);
+      }
+      .section-item.current .chip{
+        color:var(--active-text);
+        border-color:color-mix(in srgb, var(--active-text) 20%, transparent);
+      }
+      .section-title{font-weight:600;font-size:14px;flex:1 1 auto;min-width:0}
+      .chip{
+        padding:4px 8px;
+        border-radius:999px;
+        border:1px solid var(--border);
+        font-size:12px;
+        color:var(--muted);
+      }
+      .workspace{
+        background:var(--panel);
+        border:1px solid var(--border);
+        border-radius:14px;
+        padding:12px;
+        box-shadow:var(--shadow);
+        display:flex;
+        flex-direction:column;
+        gap:10px;
+      }
+      .summary-row{display:flex;flex-direction:column;gap:12px}
+      .card{
+        background:var(--card);
+        border:1px solid var(--border);
+        border-radius:12px;
         overflow:hidden;
       }
       .cardhead{
-        padding:14px 16px;
+        padding:14px 16px 12px;
         border-bottom:1px solid var(--border);
-        display:flex; align-items:flex-start; justify-content:space-between; gap:12px;
+        display:flex;
+        align-items:flex-start;
+        justify-content:space-between;
+        gap:12px;
       }
-      .methodtitle{display:flex; flex-direction:column; gap:6px}
-      .methodtitle h2{margin:0; font-size:17px}
-      .methodmeta{display:flex; flex-wrap:wrap; gap:8px; align-items:center}
+      .methodtitle{display:flex;flex-direction:column;gap:8px}
+      .methodtitle h2{margin:0;font-size:18px;line-height:1.25}
+      .methodmeta{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
       .tag{
-        font-size:12px; padding:4px 8px; border-radius:999px;
+        font-size:11px;
+        padding:4px 8px;
+        border-radius:999px;
         border:1px solid var(--border);
-        background:rgba(0,0,0,.18);
+        background:var(--panel);
         color:var(--muted);
       }
-      .tag.get{border-color: rgba(124,240,200,.35); color: var(--accent2)}
-      .tag.post{border-color: rgba(106,166,255,.35); color: var(--accent)}
+      .tag.get,.tag.post{color:var(--text)}
+      .section{display:flex;flex-direction:column;gap:12px}
+      .section-text{
+        max-width: 78ch;
+        font-size:16px;
+        line-height:1.75;
+        color:var(--text);
+        margin-top:6px;
+        font-weight:400;
+        letter-spacing:.01em;
+      }
+      .section-text p{
+        margin:0 0 14px;
+      }
+      .section-text p:last-child{
+        margin-bottom:0;
+      }
       .url{
         font-family:var(--mono);
         font-size:12px;
-        padding:7px 10px;
-        border-radius:12px;
-        border:1px dashed rgba(255,255,255,.18);
-        background:rgba(0,0,0,.18);
-        color:var(--text);
-        display:flex; gap:10px; align-items:center;
-        max-width: 100%; overflow:auto;
+        padding:10px 12px;
+        border-radius:10px;
+        border:1px dashed var(--border);
+        background:var(--input-bg);
+        color:var(--input-text);
+        display:flex;gap:10px;align-items:center;justify-content:space-between;
+        max-width:100%;overflow:auto;
       }
-      .section{padding:14px 16px}
       details{
         border:1px solid var(--border);
-        background:rgba(0,0,0,.14);
-        border-radius:var(--radius2);
-        padding:10px 12px;
-        margin:10px 0;
+        border-radius:10px;
+        background:color-mix(in srgb, var(--panel) 96%, transparent);
+        overflow:hidden;
       }
       summary{
         cursor:pointer;
-        color:var(--text);
-        font-weight:600;
         list-style:none;
-        display:flex; align-items:center; justify-content:space-between;
+        padding:12px 14px;
+        font-weight:600;
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        font-size:15px;
       }
       summary::-webkit-details-marker{display:none}
-      .sumhint{color:var(--muted); font-weight:500; font-size:12px}
+      .sumhint{color:var(--muted);font-weight:500;font-size:12px}
       table{
         width:100%;
-        border-collapse: separate;
-        border-spacing:0;
-        overflow:hidden;
-        border:1px solid var(--border);
-        border-radius: 12px;
-        background:rgba(16,31,58,.35);
-        margin-top:10px;
-      }
-      th, td{
-        padding:10px 10px;
-        border-bottom:1px solid rgba(255,255,255,.08);
-        vertical-align:top;
+        border-collapse:collapse;
+        min-width:600px;
         font-size:13px;
-        line-height:1.35;
+      }
+      th,td{
+        padding:11px 12px;
+        border-bottom:1px solid var(--border);
+        text-align:left;
+        vertical-align:top;
       }
       th{
-        text-align:left;
-        color:var(--muted);
+        background:var(--preview-table-head);
         font-weight:600;
-        background:rgba(0,0,0,.18);
+        font-size:12px;
+        letter-spacing:.01em;
       }
-      tr:last-child td{border-bottom:0}
-      code, pre{ font-family:var(--mono); }
+      tbody tr:nth-child(odd) td{
+        background:color-mix(in srgb, var(--card) 96%, transparent);
+      }
+      .table-shell{border-top:1px solid var(--border);overflow:auto}
       pre{
-        margin:10px 0 0;
-        background:var(--codebg);
-        border:1px solid rgba(255,255,255,.12);
-        border-radius:12px;
-        padding:12px 12px;
+        margin:0;
+        background:var(--input-bg);
+        color:var(--input-text);
+        border:1px solid var(--border);
+        border-radius:10px;
+        padding:12px;
         overflow:auto;
         position:relative;
         font-size:12px;
         line-height:1.5;
+        font-family:var(--mono);
       }
-      .pretools{ position:absolute; top:8px; right:8px; display:flex; gap:8px; }
-      .smallbtn{
-        font-size:11px;
-        padding:6px 8px;
-        border-radius:10px;
-        border:1px solid rgba(255,255,255,.14);
-        background:rgba(255,255,255,.05);
-        color:var(--text);
-      }
+      .pretools{position:absolute;top:8px;right:8px;display:flex;gap:8px}
       .note{
-        border-left:3px solid rgba(106,166,255,.65);
-        background:rgba(106,166,255,.08);
+        border-radius:10px;
         padding:10px 12px;
-        border-radius:12px;
-        color:var(--text);
-        margin-top:10px;
-        font-size:13px;
-        line-height:1.45;
+        border:1px solid var(--border);
+        background:color-mix(in srgb, var(--panel) 92%, transparent);
       }
-      .note.warn{border-left-color: rgba(255,209,102,.8); background:rgba(255,209,102,.08)}
-      .note.bad{border-left-color: rgba(255,107,107,.8); background:rgba(255,107,107,.08)}
+      .note.bad{border-color:#ef4444;color:#ef4444}
       .muted{color:var(--muted)}
+      body[data-theme="light"] .theme-toggle{
+        background:#fffdfa;
+        border-color:#d8d1c2;
+      }
+      body[data-theme="light"] .theme-toggle-track{
+        background:#ece6da;
+        border-color:#d6cdbc;
+      }
+      body[data-theme="light"] .theme-toggle-thumb{
+        background:#111111;
+      }
+      body[data-theme="light"] .theme-toggle input:checked + .theme-toggle-track{
+        background:#111111;
+        border-color:#111111;
+      }
+      body[data-theme="light"] .theme-toggle input:checked + .theme-toggle-track .theme-toggle-thumb{
+        background:#ffffff;
+      }
+      body[data-theme="light"] .topbar,
+      body[data-theme="light"] .sidebar,
+      body[data-theme="light"] .workspace{
+        background:color-mix(in srgb, var(--panel) 92%, #ffffff 8%);
+        border-color:#d8d1c2;
+        box-shadow:0 10px 24px rgba(15, 23, 42, 0.05);
+      }
+      body[data-theme="light"] .card{
+        background:#fffdfa;
+        border-color:#ddd5c7;
+      }
+      body[data-theme="light"] .section-item{
+        background:#fffdfa;
+        border-color:#dfd9cc;
+      }
+      body[data-theme="light"] .section-item:hover{
+        border-color:#b8ae9c;
+        background:#faf6ee;
+      }
+      body[data-theme="light"] .section-item.current{
+        background:#111111;
+        color:#ffffff;
+        border-color:#111111;
+        box-shadow:0 10px 20px rgba(17, 17, 17, 0.14);
+      }
+      body[data-theme="light"] .section-item.current .chip{
+        color:#ffffff;
+        border-color:rgba(255,255,255,.22);
+      }
+      body[data-theme="light"] .doc-btn.ghost:hover,
+      body[data-theme="light"] .smallbtn:hover{
+        background:#f1ece2;
+        color:#171717;
+        border-color:#cfc6b6;
+      }
+      body[data-theme="light"] details{
+        background:#fffdfa;
+      }
+      body[data-theme="light"] th{
+        background:#f3efe6;
+      }
+      @media (max-width: 1024px){
+        .layout{grid-template-columns:1fr}
+        .sidebar{position:static;min-height:auto}
+        .actions,.toolbar-stack,.toolbar-meta,.toolbar-nav{justify-content:flex-start;align-items:flex-start}
+      }
     </style>`,
     '</head>',
-    '<body>',
-    '<div class="wrap">',
-    '<header>',
-    '<div class="title">',
+    `<body data-theme="${initialTheme}">`,
+    '<div class="shell">',
+    '<header class="topbar">',
+    '<div class="brand">',
+    '<div class="logo">DB</div>',
+    '<div>',
     '<h1>Документация API</h1>',
-    '<div class="pillrow">',
-    `<span class="pill"><strong>Sections:</strong> ${visibleSections.length}</span>`,
-    requestSection ? `<span class="pill"><strong>Auth:</strong> ${escapeHtml(authInfo?.schemeLabel ?? 'None')}</span>` : '',
-    requestSection ? `<span class="pill"><strong>Format:</strong> ${escapeHtml(requestSection.format.toUpperCase())}</span>` : '',
+    '<p>Экспортируемая версия документации в том же оформлении, что и редактор.</p>',
     '</div>',
     '</div>',
-    '<div class="tools">',
-    '<div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end">',
-    renderButton('Overview', '#top'),
-    visibleSections.find((section) => section.id === 'request') ? renderButton('Request', '#request') : '',
-    visibleSections.find((section) => section.id === 'response') ? renderButton('Response', '#response') : '',
+    '<div class="toolbar-stack">',
+    '<div class="toolbar-meta">',
+    `<span class="badge">Sections: ${visibleSections.length}</span>`,
+    requestSection ? `<span class="badge">Auth: ${escapeHtml(authInfo?.schemeLabel ?? 'None')}</span>` : '',
+    requestSection ? `<span class="badge">Format: ${escapeHtml(requestSection.format.toUpperCase())}</span>` : '',
+    '<label class="theme-toggle" aria-label="Переключить тему">',
+    '<span class="theme-toggle-label">Темная</span>',
+    `<input type="checkbox" id="theme-toggle" ${initialTheme === 'light' ? 'checked' : ''} />`,
+    '<span class="theme-toggle-track" aria-hidden="true"><span class="theme-toggle-thumb"></span></span>',
+    '<span class="theme-toggle-label">Светлая</span>',
+    '</label>',
+    '</div>',
+    '<div class="toolbar-nav">',
+    renderButton('К началу', '#top', 'ghost'),
+    visibleSections.find((section) => section.id === 'request') ? renderButton('Request', '#request', 'ghost') : '',
+    visibleSections.find((section) => section.id === 'response') ? renderButton('Response', '#response', 'ghost') : '',
     '</div>',
     '</div>',
     '</header>',
     '<div class="layout" id="top">',
     renderSidebar(visibleSections),
-    `<main id="content">${blocks.join('')}</main>`,
+    `<main class="workspace" id="content"><div class="summary-row">${blocks.join('')}</div></main>`,
     '</div>',
     '</div>',
+    `<script>
+      const themes = ${JSON.stringify(themeConfig)};
+      const root = document.documentElement;
+      const body = document.body;
+      const toggle = document.getElementById('theme-toggle');
+      const tokenMap = {
+        bg: '--bg',
+        panel: '--panel',
+        card: '--card',
+        previewText: '--text',
+        muted: '--muted',
+        accent: '--accent',
+        accentSolid: '--accent-solid',
+        border: '--border',
+        shadow: '--shadow',
+        inputBg: '--input-bg',
+        inputText: '--input-text',
+        scrollbarTrack: '--scrollbar-track',
+        scrollbarThumb: '--scrollbar-thumb',
+        scrollbarThumbHover: '--scrollbar-thumb-hover',
+        buttonBg: '--button-bg',
+        buttonText: '--button-text',
+        buttonShadow: '--button-shadow',
+        buttonShadowHover: '--button-shadow-hover',
+        activeBg: '--active-bg',
+        activeText: '--active-text',
+        previewTableHead: '--preview-table-head'
+      };
+      function applyTheme(nextTheme) {
+        const tokens = themes[nextTheme];
+        body.dataset.theme = nextTheme;
+        root.style.colorScheme = nextTheme;
+        Object.entries(tokenMap).forEach(([key, cssVar]) => {
+          root.style.setProperty(cssVar, tokens[key]);
+        });
+        if (toggle instanceof HTMLInputElement) {
+          toggle.checked = nextTheme === 'light';
+        }
+      }
+      toggle?.addEventListener('change', () => {
+        applyTheme(body.dataset.theme === 'dark' ? 'light' : 'dark');
+      });
+      document.addEventListener('click', async (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+        const copyText = target.dataset.copyText;
+        const copyTarget = target.dataset.copyTarget;
+        if (!copyText && !copyTarget) return;
+        let value = copyText || '';
+        if (copyTarget) {
+          const node = document.getElementById(copyTarget);
+          value = node?.textContent || '';
+        }
+        if (!value) return;
+        try {
+          await navigator.clipboard.writeText(value);
+          const previous = target.textContent;
+          target.textContent = 'Copied';
+          setTimeout(() => {
+            target.textContent = previous;
+          }, 900);
+        } catch {}
+      });
+      const sections = Array.from(document.querySelectorAll('main section[id]'));
+      const navLinks = Array.from(document.querySelectorAll('[data-section-link]'));
+      const setCurrentSection = (id) => {
+        navLinks.forEach((link) => {
+          link.classList.toggle('current', link.dataset.sectionLink === id);
+        });
+      };
+      if (sections.length > 0) {
+        setCurrentSection(sections[0].id);
+        const observer = new IntersectionObserver(
+          (entries) => {
+            const visible = entries
+              .filter((entry) => entry.isIntersecting)
+              .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+            if (visible) setCurrentSection(visible.target.id);
+          },
+          { rootMargin: '-18% 0px -58% 0px', threshold: [0.1, 0.35, 0.6] }
+        );
+        sections.forEach((section) => observer.observe(section));
+      }
+      applyTheme(body.dataset.theme || 'dark');
+    </script>`,
     '</body>',
     '</html>'
   ].join('\n');

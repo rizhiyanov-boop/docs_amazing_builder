@@ -36,7 +36,9 @@ export function resolveSectionTitle(title: string): string {
 }
 
 export function sanitizeSections(sections: DocSection[]): DocSection[] {
-  return sections.map((section) => {
+  return sections
+    .filter((section) => section.id !== 'external-url')
+    .map((section) => {
     const normalizedSection =
       section.kind === 'parsed' && section.id === 'body'
         ? { ...section, id: 'response', title: section.title === 'Body / Выходные параметры' ? 'Response' : section.title }

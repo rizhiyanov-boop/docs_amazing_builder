@@ -32,7 +32,7 @@ import type { DocSection, ParsedRow, ParsedSection, ParseFormat, ProjectData, Re
 
 const STORAGE_KEY = 'doc-builder-project-v2';
 
-type TabKey = 'editor' | 'html' | 'wiki' | 'split';
+type TabKey = 'editor' | 'html' | 'wiki';
 type AutosaveState = 'idle' | 'saving' | 'saved' | 'error';
 type ParseTarget = 'server' | 'client';
 
@@ -320,7 +320,8 @@ export default function App() {
       ? Boolean((selectedSection.clientRows ?? []).length > 0 && selectedSection.clientLastSyncedFormat && selectedSection.clientLastSyncedFormat !== (selectedSection.clientFormat ?? 'json'))
       : false;
 
-  const htmlOutput = useMemo(() => renderHtmlDocument(sections, theme), [sections, theme]);
+  const htmlOutput = useMemo(() => renderHtmlDocument(sections, theme, { interactive: true }), [sections, theme]);
+  const htmlPreviewOutput = useMemo(() => renderHtmlDocument(sections, theme, { interactive: false }), [sections, theme]);
   const wikiOutput = useMemo(() => renderWikiDocument(sections), [sections]);
 
   useEffect(() => {
@@ -1574,7 +1575,7 @@ export default function App() {
 
         <main className="workspace" role="main">
           <div className="tabs" role="tablist" aria-label="Просмотр">
-            {['editor', 'html', 'wiki', 'split'].map((key) => (
+            {['editor', 'html', 'wiki'].map((key) => (
               <button
                 key={key}
                 role="tab"
@@ -1585,14 +1586,13 @@ export default function App() {
                 {key === 'editor' && 'Редактор'}
                 {key === 'html' && 'HTML'}
                 {key === 'wiki' && 'Wiki'}
-                {key === 'split' && 'Split'}
               </button>
             ))}
           </div>
 
           {selectedSection ? (
-            <div className={`panes ${tab === 'split' ? 'split' : ''}`}>
-              {(tab === 'editor' || tab === 'split') && (
+            <div className="panes">
+              {tab === 'editor' && (
                 <section className="panel">
                   <div className="panel-head">
                     <div>
@@ -1690,7 +1690,7 @@ export default function App() {
                 </section>
               )}
 
-              {(tab === 'html' || tab === 'split') && (
+              {tab === 'html' && (
                 <section className={tab === 'html' ? 'panel panel-html-preview' : 'panel'}>
                   <div className="panel-head">
                     <div className="panel-title">Предпросмотр HTML</div>
@@ -1702,12 +1702,12 @@ export default function App() {
                     className={tab === 'html' ? 'preview-frame preview-frame-full' : 'preview-frame'}
                     title="HTML preview"
                     sandbox="allow-same-origin"
-                    srcDoc={htmlOutput}
+                    srcDoc={htmlPreviewOutput}
                   />
                 </section>
               )}
 
-              {(tab === 'wiki' || tab === 'split') && (
+              {tab === 'wiki' && (
                 <section className="panel">
                   <div className="panel-head">
                     <div className="panel-title">Предпросмотр Wiki</div>
@@ -1715,7 +1715,7 @@ export default function App() {
                       Скачать
                     </button>
                   </div>
-                  <textarea className="code" readOnly value={wikiOutput} rows={tab === 'split' ? 14 : 24} />
+                  <textarea className="code" readOnly value={wikiOutput} rows={24} />
                 </section>
               )}
             </div>

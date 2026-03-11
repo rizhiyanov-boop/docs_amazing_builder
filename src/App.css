@@ -339,10 +339,6 @@ button.primary {
   gap: 12px;
 }
 
-.panes.split {
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-}
-
 .panel {
   background: var(--card);
   border: 1px solid var(--border);

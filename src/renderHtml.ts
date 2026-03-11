@@ -5,6 +5,10 @@ import { getThemeTokens } from './theme';
 import type { ThemeName } from './theme';
 import type { DocSection, ParsedRow, ParsedSection, TextSection } from './types';
 
+type RenderHtmlOptions = {
+  interactive?: boolean;
+};
+
 function escapeHtml(value: string): string {
   return value
     .replaceAll('&', '&amp;')
@@ -54,25 +58,29 @@ function renderTag(label: string, kind = ''): string {
   return `<span class="tag ${kind}">${escapeHtml(label)}</span>`;
 }
 
-function renderButton(label: string, href: string, kind = 'ghost'): string {
+function renderButton(label: string, href: string, kind = 'ghost', interactive = true): string {
+  if (!interactive) return `<span class="doc-btn ${kind} disabled">${escapeHtml(label)}</span>`;
   return `<a class="doc-btn ${kind}" href="${escapeHtml(href)}">${escapeHtml(label)}</a>`;
 }
 
-function renderUrl(value: string, label = 'URL'): string {
+function renderUrl(value: string, label = 'URL', interactive = true): string {
   if (!value.trim()) return '';
-  return `<div class="url"><span>${escapeHtml(label)}: ${escapeHtml(value)}</span><button class="smallbtn" type="button" data-copy-text="${escapeHtml(
-    value
-  )}">Copy</button></div>`;
+  const action = interactive
+    ? `<button class="smallbtn" type="button" data-copy-text="${escapeHtml(value)}">Copy</button>`
+    : '';
+  return `<div class="url"><span>${escapeHtml(label)}: ${escapeHtml(value)}</span>${action}</div>`;
 }
 
-function renderCodeBlock(id: string, title: string, content: string): string {
+function renderCodeBlock(id: string, title: string, content: string, interactive = true): string {
   if (!content.trim()) return '';
   return [
     '<details open>',
     `<summary>${escapeHtml(title)} <span class="sumhint">example</span></summary>`,
-    `<pre><div class="pretools"><button class="smallbtn" type="button" data-copy-target="${escapeHtml(
-      id
-    )}">Copy</button></div><code id="${escapeHtml(id)}">${escapeHtml(content.trim())}</code></pre>`,
+    `<pre>${
+      interactive
+        ? `<div class="pretools"><button class="smallbtn" type="button" data-copy-target="${escapeHtml(id)}">Copy</button></div>`
+        : ''
+    }<code id="${escapeHtml(id)}">${escapeHtml(content.trim())}</code></pre>`,
     '</details>'
   ].join('');
 }
@@ -109,7 +117,7 @@ function renderStructuredTable(rows: ParsedRow[], section: ParsedSection): strin
   return `<table><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
-function wrapCard(id: string, title: string, meta: string, body: string, path = '', method = ''): string {
+function wrapCard(id: string, title: string, meta: string, body: string, path = '', method = '', interactive = true): string {
   return [
     `<section class="card" id="${escapeHtml(id)}">`,
     '<div class="cardhead">',
@@ -117,7 +125,7 @@ function wrapCard(id: string, title: string, meta: string, body: string, path = 
     `<h2>${escapeHtml(title)}</h2>`,
     meta ? `<div class="methodmeta">${meta}</div>` : '',
     '</div>',
-    path ? `<div>${renderUrl(path, method || 'Path')}</div>` : '<div></div>',
+    path ? `<div>${renderUrl(path, method || 'Path', interactive)}</div>` : '<div></div>',
     '</div>',
     `<div class="section">${body}</div>`,
     '</section>'
@@ -151,7 +159,7 @@ function renderAuthDetails(section: ParsedSection): string {
   ].join('');
 }
 
-function renderRequestSection(section: ParsedSection): string {
+function renderRequestSection(section: ParsedSection, interactive = true): string {
   const title = resolveSectionTitle(section.title);
   const { headers, otherRows, urlRow } = splitRequestRows(getRequestRows(section));
   const requestError = section.error || section.clientError;
@@ -165,17 +173,17 @@ function renderRequestSection(section: ParsedSection): string {
     otherRows.length > 0
       ? `<details open><summary>Request schema <span class="sumhint">${section.format.toUpperCase()}</span></summary>${renderStructuredTable(otherRows, section)}</details>`
       : '',
-    renderCodeBlock('request-server-example', 'Server request example', section.input),
-    section.domainModelEnabled ? renderCodeBlock('request-client-example', 'Client request example', section.clientInput ?? '') : '',
+    renderCodeBlock('request-server-example', 'Server request example', section.input, interactive),
+    section.domainModelEnabled ? renderCodeBlock('request-client-example', 'Client request example', section.clientInput ?? '', interactive) : '',
     requestError ? `<div class="note bad"><b>Ошибка секции</b><br/>${escapeHtml(requestError)}</div>` : ''
   ]
     .filter(Boolean)
     .join('');
 
-  return wrapCard(section.id, title, meta, body, urlRow?.example ?? '', section.format.toUpperCase());
+  return wrapCard(section.id, title, meta, body, urlRow?.example ?? '', section.format.toUpperCase(), interactive);
 }
 
-function renderResponseSection(section: ParsedSection): string {
+function renderResponseSection(section: ParsedSection, interactive = true): string {
   const title = resolveSectionTitle(section.title);
   const rows = getRequestRows(section);
   const responseError = section.error || section.clientError;
@@ -185,34 +193,34 @@ function renderResponseSection(section: ParsedSection): string {
     rows.length > 0
       ? `<details open><summary>Response schema <span class="sumhint">${rows.length} rows</span></summary>${renderStructuredTable(rows, section)}</details>`
       : '',
-    renderCodeBlock('response-server-example', 'Server response example', section.input),
-    section.domainModelEnabled ? renderCodeBlock('response-client-example', 'Client response example', section.clientInput ?? '') : '',
+    renderCodeBlock('response-server-example', 'Server response example', section.input, interactive),
+    section.domainModelEnabled ? renderCodeBlock('response-client-example', 'Client response example', section.clientInput ?? '', interactive) : '',
     responseError ? `<div class="note bad"><b>Ошибка секции</b><br/>${escapeHtml(responseError)}</div>` : ''
   ]
     .filter(Boolean)
     .join('');
 
-  return wrapCard(section.id, title, meta, body);
+  return wrapCard(section.id, title, meta, body, '', '', interactive);
 }
 
-function renderGenericParsedSection(section: ParsedSection): string {
+function renderGenericParsedSection(section: ParsedSection, interactive = true): string {
   const title = resolveSectionTitle(section.title);
   const meta = renderTag(section.format.toUpperCase());
   const body = [
     `<details open><summary>Schema <span class="sumhint">${section.rows.length} rows</span></summary>${renderDefaultTable(section.rows)}</details>`,
-    renderCodeBlock(`${section.id}-example`, `${title} example`, section.input),
+    renderCodeBlock(`${section.id}-example`, `${title} example`, section.input, interactive),
     section.error ? `<div class="note bad"><b>Ошибка секции</b><br/>${escapeHtml(section.error)}</div>` : ''
   ]
     .filter(Boolean)
     .join('');
 
-  return wrapCard(section.id, title, meta, body);
+  return wrapCard(section.id, title, meta, body, '', '', interactive);
 }
 
-function renderParsedSection(section: ParsedSection): string {
-  if (section.id === 'request') return renderRequestSection(section);
-  if (section.id === 'response') return renderResponseSection(section);
-  return renderGenericParsedSection(section);
+function renderParsedSection(section: ParsedSection, interactive = true): string {
+  if (section.id === 'request') return renderRequestSection(section, interactive);
+  if (section.id === 'response') return renderResponseSection(section, interactive);
+  return renderGenericParsedSection(section, interactive);
 }
 
 function getVisibleSections(sections: DocSection[]): DocSection[] {
@@ -221,10 +229,13 @@ function getVisibleSections(sections: DocSection[]): DocSection[] {
   );
 }
 
-function renderSidebar(sections: DocSection[]): string {
+function renderSidebar(sections: DocSection[], interactive = true): string {
   const items = sections
     .map((section) => {
       const badge = section.kind === 'parsed' ? `<span class="chip">${escapeHtml(section.format.toUpperCase())}</span>` : '';
+      if (!interactive) {
+        return `<div class="section-item">${badge}<span class="section-title">${escapeHtml(resolveSectionTitle(section.title))}</span></div>`;
+      }
       return `<a class="section-item" data-section-link="${escapeHtml(section.id)}" href="#${escapeHtml(section.id)}">${badge}<span class="section-title">${escapeHtml(
         resolveSectionTitle(section.title)
       )}</span></a>`;
@@ -234,9 +245,10 @@ function renderSidebar(sections: DocSection[]): string {
   return [`<aside class="sidebar"><div class="sidebar-head"><strong>Секции</strong></div><div class="section-list">${items}</div></aside>`].join('');
 }
 
-export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'dark'): string {
+export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'dark', options: RenderHtmlOptions = {}): string {
+  const interactive = options.interactive ?? true;
   const visibleSections = getVisibleSections(sections);
-  const blocks = visibleSections.map((section) => (section.kind === 'text' ? renderTextSection(section) : renderParsedSection(section)));
+  const blocks = visibleSections.map((section) => (section.kind === 'text' ? renderTextSection(section) : renderParsedSection(section, interactive)));
   const darkTokens = getThemeTokens('dark');
   const lightTokens = getThemeTokens('light');
   const requestSection = sections.find((section) => section.kind === 'parsed' && section.id === 'request') as ParsedSection | undefined;
@@ -350,6 +362,10 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
         color:var(--text);
         border:1px solid var(--border);
         box-shadow:none;
+      }
+      .doc-btn.disabled{
+        pointer-events:none;
+        opacity:.7;
       }
       body[data-theme="light"] .doc-btn.ghost:hover,
       body[data-theme="light"] .smallbtn:hover{
@@ -671,26 +687,31 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
     `<span class="badge">Sections: ${visibleSections.length}</span>`,
     requestSection ? `<span class="badge">Auth: ${escapeHtml(authInfo?.schemeLabel ?? 'None')}</span>` : '',
     requestSection ? `<span class="badge">Format: ${escapeHtml(requestSection.format.toUpperCase())}</span>` : '',
-    '<label class="theme-toggle" aria-label="Переключить тему">',
-    '<span class="theme-toggle-label">Темная</span>',
-    `<input type="checkbox" id="theme-toggle" ${initialTheme === 'light' ? 'checked' : ''} />`,
-    '<span class="theme-toggle-track" aria-hidden="true"><span class="theme-toggle-thumb"></span></span>',
-    '<span class="theme-toggle-label">Светлая</span>',
-    '</label>',
+    interactive
+      ? [
+          '<label class="theme-toggle" aria-label="Переключить тему">',
+          '<span class="theme-toggle-label">Темная</span>',
+          `<input type="checkbox" id="theme-toggle" ${initialTheme === 'light' ? 'checked' : ''} />`,
+          '<span class="theme-toggle-track" aria-hidden="true"><span class="theme-toggle-thumb"></span></span>',
+          '<span class="theme-toggle-label">Светлая</span>',
+          '</label>'
+        ].join('')
+      : '<span class="badge">Preview</span>',
     '</div>',
     '<div class="toolbar-nav">',
-    renderButton('К началу', '#top', 'ghost'),
-    visibleSections.find((section) => section.id === 'request') ? renderButton('Request', '#request', 'ghost') : '',
-    visibleSections.find((section) => section.id === 'response') ? renderButton('Response', '#response', 'ghost') : '',
+    renderButton('К началу', '#top', 'ghost', interactive),
+    visibleSections.find((section) => section.id === 'request') ? renderButton('Request', '#request', 'ghost', interactive) : '',
+    visibleSections.find((section) => section.id === 'response') ? renderButton('Response', '#response', 'ghost', interactive) : '',
     '</div>',
     '</div>',
     '</header>',
     '<div class="layout" id="top">',
-    renderSidebar(visibleSections),
+    renderSidebar(visibleSections, interactive),
     `<main class="workspace" id="content"><div class="summary-row">${blocks.join('')}</div></main>`,
     '</div>',
     '</div>',
-    `<script>
+    interactive
+      ? `<script>
       const themes = ${JSON.stringify(themeConfig)};
       const root = document.documentElement;
       const body = document.body;
@@ -753,28 +774,22 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
           }, 900);
         } catch {}
       });
-      const sections = Array.from(document.querySelectorAll('main section[id]'));
       const navLinks = Array.from(document.querySelectorAll('[data-section-link]'));
       const setCurrentSection = (id) => {
         navLinks.forEach((link) => {
           link.classList.toggle('current', link.dataset.sectionLink === id);
         });
       };
-      if (sections.length > 0) {
-        setCurrentSection(sections[0].id);
-        const observer = new IntersectionObserver(
-          (entries) => {
-            const visible = entries
-              .filter((entry) => entry.isIntersecting)
-              .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-            if (visible) setCurrentSection(visible.target.id);
-          },
-          { rootMargin: '-18% 0px -58% 0px', threshold: [0.1, 0.35, 0.6] }
-        );
-        sections.forEach((section) => observer.observe(section));
-      }
+      const syncCurrentFromHash = () => {
+        const currentHash = window.location.hash.replace('#', '');
+        const fallback = navLinks[0]?.dataset.sectionLink || '';
+        setCurrentSection(currentHash || fallback);
+      };
+      window.addEventListener('hashchange', syncCurrentFromHash);
+      syncCurrentFromHash();
       applyTheme(body.dataset.theme || 'dark');
-    </script>`,
+    </script>`
+      : '',
     '</body>',
     '</html>'
   ].join('\n');

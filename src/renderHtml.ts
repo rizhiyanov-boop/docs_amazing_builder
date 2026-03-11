@@ -234,6 +234,26 @@ function renderRequestSection(section: ParsedSection, interactive = true): strin
   const requestUrl = section.requestUrl?.trim() || (urlRow?.example ?? '');
   const requestMethod = section.requestMethod?.trim() || section.format.toUpperCase();
   const requestProtocol = section.requestProtocol?.trim() || 'REST';
+  const externalRequestUrl = section.externalRequestUrl?.trim() || '';
+  const externalRequestMethod = section.externalRequestMethod?.trim() || 'POST';
+  const externalAuthHeader =
+    section.externalAuthType === 'bearer'
+      ? [{ field: 'Authorization', type: 'string', required: '+', description: 'Авторизация: Bearer token', example: `Bearer ${section.externalAuthTokenExample?.trim() || 'token'}` }]
+      : section.externalAuthType === 'basic'
+        ? [{ field: 'Authorization', type: 'string', required: '+', description: 'Авторизация: Basic auth', example: 'Basic <base64(username:password)>' }]
+        : section.externalAuthType === 'api-key'
+          ? [{
+              field: section.externalAuthHeaderName?.trim() || 'X-API-Key',
+              type: 'string',
+              required: '+',
+              description: 'Авторизация: API key',
+              example: section.externalAuthApiKeyExample?.trim() || ''
+            }]
+          : [];
+  const externalHeaders = [
+    ...externalAuthHeader.map((row) => ({ ...row, source: 'header' as const })),
+    ...(section.clientRows ?? []).filter((row) => row.source === 'header' && row.enabled !== false)
+  ];
   const serverCurl = buildInputFromRows(
     'curl',
     [...getRequestHeaderRows(section).filter((row) => row.enabled !== false), ...section.rows.filter((row) => row.source !== 'header')],
@@ -241,7 +261,7 @@ function renderRequestSection(section: ParsedSection, interactive = true): strin
   );
   const clientCurl =
     section.domainModelEnabled && (section.clientRows?.length ?? 0) > 0
-      ? buildInputFromRows('curl', section.clientRows ?? [], { requestUrl, requestMethod: section.requestMethod })
+      ? buildInputFromRows('curl', externalHeaders.concat((section.clientRows ?? []).filter((row) => row.source !== 'header')), { requestUrl: externalRequestUrl, requestMethod: section.externalRequestMethod })
       : '';
   const meta = [renderTag(requestMethod), renderTag(requestProtocol), renderTag(section.format.toUpperCase())].join(' ');
   const body = [
@@ -258,6 +278,17 @@ function renderRequestSection(section: ParsedSection, interactive = true): strin
       : '',
     renderCodeBlock(`${section.id}-server-example`, 'Server request example', section.input, interactive, section.format),
     renderCodeBlock(`${section.id}-server-curl`, 'Server cURL', serverCurl, interactive),
+    section.domainModelEnabled
+      ? `<details open><summary>Внешний вызов <span class="sumhint">${escapeHtml(requestProtocol)}</span></summary><table><tbody><tr><td>Внешний URL</td><td>${renderCell(
+          externalRequestUrl
+        )}</td></tr><tr><td>Метод</td><td>${renderCell(externalRequestMethod)}</td></tr><tr><td>Протокол</td><td>${renderCell(requestProtocol)}</td></tr></tbody></table></details>`
+      : '',
+    section.domainModelEnabled && externalHeaders.length > 0
+      ? `<details open><summary>Внешние headers <span class="sumhint">${externalHeaders.length} headers</span></summary>${renderStructuredTable(
+          externalHeaders,
+          section
+        )}</details>`
+      : '',
     section.domainModelEnabled
       ? renderCodeBlock(`${section.id}-client-example`, 'Client request example', section.clientInput ?? '', interactive, section.clientFormat ?? 'json')
       : '',

@@ -101,6 +101,9 @@ function renderRequestSection(section: ParsedSection): string[] {
   const requestUrl = section.requestUrl?.trim() || (urlRow?.example ?? '');
   const requestMethod = section.requestMethod?.trim() || section.format.toUpperCase();
   const requestProtocol = section.requestProtocol?.trim() || 'REST';
+  const externalRequestUrl = section.externalRequestUrl?.trim() || '';
+  const externalRequestMethod = section.externalRequestMethod?.trim() || 'POST';
+  const externalHeaders = (section.clientRows ?? []).filter((row) => row.source === 'header' && row.enabled !== false);
 
   lines.push('');
   lines.push('h3. Общее описание метода');
@@ -124,6 +127,22 @@ function renderRequestSection(section: ParsedSection): string[] {
     lines.push('h3. Headers');
     lines.push('');
     lines.push(...renderStructuredTable(headers, section));
+  }
+  if (section.domainModelEnabled) {
+    lines.push('');
+    lines.push('h3. Внешний вызов');
+    lines.push('');
+    if (externalRequestUrl) {
+      lines.push(`*Внешний URL:* ${toWikiCell(externalRequestUrl)}`);
+    }
+    lines.push(`*Метод:* ${toWikiCell(externalRequestMethod)}`);
+    lines.push(`*Протокол:* ${toWikiCell(requestProtocol)}`);
+  }
+  if (externalHeaders.length > 0) {
+    lines.push('');
+    lines.push('h3. Внешние headers');
+    lines.push('');
+    lines.push(...renderStructuredTable(externalHeaders, section));
   }
   if (requestError) {
     lines.push('');

@@ -83,7 +83,15 @@ export function sanitizeSections(sections: DocSection[]): DocSection[] {
       authApiKeyExample: sectionType === 'request' ? normalizedSection.authApiKeyExample ?? DEFAULT_API_KEY_EXAMPLE : undefined,
       requestUrl: sectionType === 'request' ? normalizedSection.requestUrl ?? '' : undefined,
       requestMethod: sectionType === 'request' ? normalizedSection.requestMethod ?? 'POST' : undefined,
-      requestProtocol: sectionType === 'request' ? normalizedSection.requestProtocol ?? 'REST' : undefined
+      requestProtocol: sectionType === 'request' ? normalizedSection.requestProtocol ?? 'REST' : undefined,
+      externalRequestUrl: sectionType === 'request' ? normalizedSection.externalRequestUrl ?? '' : undefined,
+      externalRequestMethod: sectionType === 'request' ? normalizedSection.externalRequestMethod ?? 'POST' : undefined,
+      externalAuthType: sectionType === 'request' ? normalizedSection.externalAuthType ?? 'none' : undefined,
+      externalAuthHeaderName: sectionType === 'request' ? normalizedSection.externalAuthHeaderName ?? DEFAULT_API_KEY_HEADER : undefined,
+      externalAuthTokenExample: sectionType === 'request' ? normalizedSection.externalAuthTokenExample ?? DEFAULT_BEARER_TOKEN_EXAMPLE : undefined,
+      externalAuthUsername: sectionType === 'request' ? normalizedSection.externalAuthUsername ?? DEFAULT_BASIC_USERNAME : undefined,
+      externalAuthPassword: sectionType === 'request' ? normalizedSection.externalAuthPassword ?? DEFAULT_BASIC_PASSWORD : undefined,
+      externalAuthApiKeyExample: sectionType === 'request' ? normalizedSection.externalAuthApiKeyExample ?? DEFAULT_API_KEY_EXAMPLE : undefined
     };
   });
 }

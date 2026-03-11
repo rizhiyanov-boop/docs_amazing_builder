@@ -60,6 +60,14 @@ export interface ParsedSection extends BaseSection {
   requestUrl?: string;
   requestMethod?: RequestMethod;
   requestProtocol?: RequestProtocol;
+  externalRequestUrl?: string;
+  externalRequestMethod?: RequestMethod;
+  externalAuthType?: RequestAuthType;
+  externalAuthHeaderName?: string;
+  externalAuthTokenExample?: string;
+  externalAuthUsername?: string;
+  externalAuthPassword?: string;
+  externalAuthApiKeyExample?: string;
 }
 
 export type DocSection = TextSection | ParsedSection;

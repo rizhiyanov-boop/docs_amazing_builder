@@ -19,8 +19,7 @@ import {
   isAuthHeader,
   isDefaultRequestHeader,
   isRequestMappingRow,
-  OPTIONAL_MARK,
-  getRequestAuthInfo
+  OPTIONAL_MARK
 } from './requestHeaders';
 import { renderHtmlDocument } from './renderHtml';
 import { editorElementToWikiText, escapeRichTextHtml, richTextToHtml } from './richText';
@@ -89,22 +88,26 @@ const TYPE_OPTIONS_EXTENDED = [
 ];
 const REQUIRED_OPTIONS = ['+', OPTIONAL_MARK, '-'];
 const STRUCTURED_EXAMPLE_PLACEHOLDER = '-';
-const ADDABLE_BLOCK_TYPES: Array<{ type: 'text' | 'request' | 'response'; label: string }> = [
+type AddableBlockType = 'text' | 'request' | 'response' | 'error-logic';
+
+const ADDABLE_BLOCK_TYPES: Array<{ type: AddableBlockType; label: string }> = [
   { type: 'text', label: 'Текстовый блок' },
   { type: 'request', label: 'Request блок' },
-  { type: 'response', label: 'Response блок' }
+  { type: 'response', label: 'Response блок' },
+  { type: 'error-logic', label: 'Логика обработки ошибок' }
 ];
-const AUTO_SECTION_TITLE_BASE: Record<'text' | 'request' | 'response', string> = {
+const AUTO_SECTION_TITLE_BASE: Record<AddableBlockType, string> = {
   text: 'Текстовый блок',
   request: 'Request блок',
-  response: 'Response блок'
+  response: 'Response блок',
+  'error-logic': 'Логика обработки ошибок'
 };
 
 function usesStructuredPlaceholder(type: string): boolean {
   return ['object', 'array', 'array_object'].includes(type);
 }
 
-function createAutoSectionTitle(sections: DocSection[], type: 'text' | 'request' | 'response'): string {
+function createAutoSectionTitle(sections: DocSection[], type: AddableBlockType): string {
   const baseTitle = AUTO_SECTION_TITLE_BASE[type];
   const escapedBase = baseTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const matcher = new RegExp(`^${escapedBase}(?:\\s+(\\d+))?$`);
@@ -120,8 +123,8 @@ function createAutoSectionTitle(sections: DocSection[], type: 'text' | 'request'
   return `${baseTitle} ${nextIndex}`;
 }
 
-function createTextSection(id = `custom-${Date.now()}`): DocSection {
-  return { id, title: DEFAULT_SECTION_TITLE, enabled: true, kind: 'text', value: '' };
+function createTextSection(id = `custom-${Date.now()}`, title = DEFAULT_SECTION_TITLE): DocSection {
+  return { id, title, enabled: true, kind: 'text', value: '' };
 }
 
 function createParsedSection(sectionType: ParsedSectionType, id = `custom-${sectionType}-${Date.now()}`): ParsedSection {
@@ -153,14 +156,21 @@ function createParsedSection(sectionType: ParsedSectionType, id = `custom-${sect
     authApiKeyExample: isRequest ? DEFAULT_API_KEY_EXAMPLE : undefined,
     requestUrl: isRequest ? '' : undefined,
     requestMethod: isRequest ? 'POST' : undefined,
-    requestProtocol: isRequest ? 'REST' : undefined
+    requestProtocol: isRequest ? 'REST' : undefined,
+    externalRequestUrl: isRequest ? '' : undefined,
+    externalRequestMethod: isRequest ? 'POST' : undefined,
+    externalAuthType: isRequest ? 'none' : undefined,
+    externalAuthHeaderName: isRequest ? DEFAULT_API_KEY_HEADER : undefined,
+    externalAuthTokenExample: isRequest ? DEFAULT_BEARER_TOKEN_EXAMPLE : undefined,
+    externalAuthUsername: isRequest ? DEFAULT_BASIC_USERNAME : undefined,
+    externalAuthPassword: isRequest ? DEFAULT_BASIC_PASSWORD : undefined,
+    externalAuthApiKeyExample: isRequest ? DEFAULT_API_KEY_EXAMPLE : undefined
   };
 }
 
 function createInitialSections(): DocSection[] {
   return [
     { id: 'goal', title: 'Цель', enabled: true, kind: 'text', value: '', required: true },
-    { id: 'external-url', title: 'Внешний URL', enabled: true, kind: 'text', value: '' },
     createParsedSection('request', 'request'),
     createParsedSection('response', 'response'),
     { id: 'errors', title: 'Ошибки', enabled: true, kind: 'text', value: '' },
@@ -192,6 +202,77 @@ function getSectionRows(section: ParsedSection): ParsedRow[] {
 
 function getRequestHeaderRowsForEditor(section: ParsedSection): ParsedRow[] {
   return isRequestSection(section) ? getRequestHeaderRows(section) : [];
+}
+
+function getExternalRequestHeaderRowsForEditor(section: ParsedSection): ParsedRow[] {
+  if (!isRequestSection(section)) return [];
+  return [...(section.clientRows ?? []).filter((row) => row.source === 'header')].sort((left, right) => left.field.localeCompare(right.field));
+}
+
+function getExternalAuthHeaderRows(section: ParsedSection): ParsedRow[] {
+  if (!isRequestSection(section)) return [];
+
+  if (section.externalAuthType === 'bearer') {
+    const tokenExample = section.externalAuthTokenExample?.trim() || DEFAULT_BEARER_TOKEN_EXAMPLE;
+    return [{
+      field: 'Authorization',
+      sourceField: 'Authorization',
+      origin: 'generated',
+      enabled: true,
+      type: 'string',
+      required: '+',
+      description: 'Авторизация: Bearer token',
+      example: `Bearer ${tokenExample}`,
+      source: 'header'
+    }];
+  }
+
+  if (section.externalAuthType === 'basic') {
+    return [{
+      field: 'Authorization',
+      sourceField: 'Authorization',
+      origin: 'generated',
+      enabled: true,
+      type: 'string',
+      required: '+',
+      description: 'Авторизация: Basic auth',
+      example: 'Basic <base64(username:password)>',
+      source: 'header'
+    }];
+  }
+
+  if (section.externalAuthType === 'api-key') {
+    const headerName = section.externalAuthHeaderName?.trim() || DEFAULT_API_KEY_HEADER;
+    const apiKeyExample = section.externalAuthApiKeyExample?.trim() || DEFAULT_API_KEY_EXAMPLE;
+    return [{
+      field: headerName,
+      sourceField: headerName,
+      origin: 'generated',
+      enabled: true,
+      type: 'string',
+      required: '+',
+      description: 'Авторизация: API key',
+      example: apiKeyExample,
+      source: 'header'
+    }];
+  }
+
+  return [];
+}
+
+function getExternalSourceRows(section: ParsedSection): ParsedRow[] {
+  const clientRows = section.clientRows ?? [];
+  const authRows = getExternalAuthHeaderRows(section);
+  const existingHeaderNames = new Set(clientRows.filter((row) => row.source === 'header').map((row) => row.field.trim().toLowerCase()));
+  const nextRows = [...clientRows];
+
+  for (const authRow of authRows) {
+    if (!existingHeaderNames.has(authRow.field.trim().toLowerCase())) {
+      nextRows.unshift(authRow);
+    }
+  }
+
+  return nextRows;
 }
 
 function validateSection(section: DocSection): string {
@@ -518,8 +599,11 @@ export default function App() {
     });
   }
 
-  function addSectionByType(type: 'text' | 'request' | 'response'): void {
-    const nextSection = type === 'text' ? createTextSection() : createParsedSection(type);
+  function addSectionByType(type: AddableBlockType): void {
+    const nextSection =
+      type === 'text' || type === 'error-logic'
+        ? createTextSection(undefined, AUTO_SECTION_TITLE_BASE[type])
+        : createParsedSection(type);
     setSections((prev) => {
       nextSection.title = createAutoSectionTitle(prev, type);
       return [...prev, nextSection];
@@ -534,11 +618,18 @@ export default function App() {
 
     try {
       const rows = parseToRows(format, input);
-      const curlMeta = target === 'server' && isRequestSection(section) && format === 'curl' ? parseCurlMeta(input) : null;
+      const curlMeta = isRequestSection(section) && format === 'curl' ? parseCurlMeta(input) : null;
       updateSection(section.id, (current) => {
         if (current.kind !== 'parsed') return current;
         if (target === 'client' && isDualModelSection(current)) {
-          return { ...current, clientRows: rows, clientError: '', clientLastSyncedFormat: current.clientFormat ?? 'json' };
+          return {
+            ...current,
+            clientRows: rows,
+            clientError: '',
+            clientLastSyncedFormat: current.clientFormat ?? 'json',
+            externalRequestUrl: isRequestSection(current) ? curlMeta?.url ?? current.externalRequestUrl ?? '' : current.externalRequestUrl,
+            externalRequestMethod: isRequestSection(current) ? curlMeta?.method ?? current.externalRequestMethod ?? 'POST' : current.externalRequestMethod
+          };
         }
         return {
           ...current,
@@ -691,6 +782,24 @@ export default function App() {
     });
   }
 
+  function addExternalRequestHeader(section: ParsedSection): void {
+    const manualHeader: ParsedRow = {
+      field: `X-CUSTOM-${Date.now()}`,
+      origin: 'manual',
+      enabled: true,
+      type: 'string',
+      required: '-',
+      description: '',
+      example: '',
+      source: 'header'
+    };
+
+    updateSection(section.id, (current) => {
+      if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
+      return { ...current, clientRows: [...(current.clientRows ?? []), manualHeader] };
+    });
+  }
+
   function updateServerRow(sectionId: string, rowKey: string, updater: (row: ParsedRow) => ParsedRow): void {
     updateSection(sectionId, (current) => {
       if (current.kind !== 'parsed') return current;
@@ -715,6 +824,13 @@ export default function App() {
     });
   }
 
+  function deleteExternalRequestHeader(sectionId: string, rowKey: string): void {
+    updateSection(sectionId, (current) => {
+      if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
+      return { ...current, clientRows: (current.clientRows ?? []).filter((row) => getParsedRowKey(row) !== rowKey) };
+    });
+  }
+
   function deleteParsedRow(sectionId: string, rowKey: string, target: ParseTarget = 'server'): void {
     updateSection(sectionId, (current) => {
       if (current.kind !== 'parsed') return current;
@@ -735,9 +851,9 @@ export default function App() {
         const clientRows = current.clientRows ?? [];
         return {
           ...current,
-          clientInput: buildInputFromRows(current.clientFormat ?? 'json', clientRows, {
-            requestUrl: current.requestUrl,
-            requestMethod: current.requestMethod
+          clientInput: buildInputFromRows(current.clientFormat ?? 'json', getExternalSourceRows(current), {
+            requestUrl: current.externalRequestUrl,
+            requestMethod: current.externalRequestMethod
           }),
           clientLastSyncedFormat: current.clientFormat ?? 'json',
           clientRows: clientRows.map((row) =>
@@ -1338,8 +1454,9 @@ export default function App() {
     );
   }
 
-  function renderRequestHeadersTable(section: ParsedSection): ReactNode {
-    const headers = getRequestHeaderRowsForEditor(section);
+  function renderRequestHeadersTable(section: ParsedSection, target: ParseTarget = 'server'): ReactNode {
+    const isExternal = target === 'client';
+    const headers = isExternal ? getExternalRequestHeaderRowsForEditor(section) : getRequestHeaderRowsForEditor(section);
 
     return (
       <div className="table-wrap">
@@ -1356,9 +1473,10 @@ export default function App() {
           <tbody>
             {headers.map((row, index) => {
               const rowKey = getParsedRowKey(row);
-              const isDefault = isDefaultRequestHeader(row);
-              const isAuto = isAuthHeader(section, row);
-              const isPersisted = section.rows.some((item) => getParsedRowKey(item) === rowKey);
+              const isDefault = isExternal ? false : isDefaultRequestHeader(row);
+              const isAuto = isExternal ? false : isAuthHeader(section, row);
+              const persistedRows = isExternal ? section.clientRows ?? [] : section.rows;
+              const isPersisted = persistedRows.some((item) => getParsedRowKey(item) === rowKey);
 
               return (
                 <tr key={`${rowKey}-${index}`}>
@@ -1371,7 +1489,19 @@ export default function App() {
                         checked={row.enabled !== false}
                         onChange={(e) => {
                           if (isPersisted) {
-                            updateServerRow(section.id, rowKey, (current) => ({ ...current, enabled: e.target.checked }));
+                            if (isExternal) {
+                              updateSection(section.id, (current) => {
+                                if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
+                                return {
+                                  ...current,
+                                  clientRows: (current.clientRows ?? []).map((item) =>
+                                    getParsedRowKey(item) === rowKey ? { ...item, enabled: e.target.checked } : item
+                                  )
+                                };
+                              });
+                            } else {
+                              updateServerRow(section.id, rowKey, (current) => ({ ...current, enabled: e.target.checked }));
+                            }
                             return;
                           }
 
@@ -1379,8 +1509,8 @@ export default function App() {
                             if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
                             return {
                               ...current,
-                              rows: [
-                                ...current.rows,
+                              [isExternal ? 'clientRows' : 'rows']: [
+                                ...(isExternal ? current.clientRows ?? [] : current.rows),
                                 {
                                   ...row,
                                   enabled: e.target.checked
@@ -1398,7 +1528,9 @@ export default function App() {
                       row,
                       isAuto || isDefault
                         ? { allowEdit: false }
-                        : { onDelete: () => deleteRequestHeader(section.id, rowKey) }
+                        : {
+                            onDelete: () => (isExternal ? deleteExternalRequestHeader(section.id, rowKey) : deleteRequestHeader(section.id, rowKey))
+                          }
                     )}
                   </td>
                   <td>{row.required || '—'}</td>
@@ -1408,8 +1540,20 @@ export default function App() {
                     ) : (
                       <input
                         type="text"
-                        value={isPersisted ? section.rows.find((item) => getParsedRowKey(item) === rowKey)?.description ?? row.description : row.description}
-                        onChange={(e) => updateServerRow(section.id, rowKey, (current) => ({ ...current, description: e.target.value }))}
+                        value={isPersisted ? persistedRows.find((item) => getParsedRowKey(item) === rowKey)?.description ?? row.description : row.description}
+                        onChange={(e) =>
+                          isExternal
+                            ? updateSection(section.id, (current) => {
+                                if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
+                                return {
+                                  ...current,
+                                  clientRows: (current.clientRows ?? []).map((item) =>
+                                    getParsedRowKey(item) === rowKey ? { ...item, description: e.target.value } : item
+                                  )
+                                };
+                              })
+                            : updateServerRow(section.id, rowKey, (current) => ({ ...current, description: e.target.value }))
+                        }
                       />
                     )}
                   </td>
@@ -1419,8 +1563,20 @@ export default function App() {
                     ) : (
                       <input
                         type="text"
-                        value={isPersisted ? section.rows.find((item) => getParsedRowKey(item) === rowKey)?.example ?? row.example : row.example}
-                        onChange={(e) => updateServerRow(section.id, rowKey, (current) => ({ ...current, example: e.target.value }))}
+                        value={isPersisted ? persistedRows.find((item) => getParsedRowKey(item) === rowKey)?.example ?? row.example : row.example}
+                        onChange={(e) =>
+                          isExternal
+                            ? updateSection(section.id, (current) => {
+                                if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
+                                return {
+                                  ...current,
+                                  clientRows: (current.clientRows ?? []).map((item) =>
+                                    getParsedRowKey(item) === rowKey ? { ...item, example: e.target.value } : item
+                                  )
+                                };
+                              })
+                            : updateServerRow(section.id, rowKey, (current) => ({ ...current, example: e.target.value }))
+                        }
                       />
                     )}
                   </td>
@@ -1430,7 +1586,7 @@ export default function App() {
           </tbody>
         </table>
         <div className="table-actions">
-          <button className="ghost small" type="button" onClick={() => addRequestHeader(section)}>
+          <button className="ghost small" type="button" onClick={() => (isExternal ? addExternalRequestHeader(section) : addRequestHeader(section))}>
             + Header
           </button>
         </div>
@@ -1505,28 +1661,47 @@ export default function App() {
     );
   }
 
-  function renderRequestAuthEditor(section: ParsedSection): ReactNode {
+  function renderRequestAuthEditor(section: ParsedSection, target: ParseTarget = 'server'): ReactNode {
     if (!isRequestSection(section)) return null;
+    const isExternal = target === 'client';
+    const authType = isExternal ? section.externalAuthType ?? 'none' : section.authType ?? 'none';
+    const tokenExample = isExternal ? section.externalAuthTokenExample ?? '' : section.authTokenExample ?? '';
+    const username = isExternal ? section.externalAuthUsername ?? '' : section.authUsername ?? '';
+    const password = isExternal ? section.externalAuthPassword ?? '' : section.authPassword ?? '';
+    const headerName = isExternal ? section.externalAuthHeaderName ?? DEFAULT_API_KEY_HEADER : section.authHeaderName ?? DEFAULT_API_KEY_HEADER;
+    const apiKeyExample = isExternal ? section.externalAuthApiKeyExample ?? '' : section.authApiKeyExample ?? '';
+    const title = isExternal ? 'Авторизация внешнего запроса' : 'Авторизация';
 
     return (
       <details className="expander" open>
-        <summary className="expander-summary">Авторизация</summary>
+        <summary className="expander-summary">{title}</summary>
         <div className="expander-body">
           <label className="field">
             <div className="label">Способ</div>
             <select
-              value={section.authType ?? 'none'}
+              value={authType}
               onChange={(e) =>
                 updateSection(section.id, (current) =>
                   current.kind === 'parsed' && isRequestSection(current)
                     ? {
                         ...current,
-                        authType: e.target.value as RequestAuthType,
-                        authHeaderName: current.authHeaderName || DEFAULT_API_KEY_HEADER,
-                        authTokenExample: current.authTokenExample || DEFAULT_BEARER_TOKEN_EXAMPLE,
-                        authUsername: current.authUsername || DEFAULT_BASIC_USERNAME,
-                        authPassword: current.authPassword || DEFAULT_BASIC_PASSWORD,
-                        authApiKeyExample: current.authApiKeyExample || DEFAULT_API_KEY_EXAMPLE
+                        ...(isExternal
+                          ? {
+                              externalAuthType: e.target.value as RequestAuthType,
+                              externalAuthHeaderName: current.externalAuthHeaderName || DEFAULT_API_KEY_HEADER,
+                              externalAuthTokenExample: current.externalAuthTokenExample || DEFAULT_BEARER_TOKEN_EXAMPLE,
+                              externalAuthUsername: current.externalAuthUsername || DEFAULT_BASIC_USERNAME,
+                              externalAuthPassword: current.externalAuthPassword || DEFAULT_BASIC_PASSWORD,
+                              externalAuthApiKeyExample: current.externalAuthApiKeyExample || DEFAULT_API_KEY_EXAMPLE
+                            }
+                          : {
+                              authType: e.target.value as RequestAuthType,
+                              authHeaderName: current.authHeaderName || DEFAULT_API_KEY_HEADER,
+                              authTokenExample: current.authTokenExample || DEFAULT_BEARER_TOKEN_EXAMPLE,
+                              authUsername: current.authUsername || DEFAULT_BASIC_USERNAME,
+                              authPassword: current.authPassword || DEFAULT_BASIC_PASSWORD,
+                              authApiKeyExample: current.authApiKeyExample || DEFAULT_API_KEY_EXAMPLE
+                            })
                       }
                     : current
                 )
@@ -1539,16 +1714,16 @@ export default function App() {
             </select>
           </label>
 
-          {section.authType === 'bearer' && (
+          {authType === 'bearer' && (
             <label className="field">
               <div className="label">Пример токена</div>
               <input
                 type="text"
-                value={section.authTokenExample ?? ''}
+                value={tokenExample}
                 onChange={(e) =>
                   updateSection(section.id, (current) =>
                     current.kind === 'parsed' && isRequestSection(current)
-                      ? { ...current, authTokenExample: e.target.value }
+                      ? { ...current, ...(isExternal ? { externalAuthTokenExample: e.target.value } : { authTokenExample: e.target.value }) }
                       : current
                   )
                 }
@@ -1557,17 +1732,17 @@ export default function App() {
             </label>
           )}
 
-          {section.authType === 'basic' && (
+          {authType === 'basic' && (
             <div className="row gap auth-grid">
               <label className="field">
                 <div className="label">Логин</div>
                 <input
                   type="text"
-                  value={section.authUsername ?? ''}
+                  value={username}
                   onChange={(e) =>
                     updateSection(section.id, (current) =>
                       current.kind === 'parsed' && isRequestSection(current)
-                        ? { ...current, authUsername: e.target.value }
+                        ? { ...current, ...(isExternal ? { externalAuthUsername: e.target.value } : { authUsername: e.target.value }) }
                         : current
                     )
                   }
@@ -1578,11 +1753,11 @@ export default function App() {
                 <div className="label">Пароль</div>
                 <input
                   type="text"
-                  value={section.authPassword ?? ''}
+                  value={password}
                   onChange={(e) =>
                     updateSection(section.id, (current) =>
                       current.kind === 'parsed' && isRequestSection(current)
-                        ? { ...current, authPassword: e.target.value }
+                        ? { ...current, ...(isExternal ? { externalAuthPassword: e.target.value } : { authPassword: e.target.value }) }
                         : current
                     )
                   }
@@ -1592,17 +1767,17 @@ export default function App() {
             </div>
           )}
 
-          {section.authType === 'api-key' && (
+          {authType === 'api-key' && (
             <div className="row gap auth-grid">
               <label className="field">
                 <div className="label">Имя header</div>
                 <input
                   type="text"
-                  value={section.authHeaderName ?? 'X-API-Key'}
+                  value={headerName}
                   onChange={(e) =>
                     updateSection(section.id, (current) =>
                       current.kind === 'parsed' && isRequestSection(current)
-                        ? { ...current, authHeaderName: e.target.value }
+                        ? { ...current, ...(isExternal ? { externalAuthHeaderName: e.target.value } : { authHeaderName: e.target.value }) }
                         : current
                     )
                   }
@@ -1613,11 +1788,11 @@ export default function App() {
                 <div className="label">Пример API key</div>
                 <input
                   type="text"
-                  value={section.authApiKeyExample ?? ''}
+                  value={apiKeyExample}
                   onChange={(e) =>
                     updateSection(section.id, (current) =>
                       current.kind === 'parsed' && isRequestSection(current)
-                        ? { ...current, authApiKeyExample: e.target.value }
+                        ? { ...current, ...(isExternal ? { externalAuthApiKeyExample: e.target.value } : { authApiKeyExample: e.target.value }) }
                         : current
                     )
                   }
@@ -1627,57 +1802,70 @@ export default function App() {
             </div>
           )}
 
-          {getRequestAuthInfo(section) && <div className="muted">Настройка автоматически попадет в headers и в итоговую документацию.</div>}
+          <div className="muted">Настройка автоматически попадет в headers и в итоговую документацию.</div>
         </div>
       </details>
     );
   }
 
-  function renderRequestMetaEditor(section: ParsedSection): ReactNode {
+  function renderRequestMetaEditor(section: ParsedSection, target: ParseTarget = 'server'): ReactNode {
     if (!isRequestSection(section)) return null;
+    const isExternal = target === 'client';
+    const title = isExternal ? 'Внешний вызов' : 'Общее описание метода';
+    const urlLabel = isExternal ? 'Внешний URL' : 'URL метода';
 
-    const applyRequestMeta = (patch: Partial<Pick<ParsedSection, 'requestUrl' | 'requestMethod'>>) => {
+    const applyRequestMeta = (patch: Partial<Pick<ParsedSection, 'requestUrl' | 'requestMethod' | 'externalRequestUrl' | 'externalRequestMethod'>>) => {
       updateSection(section.id, (current) => {
         if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
 
         const next = { ...current, ...patch };
-        if (next.format !== 'curl') return next;
+        const targetFormat = isExternal ? next.clientFormat ?? 'json' : next.format;
+        if (targetFormat !== 'curl') return next;
 
-        const serverRows = [
-          ...getRequestHeaderRowsForEditor(next).filter((row) => row.enabled !== false),
-          ...next.rows.filter((row) => row.source !== 'header')
-        ];
+        const syncRows = isExternal
+          ? next.clientRows ?? []
+          : [...getRequestHeaderRowsForEditor(next).filter((row) => row.enabled !== false), ...next.rows.filter((row) => row.source !== 'header')];
 
         return {
           ...next,
-          input: buildInputFromRows(next.format, serverRows, {
-            requestUrl: next.requestUrl,
-            requestMethod: next.requestMethod
-          }),
-          lastSyncedFormat: next.format
+          ...(isExternal
+            ? {
+                clientInput: buildInputFromRows(targetFormat, getExternalSourceRows(next), {
+                  requestUrl: next.externalRequestUrl,
+                  requestMethod: next.externalRequestMethod
+                }),
+                clientLastSyncedFormat: targetFormat
+              }
+            : {
+                input: buildInputFromRows(targetFormat, syncRows, {
+                  requestUrl: next.requestUrl,
+                  requestMethod: next.requestMethod
+                }),
+                lastSyncedFormat: targetFormat
+              })
         };
       });
     };
 
     return (
       <details className="expander" open>
-        <summary className="expander-summary">Общее описание метода</summary>
+        <summary className="expander-summary">{title}</summary>
         <div className="expander-body">
           <div className="row gap auth-grid">
             <label className="field">
-              <div className="label">URL метода</div>
+              <div className="label">{urlLabel}</div>
               <input
                 type="text"
-                value={section.requestUrl ?? ''}
-                onChange={(e) => applyRequestMeta({ requestUrl: e.target.value })}
+                value={isExternal ? section.externalRequestUrl ?? '' : section.requestUrl ?? ''}
+                onChange={(e) => applyRequestMeta(isExternal ? { externalRequestUrl: e.target.value } : { requestUrl: e.target.value })}
                 placeholder="https://api.example.com/v1/method"
               />
             </label>
             <label className="field">
               <div className="label">Тип метода</div>
               <select
-                value={section.requestMethod ?? 'POST'}
-                onChange={(e) => applyRequestMeta({ requestMethod: e.target.value as RequestMethod })}
+                value={isExternal ? section.externalRequestMethod ?? 'POST' : section.requestMethod ?? 'POST'}
+                onChange={(e) => applyRequestMeta(isExternal ? { externalRequestMethod: e.target.value as RequestMethod } : { requestMethod: e.target.value as RequestMethod })}
               >
                 <option value="GET">GET</option>
                 <option value="POST">POST</option>
@@ -1863,11 +2051,11 @@ export default function App() {
 
         {isRequestSection(section) && (
           <>
-            {renderRequestMetaEditor(section)}
-            {renderRequestAuthEditor(section)}
+            {renderRequestMetaEditor(section, 'server')}
+            {renderRequestAuthEditor(section, 'server')}
             <div className="stack">
               <div className="label">Headers</div>
-              {renderRequestHeadersTable(section)}
+              {renderRequestHeadersTable(section, 'server')}
             </div>
           </>
         )}
@@ -1902,34 +2090,46 @@ export default function App() {
         </details>
 
         {section.domainModelEnabled && (
-          <details className="expander" open>
-            <summary className="expander-summary">{clientLabel}</summary>
-            <div className="expander-body">
-              <div className="row gap">
-                <label className="field">
-                  <div className="label">Формат</div>
-                  <select
-                    value={section.clientFormat ?? 'json'}
-                    onChange={(e) =>
-                      updateSection(section.id, (current) =>
-                        current.kind === 'parsed' && isDualModelSection(current)
-                          ? { ...current, clientFormat: e.target.value as ParseFormat, clientError: '' }
-                          : current
-                      )
-                    }
-                  >
-                    <option value="json">JSON</option>
-                    <option value="curl">cURL</option>
-                  </select>
-                </label>
-                <button className="primary" type="button" onClick={() => runParser(section, 'client')}>
-                  Парсить
-                </button>
-              </div>
+          <>
+            {isRequestSection(section) && (
+              <>
+                {renderRequestMetaEditor(section, 'client')}
+                {renderRequestAuthEditor(section, 'client')}
+                <div className="stack">
+                  <div className="label">Внешние headers</div>
+                  {renderRequestHeadersTable(section, 'client')}
+                </div>
+              </>
+            )}
+            <details className="expander" open>
+              <summary className="expander-summary">{clientLabel}</summary>
+              <div className="expander-body">
+                <div className="row gap">
+                  <label className="field">
+                    <div className="label">Формат</div>
+                    <select
+                      value={section.clientFormat ?? 'json'}
+                      onChange={(e) =>
+                        updateSection(section.id, (current) =>
+                          current.kind === 'parsed' && isDualModelSection(current)
+                            ? { ...current, clientFormat: e.target.value as ParseFormat, clientError: '' }
+                            : current
+                        )
+                      }
+                    >
+                      <option value="json">JSON</option>
+                      <option value="curl">cURL</option>
+                    </select>
+                  </label>
+                  <button className="primary" type="button" onClick={() => runParser(section, 'client')}>
+                    Парсить
+                  </button>
+                </div>
 
-              {renderSourceEditor(section, 'client', `${exampleLabel} (${clientLabel})`)}
-            </div>
-          </details>
+                {renderSourceEditor(section, 'client', `${exampleLabel} (${clientLabel})`)}
+              </div>
+            </details>
+          </>
         )}
 
         {section.error && <div className="alert error">{serverLabel}: {section.error}</div>}

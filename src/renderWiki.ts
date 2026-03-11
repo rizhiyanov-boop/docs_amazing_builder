@@ -35,6 +35,14 @@ function toWikiExampleCell(value: string): string {
   return toWikiCell(trimmed);
 }
 
+function toWikiTextBlock(value: string): string[] {
+  return value
+    .replaceAll('\r\n', '\n')
+    .replaceAll('\r', '\n')
+    .split('\n')
+    .map((line) => escapeWiki(line));
+}
+
 function shouldRenderTextSection(section: TextSection): boolean {
   return section.enabled && Boolean(section.value.trim());
 }
@@ -82,7 +90,7 @@ function renderStructuredTable(rows: ParsedRow[], section: ParsedSection): strin
 }
 
 function renderTextSection(section: TextSection): string[] {
-  return [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`, toWikiCell(section.value)];
+  return [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`, '', ...toWikiTextBlock(section.value)];
 }
 
 function renderRequestSection(section: ParsedSection): string[] {
@@ -90,11 +98,19 @@ function renderRequestSection(section: ParsedSection): string[] {
   const { headers, otherRows, urlRow } = splitRequestRows(getRequestRows(section));
   const requestError = section.error || section.clientError;
   const authInfo = getRequestAuthInfo(section);
+  const requestUrl = section.requestUrl?.trim() || (urlRow?.example ?? '');
+  const requestMethod = section.requestMethod?.trim() || section.format.toUpperCase();
+  const requestProtocol = section.requestProtocol?.trim() || 'REST';
 
-  if (urlRow) {
-    lines.push('');
-    lines.push(`*URL:* ${toWikiCell(urlRow.example)}`);
+  lines.push('');
+  lines.push('h3. Общее описание метода');
+  lines.push('');
+  if (requestUrl) {
+    lines.push(`*URL:* ${toWikiCell(requestUrl)}`);
   }
+  lines.push(`*Метод:* ${toWikiCell(requestMethod)}`);
+  lines.push(`*Протокол:* ${toWikiCell(requestProtocol)}`);
+
   if (authInfo) {
     lines.push('');
     lines.push('h3. Authorization');

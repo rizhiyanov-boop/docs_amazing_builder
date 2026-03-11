@@ -1,9 +1,11 @@
 ﻿import { getRequestColumnLabel, getRequestColumnOrder } from './requestColumns';
-import { getRequestAuthInfo, getRequestRows, requestHasRows, splitRequestRows } from './requestHeaders';
+import { getRequestAuthInfo, getRequestHeaderRows, getRequestRows, requestHasRows, splitRequestRows } from './requestHeaders';
+import { richTextToHtml } from './richText';
 import { resolveSectionTitle } from './sectionTitles';
+import { buildInputFromRows } from './sourceSync';
 import { getThemeTokens } from './theme';
 import type { ThemeName } from './theme';
-import type { DocSection, ParsedRow, ParsedSection, TextSection } from './types';
+import type { DocSection, ParseFormat, ParsedRow, ParsedSection, TextSection } from './types';
 
 type RenderHtmlOptions = {
   interactive?: boolean;
@@ -41,17 +43,82 @@ function renderTextValue(value: string): string {
   return escapeHtml(trimmed).replaceAll('\n', '<br/>');
 }
 
+function wrapCodeToken(kind: string, value: string): string {
+  return `<span class="code-token ${kind}">${escapeHtml(value)}</span>`;
+}
+
+function highlightJsonCode(value: string): string {
+  let index = 0;
+  let result = '';
+
+  while (index < value.length) {
+    const char = value[index];
+
+    if (char === '"') {
+      let end = index + 1;
+      let escaped = false;
+      while (end < value.length) {
+        const current = value[end];
+        if (current === '"' && !escaped) break;
+        escaped = current === '\\' && !escaped;
+        if (current !== '\\') escaped = false;
+        end += 1;
+      }
+
+      const token = value.slice(index, Math.min(end + 1, value.length));
+      let lookahead = end + 1;
+      while (lookahead < value.length && /\s/.test(value[lookahead])) lookahead += 1;
+      const kind = value[lookahead] === ':' ? 'code-key' : 'code-string';
+      result += wrapCodeToken(kind, token);
+      index = Math.min(end + 1, value.length);
+      continue;
+    }
+
+    if ('{}[]:,'.includes(char)) {
+      result += wrapCodeToken('code-punctuation', char);
+      index += 1;
+      continue;
+    }
+
+    const literalMatch = value.slice(index).match(/^(true|false|null)\b/);
+    if (literalMatch) {
+      const token = literalMatch[1];
+      result += wrapCodeToken(token === 'null' ? 'code-null' : 'code-boolean', token);
+      index += token.length;
+      continue;
+    }
+
+    const numberMatch = value.slice(index).match(/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/);
+    if (numberMatch) {
+      result += wrapCodeToken('code-number', numberMatch[0]);
+      index += numberMatch[0].length;
+      continue;
+    }
+
+    result += escapeHtml(char);
+    index += 1;
+  }
+
+  return result;
+}
+
+function highlightCurlCode(value: string): string {
+  return escapeHtml(value)
+    .replace(/\b(curl)\b/g, '<span class="code-token code-keyword">$1</span>')
+    .replace(/(^|\s)(--?[A-Za-z-]+)/g, '$1<span class="code-token code-flag">$2</span>')
+    .replace(/(&quot;https?:\/\/.*?&quot;)/g, '<span class="code-token code-url">$1</span>')
+    .replace(/(&quot;.*?&quot;|'.*?')/g, '<span class="code-token code-string">$1</span>');
+}
+
+function highlightCode(format: ParseFormat, value: string): string {
+  if (format === 'json') return highlightJsonCode(value);
+  return highlightCurlCode(value);
+}
+
 function renderProseValue(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) return '<span class="muted">Не заполнено</span>';
-
-  const paragraphs = trimmed
-    .split(/\n\s*\n/)
-    .map((paragraph) => paragraph.trim())
-    .filter(Boolean)
-    .map((paragraph) => `<p>${escapeHtml(paragraph).replaceAll('\n', '<br/>')}</p>`);
-
-  return paragraphs.join('');
+  return richTextToHtml(trimmed).replace(/<h([2-6])>/g, '<h$1 class="prose-heading">');
 }
 
 function renderTag(label: string, kind = ''): string {
@@ -71,7 +138,7 @@ function renderUrl(value: string, label = 'URL', interactive = true): string {
   return `<div class="url"><span>${escapeHtml(label)}: ${escapeHtml(value)}</span>${action}</div>`;
 }
 
-function renderCodeBlock(id: string, title: string, content: string, interactive = true): string {
+function renderCodeBlock(id: string, title: string, content: string, interactive = true, format: ParseFormat = 'json'): string {
   if (!content.trim()) return '';
   return [
     '<details open>',
@@ -80,7 +147,7 @@ function renderCodeBlock(id: string, title: string, content: string, interactive
       interactive
         ? `<div class="pretools"><button class="smallbtn" type="button" data-copy-target="${escapeHtml(id)}">Copy</button></div>`
         : ''
-    }<code id="${escapeHtml(id)}">${escapeHtml(content.trim())}</code></pre>`,
+    }<code class="code-block language-${format}" id="${escapeHtml(id)}">${highlightCode(format, content.trim())}</code></pre>`,
     '</details>'
   ].join('');
 }
@@ -161,11 +228,27 @@ function renderAuthDetails(section: ParsedSection): string {
 
 function renderRequestSection(section: ParsedSection, interactive = true): string {
   const title = resolveSectionTitle(section.title);
-  const { headers, otherRows, urlRow } = splitRequestRows(getRequestRows(section));
+  const requestRows = getRequestRows(section);
+  const { headers, otherRows, urlRow } = splitRequestRows(requestRows);
   const requestError = section.error || section.clientError;
-  const meta = renderTag(section.format.toUpperCase());
+  const requestUrl = section.requestUrl?.trim() || (urlRow?.example ?? '');
+  const requestMethod = section.requestMethod?.trim() || section.format.toUpperCase();
+  const requestProtocol = section.requestProtocol?.trim() || 'REST';
+  const serverCurl = buildInputFromRows(
+    'curl',
+    [...getRequestHeaderRows(section).filter((row) => row.enabled !== false), ...section.rows.filter((row) => row.source !== 'header')],
+    { requestUrl, requestMethod: section.requestMethod }
+  );
+  const clientCurl =
+    section.domainModelEnabled && (section.clientRows?.length ?? 0) > 0
+      ? buildInputFromRows('curl', section.clientRows ?? [], { requestUrl, requestMethod: section.requestMethod })
+      : '';
+  const meta = [renderTag(requestMethod), renderTag(requestProtocol), renderTag(section.format.toUpperCase())].join(' ');
   const body = [
     renderInfoNote('Назначение', title),
+    `<details open><summary>Общее описание метода <span class="sumhint">${escapeHtml(requestProtocol)}</span></summary><table><tbody><tr><td>URL</td><td>${renderCell(
+      requestUrl
+    )}</td></tr><tr><td>Метод</td><td>${renderCell(requestMethod)}</td></tr><tr><td>Протокол</td><td>${renderCell(requestProtocol)}</td></tr></tbody></table></details>`,
     renderAuthDetails(section),
     headers.length > 0
       ? `<details open><summary>Headers <span class="sumhint">${headers.length} headers</span></summary>${renderStructuredTable(headers, section)}</details>`
@@ -173,14 +256,18 @@ function renderRequestSection(section: ParsedSection, interactive = true): strin
     otherRows.length > 0
       ? `<details open><summary>Request schema <span class="sumhint">${section.format.toUpperCase()}</span></summary>${renderStructuredTable(otherRows, section)}</details>`
       : '',
-    renderCodeBlock('request-server-example', 'Server request example', section.input, interactive),
-    section.domainModelEnabled ? renderCodeBlock('request-client-example', 'Client request example', section.clientInput ?? '', interactive) : '',
+    renderCodeBlock('request-server-example', 'Server request example', section.input, interactive, section.format),
+    renderCodeBlock('request-server-curl', 'Server cURL', serverCurl, interactive),
+    section.domainModelEnabled
+      ? renderCodeBlock('request-client-example', 'Client request example', section.clientInput ?? '', interactive, section.clientFormat ?? 'json')
+      : '',
+    section.domainModelEnabled ? renderCodeBlock('request-client-curl', 'Client cURL', clientCurl, interactive) : '',
     requestError ? `<div class="note bad"><b>Ошибка секции</b><br/>${escapeHtml(requestError)}</div>` : ''
   ]
     .filter(Boolean)
     .join('');
 
-  return wrapCard(section.id, title, meta, body, urlRow?.example ?? '', section.format.toUpperCase(), interactive);
+  return wrapCard(section.id, title, meta, body, requestUrl, requestMethod, interactive);
 }
 
 function renderResponseSection(section: ParsedSection, interactive = true): string {
@@ -193,8 +280,10 @@ function renderResponseSection(section: ParsedSection, interactive = true): stri
     rows.length > 0
       ? `<details open><summary>Response schema <span class="sumhint">${rows.length} rows</span></summary>${renderStructuredTable(rows, section)}</details>`
       : '',
-    renderCodeBlock('response-server-example', 'Server response example', section.input, interactive),
-    section.domainModelEnabled ? renderCodeBlock('response-client-example', 'Client response example', section.clientInput ?? '', interactive) : '',
+    renderCodeBlock('response-server-example', 'Server response example', section.input, interactive, section.format),
+    section.domainModelEnabled
+      ? renderCodeBlock('response-client-example', 'Client response example', section.clientInput ?? '', interactive, section.clientFormat ?? 'json')
+      : '',
     responseError ? `<div class="note bad"><b>Ошибка секции</b><br/>${escapeHtml(responseError)}</div>` : ''
   ]
     .filter(Boolean)
@@ -208,7 +297,7 @@ function renderGenericParsedSection(section: ParsedSection, interactive = true):
   const meta = renderTag(section.format.toUpperCase());
   const body = [
     `<details open><summary>Schema <span class="sumhint">${section.rows.length} rows</span></summary>${renderDefaultTable(section.rows)}</details>`,
-    renderCodeBlock(`${section.id}-example`, `${title} example`, section.input, interactive),
+    renderCodeBlock(`${section.id}-example`, `${title} example`, section.input, interactive, section.format),
     section.error ? `<div class="note bad"><b>Ошибка секции</b><br/>${escapeHtml(section.error)}</div>` : ''
   ]
     .filter(Boolean)
@@ -530,8 +619,55 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
       .section-text p{
         margin:0 0 14px;
       }
+      .section-text strong{font-weight:700;color:var(--text)}
+      .section-text em{font-style:italic}
       .section-text p:last-child{
         margin-bottom:0;
+      }
+      .section-text ul,
+      .section-text ol{
+        margin:0 0 14px 22px;
+        padding:0;
+      }
+      .section-text ul{list-style-type:disc}
+      .section-text ul ul{list-style-type:circle}
+      .section-text ul ul ul{list-style-type:square}
+      .section-text ol{list-style-type:decimal}
+      .section-text ol ol{list-style-type:lower-alpha}
+      .section-text ol ol ol{list-style-type:decimal}
+      .section-text li{
+        margin:0 0 6px;
+      }
+      .section-text blockquote{
+        margin:0 0 14px;
+        padding:10px 14px;
+        border-left:3px solid var(--accent-solid);
+        background:color-mix(in srgb, var(--panel) 92%, transparent);
+        border-radius:10px;
+      }
+      .section-text code{
+        font-family:var(--mono);
+        font-size:.92em;
+        padding:2px 6px;
+        border-radius:6px;
+        background:var(--input-bg);
+        color:var(--input-text);
+      }
+      .section-text a{
+        color:var(--accent-solid);
+        text-decoration:underline;
+        text-underline-offset:2px;
+      }
+      .section-text .doc-anchor-marker{
+        display:inline-block;
+        width:0;
+        height:0;
+        overflow:hidden;
+      }
+      .section-text .prose-heading{
+        margin:0 0 12px;
+        font-size:1.05em;
+        line-height:1.35;
       }
       .url{
         font-family:var(--mono);
@@ -597,6 +733,12 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
         line-height:1.5;
         font-family:var(--mono);
       }
+      .code-block{display:block;white-space:pre-wrap;word-break:break-word}
+      .code-token.code-key{color:#f59e0b}
+      .code-token.code-string,.code-token.code-url{color:#22c55e}
+      .code-token.code-number{color:#38bdf8}
+      .code-token.code-boolean,.code-token.code-null,.code-token.code-keyword,.code-token.code-flag{color:#f97316}
+      .code-token.code-punctuation{color:#94a3b8}
       .pretools{position:absolute;top:8px;right:8px;display:flex;gap:8px}
       .note{
         border-radius:10px;

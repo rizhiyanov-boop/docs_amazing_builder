@@ -69,7 +69,10 @@ export function sanitizeSections(sections: DocSection[]): DocSection[] {
       authTokenExample: normalizedSection.id === 'request' ? normalizedSection.authTokenExample ?? DEFAULT_BEARER_TOKEN_EXAMPLE : undefined,
       authUsername: normalizedSection.id === 'request' ? normalizedSection.authUsername ?? DEFAULT_BASIC_USERNAME : undefined,
       authPassword: normalizedSection.id === 'request' ? normalizedSection.authPassword ?? DEFAULT_BASIC_PASSWORD : undefined,
-      authApiKeyExample: normalizedSection.id === 'request' ? normalizedSection.authApiKeyExample ?? DEFAULT_API_KEY_EXAMPLE : undefined
+      authApiKeyExample: normalizedSection.id === 'request' ? normalizedSection.authApiKeyExample ?? DEFAULT_API_KEY_EXAMPLE : undefined,
+      requestUrl: normalizedSection.id === 'request' ? normalizedSection.requestUrl ?? '' : undefined,
+      requestMethod: normalizedSection.id === 'request' ? normalizedSection.requestMethod ?? 'POST' : undefined,
+      requestProtocol: normalizedSection.id === 'request' ? normalizedSection.requestProtocol ?? 'REST' : undefined
     };
   });
 }

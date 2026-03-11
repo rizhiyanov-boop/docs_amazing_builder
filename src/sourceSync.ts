@@ -1,12 +1,11 @@
-import type { ParseFormat, ParsedRow } from './types';
+import type { ParseFormat, ParsedRow, RequestMethod } from './types';
+
+type BuildInputOptions = {
+  requestUrl?: string;
+  requestMethod?: RequestMethod;
+};
 
 type JsonContainer = Record<string, unknown> | unknown[];
-type XmlNode = {
-  name: string;
-  attributes: Record<string, string>;
-  children: Map<string, XmlNode>;
-  text?: string;
-};
 
 function tokenizePath(path: string): string[] {
   return path
@@ -22,6 +21,7 @@ function isIndexToken(token: string): boolean {
 function getDefaultValue(type: string): unknown {
   if (type === 'int' || type === 'long' || type === 'number') return 0;
   if (type === 'boolean') return false;
+  if (type === 'object' || type === 'map') return {};
   if (type === 'array' || type === 'array_object') return [];
   if (type === 'null') return null;
   return '';
@@ -30,6 +30,9 @@ function getDefaultValue(type: string): unknown {
 function parseExampleValue(row: ParsedRow): unknown {
   const trimmed = row.example.trim();
   if (!trimmed) return getDefaultValue(row.type);
+  if (trimmed === '-' && (row.type === 'object' || row.type === 'map' || row.type === 'array' || row.type === 'array_object')) {
+    return getDefaultValue(row.type);
+  }
 
   if (row.type === 'string' || row.type === 'element' || row.type === 'attribute') {
     try {
@@ -102,81 +105,19 @@ function buildJsonObject(rows: ParsedRow[]): unknown {
   return root;
 }
 
-function escapeXml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;');
-}
-
-function getOrCreateNode(root: XmlNode, path: string): XmlNode {
-  const tokens = path.split('.').filter(Boolean);
-  let current = root;
-
-  for (const token of tokens) {
-    const existing = current.children.get(token);
-    if (existing) {
-      current = existing;
-      continue;
-    }
-
-    const nextNode: XmlNode = { name: token, attributes: {}, children: new Map() };
-    current.children.set(token, nextNode);
-    current = nextNode;
-  }
-
-  return current;
-}
-
-function renderXmlNode(node: XmlNode): string {
-  const attributes = Object.entries(node.attributes)
-    .map(([name, value]) => ` ${name}="${escapeXml(value)}"`)
-    .join('');
-  const children = Array.from(node.children.values()).map(renderXmlNode).join('');
-  const text = node.text ? escapeXml(node.text) : '';
-  return `<${node.name}${attributes}>${text}${children}</${node.name}>`;
-}
-
-function buildXmlDocument(rows: ParsedRow[]): string {
-  const sortedRows = rows.filter((row) => row.field.trim()).sort((left, right) => left.field.localeCompare(right.field));
-  const firstElementRow = sortedRows.find((row) => !row.field.includes('.@'));
-  const rootName = firstElementRow?.field.split('.')[0] ?? 'root';
-  const root: XmlNode = { name: rootName, attributes: {}, children: new Map() };
-
-  for (const row of sortedRows) {
-    if (row.field.includes('.@')) {
-      const [elementPath, attrName] = row.field.split('.@');
-      const node = elementPath === rootName ? root : getOrCreateNode(root, elementPath.replace(`${rootName}.`, ''));
-      node.attributes[attrName] = String(parseExampleValue(row));
-      continue;
-    }
-
-    const relativePath = row.field === rootName ? '' : row.field.replace(`${rootName}.`, '');
-    const node = relativePath ? getOrCreateNode(root, relativePath) : root;
-    const hasChildren = sortedRows.some((candidate) => candidate.field.startsWith(`${row.field}.`) && candidate.field !== row.field);
-    if (!hasChildren) {
-      const value = parseExampleValue(row);
-      node.text = value == null ? '' : String(value);
-    }
-  }
-
-  return renderXmlNode(root);
-}
-
-function buildCurl(rows: ParsedRow[]): string {
-  const url = rows.find((row) => row.source === 'url')?.example.trim() || 'https://example.com';
+function buildCurl(rows: ParsedRow[], options?: BuildInputOptions): string {
+  const url = options?.requestUrl?.trim() || rows.find((row) => row.source === 'url')?.example.trim() || 'https://example.com';
+  const method = options?.requestMethod?.trim() || 'POST';
   const headers = rows
     .filter((row) => row.source === 'header')
     .map((row) => `-H "${row.field}: ${row.example.trim()}"`);
   const bodyRows = rows.filter((row) => row.source !== 'header' && row.source !== 'url' && row.field.trim());
   const body = bodyRows.length > 0 ? JSON.stringify(buildJsonObject(bodyRows), null, 2) : '';
 
-  return ['curl', `"${url}"`, ...headers, ...(body ? [`--data-raw '${body}'`] : [])].join(' ');
+  return ['curl', '-X', method, `"${url}"`, ...headers, ...(body ? [`--data-raw '${body}'`] : [])].join(' ');
 }
 
-export function buildInputFromRows(format: ParseFormat, rows: ParsedRow[]): string {
+export function buildInputFromRows(format: ParseFormat, rows: ParsedRow[], options?: BuildInputOptions): string {
   if (format === 'json') return JSON.stringify(buildJsonObject(rows), null, 2);
-  if (format === 'xml') return buildXmlDocument(rows);
-  return buildCurl(rows);
+  return buildCurl(rows, options);
 }

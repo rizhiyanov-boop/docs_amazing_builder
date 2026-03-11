@@ -1,6 +1,8 @@
-export type ParseFormat = 'json' | 'xml' | 'curl';
+export type ParseFormat = 'json' | 'curl';
 export type RequestColumnKey = 'field' | 'type' | 'required' | 'clientField' | 'description' | 'example';
 export type RequestAuthType = 'none' | 'bearer' | 'basic' | 'api-key';
+export type RequestMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+export type RequestProtocol = 'REST';
 
 export type SectionKind = 'text' | 'parsed';
 
@@ -53,6 +55,9 @@ export interface ParsedSection extends BaseSection {
   authUsername?: string;
   authPassword?: string;
   authApiKeyExample?: string;
+  requestUrl?: string;
+  requestMethod?: RequestMethod;
+  requestProtocol?: RequestProtocol;
 }
 
 export type DocSection = TextSection | ParsedSection;

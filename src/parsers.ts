@@ -1,5 +1,12 @@
 import { OPTIONAL_MARK } from './requestHeaders';
-import type { ParseFormat, ParsedRow } from './types';
+import type { ParseFormat, ParsedRow, RequestMethod } from './types';
+
+export type ParsedCurlMeta = {
+  url?: string;
+  method?: RequestMethod;
+};
+
+const STRUCTURED_EXAMPLE_PLACEHOLDER = '-';
 
 function createParsedRow(row: Omit<ParsedRow, 'sourceField' | 'origin'>): ParsedRow {
   return {
@@ -53,7 +60,7 @@ function flattenJson(value: unknown, basePath = ''): ParsedRow[] {
           type: 'array',
           required: OPTIONAL_MARK,
           description: '',
-          example: '[]'
+          example: STRUCTURED_EXAMPLE_PLACEHOLDER
         })
       ];
     }
@@ -66,7 +73,7 @@ function flattenJson(value: unknown, basePath = ''): ParsedRow[] {
         type: isArrayOfObjects ? 'array_object' : 'array',
         required: OPTIONAL_MARK,
         description: '',
-        example: JSON.stringify(first).slice(0, 120)
+        example: STRUCTURED_EXAMPLE_PLACEHOLDER
       })
     ];
 
@@ -109,52 +116,6 @@ function flattenJson(value: unknown, basePath = ''): ParsedRow[] {
 
 function parseJson(input: string): ParsedRow[] {
   return flattenJson(JSON.parse(input));
-}
-
-function parseXml(input: string): ParsedRow[] {
-  const xml = new DOMParser().parseFromString(input, 'application/xml');
-  const parserError = xml.querySelector('parsererror');
-  if (parserError) {
-    throw new Error('Некорректный XML');
-  }
-
-  const rows: ParsedRow[] = [];
-
-  function walk(element: Element, path = element.tagName): void {
-    rows.push(
-      createParsedRow({
-        field: path,
-        type: 'element',
-        required: OPTIONAL_MARK,
-        description: '',
-        example: element.textContent?.trim().slice(0, 120) ?? ''
-      })
-    );
-
-    for (const attr of Array.from(element.attributes)) {
-      rows.push(
-        createParsedRow({
-          field: `${path}.@${attr.name}`,
-          type: 'attribute',
-          required: OPTIONAL_MARK,
-          description: '',
-          example: attr.value
-        })
-      );
-    }
-
-    for (const child of Array.from(element.children)) {
-      walk(child, `${path}.${child.tagName}`);
-    }
-  }
-
-  const root = xml.documentElement;
-  if (!root) {
-    throw new Error('Пустой XML');
-  }
-
-  walk(root);
-  return rows;
 }
 
 function parseCurl(input: string): ParsedRow[] {
@@ -225,7 +186,7 @@ function parseCurl(input: string): ParsedRow[] {
             pushed = true;
           }
         } catch {
-          // fall through to scalar handling
+          // fall through
         }
       }
 
@@ -324,12 +285,22 @@ function parseCurl(input: string): ParsedRow[] {
   return rows;
 }
 
+export function parseCurlMeta(input: string): ParsedCurlMeta {
+  const normalized = input.replace(/\r\n/g, ' ').replace(/\n/g, ' ');
+  const methodMatch = normalized.match(/(?:^|\s)(?:-X|--request)\s+(GET|POST|PUT|PATCH|DELETE)\b/i);
+  const urlMatch = normalized.match(/curl\s+(?:-X\s+\w+\s+)?['"]?(https?:\/\/[^'"\s]+)['"]?/i);
+
+  return {
+    method: (methodMatch?.[1]?.toUpperCase() as RequestMethod | undefined) ?? (urlMatch ? 'POST' : undefined),
+    url: urlMatch?.[1]
+  };
+}
+
 export function parseToRows(format: ParseFormat, input: string): ParsedRow[] {
   if (!input.trim()) {
     throw new Error('Поле ввода пустое');
   }
 
   if (format === 'json') return parseJson(input);
-  if (format === 'xml') return parseXml(input);
   return parseCurl(input);
 }

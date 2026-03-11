@@ -10,7 +10,7 @@ function escapeWiki(value: string): string {
 }
 
 function isDualModelSection(section: ParsedSection): boolean {
-  return section.id === 'request' || section.id === 'response';
+  return section.sectionType === 'request' || section.sectionType === 'response';
 }
 
 function toWikiCell(value: string): string {
@@ -150,8 +150,8 @@ function renderResponseSection(section: ParsedSection): string[] {
 }
 
 function renderParsedSection(section: ParsedSection): string[] {
-  if (section.id === 'request') return renderRequestSection(section);
-  if (section.id === 'response') return renderResponseSection(section);
+  if (section.sectionType === 'request') return renderRequestSection(section);
+  if (section.sectionType === 'response') return renderResponseSection(section);
 
   const lines: string[] = [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`];
 

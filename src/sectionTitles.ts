@@ -6,7 +6,7 @@ import {
   DEFAULT_BASIC_USERNAME,
   DEFAULT_BEARER_TOKEN_EXAMPLE
 } from './requestHeaders';
-import type { DocSection, ParsedRow } from './types';
+import type { DocSection, ParsedRow, ParsedSectionType } from './types';
 
 export const DEFAULT_SECTION_TITLE = 'Новая секция';
 
@@ -21,6 +21,13 @@ function normalizeRow(row: ParsedRow): ParsedRow {
 
 function isDualModelSectionId(id: string): boolean {
   return id === 'request' || id === 'response';
+}
+
+function resolveParsedSectionType(section: Extract<DocSection, { kind: 'parsed' }>): ParsedSectionType {
+  if (section.sectionType) return section.sectionType;
+  if (section.id === 'request') return 'request';
+  if (section.id === 'response' || section.id === 'body') return 'response';
+  return 'generic';
 }
 
 export function resolveSectionTitle(title: string): string {
@@ -45,14 +52,18 @@ export function sanitizeSections(sections: DocSection[]): DocSection[] {
     if (!isDualModelSectionId(normalizedSection.id)) {
       return {
         ...normalizedSection,
+        sectionType: resolveParsedSectionType(normalizedSection),
         title: resolveSectionTitle(normalizedSection.title),
         lastSyncedFormat: normalizedSection.lastSyncedFormat ?? normalizedSection.format,
         rows: normalizedSection.rows.map(normalizeRow)
       };
     }
 
+    const sectionType = resolveParsedSectionType(normalizedSection);
+
     return {
       ...normalizedSection,
+      sectionType,
       title: resolveSectionTitle(normalizedSection.title),
       lastSyncedFormat: normalizedSection.lastSyncedFormat ?? normalizedSection.format,
       rows: normalizedSection.rows.map(normalizeRow),
@@ -64,15 +75,15 @@ export function sanitizeSections(sections: DocSection[]): DocSection[] {
       clientError: normalizedSection.clientError ?? '',
       clientMappings: normalizedSection.clientMappings ?? {},
       requestColumnOrder: normalizedSection.requestColumnOrder ?? DEFAULT_REQUEST_COLUMN_ORDER,
-      authType: normalizedSection.id === 'request' ? normalizedSection.authType ?? 'none' : undefined,
-      authHeaderName: normalizedSection.id === 'request' ? normalizedSection.authHeaderName ?? DEFAULT_API_KEY_HEADER : undefined,
-      authTokenExample: normalizedSection.id === 'request' ? normalizedSection.authTokenExample ?? DEFAULT_BEARER_TOKEN_EXAMPLE : undefined,
-      authUsername: normalizedSection.id === 'request' ? normalizedSection.authUsername ?? DEFAULT_BASIC_USERNAME : undefined,
-      authPassword: normalizedSection.id === 'request' ? normalizedSection.authPassword ?? DEFAULT_BASIC_PASSWORD : undefined,
-      authApiKeyExample: normalizedSection.id === 'request' ? normalizedSection.authApiKeyExample ?? DEFAULT_API_KEY_EXAMPLE : undefined,
-      requestUrl: normalizedSection.id === 'request' ? normalizedSection.requestUrl ?? '' : undefined,
-      requestMethod: normalizedSection.id === 'request' ? normalizedSection.requestMethod ?? 'POST' : undefined,
-      requestProtocol: normalizedSection.id === 'request' ? normalizedSection.requestProtocol ?? 'REST' : undefined
+      authType: sectionType === 'request' ? normalizedSection.authType ?? 'none' : undefined,
+      authHeaderName: sectionType === 'request' ? normalizedSection.authHeaderName ?? DEFAULT_API_KEY_HEADER : undefined,
+      authTokenExample: sectionType === 'request' ? normalizedSection.authTokenExample ?? DEFAULT_BEARER_TOKEN_EXAMPLE : undefined,
+      authUsername: sectionType === 'request' ? normalizedSection.authUsername ?? DEFAULT_BASIC_USERNAME : undefined,
+      authPassword: sectionType === 'request' ? normalizedSection.authPassword ?? DEFAULT_BASIC_PASSWORD : undefined,
+      authApiKeyExample: sectionType === 'request' ? normalizedSection.authApiKeyExample ?? DEFAULT_API_KEY_EXAMPLE : undefined,
+      requestUrl: sectionType === 'request' ? normalizedSection.requestUrl ?? '' : undefined,
+      requestMethod: sectionType === 'request' ? normalizedSection.requestMethod ?? 'POST' : undefined,
+      requestProtocol: sectionType === 'request' ? normalizedSection.requestProtocol ?? 'REST' : undefined
     };
   });
 }

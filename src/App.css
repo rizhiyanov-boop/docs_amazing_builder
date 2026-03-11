@@ -220,10 +220,60 @@ button.primary {
   align-items: center;
 }
 
+.add-block-menu {
+  position: relative;
+}
+
+.add-block-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  min-width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.add-block-option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.add-block-option:hover {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--input-bg) 82%, transparent);
+}
+
+.add-block-option-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .section-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.sidebar-footer {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
 }
 
 .section-item {
@@ -619,10 +669,24 @@ select {
 
 .table-actions {
   display: flex;
+  gap: 8px;
   justify-content: flex-end;
   padding: 10px;
   border-bottom: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.02);
+}
+
+.table-wrap-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+.table-wrap-empty .table-actions {
+  padding: 0;
+  border-bottom: 0;
+  background: transparent;
 }
 
 table {

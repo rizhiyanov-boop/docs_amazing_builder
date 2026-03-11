@@ -3,6 +3,7 @@ export type RequestColumnKey = 'field' | 'type' | 'required' | 'clientField' | '
 export type RequestAuthType = 'none' | 'bearer' | 'basic' | 'api-key';
 export type RequestMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 export type RequestProtocol = 'REST';
+export type ParsedSectionType = 'generic' | 'request' | 'response';
 
 export type SectionKind = 'text' | 'parsed';
 
@@ -36,6 +37,7 @@ export interface TextSection extends BaseSection {
 
 export interface ParsedSection extends BaseSection {
   kind: 'parsed';
+  sectionType?: ParsedSectionType;
   format: ParseFormat;
   lastSyncedFormat?: ParseFormat;
   input: string;

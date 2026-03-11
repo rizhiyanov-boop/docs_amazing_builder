@@ -20,14 +20,14 @@ const BASE_COLUMN_LABELS: Record<RequestColumnKey, string> = {
 
 export function getRequestColumnLabel(section: ParsedSection, column: RequestColumnKey): string {
   if (column === 'clientField') {
-    return section.id === 'response' ? 'Client response' : 'Client request';
+    return section.sectionType === 'response' ? 'Client response' : 'Client request';
   }
 
   return BASE_COLUMN_LABELS[column];
 }
 
 export function getRequestColumnOrder(section: ParsedSection, rows: ParsedRow[]): RequestColumnKey[] {
-  if (section.id !== 'request' && section.id !== 'response') {
+  if (section.sectionType !== 'request' && section.sectionType !== 'response') {
     return DEFAULT_REQUEST_COLUMN_ORDER.filter((column) => column !== 'clientField');
   }
 

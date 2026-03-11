@@ -29,7 +29,7 @@ import { DEFAULT_SECTION_TITLE, resolveSectionTitle, sanitizeSections } from './
 import { buildInputFromRows } from './sourceSync';
 import { applyThemeToRoot } from './theme';
 import type { ThemeName } from './theme';
-import type { DocSection, ParsedRow, ParsedSection, ParseFormat, ProjectData, RequestAuthType, RequestColumnKey, RequestMethod } from './types';
+import type { DocSection, ParsedRow, ParsedSection, ParsedSectionType, ParseFormat, ProjectData, RequestAuthType, RequestColumnKey, RequestMethod } from './types';
 
 const STORAGE_KEY = 'doc-builder-project-v2';
 
@@ -89,60 +89,80 @@ const TYPE_OPTIONS_EXTENDED = [
 ];
 const REQUIRED_OPTIONS = ['+', OPTIONAL_MARK, '-'];
 const STRUCTURED_EXAMPLE_PLACEHOLDER = '-';
+const ADDABLE_BLOCK_TYPES: Array<{ type: 'text' | 'request' | 'response'; label: string }> = [
+  { type: 'text', label: 'Текстовый блок' },
+  { type: 'request', label: 'Request блок' },
+  { type: 'response', label: 'Response блок' }
+];
+const AUTO_SECTION_TITLE_BASE: Record<'text' | 'request' | 'response', string> = {
+  text: 'Текстовый блок',
+  request: 'Request блок',
+  response: 'Response блок'
+};
 
 function usesStructuredPlaceholder(type: string): boolean {
   return ['object', 'array', 'array_object'].includes(type);
+}
+
+function createAutoSectionTitle(sections: DocSection[], type: 'text' | 'request' | 'response'): string {
+  const baseTitle = AUTO_SECTION_TITLE_BASE[type];
+  const escapedBase = baseTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const matcher = new RegExp(`^${escapedBase}(?:\\s+(\\d+))?$`);
+
+  const nextIndex =
+    sections.reduce((maxValue, section) => {
+      const match = resolveSectionTitle(section.title).match(matcher);
+      if (!match) return maxValue;
+      const index = match[1] ? Number(match[1]) : 1;
+      return Math.max(maxValue, index);
+    }, 0) + 1;
+
+  return `${baseTitle} ${nextIndex}`;
+}
+
+function createTextSection(id = `custom-${Date.now()}`): DocSection {
+  return { id, title: DEFAULT_SECTION_TITLE, enabled: true, kind: 'text', value: '' };
+}
+
+function createParsedSection(sectionType: ParsedSectionType, id = `custom-${sectionType}-${Date.now()}`): ParsedSection {
+  const isRequest = sectionType === 'request';
+
+  return {
+    id,
+    title: sectionType === 'request' ? 'Request' : sectionType === 'response' ? 'Response' : DEFAULT_SECTION_TITLE,
+    enabled: true,
+    kind: 'parsed',
+    sectionType,
+    format: isRequest ? 'curl' : 'json',
+    lastSyncedFormat: isRequest ? 'curl' : 'json',
+    input: '',
+    rows: [],
+    error: '',
+    domainModelEnabled: sectionType !== 'generic' ? false : undefined,
+    clientFormat: sectionType !== 'generic' ? 'json' : undefined,
+    clientLastSyncedFormat: sectionType !== 'generic' ? 'json' : undefined,
+    clientInput: sectionType !== 'generic' ? '' : undefined,
+    clientRows: sectionType !== 'generic' ? [] : undefined,
+    clientError: sectionType !== 'generic' ? '' : undefined,
+    clientMappings: sectionType !== 'generic' ? {} : undefined,
+    authType: isRequest ? 'none' : undefined,
+    authHeaderName: isRequest ? DEFAULT_API_KEY_HEADER : undefined,
+    authTokenExample: isRequest ? DEFAULT_BEARER_TOKEN_EXAMPLE : undefined,
+    authUsername: isRequest ? DEFAULT_BASIC_USERNAME : undefined,
+    authPassword: isRequest ? DEFAULT_BASIC_PASSWORD : undefined,
+    authApiKeyExample: isRequest ? DEFAULT_API_KEY_EXAMPLE : undefined,
+    requestUrl: isRequest ? '' : undefined,
+    requestMethod: isRequest ? 'POST' : undefined,
+    requestProtocol: isRequest ? 'REST' : undefined
+  };
 }
 
 function createInitialSections(): DocSection[] {
   return [
     { id: 'goal', title: 'Цель', enabled: true, kind: 'text', value: '', required: true },
     { id: 'external-url', title: 'Внешний URL', enabled: true, kind: 'text', value: '' },
-    {
-      id: 'request',
-      title: 'Request',
-      enabled: true,
-      kind: 'parsed',
-      format: 'curl',
-      lastSyncedFormat: 'curl',
-      input: '',
-      rows: [],
-      error: '',
-      domainModelEnabled: false,
-      clientFormat: 'json',
-      clientLastSyncedFormat: 'json',
-      clientInput: '',
-      clientRows: [],
-      clientError: '',
-      clientMappings: {},
-      authType: 'none',
-      authHeaderName: DEFAULT_API_KEY_HEADER,
-      authTokenExample: DEFAULT_BEARER_TOKEN_EXAMPLE,
-      authUsername: DEFAULT_BASIC_USERNAME,
-      authPassword: DEFAULT_BASIC_PASSWORD,
-      authApiKeyExample: DEFAULT_API_KEY_EXAMPLE,
-      requestUrl: '',
-      requestMethod: 'POST',
-      requestProtocol: 'REST'
-    },
-    {
-      id: 'response',
-      title: 'Response',
-      enabled: true,
-      kind: 'parsed',
-      format: 'json',
-      lastSyncedFormat: 'json',
-      input: '',
-      rows: [],
-      error: '',
-      domainModelEnabled: false,
-      clientFormat: 'json',
-      clientLastSyncedFormat: 'json',
-      clientInput: '',
-      clientRows: [],
-      clientError: '',
-      clientMappings: {}
-    },
+    createParsedSection('request', 'request'),
+    createParsedSection('response', 'response'),
     { id: 'errors', title: 'Ошибки', enabled: true, kind: 'text', value: '' },
     { id: 'non-functional', title: 'Нефункциональные требования', enabled: true, kind: 'text', value: '' },
     { id: 'future', title: 'Доработки, планирующиеся на следующих этапах', enabled: false, kind: 'text', value: '' }
@@ -150,11 +170,11 @@ function createInitialSections(): DocSection[] {
 }
 
 function isRequestSection(section: ParsedSection): boolean {
-  return section.id === 'request';
+  return section.sectionType === 'request';
 }
 
 function isResponseSection(section: ParsedSection): boolean {
-  return section.id === 'response';
+  return section.sectionType === 'response';
 }
 
 function isDualModelSection(section: ParsedSection): boolean {
@@ -181,9 +201,9 @@ function validateSection(section: DocSection): string {
     const hasServerInput = Boolean(section.input.trim());
     const hasClientInput = section.domainModelEnabled ? Boolean(section.clientInput?.trim()) : false;
 
-    if (!hasServerInput && !hasClientInput) return 'Введите исходные данные для парсинга';
     if (section.error) return `Секция заблокирована: ${section.error}`;
     if (section.clientError) return `${getSectionSideLabel(section, 'client')} заблокирован: ${section.clientError}`;
+    if (!hasServerInput && !hasClientInput && getSectionRows(section).length === 0) return '';
     if (getSectionRows(section).length === 0) return 'Нет распарсенных строк';
     return '';
   }
@@ -391,6 +411,7 @@ export default function App() {
   const [requestCellError, setRequestCellError] = useState('');
   const [editingTitle, setEditingTitle] = useState<EditableTitleState | null>(null);
   const [expandedDriftAlerts, setExpandedDriftAlerts] = useState<DriftAlertState>({});
+  const [isAddBlockMenuOpen, setIsAddBlockMenuOpen] = useState(false);
 
   useEffect(() => {
     if (!sections.find((section) => section.id === selectedId) && sections[0]) {
@@ -495,6 +516,16 @@ export default function App() {
 
       return next;
     });
+  }
+
+  function addSectionByType(type: 'text' | 'request' | 'response'): void {
+    const nextSection = type === 'text' ? createTextSection() : createParsedSection(type);
+    setSections((prev) => {
+      nextSection.title = createAutoSectionTitle(prev, type);
+      return [...prev, nextSection];
+    });
+    setSelectedId(nextSection.id);
+    setIsAddBlockMenuOpen(false);
   }
 
   function runParser(section: ParsedSection, target: ParseTarget = 'server'): void {
@@ -1189,10 +1220,26 @@ export default function App() {
     const duplicateFieldSet = getDuplicateValueSet(section.rows.filter((row) => row.source !== 'header'));
     const duplicateClientFieldSet = isDualModelSection(section) ? getDuplicateValueSet(section.clientRows ?? []) : new Set<string>();
 
-    if (rows.length === 0) return <div className="muted">Нет распарсенных строк</div>;
-
     if (isDualModelSection(section)) {
       const columns = getRequestColumnOrder(section, rows);
+
+      if (rows.length === 0) {
+        return (
+          <div className="table-wrap table-wrap-empty">
+            <div className="muted">Таблица пока пустая</div>
+            <div className="table-actions">
+              <button className="ghost small" type="button" onClick={() => addManualRow(section, 'server')}>
+                + Параметр
+              </button>
+              {section.domainModelEnabled && (
+                <button className="ghost small" type="button" onClick={() => addManualRow(section, 'client')}>
+                  + Client параметр
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      }
 
       return (
         <div className="table-wrap">
@@ -1242,10 +1289,17 @@ export default function App() {
             <button className="ghost small" type="button" onClick={() => addManualRow(section, 'server')}>
               + Параметр
             </button>
+            {section.domainModelEnabled && (
+              <button className="ghost small" type="button" onClick={() => addManualRow(section, 'client')}>
+                + Client параметр
+              </button>
+            )}
           </div>
         </div>
       );
     }
+
+    if (rows.length === 0) return <div className="muted">Нет распарсенных строк</div>;
 
     return (
       <div className="table-wrap">
@@ -1770,6 +1824,7 @@ export default function App() {
   function renderRequestEditor(section: ParsedSection) {
     const serverLabel = getSectionSideLabel(section, 'server');
     const clientLabel = getSectionSideLabel(section, 'client');
+    const exampleLabel = isResponseSection(section) ? 'Пример ответа' : 'Пример запроса';
     return (
       <div className="stack">
         <label className="switch">
@@ -1842,7 +1897,7 @@ export default function App() {
               </button>
             </div>
 
-            {renderSourceEditor(section, 'server', `Пример входящего запроса (${serverLabel})`)}
+            {renderSourceEditor(section, 'server', `${exampleLabel} (${serverLabel})`)}
           </div>
         </details>
 
@@ -1872,7 +1927,7 @@ export default function App() {
                 </button>
               </div>
 
-              {renderSourceEditor(section, 'client', `Пример входящего запроса (${clientLabel})`)}
+              {renderSourceEditor(section, 'client', `${exampleLabel} (${clientLabel})`)}
             </div>
           </details>
         )}
@@ -1973,14 +2028,6 @@ export default function App() {
         <aside className="sidebar" role="listbox" aria-label="Секции">
           <div className="sidebar-head">
             <div className="muted">Секции</div>
-            <button
-              className="ghost small"
-              onClick={() =>
-                setSections((prev) => [...prev, { id: `custom-${Date.now()}`, title: DEFAULT_SECTION_TITLE, enabled: true, kind: 'text', value: '' }])
-              }
-            >
-              + Добавить
-            </button>
           </div>
           <div className="section-list">
             {sections.map((section) => {
@@ -2002,13 +2049,43 @@ export default function App() {
                 >
                   <div className="section-title">{resolveSectionTitle(section.title)}</div>
                   <div className="chips">
-                    {section.kind === 'parsed' && <span className="chip">{section.format.toUpperCase()}</span>}
+                    {section.kind === 'parsed' && (
+                      <span className="chip">
+                        {section.sectionType === 'request'
+                          ? 'REQUEST'
+                          : section.sectionType === 'response'
+                            ? 'RESPONSE'
+                            : section.format.toUpperCase()}
+                      </span>
+                    )}
                     {!section.enabled && <span className="chip muted">off</span>}
                     {error && <span className="chip danger">err</span>}
                   </div>
                 </button>
               );
             })}
+          </div>
+          <div className="sidebar-footer">
+            <div className="add-block-menu">
+              <button className="ghost small" type="button" onClick={() => setIsAddBlockMenuOpen((current) => !current)}>
+                + Добавить секцию
+              </button>
+              {isAddBlockMenuOpen && (
+                <div className="add-block-popover" role="menu" aria-label="Тип нового блока">
+                  {ADDABLE_BLOCK_TYPES.map((item) => (
+                    <button
+                      key={item.type}
+                      className="add-block-option"
+                      type="button"
+                      role="menuitem"
+                      onClick={() => addSectionByType(item.type)}
+                    >
+                      <span className="add-block-option-title">{item.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </aside>
 
@@ -2036,7 +2113,6 @@ export default function App() {
                   <div className="panel-head">
                     <div>
                       <div className="panel-title">{renderEditableSectionTitle(selectedSection)}</div>
-                      <div className="panel-sub">ID: {selectedSection.id}</div>
                     </div>
                     <div className="row gap">
                       {isCustomSection(selectedSection) && (

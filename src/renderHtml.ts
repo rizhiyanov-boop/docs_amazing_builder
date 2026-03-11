@@ -20,7 +20,7 @@ function escapeHtml(value: string): string {
 }
 
 function isDualModelSection(section: ParsedSection): boolean {
-  return section.id === 'request' || section.id === 'response';
+  return section.sectionType === 'request' || section.sectionType === 'response';
 }
 
 function shouldRenderTextSection(section: TextSection): boolean {
@@ -256,12 +256,12 @@ function renderRequestSection(section: ParsedSection, interactive = true): strin
     otherRows.length > 0
       ? `<details open><summary>Request schema <span class="sumhint">${section.format.toUpperCase()}</span></summary>${renderStructuredTable(otherRows, section)}</details>`
       : '',
-    renderCodeBlock('request-server-example', 'Server request example', section.input, interactive, section.format),
-    renderCodeBlock('request-server-curl', 'Server cURL', serverCurl, interactive),
+    renderCodeBlock(`${section.id}-server-example`, 'Server request example', section.input, interactive, section.format),
+    renderCodeBlock(`${section.id}-server-curl`, 'Server cURL', serverCurl, interactive),
     section.domainModelEnabled
-      ? renderCodeBlock('request-client-example', 'Client request example', section.clientInput ?? '', interactive, section.clientFormat ?? 'json')
+      ? renderCodeBlock(`${section.id}-client-example`, 'Client request example', section.clientInput ?? '', interactive, section.clientFormat ?? 'json')
       : '',
-    section.domainModelEnabled ? renderCodeBlock('request-client-curl', 'Client cURL', clientCurl, interactive) : '',
+    section.domainModelEnabled ? renderCodeBlock(`${section.id}-client-curl`, 'Client cURL', clientCurl, interactive) : '',
     requestError ? `<div class="note bad"><b>Ошибка секции</b><br/>${escapeHtml(requestError)}</div>` : ''
   ]
     .filter(Boolean)
@@ -280,9 +280,9 @@ function renderResponseSection(section: ParsedSection, interactive = true): stri
     rows.length > 0
       ? `<details open><summary>Response schema <span class="sumhint">${rows.length} rows</span></summary>${renderStructuredTable(rows, section)}</details>`
       : '',
-    renderCodeBlock('response-server-example', 'Server response example', section.input, interactive, section.format),
+    renderCodeBlock(`${section.id}-server-example`, 'Server response example', section.input, interactive, section.format),
     section.domainModelEnabled
-      ? renderCodeBlock('response-client-example', 'Client response example', section.clientInput ?? '', interactive, section.clientFormat ?? 'json')
+      ? renderCodeBlock(`${section.id}-client-example`, 'Client response example', section.clientInput ?? '', interactive, section.clientFormat ?? 'json')
       : '',
     responseError ? `<div class="note bad"><b>Ошибка секции</b><br/>${escapeHtml(responseError)}</div>` : ''
   ]
@@ -307,8 +307,8 @@ function renderGenericParsedSection(section: ParsedSection, interactive = true):
 }
 
 function renderParsedSection(section: ParsedSection, interactive = true): string {
-  if (section.id === 'request') return renderRequestSection(section, interactive);
-  if (section.id === 'response') return renderResponseSection(section, interactive);
+  if (section.sectionType === 'request') return renderRequestSection(section, interactive);
+  if (section.sectionType === 'response') return renderResponseSection(section, interactive);
   return renderGenericParsedSection(section, interactive);
 }
 
@@ -340,8 +340,12 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
   const blocks = visibleSections.map((section) => (section.kind === 'text' ? renderTextSection(section) : renderParsedSection(section, interactive)));
   const darkTokens = getThemeTokens('dark');
   const lightTokens = getThemeTokens('light');
-  const requestSection = sections.find((section) => section.kind === 'parsed' && section.id === 'request') as ParsedSection | undefined;
-  const authInfo = requestSection ? getRequestAuthInfo(requestSection) : null;
+  const requestSections = sections.filter(
+    (section): section is ParsedSection => section.kind === 'parsed' && section.sectionType === 'request'
+  );
+  const responseSections = sections.filter(
+    (section): section is ParsedSection => section.kind === 'parsed' && section.sectionType === 'response'
+  );
   const themeConfig = {
     dark: darkTokens,
     light: lightTokens
@@ -827,8 +831,8 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
     '<div class="toolbar-stack">',
     '<div class="toolbar-meta">',
     `<span class="badge">Sections: ${visibleSections.length}</span>`,
-    requestSection ? `<span class="badge">Auth: ${escapeHtml(authInfo?.schemeLabel ?? 'None')}</span>` : '',
-    requestSection ? `<span class="badge">Format: ${escapeHtml(requestSection.format.toUpperCase())}</span>` : '',
+    requestSections.length > 0 ? `<span class="badge">Request blocks: ${requestSections.length}</span>` : '',
+    responseSections.length > 0 ? `<span class="badge">Response blocks: ${responseSections.length}</span>` : '',
     interactive
       ? [
           '<label class="theme-toggle" aria-label="Переключить тему">',
@@ -842,8 +846,6 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
     '</div>',
     '<div class="toolbar-nav">',
     renderButton('К началу', '#top', 'ghost', interactive),
-    visibleSections.find((section) => section.id === 'request') ? renderButton('Request', '#request', 'ghost', interactive) : '',
-    visibleSections.find((section) => section.id === 'response') ? renderButton('Response', '#response', 'ghost', interactive) : '',
     '</div>',
     '</div>',
     '</header>',

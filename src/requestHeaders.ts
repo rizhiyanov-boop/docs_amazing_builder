@@ -28,7 +28,7 @@ const REQUEST_HEADER_ORDER = new Map(DEFAULT_REQUEST_HEADERS.map((header, index)
 const DEFAULT_REQUEST_HEADER_NAMES = new Set(DEFAULT_REQUEST_HEADERS.map((header) => header.field.toLowerCase()));
 
 function isDualModelSection(section: ParsedSection): boolean {
-  return section.id === 'request' || section.id === 'response';
+  return section.sectionType === 'request' || section.sectionType === 'response';
 }
 
 function getRowKey(row: ParsedRow): string {
@@ -108,7 +108,7 @@ function filterEnabledRows(rows: ParsedRow[]): ParsedRow[] {
 }
 
 function getRequestAuthInfoInternal(section: ParsedSection): RequestAuthInfo | null {
-  if (section.id !== 'request') return null;
+  if (section.sectionType !== 'request') return null;
 
   if (section.authType === 'bearer') {
     const tokenExample = section.authTokenExample?.trim() || DEFAULT_BEARER_TOKEN_EXAMPLE;
@@ -182,7 +182,7 @@ function getRequestServerRows(section: ParsedSection, options?: { includeDisable
   const includeDisabledHeaders = options?.includeDisabledHeaders ?? false;
   const includeAuth = options?.includeAuth ?? true;
 
-  if (section.id !== 'request') {
+  if (section.sectionType !== 'request') {
     return includeDisabledHeaders ? section.rows : filterEnabledRows(section.rows);
   }
 

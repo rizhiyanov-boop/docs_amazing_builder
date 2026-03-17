@@ -39,6 +39,58 @@ export function sanitizeSections(sections: DocSection[]): DocSection[] {
   return sections
     .filter((section) => section.id !== 'external-url')
     .map((section) => {
+    if (section.kind === 'errors') {
+      return {
+        ...section,
+        title: resolveSectionTitle(section.title),
+        rows: (section.rows ?? []).map((row) => ({
+          clientHttpStatus: row.clientHttpStatus ?? '',
+          clientResponse: row.clientResponse ?? '',
+          trigger: row.trigger ?? '',
+          errorType: row.errorType ?? '-',
+          serverHttpStatus: row.serverHttpStatus ?? '',
+          internalCode: row.internalCode ?? '',
+          message: row.message ?? ''
+        }))
+      };
+    }
+
+    if (section.kind === 'text' && section.id === 'errors') {
+      const legacyTrigger = section.value?.trim() ?? '';
+
+      return {
+        id: section.id,
+        title: resolveSectionTitle(section.title),
+        enabled: section.enabled,
+        kind: 'errors',
+        rows: [
+          {
+            clientHttpStatus: '',
+            clientResponse: '',
+            trigger: legacyTrigger,
+            errorType: '-',
+            serverHttpStatus: '',
+            internalCode: '',
+            message: ''
+          }
+        ]
+      };
+    }
+
+    if (section.kind === 'diagram') {
+      return {
+        ...section,
+        title: resolveSectionTitle(section.title),
+        diagrams: (section.diagrams ?? []).map((diagram, index) => ({
+          id: diagram.id || `diagram-${Date.now()}-${index}`,
+          title: diagram.title ?? '',
+          engine: diagram.engine === 'plantuml' ? 'plantuml' : 'mermaid',
+          code: diagram.code ?? '',
+          description: diagram.description ?? ''
+        }))
+      };
+    }
+
     const normalizedSection =
       section.kind === 'parsed' && section.id === 'body'
         ? { ...section, id: 'response', title: section.title === 'Body / Выходные параметры' ? 'Response' : section.title }

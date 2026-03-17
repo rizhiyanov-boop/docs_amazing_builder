@@ -2,6 +2,8 @@
 import type { ReactNode } from 'react';
 import './App.css';
 import { parseCurlMeta, parseToRows } from './parsers';
+import { getDiagramImageUrl, getPlantUmlImageUrl, slugifyDiagramName } from './diagramUtils';
+import { ERROR_CATALOG, ERROR_CATALOG_BY_CODE, POPULAR_HTTP_STATUS_CODES } from './errorCatalog';
 import { getRequestColumnLabel, getRequestColumnOrder, moveRequestColumn } from './requestColumns';
 import {
   DEFAULT_API_KEY_EXAMPLE,
@@ -28,7 +30,7 @@ import { DEFAULT_SECTION_TITLE, resolveSectionTitle, sanitizeSections } from './
 import { buildInputFromRows } from './sourceSync';
 import { applyThemeToRoot } from './theme';
 import type { ThemeName } from './theme';
-import type { DocSection, ParsedRow, ParsedSection, ParsedSectionType, ParseFormat, ProjectData, RequestAuthType, RequestColumnKey, RequestMethod } from './types';
+import type { DiagramItem, DiagramSection, DocSection, ErrorRow, ErrorsSection, ParsedRow, ParsedSection, ParsedSectionType, ParseFormat, ProjectData, RequestAuthType, RequestColumnKey, RequestMethod } from './types';
 
 const STORAGE_KEY = 'doc-builder-project-v2';
 
@@ -59,6 +61,7 @@ type EditableTitleState = {
   draft: string;
 };
 type DriftAlertState = Record<string, boolean>;
+type ExpanderState = Record<string, boolean>;
 type EditableFieldOptions = {
   allowEdit?: boolean;
   onDelete?: () => void;
@@ -88,19 +91,21 @@ const TYPE_OPTIONS_EXTENDED = [
 ];
 const REQUIRED_OPTIONS = ['+', OPTIONAL_MARK, '-'];
 const STRUCTURED_EXAMPLE_PLACEHOLDER = '-';
-type AddableBlockType = 'text' | 'request' | 'response' | 'error-logic';
+type AddableBlockType = 'text' | 'request' | 'response' | 'error-logic' | 'diagram';
 
 const ADDABLE_BLOCK_TYPES: Array<{ type: AddableBlockType; label: string }> = [
   { type: 'text', label: 'Текстовый блок' },
   { type: 'request', label: 'Request блок' },
   { type: 'response', label: 'Response блок' },
-  { type: 'error-logic', label: 'Логика обработки ошибок' }
+  { type: 'error-logic', label: 'Логика обработки ошибок' },
+  { type: 'diagram', label: 'Диаграмма' }
 ];
 const AUTO_SECTION_TITLE_BASE: Record<AddableBlockType, string> = {
   text: 'Текстовый блок',
   request: 'Request блок',
   response: 'Response блок',
-  'error-logic': 'Логика обработки ошибок'
+  'error-logic': 'Логика обработки ошибок',
+  diagram: 'Диаграмма'
 };
 
 function usesStructuredPlaceholder(type: string): boolean {
@@ -168,14 +173,60 @@ function createParsedSection(sectionType: ParsedSectionType, id = `custom-${sect
   };
 }
 
+function createDiagramItem(id = `diagram-item-${Date.now()}`): DiagramItem {
+  return {
+    id,
+    title: '',
+    engine: 'mermaid',
+    code: '',
+    description: ''
+  };
+}
+
+function createDiagramSection(id = `custom-diagram-${Date.now()}`): DiagramSection {
+  return {
+    id,
+    title: 'Диаграмма',
+    enabled: true,
+    kind: 'diagram',
+    diagrams: [createDiagramItem()]
+  };
+}
+
+function createErrorRow(): ErrorRow {
+  return {
+    clientHttpStatus: '',
+    clientResponse: '',
+    trigger: '',
+    errorType: '-',
+    serverHttpStatus: '',
+    internalCode: '',
+    message: ''
+  };
+}
+
+function createErrorsSection(id = 'errors', title = 'Ошибки'): ErrorsSection {
+  return {
+    id,
+    title,
+    enabled: true,
+    kind: 'errors',
+    rows: [createErrorRow()]
+  };
+}
+
 function createInitialSections(): DocSection[] {
+  const processDiagramSection = createDiagramSection('process-diagram');
+  processDiagramSection.title = 'Диаграмма процесса';
+
   return [
     { id: 'goal', title: 'Цель', enabled: true, kind: 'text', value: '', required: true },
+    { id: 'functional', title: 'Функциональные требования', enabled: true, kind: 'text', value: '' },
+    processDiagramSection,
     createParsedSection('request', 'request'),
     createParsedSection('response', 'response'),
-    { id: 'errors', title: 'Ошибки', enabled: true, kind: 'text', value: '' },
-    { id: 'non-functional', title: 'Нефункциональные требования', enabled: true, kind: 'text', value: '' },
-    { id: 'future', title: 'Доработки, планирующиеся на следующих этапах', enabled: false, kind: 'text', value: '' }
+    createErrorsSection('errors', 'Ошибки'),
+    { id: 'non-functional', title: 'Нефункциональные требования', enabled: true, kind: 'text', value: '' }
   ];
 }
 
@@ -276,6 +327,16 @@ function getExternalSourceRows(section: ParsedSection): ParsedRow[] {
 }
 
 function validateSection(section: DocSection): string {
+  if (section.kind === 'errors') return '';
+
+  if (section.kind === 'diagram') {
+    const hasContent = section.diagrams.some((diagram) => diagram.code.trim());
+    if (!hasContent) return '';
+    const invalid = section.diagrams.find((diagram) => !diagram.code.trim());
+    if (invalid) return 'Заполните код всех добавленных диаграмм или удалите пустые';
+    return '';
+  }
+
   if (section.kind !== 'parsed') return '';
 
   if (isDualModelSection(section)) {
@@ -313,6 +374,14 @@ function loadProject(): DocSection[] {
 
 function downloadText(filename: string, content: string): void {
   const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+function downloadBlob(filename: string, blob: Blob): void {
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
   link.download = filename;
@@ -473,14 +542,80 @@ function validateExampleValue(example: string, type: string): string {
   }
 }
 
+function validateJsonDraft(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+
+  const startsLikeJson = trimmed.startsWith('{') || trimmed.startsWith('[');
+  const endsLikeJson = trimmed.endsWith('}') || trimmed.endsWith(']');
+  if (!startsLikeJson && !endsLikeJson) return '';
+
+  try {
+    JSON.parse(trimmed);
+    return '';
+  } catch {
+    return 'Client Response похож на JSON, но содержит ошибку синтаксиса';
+  }
+}
+
+function MermaidLivePreview({ code }: { code: string }): ReactNode {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function renderDiagram(): Promise<void> {
+      const host = hostRef.current;
+      if (!host) return;
+
+      const source = code.trim();
+      if (!source) {
+        host.innerHTML = '';
+        setError('');
+        return;
+      }
+
+      try {
+        const mermaidModule = await import('mermaid');
+        const mermaid = mermaidModule.default;
+        mermaid.initialize({ startOnLoad: false, securityLevel: 'loose' });
+        const graphId = `mermaid-${Math.random().toString(36).slice(2, 10)}`;
+        const { svg } = await mermaid.render(graphId, source);
+        if (!isActive) return;
+        host.innerHTML = svg;
+        setError('');
+      } catch (diagramError) {
+        if (!isActive) return;
+        host.innerHTML = '';
+        setError(diagramError instanceof Error ? diagramError.message : 'Ошибка Mermaid рендера');
+      }
+    }
+
+    void renderDiagram();
+
+    return () => {
+      isActive = false;
+    };
+  }, [code]);
+
+  return (
+    <div className="diagram-preview">
+      <div ref={hostRef} className="diagram-preview-canvas" />
+      {error && <div className="inline-error">{error}</div>}
+    </div>
+  );
+}
+
 export default function App() {
   const textSectionRef = useRef<HTMLDivElement | null>(null);
   const textSelectionRef = useRef<Range | null>(null);
   const textEditorSectionRef = useRef<string | null>(null);
+  const diagramTextRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [sections, setSections] = useState<DocSection[]>(() => loadProject());
   const [selectedId, setSelectedId] = useState<string>(() => createInitialSections()[0].id);
   const [tab, setTab] = useState<TabKey>('editor');
-  const [theme, setTheme] = useState<ThemeName>('dark');
+  const [theme, setTheme] = useState<ThemeName>('light');
   const [autosave, setAutosave] = useState<AutosaveInfo>({ state: 'idle' });
   const [importError, setImportError] = useState('');
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -492,6 +627,7 @@ export default function App() {
   const [requestCellError, setRequestCellError] = useState('');
   const [editingTitle, setEditingTitle] = useState<EditableTitleState | null>(null);
   const [expandedDriftAlerts, setExpandedDriftAlerts] = useState<DriftAlertState>({});
+  const [expanderState, setExpanderState] = useState<ExpanderState>({});
   const [isAddBlockMenuOpen, setIsAddBlockMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -499,6 +635,10 @@ export default function App() {
       setSelectedId(sections[0].id);
     }
   }, [sections, selectedId]);
+
+  useEffect(() => {
+    setTab('editor');
+  }, [selectedId]);
 
   const validationMap: TableValidation = useMemo(() => {
     const map = new Map<string, string>();
@@ -558,8 +698,38 @@ export default function App() {
     textEditorSectionRef.current = selectedSection.id;
   }, [selectedSection]);
 
+  useEffect(() => {
+    const focusedElement = document.activeElement;
+
+    for (const section of sections) {
+      if (section.kind !== 'diagram') continue;
+
+      for (const diagram of section.diagrams) {
+        const editorKey = `${section.id}:${diagram.id}`;
+        const editor = diagramTextRefs.current[editorKey];
+        if (!editor || editor === focusedElement) continue;
+
+        const nextHtml = richTextToHtml(diagram.description ?? '');
+        if (editor.innerHTML !== nextHtml) editor.innerHTML = nextHtml;
+      }
+    }
+  }, [sections]);
+
   function updateSection(id: string, updater: (section: DocSection) => DocSection): void {
     setSections((prev) => prev.map((section) => (section.id === id ? updater(section) : section)));
+  }
+
+  function getExpanderKey(sectionId: string, blockId: string): string {
+    return `${sectionId}:${blockId}`;
+  }
+
+  function isExpanderOpen(sectionId: string, blockId: string): boolean {
+    return expanderState[getExpanderKey(sectionId, blockId)] ?? false;
+  }
+
+  function setExpanderOpen(sectionId: string, blockId: string, isOpen: boolean): void {
+    const key = getExpanderKey(sectionId, blockId);
+    setExpanderState((current) => ({ ...current, [key]: isOpen }));
   }
 
   function updateSectionTitle(id: string, title: string): void {
@@ -599,10 +769,37 @@ export default function App() {
     });
   }
 
+  function addDiagram(sectionId: string): void {
+    updateSection(sectionId, (section) => {
+      if (section.kind !== 'diagram') return section;
+      return { ...section, diagrams: [...section.diagrams, createDiagramItem()] };
+    });
+  }
+
+  function updateDiagram(sectionId: string, diagramId: string, updater: (diagram: DiagramItem) => DiagramItem): void {
+    updateSection(sectionId, (section) => {
+      if (section.kind !== 'diagram') return section;
+      return {
+        ...section,
+        diagrams: section.diagrams.map((diagram) => (diagram.id === diagramId ? updater(diagram) : diagram))
+      };
+    });
+  }
+
+  function deleteDiagram(sectionId: string, diagramId: string): void {
+    updateSection(sectionId, (section) => {
+      if (section.kind !== 'diagram') return section;
+      const nextDiagrams = section.diagrams.filter((diagram) => diagram.id !== diagramId);
+      return { ...section, diagrams: nextDiagrams.length > 0 ? nextDiagrams : [createDiagramItem()] };
+    });
+  }
+
   function addSectionByType(type: AddableBlockType): void {
     const nextSection =
       type === 'text' || type === 'error-logic'
         ? createTextSection(undefined, AUTO_SECTION_TITLE_BASE[type])
+        : type === 'diagram'
+          ? createDiagramSection()
         : createParsedSection(type);
     setSections((prev) => {
       nextSection.title = createAutoSectionTitle(prev, type);
@@ -610,6 +807,65 @@ export default function App() {
     });
     setSelectedId(nextSection.id);
     setIsAddBlockMenuOpen(false);
+  }
+
+  function updateErrorRow(sectionId: string, rowIndex: number, updater: (row: ErrorRow) => ErrorRow): void {
+    updateSection(sectionId, (section) => {
+      if (section.kind !== 'errors') return section;
+      return {
+        ...section,
+        rows: section.rows.map((row, index) => (index === rowIndex ? updater(row) : row))
+      };
+    });
+  }
+
+  function addErrorRow(sectionId: string): void {
+    updateSection(sectionId, (section) => {
+      if (section.kind !== 'errors') return section;
+      return { ...section, rows: [...section.rows, createErrorRow()] };
+    });
+  }
+
+  function deleteErrorRow(sectionId: string, rowIndex: number): void {
+    updateSection(sectionId, (section) => {
+      if (section.kind !== 'errors') return section;
+      const nextRows = section.rows.filter((_, index) => index !== rowIndex);
+      return { ...section, rows: nextRows.length > 0 ? nextRows : [createErrorRow()] };
+    });
+  }
+
+  function applyInternalCode(sectionId: string, rowIndex: number, internalCode: string): void {
+    updateErrorRow(sectionId, rowIndex, (row) => {
+      const normalizedCode = internalCode.trim();
+      const preset = ERROR_CATALOG_BY_CODE.get(normalizedCode);
+      if (!preset) {
+        return {
+          ...row,
+          internalCode: normalizedCode,
+          serverHttpStatus: '',
+          message: ''
+        };
+      }
+      return {
+        ...row,
+        internalCode: normalizedCode,
+        serverHttpStatus: preset.httpStatus,
+        message: preset.message
+      };
+    });
+  }
+
+  function insertJsonResponse(sectionId: string, rowIndex: number): void {
+    updateErrorRow(sectionId, rowIndex, (row) => {
+      const trimmed = row.clientResponse.trim();
+      if (!trimmed) return { ...row, clientResponse: '{\n  \n}' };
+
+      try {
+        return { ...row, clientResponse: JSON.stringify(JSON.parse(trimmed), null, 2) };
+      } catch {
+        return row;
+      }
+    });
   }
 
   function runParser(section: ParsedSection, target: ParseTarget = 'server'): void {
@@ -654,6 +910,39 @@ export default function App() {
 
   function exportProjectJson(): void {
     downloadText('doc-project.json', JSON.stringify(asProjectData(sections), null, 2));
+  }
+
+  async function exportDiagramJpegs(): Promise<void> {
+    const diagramSections = sections.filter((section): section is DiagramSection => section.kind === 'diagram');
+
+    for (const section of diagramSections) {
+      const sectionSlug = slugifyDiagramName(resolveSectionTitle(section.title)) || section.id;
+      const diagrams = section.diagrams.filter((diagram) => diagram.code.trim());
+
+      for (let index = 0; index < diagrams.length; index += 1) {
+        const diagram = diagrams[index];
+        try {
+          const imageUrl = getDiagramImageUrl(diagram.engine, diagram.code, 'jpeg');
+          const response = await fetch(imageUrl);
+          if (!response.ok) continue;
+          const blob = await response.blob();
+          const titleSlug = slugifyDiagramName(diagram.title) || `diagram-${index + 1}`;
+          downloadBlob(`${sectionSlug}-${titleSlug}.jpeg`, blob);
+        } catch {
+          // Skip broken diagram export and continue for remaining diagrams.
+        }
+      }
+    }
+  }
+
+  async function handleExportHtml(): Promise<void> {
+    await exportDiagramJpegs();
+    downloadText('documentation.html', htmlOutput);
+  }
+
+  async function handleExportWiki(): Promise<void> {
+    await exportDiagramJpegs();
+    downloadText('documentation.wiki', wikiOutput);
   }
 
   async function copyToClipboard(value: string): Promise<void> {
@@ -701,6 +990,41 @@ export default function App() {
     if (!editor) return;
     const nextValue = editorElementToWikiText(editor);
     updateSection(sectionId, (current) => (current.kind === 'text' && current.value !== nextValue ? { ...current, value: nextValue } : current));
+  }
+
+  function getDiagramEditorKey(sectionId: string, diagramId: string): string {
+    return `${sectionId}:${diagramId}`;
+  }
+
+  function syncDiagramDescriptionFromEditor(sectionId: string, diagramId: string): void {
+    const editor = diagramTextRefs.current[getDiagramEditorKey(sectionId, diagramId)];
+    if (!editor) return;
+    const nextValue = editorElementToWikiText(editor);
+    updateDiagram(sectionId, diagramId, (current) => ({ ...current, description: nextValue }));
+  }
+
+  function applyDiagramTextCommand(
+    sectionId: string,
+    diagramId: string,
+    action: 'bold' | 'italic' | 'code' | 'h3' | 'ul' | 'ol' | 'quote'
+  ): void {
+    const editor = diagramTextRefs.current[getDiagramEditorKey(sectionId, diagramId)];
+    if (!editor) return;
+
+    editor.focus();
+
+    if (action === 'bold') document.execCommand('bold');
+    if (action === 'italic') document.execCommand('italic');
+    if (action === 'ul') document.execCommand('insertUnorderedList');
+    if (action === 'ol') document.execCommand('insertOrderedList');
+    if (action === 'h3') document.execCommand('formatBlock', false, 'h3');
+    if (action === 'quote') document.execCommand('formatBlock', false, 'blockquote');
+    if (action === 'code') {
+      const selection = window.getSelection()?.toString() || 'code';
+      document.execCommand('insertHTML', false, `<code>${escapeRichTextHtml(selection)}</code>`);
+    }
+
+    syncDiagramDescriptionFromEditor(sectionId, diagramId);
   }
 
   function rememberTextSelection(): void {
@@ -895,6 +1219,41 @@ export default function App() {
     return target === 'client' && isDualModelSection(section) ? section.clientFormat ?? 'json' : section.format;
   }
 
+  function detectSourceFormat(draft: string): ParseFormat | null {
+    const trimmed = draft.trim();
+    if (!trimmed) return null;
+
+    if (/^curl(?:\s|$)/i.test(trimmed)) return 'curl';
+
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        JSON.parse(trimmed);
+        return 'json';
+      } catch {
+        return null;
+      }
+    }
+
+    return null;
+  }
+
+  function applyDetectedSourceFormat(sectionId: string, target: ParseTarget, draft: string, currentFormat: ParseFormat): ParseFormat {
+    const detectedFormat = detectSourceFormat(draft);
+    if (!detectedFormat || detectedFormat === currentFormat) return currentFormat;
+
+    updateSection(sectionId, (current) => {
+      if (current.kind !== 'parsed') return current;
+
+      if (target === 'client' && isDualModelSection(current)) {
+        return { ...current, clientFormat: detectedFormat, clientError: '' };
+      }
+
+      return { ...current, format: detectedFormat, error: '' };
+    });
+
+    return detectedFormat;
+  }
+
   function validateSourceDraft(format: ParseFormat, draft: string): string {
     if (format !== 'json') return '';
     if (!draft.trim()) return '';
@@ -932,7 +1291,12 @@ export default function App() {
     const section = sections.find((item) => item.id === editingSource.sectionId);
     if (!section || section.kind !== 'parsed') return;
 
-    const format = getSourceFormat(section, editingSource.target);
+    const format = applyDetectedSourceFormat(
+      editingSource.sectionId,
+      editingSource.target,
+      editingSource.draft,
+      getSourceFormat(section, editingSource.target)
+    );
     const error = validateSourceDraft(format, editingSource.draft);
     if (error) {
       setSourceEditorError(error);
@@ -942,10 +1306,10 @@ export default function App() {
     updateSection(editingSource.sectionId, (current) => {
       if (current.kind !== 'parsed') return current;
       if (editingSource.target === 'client' && isDualModelSection(current)) {
-        return { ...current, clientInput: editingSource.draft, clientError: '' };
+        return { ...current, clientFormat: format, clientInput: editingSource.draft, clientError: '' };
       }
 
-      return { ...current, input: editingSource.draft, error: '' };
+      return { ...current, format, input: editingSource.draft, error: '' };
     });
 
     cancelSourceEditing();
@@ -1671,9 +2035,14 @@ export default function App() {
     const headerName = isExternal ? section.externalAuthHeaderName ?? DEFAULT_API_KEY_HEADER : section.authHeaderName ?? DEFAULT_API_KEY_HEADER;
     const apiKeyExample = isExternal ? section.externalAuthApiKeyExample ?? '' : section.authApiKeyExample ?? '';
     const title = isExternal ? 'Авторизация внешнего запроса' : 'Авторизация';
+    const blockId = isExternal ? 'auth-client' : 'auth-server';
 
     return (
-      <details className="expander" open>
+      <details
+        className="expander"
+        open={isExpanderOpen(section.id, blockId)}
+        onToggle={(e) => setExpanderOpen(section.id, blockId, e.currentTarget.open)}
+      >
         <summary className="expander-summary">{title}</summary>
         <div className="expander-body">
           <label className="field">
@@ -1813,6 +2182,7 @@ export default function App() {
     const isExternal = target === 'client';
     const title = isExternal ? 'Внешний вызов' : 'Общее описание метода';
     const urlLabel = isExternal ? 'Внешний URL' : 'URL метода';
+    const blockId = isExternal ? 'meta-client' : 'meta-server';
 
     const applyRequestMeta = (patch: Partial<Pick<ParsedSection, 'requestUrl' | 'requestMethod' | 'externalRequestUrl' | 'externalRequestMethod'>>) => {
       updateSection(section.id, (current) => {
@@ -1848,7 +2218,11 @@ export default function App() {
     };
 
     return (
-      <details className="expander" open>
+      <details
+        className="expander"
+        open={isExpanderOpen(section.id, blockId)}
+        onToggle={(e) => setExpanderOpen(section.id, blockId, e.currentTarget.open)}
+      >
         <summary className="expander-summary">{title}</summary>
         <div className="expander-body">
           <div className="row gap auth-grid">
@@ -1890,11 +2264,16 @@ export default function App() {
     const value = getSourceValue(section, target);
     const isEditing = editingSource?.sectionId === section.id && editingSource.target === target;
     const currentValue = isEditing ? editingSource.draft : value;
+    const shouldOpenEmptyInput = !value.trim() && !isEditing;
+    const hasSourceValue = Boolean(currentValue.trim());
 
     return (
       <div className="source-panel">
         <div className="source-panel-head">
           <div className="label">{title}</div>
+          <div className="source-format-status">
+            <span className={`source-format-badge ${hasSourceValue ? 'active' : ''}`}>{format.toUpperCase()}</span>
+          </div>
           <div className="field-actions visible">
             {!isEditing && (
               <>
@@ -1975,7 +2354,32 @@ export default function App() {
           </div>
         </div>
 
-        {!isEditing && (
+        {shouldOpenEmptyInput && (
+          <div className="source-edit-wrap">
+            <textarea
+              className="source-edit"
+              rows={12}
+              value=""
+              onChange={(e) => {
+                const nextDraft = e.target.value;
+                const nextFormat = applyDetectedSourceFormat(section.id, target, nextDraft, format);
+                setEditingSource({
+                  sectionId: section.id,
+                  target,
+                  draft: nextDraft
+                });
+                setSourceEditorError(validateSourceDraft(nextFormat, nextDraft));
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') cancelSourceEditing();
+              }}
+              placeholder="Вставьте JSON или cURL"
+              autoFocus
+            />
+          </div>
+        )}
+
+        {!isEditing && !shouldOpenEmptyInput && (
           <div className={`source-code source-code-display language-${format}`} onDoubleClick={() => startSourceEditing(section, target)}>
             <pre className={`source-code language-${format}`}>
               <code dangerouslySetInnerHTML={{ __html: highlightCode(format, currentValue || '') || '&nbsp;' }} />
@@ -1991,10 +2395,13 @@ export default function App() {
               value={editingSource.draft}
               onChange={(e) => {
                 const nextDraft = e.target.value;
+                const nextFormat = applyDetectedSourceFormat(section.id, target, nextDraft, format);
                 setEditingSource((current) => (current ? { ...current, draft: nextDraft } : current));
-                setSourceEditorError(validateSourceDraft(format, nextDraft));
+                setSourceEditorError(validateSourceDraft(nextFormat, nextDraft));
               }}
-              onBlur={saveSourceEditing}
+              onBlur={() => {
+                if (format !== 'json') saveSourceEditing();
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Escape') cancelSourceEditing();
                 if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) saveSourceEditing();
@@ -2060,26 +2467,14 @@ export default function App() {
           </>
         )}
 
-        <details className="expander" open>
+        <details
+          className="expander"
+          open={isExpanderOpen(section.id, 'source-server')}
+          onToggle={(e) => setExpanderOpen(section.id, 'source-server', e.currentTarget.open)}
+        >
           <summary className="expander-summary">{serverLabel}</summary>
           <div className="expander-body">
             <div className="row gap">
-              <label className="field">
-                <div className="label">Формат</div>
-                <select
-                  value={section.format}
-                  onChange={(e) =>
-                    updateSection(section.id, (current) =>
-                      current.kind === 'parsed'
-                        ? { ...current, format: e.target.value as ParseFormat, error: '' }
-                        : current
-                    )
-                  }
-                >
-                  <option value="json">JSON</option>
-                  <option value="curl">cURL</option>
-                </select>
-              </label>
               <button className="primary" type="button" onClick={() => runParser(section, 'server')}>
                 Парсить
               </button>
@@ -2101,26 +2496,14 @@ export default function App() {
                 </div>
               </>
             )}
-            <details className="expander" open>
+            <details
+              className="expander"
+              open={isExpanderOpen(section.id, 'source-client')}
+              onToggle={(e) => setExpanderOpen(section.id, 'source-client', e.currentTarget.open)}
+            >
               <summary className="expander-summary">{clientLabel}</summary>
               <div className="expander-body">
                 <div className="row gap">
-                  <label className="field">
-                    <div className="label">Формат</div>
-                    <select
-                      value={section.clientFormat ?? 'json'}
-                      onChange={(e) =>
-                        updateSection(section.id, (current) =>
-                          current.kind === 'parsed' && isDualModelSection(current)
-                            ? { ...current, clientFormat: e.target.value as ParseFormat, clientError: '' }
-                            : current
-                        )
-                      }
-                    >
-                      <option value="json">JSON</option>
-                      <option value="curl">cURL</option>
-                    </select>
-                  </label>
                   <button className="primary" type="button" onClick={() => runParser(section, 'client')}>
                     Парсить
                   </button>
@@ -2136,6 +2519,311 @@ export default function App() {
         {section.clientError && <div className="alert error">{clientLabel}: {section.clientError}</div>}
         {requestCellError && <div className="alert error">{requestCellError}</div>}
         {renderParsedTable(section)}
+      </div>
+    );
+  }
+
+  function renderDiagramEditor(section: DiagramSection): ReactNode {
+    return (
+      <div className="stack">
+        <div className="row gap">
+          <button className="ghost small" type="button" onClick={() => addDiagram(section.id)}>
+            + Диаграмма
+          </button>
+        </div>
+
+        {section.diagrams.map((diagram, index) => {
+          const blockId = `diagram-item-${diagram.id}`;
+          const title = diagram.title.trim() || `Диаграмма ${index + 1}`;
+
+          return (
+            <details
+              key={diagram.id}
+              className="expander"
+              open={isExpanderOpen(section.id, blockId)}
+              onToggle={(e) => setExpanderOpen(section.id, blockId, e.currentTarget.open)}
+            >
+              <summary className="expander-summary">{title}</summary>
+              <div className="expander-body">
+                <div className="diagram-header-row">
+                  <label className="field">
+                    <div className="label">Название</div>
+                    <input
+                      type="text"
+                      value={diagram.title}
+                      onChange={(e) => updateDiagram(section.id, diagram.id, (current) => ({ ...current, title: e.target.value }))}
+                      placeholder="Например: Общий процесс"
+                    />
+                  </label>
+                  <div className="diagram-engine-toggle" role="group" aria-label="Движок диаграммы">
+                    <button
+                      type="button"
+                      className={`ghost small ${diagram.engine === 'mermaid' ? 'active' : ''}`}
+                      onClick={() => updateDiagram(section.id, diagram.id, (current) => ({ ...current, engine: 'mermaid' }))}
+                    >
+                      Mermaid
+                    </button>
+                    <button
+                      type="button"
+                      className={`ghost small ${diagram.engine === 'plantuml' ? 'active' : ''}`}
+                      onClick={() => updateDiagram(section.id, diagram.id, (current) => ({ ...current, engine: 'plantuml' }))}
+                    >
+                      PlantUML
+                    </button>
+                  </div>
+                </div>
+
+                <label className="field">
+                  <div className="label">Код диаграммы</div>
+                  <textarea
+                    className="source-edit"
+                    rows={10}
+                    value={diagram.code}
+                    onChange={(e) => updateDiagram(section.id, diagram.id, (current) => ({ ...current, code: e.target.value }))}
+                    placeholder={diagram.engine === 'mermaid' ? 'sequenceDiagram\nA->>B: Hello' : '@startuml\nAlice -> Bob: Hello\n@enduml'}
+                  />
+                </label>
+
+                <div className="label">Предпросмотр</div>
+                {!diagram.code.trim() && <div className="muted">Вставьте код диаграммы для предпросмотра</div>}
+                {diagram.code.trim() && diagram.engine === 'mermaid' && <MermaidLivePreview code={diagram.code} />}
+                {diagram.code.trim() && diagram.engine === 'plantuml' && (
+                  <div className="diagram-preview">
+                    <img className="diagram-preview-image" src={getPlantUmlImageUrl(diagram.code, 'svg')} alt={title} loading="lazy" />
+                  </div>
+                )}
+
+                <div className="diagram-description-block">
+                  <div className="label">Текст под диаграммой</div>
+                  <div className="text-toolbar" role="toolbar" aria-label="Форматирование текста под диаграммой">
+                    <div className="toolbar-group" aria-label="Базовое форматирование">
+                      <button
+                        className="ghost small toolbar-button"
+                        type="button"
+                        title="Жирный"
+                        aria-label="Жирный"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'bold')}
+                      >
+                        <span className="toolbar-icon toolbar-icon-bold">B</span>
+                      </button>
+                      <button
+                        className="ghost small toolbar-button"
+                        type="button"
+                        title="Курсив"
+                        aria-label="Курсив"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'italic')}
+                      >
+                        <span className="toolbar-icon toolbar-icon-italic">I</span>
+                      </button>
+                      <button
+                        className="ghost small toolbar-button"
+                        type="button"
+                        title="Код"
+                        aria-label="Код"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'code')}
+                      >
+                        <span className="toolbar-icon">&lt;/&gt;</span>
+                      </button>
+                    </div>
+                    <div className="toolbar-group" aria-label="Структура текста">
+                      <button
+                        className="ghost small toolbar-button"
+                        type="button"
+                        title="Подзаголовок"
+                        aria-label="Подзаголовок"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'h3')}
+                      >
+                        <span className="toolbar-heading-glyph" aria-hidden="true">
+                          <span className="toolbar-heading-main">T</span>
+                          <span className="toolbar-heading-level">3</span>
+                        </span>
+                      </button>
+                      <button
+                        className="ghost small toolbar-button"
+                        type="button"
+                        title="Цитата"
+                        aria-label="Цитата"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'quote')}
+                      >
+                        <span className="toolbar-icon">❝</span>
+                      </button>
+                    </div>
+                    <div className="toolbar-group" aria-label="Списки">
+                      <button
+                        className="ghost small toolbar-button"
+                        type="button"
+                        title="Маркированный список"
+                        aria-label="Маркированный список"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'ul')}
+                      >
+                        <span className="toolbar-icon">•</span>
+                      </button>
+                      <button
+                        className="ghost small toolbar-button"
+                        type="button"
+                        title="Нумерованный список"
+                        aria-label="Нумерованный список"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'ol')}
+                      >
+                        <span className="toolbar-icon">1.</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div
+                    ref={(node) => {
+                      diagramTextRefs.current[getDiagramEditorKey(section.id, diagram.id)] = node;
+                    }}
+                    className="rich-text-editor"
+                    contentEditable
+                    suppressContentEditableWarning
+                    onInput={() => syncDiagramDescriptionFromEditor(section.id, diagram.id)}
+                  />
+                </div>
+
+                <div className="row gap">
+                  <button className="ghost small" type="button" onClick={() => deleteDiagram(section.id, diagram.id)}>
+                    Удалить диаграмму
+                  </button>
+                </div>
+              </div>
+            </details>
+          );
+        })}
+      </div>
+    );
+  }
+
+  function renderErrorsEditor(section: ErrorsSection): ReactNode {
+    return (
+      <div className="stack">
+        <datalist id="http-status-options">
+          {POPULAR_HTTP_STATUS_CODES.map((code) => (
+            <option key={code} value={code} />
+          ))}
+          <option value="-" />
+        </datalist>
+
+        <datalist id="internal-code-options">
+          {ERROR_CATALOG.map((item) => (
+            <option key={item.internalCode} value={item.internalCode} label={`${item.httpStatus} - ${item.message}`} />
+          ))}
+        </datalist>
+
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>№</th>
+                <th>Client HTTP Status</th>
+                <th>Client Response</th>
+                <th>Trigger (условия возникновения)</th>
+                <th>Error Type</th>
+                <th>Server HTTP Status</th>
+                <th>Полный internalCode</th>
+                <th>Server Response</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {section.rows.map((row, index) => {
+                const clientResponseError = validateJsonDraft(row.clientResponse);
+                const normalizedCode = row.internalCode.trim();
+                const hasUnknownInternalCode = Boolean(normalizedCode) && !ERROR_CATALOG_BY_CODE.has(normalizedCode);
+
+                return (
+                <tr key={`${section.id}-error-${index}`}>
+                  <td>{index + 1}</td>
+                  <td>
+                    <input
+                      type="text"
+                      list="http-status-options"
+                      value={row.clientHttpStatus}
+                      onChange={(e) => updateErrorRow(section.id, index, (current) => ({ ...current, clientHttpStatus: e.target.value }))}
+                    />
+                  </td>
+                  <td>
+                    <div className="error-response-cell">
+                      <textarea
+                        className={clientResponseError ? 'input-warning' : ''}
+                        rows={3}
+                        value={row.clientResponse}
+                        onChange={(e) => updateErrorRow(section.id, index, (current) => ({ ...current, clientResponse: e.target.value }))}
+                      />
+                      <button className="ghost small" type="button" onClick={() => insertJsonResponse(section.id, index)}>
+                        + JSON
+                      </button>
+                      {clientResponseError && <div className="inline-error">{clientResponseError}</div>}
+                    </div>
+                  </td>
+                  <td>
+                    <textarea
+                      rows={2}
+                      value={row.trigger}
+                      onChange={(e) => updateErrorRow(section.id, index, (current) => ({ ...current, trigger: e.target.value }))}
+                    />
+                  </td>
+                  <td>
+                    <select
+                      value={row.errorType}
+                      onChange={(e) => updateErrorRow(section.id, index, (current) => ({ ...current, errorType: e.target.value as ErrorRow['errorType'] }))}
+                    >
+                      <option value="-">-</option>
+                      <option value="CommonException">CommonException</option>
+                      <option value="BusinessException">BusinessException</option>
+                      <option value="AlertException">AlertException</option>
+                    </select>
+                  </td>
+                  <td>
+                    <input
+                      type="text"
+                      disabled
+                      value={row.serverHttpStatus}
+                      title="Поле заполняется автоматически по internalCode"
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className={hasUnknownInternalCode ? 'input-warning' : ''}
+                      type="text"
+                      list="internal-code-options"
+                      value={row.internalCode}
+                      onChange={(e) => applyInternalCode(section.id, index, e.target.value)}
+                      title={hasUnknownInternalCode ? 'Код не найден в каталоге, заполните поля вручную или уточните internalCode' : ''}
+                    />
+                    {hasUnknownInternalCode && <div className="inline-warning">Код не найден в каталоге</div>}
+                  </td>
+                  <td>
+                    <input
+                      type="text"
+                      disabled
+                      value={row.message}
+                      title="Поле заполняется автоматически по internalCode"
+                    />
+                  </td>
+                  <td>
+                    <button className="icon-button danger" type="button" onClick={() => deleteErrorRow(section.id, index)} aria-label="Удалить строку">
+                      ×
+                    </button>
+                  </td>
+                </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <div className="table-actions">
+            <button className="ghost small" type="button" onClick={() => addErrorRow(section.id)}>
+              + Строка ошибки
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -2167,22 +2855,20 @@ export default function App() {
           <button className="ghost" onClick={exportProjectJson}>
             Экспорт JSON
           </button>
-          <button onClick={() => downloadText('documentation.html', htmlOutput)}>Экспорт HTML</button>
-          <button onClick={() => downloadText('documentation.wiki', wikiOutput)}>Экспорт Wiki</button>
+          <button onClick={() => void handleExportHtml()}>Экспорт HTML</button>
+          <button onClick={() => void handleExportWiki()}>Экспорт Wiki</button>
           </div>
           <div className="actions-side">
-          <label className="theme-toggle" aria-label="Переключить тему">
-            <input type="checkbox" checked={theme === 'light'} onChange={toggleTheme} />
-            <span className="theme-toggle-icon" aria-hidden>
-              ☾
-            </span>
-            <span className="theme-toggle-track" aria-hidden>
-              <span className="theme-toggle-thumb" />
-            </span>
-            <span className="theme-toggle-icon" aria-hidden>
-              ☀
-            </span>
-          </label>
+          <button
+            type="button"
+            className="theme-mermaid-toggle"
+            onClick={toggleTheme}
+            aria-label={theme === 'dark' ? 'Включить светлую тему' : 'Включить ночную тему'}
+            title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+          >
+            <span className="theme-mermaid-orb" aria-hidden />
+            <span className="theme-mermaid-icon" aria-hidden>{theme === 'dark' ? '☾' : '☀'}</span>
+          </button>
           <div className={`badge ${autosave.state}`} aria-live="polite">
             {autosave.state === 'saving' && 'Сохранение...'}
             {autosave.state === 'saved' && `Сохранено в ${autosave.at ?? ''}`}
@@ -2258,6 +2944,8 @@ export default function App() {
                             : section.format.toUpperCase()}
                       </span>
                     )}
+                    {section.kind === 'diagram' && <span className="chip">DIAGRAM</span>}
+                    {section.kind === 'errors' && <span className="chip">ERRORS</span>}
                     {!section.enabled && <span className="chip muted">off</span>}
                     {error && <span className="chip danger">err</span>}
                   </div>
@@ -2485,20 +3173,6 @@ export default function App() {
                       ) : (
                         <div className="stack">
                           <div className="row gap">
-                            <label className="field">
-                              <div className="label">Формат</div>
-                              <select
-                                value={selectedSection.format}
-                                onChange={(e) =>
-                                  updateSection(selectedSection.id, (current) =>
-                                    current.kind === 'parsed' ? { ...current, format: e.target.value as ParseFormat, error: '' } : current
-                                  )
-                                }
-                              >
-                                <option value="json">JSON</option>
-                                <option value="curl">cURL</option>
-                              </select>
-                            </label>
                             <button className="primary" type="button" onClick={() => runParser(selectedSection)}>
                               Парсить
                             </button>
@@ -2516,6 +3190,9 @@ export default function App() {
                       )}
                     </>
                   )}
+
+                  {selectedSection.kind === 'diagram' && renderDiagramEditor(selectedSection)}
+                  {selectedSection.kind === 'errors' && renderErrorsEditor(selectedSection)}
                 </section>
               )}
 
@@ -2523,7 +3200,7 @@ export default function App() {
                 <section className={tab === 'html' ? 'panel panel-html-preview' : 'panel'}>
                   <div className="panel-head">
                     <div className="panel-title">Предпросмотр HTML</div>
-                    <button className="ghost small" onClick={() => downloadText('documentation.html', htmlOutput)}>
+                    <button className="ghost small" onClick={() => void handleExportHtml()}>
                       Скачать
                     </button>
                   </div>
@@ -2540,7 +3217,7 @@ export default function App() {
                 <section className="panel">
                   <div className="panel-head">
                     <div className="panel-title">Предпросмотр Wiki</div>
-                    <button className="ghost small" onClick={() => downloadText('documentation.wiki', wikiOutput)}>
+                    <button className="ghost small" onClick={() => void handleExportWiki()}>
                       Скачать
                     </button>
                   </div>

@@ -20,7 +20,7 @@
 - **Left Sidebar:** Sections list with drag-and-drop, status chips (ok/error/disabled), "Add section" button.
 - **Main Workspace:**
   - Top tabs: Editor | HTML | Wiki.
-  - Editor pane: form for selected section; for parsed sections — format switcher (JSON/XML/cURL), textarea, Parse button, validation messages.
+   - Editor pane: form for selected section; for parsed sections — format switcher (JSON/cURL), textarea, Parse button, validation messages.
   - Preview panes (HTML/Wiki) rendered live; split view toggle.
 - **Right Rail (optional):** Quick properties (required toggle, title, enable/disable), history of autosaves, export shortcuts.
 - **Footer:** Version info, docs links, "Smoke test" shortcut.
@@ -37,7 +37,7 @@
    - Select section -> form opens.
    - Autosave on pause (800ms debounce); badge shows time, spinner while saving.
 4) **Parse data (parsed section)**
-   - User selects format (JSON/XML/cURL), enters source, clicks "Parse".
+   - User selects format (JSON/cURL), enters source, clicks "Parse".
    - Success: table preview updates; chip "Parsed"; toast with row count.
    - Error: field outlined in error color; inline message; icon; shake animation; section locked until resolved.
 5) **Preview HTML/Wiki**

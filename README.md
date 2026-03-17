@@ -2,10 +2,14 @@
 
 **Текущая версия:** 1.1.0
 
-Приложение собирает документацию из фиксированных секций, парсит JSON/XML/cURL в таблицы и генерирует 2 независимых формата:
+Приложение собирает документацию из фиксированных секций, парсит JSON/cURL в таблицы и генерирует 2 независимых формата:
 
 - HTML
 - Confluence Wiki Markup (Server/Data Center)
+
+Актуально для текущей версии:
+- парсинг поддерживает `JSON` и `cURL (REST)`;
+- для секций `Request` и `Response` доступен dual-model режим (Server/Client), маппинг полей, настройка headers и авторизации.
 
 ## Что умеет MVP
 
@@ -63,7 +67,7 @@
 
 1. Заполните текстовые секции (`Цель`, `Ошибки`, `Нефункциональные требования` и т.д.).
 2. Для секций с парсингом:
-   - выберите формат (`JSON`, `XML`, `cURL (REST)`),
+   - выберите формат (`JSON`, `cURL (REST)`),
    - вставьте исходник,
    - нажмите `Парсить в таблицу`.
 3. Если в секции ошибка парсинга — секция блокируется до исправления.
@@ -87,6 +91,12 @@
 
 - Интерфейс: [src/App.tsx](src/App.tsx)
 - Парсеры: [src/parsers.ts](src/parsers.ts)
+- Логика request/response (headers, auth, маппинг): [src/requestHeaders.ts](src/requestHeaders.ts)
 - Рендер HTML: [src/renderHtml.ts](src/renderHtml.ts)
 - Рендер Wiki: [src/renderWiki.ts](src/renderWiki.ts)
 - Модели данных: [src/types.ts](src/types.ts)
+
+## Важные примечания
+
+- Текущая версия формата проекта: `version: 2` (см. `asProjectData` в [src/App.tsx](src/App.tsx)).
+- Runtime в MVP полностью фронтендовый (React + localStorage). Папка `server/` пока является заготовкой и не участвует в работе приложения.

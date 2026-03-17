@@ -4,8 +4,18 @@ export type RequestAuthType = 'none' | 'bearer' | 'basic' | 'api-key';
 export type RequestMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 export type RequestProtocol = 'REST';
 export type ParsedSectionType = 'generic' | 'request' | 'response';
+export type DiagramEngine = 'mermaid' | 'plantuml';
+export type ErrorType = 'CommonException' | 'BusinessException' | 'AlertException' | '-';
 
-export type SectionKind = 'text' | 'parsed';
+export type SectionKind = 'text' | 'parsed' | 'diagram' | 'errors';
+
+export interface DiagramItem {
+  id: string;
+  title: string;
+  engine: DiagramEngine;
+  code: string;
+  description?: string;
+}
 
 export interface ParsedRow {
   field: string;
@@ -70,7 +80,27 @@ export interface ParsedSection extends BaseSection {
   externalAuthApiKeyExample?: string;
 }
 
-export type DocSection = TextSection | ParsedSection;
+export interface DiagramSection extends BaseSection {
+  kind: 'diagram';
+  diagrams: DiagramItem[];
+}
+
+export interface ErrorRow {
+  clientHttpStatus: string;
+  clientResponse: string;
+  trigger: string;
+  errorType: ErrorType;
+  serverHttpStatus: string;
+  internalCode: string;
+  message: string;
+}
+
+export interface ErrorsSection extends BaseSection {
+  kind: 'errors';
+  rows: ErrorRow[];
+}
+
+export type DocSection = TextSection | ParsedSection | DiagramSection | ErrorsSection;
 
 export interface ProjectData {
   version: number;

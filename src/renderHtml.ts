@@ -4,8 +4,9 @@ import { richTextToHtml } from './richText';
 import { resolveSectionTitle } from './sectionTitles';
 import { buildInputFromRows } from './sourceSync';
 import { getThemeTokens } from './theme';
+import { getDiagramImageUrl } from './diagramUtils';
 import type { ThemeName } from './theme';
-import type { DocSection, ParseFormat, ParsedRow, ParsedSection, TextSection } from './types';
+import type { DiagramSection, DocSection, ErrorsSection, ParseFormat, ParsedRow, ParsedSection, TextSection } from './types';
 
 type RenderHtmlOptions = {
   interactive?: boolean;
@@ -31,6 +32,15 @@ function shouldRenderParsedSection(section: ParsedSection): boolean {
   if (!section.enabled) return false;
   if (isDualModelSection(section)) return Boolean(section.error) || Boolean(section.clientError) || requestHasRows(section);
   return Boolean(section.error) || section.rows.length > 0;
+}
+
+function shouldRenderDiagramSection(section: DiagramSection): boolean {
+  if (!section.enabled) return false;
+  return section.diagrams.some((diagram) => diagram.code.trim());
+}
+
+function shouldRenderErrorsSection(section: ErrorsSection): boolean {
+  return section.enabled && section.rows.length > 0;
 }
 
 function renderCell(value: string): string {
@@ -343,10 +353,50 @@ function renderParsedSection(section: ParsedSection, interactive = true): string
   return renderGenericParsedSection(section, interactive);
 }
 
+function renderDiagramSection(section: DiagramSection): string {
+  const title = resolveSectionTitle(section.title);
+  const body = section.diagrams
+    .filter((diagram) => diagram.code.trim())
+    .map((diagram, index) => {
+      const diagramTitle = diagram.title.trim() || `Диаграмма ${index + 1}`;
+      const imageUrl = getDiagramImageUrl(diagram.engine, diagram.code, 'jpeg');
+
+      return [
+        '<details open>',
+        `<summary>${escapeHtml(diagramTitle)} <span class="sumhint">${escapeHtml(diagram.engine.toUpperCase())}</span></summary>`,
+        `<div class="section-text"><img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(diagramTitle)}" style="max-width:100%;border:1px solid var(--border);border-radius:10px;" /></div>`,
+        diagram.description?.trim() ? `<div class="note">${renderTextValue(diagram.description)}</div>` : '',
+        `<details><summary>Код диаграммы</summary><pre><code>${escapeHtml(diagram.code)}</code></pre></details>`,
+        '</details>'
+      ]
+        .filter(Boolean)
+        .join('');
+    })
+    .join('');
+
+  return wrapCard(section.id, title, renderTag('DIAGRAM'), body);
+}
+
+function renderErrorsSection(section: ErrorsSection): string {
+  const title = resolveSectionTitle(section.title);
+  const bodyRows = section.rows
+    .map(
+      (row, index) =>
+        `<tr><td>${index + 1}</td><td>${renderCell(row.clientHttpStatus)}</td><td>${renderCell(row.clientResponse)}</td><td>${renderCell(row.trigger)}</td><td>${renderCell(row.errorType)}</td><td>${renderCell(row.serverHttpStatus)}</td><td>${renderCell(row.internalCode)}</td><td>${renderCell(row.message)}</td></tr>`
+    )
+    .join('');
+
+  const body = `<table><thead><tr><th>№</th><th>Client HTTP Status</th><th>Client Response</th><th>Trigger (условия возникновения)</th><th>Error Type</th><th>Server HTTP Status</th><th>Полный internalCode</th><th>Server Response</th></tr></thead><tbody>${bodyRows}</tbody></table>`;
+  return wrapCard(section.id, title, renderTag('ERRORS'), body);
+}
+
 function getVisibleSections(sections: DocSection[]): DocSection[] {
-  return sections.filter((section) =>
-    section.kind === 'text' ? shouldRenderTextSection(section) : shouldRenderParsedSection(section)
-  );
+  return sections.filter((section) => {
+    if (section.kind === 'text') return shouldRenderTextSection(section);
+    if (section.kind === 'parsed') return shouldRenderParsedSection(section);
+    if (section.kind === 'diagram') return shouldRenderDiagramSection(section);
+    return shouldRenderErrorsSection(section);
+  });
 }
 
 function renderSidebar(sections: DocSection[], interactive = true): string {
@@ -368,7 +418,12 @@ function renderSidebar(sections: DocSection[], interactive = true): string {
 export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'dark', options: RenderHtmlOptions = {}): string {
   const interactive = options.interactive ?? true;
   const visibleSections = getVisibleSections(sections);
-  const blocks = visibleSections.map((section) => (section.kind === 'text' ? renderTextSection(section) : renderParsedSection(section, interactive)));
+  const blocks = visibleSections.map((section) => {
+    if (section.kind === 'text') return renderTextSection(section);
+    if (section.kind === 'parsed') return renderParsedSection(section, interactive);
+    if (section.kind === 'diagram') return renderDiagramSection(section);
+    return renderErrorsSection(section);
+  });
   const darkTokens = getThemeTokens('dark');
   const lightTokens = getThemeTokens('light');
   const requestSections = sections.filter(

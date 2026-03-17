@@ -1,7 +1,8 @@
 ﻿import { getRequestColumnLabel, getRequestColumnOrder } from './requestColumns';
 import { getRequestAuthInfo, getRequestRows, requestHasRows, splitRequestRows } from './requestHeaders';
 import { resolveSectionTitle } from './sectionTitles';
-import type { DocSection, ParsedRow, ParsedSection, TextSection } from './types';
+import { getDiagramImageUrl } from './diagramUtils';
+import type { DiagramSection, DocSection, ErrorsSection, ParsedRow, ParsedSection, TextSection } from './types';
 
 const EMPTY_WIKI_CELL = '&#160;';
 
@@ -51,6 +52,15 @@ function shouldRenderParsedSection(section: ParsedSection): boolean {
   if (!section.enabled) return false;
   if (isDualModelSection(section)) return Boolean(section.error) || Boolean(section.clientError) || requestHasRows(section);
   return Boolean(section.error) || section.rows.length > 0;
+}
+
+function shouldRenderDiagramSection(section: DiagramSection): boolean {
+  if (!section.enabled) return false;
+  return section.diagrams.some((diagram) => diagram.code.trim());
+}
+
+function shouldRenderErrorsSection(section: ErrorsSection): boolean {
+  return section.enabled && section.rows.length > 0;
 }
 
 function renderDefaultTable(rows: ParsedRow[]): string[] {
@@ -183,6 +193,45 @@ function renderParsedSection(section: ParsedSection): string[] {
   return lines;
 }
 
+function renderDiagramSection(section: DiagramSection): string[] {
+  const lines: string[] = [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`];
+
+  section.diagrams
+    .filter((diagram) => diagram.code.trim())
+    .forEach((diagram, index) => {
+      const title = diagram.title.trim() || `Диаграмма ${index + 1}`;
+      const imageUrl = getDiagramImageUrl(diagram.engine, diagram.code, 'jpeg');
+
+      lines.push('');
+      lines.push(`h3. ${escapeWiki(title)}`);
+      lines.push(`!${escapeWiki(imageUrl)}!`);
+      if (diagram.description?.trim()) {
+        lines.push(...toWikiTextBlock(diagram.description));
+      }
+      lines.push('{expand:title=Код диаграммы}');
+      lines.push('{code}');
+      lines.push(escapeWiki(diagram.code));
+      lines.push('{code}');
+      lines.push('{expand}');
+    });
+
+  return lines;
+}
+
+function renderErrorsSection(section: ErrorsSection): string[] {
+  const lines: string[] = [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`];
+  lines.push('');
+  lines.push('||№||Client HTTP Status||Client Response||Trigger (условия возникновения)||Error Type||Server HTTP Status||Полный internalCode||Server Response||');
+
+  section.rows.forEach((row, index) => {
+    lines.push(
+      `|${toWikiCell(String(index + 1))}|${toWikiCell(row.clientHttpStatus)}|${toWikiCell(row.clientResponse)}|${toWikiCell(row.trigger)}|${toWikiCell(row.errorType)}|${toWikiCell(row.serverHttpStatus)}|${toWikiCell(row.internalCode)}|${toWikiCell(row.message)}|`
+    );
+  });
+
+  return lines;
+}
+
 export function renderWikiDocument(sections: DocSection[]): string {
   const lines: string[] = ['h1. Документация API'];
 
@@ -192,9 +241,17 @@ export function renderWikiDocument(sections: DocSection[]): string {
         ? shouldRenderTextSection(section)
           ? renderTextSection(section)
           : []
-        : shouldRenderParsedSection(section)
-          ? renderParsedSection(section)
-          : [];
+        : section.kind === 'parsed'
+          ? shouldRenderParsedSection(section)
+            ? renderParsedSection(section)
+            : []
+          : section.kind === 'diagram'
+            ? shouldRenderDiagramSection(section)
+              ? renderDiagramSection(section)
+              : []
+            : shouldRenderErrorsSection(section)
+              ? renderErrorsSection(section)
+              : [];
 
     if (rendered.length > 0) {
       lines.push('');

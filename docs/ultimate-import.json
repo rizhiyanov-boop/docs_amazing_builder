@@ -1,0 +1,969 @@
+{
+  "version": 3,
+  "updatedAt": "2026-03-18T12:30:00.000Z",
+  "activeMethodId": "method-auth",
+  "methods": [
+    {
+      "id": "method-auth",
+      "name": "Auth Token Issue",
+      "updatedAt": "2026-03-18T12:30:00.000Z",
+      "sections": [
+        {
+          "id": "goal",
+          "title": "Goal",
+          "enabled": true,
+          "kind": "text",
+          "value": "Issue access token for customer channels and return token metadata.",
+          "required": true
+        },
+        {
+          "id": "functional",
+          "title": "Functional Requirements",
+          "enabled": true,
+          "kind": "text",
+          "value": "Validate credentials, create session, return token and TTL, log audit record."
+        },
+        {
+          "id": "process-diagram",
+          "title": "Process Diagram",
+          "enabled": true,
+          "kind": "diagram",
+          "diagrams": [
+            {
+              "id": "diag-auth-sequence",
+              "title": "Auth Sequence",
+              "engine": "mermaid",
+              "code": "sequenceDiagram\nparticipant Client\nparticipant API\nparticipant IAM\nClient->>API: POST /v1/auth/token\nAPI->>IAM: validate credentials\nIAM-->>API: OK + subject\nAPI-->>Client: accessToken + expiresIn",
+              "description": "Main synchronous flow for token issuance."
+            },
+            {
+              "id": "diag-auth-alt",
+              "title": "Alternative View",
+              "engine": "plantuml",
+              "code": "@startuml\nactor Client\nparticipant API\nparticipant IAM\nClient -> API: POST /v1/auth/token\nAPI -> IAM: validate\nIAM --> API: subject\nAPI --> Client: token\n@enduml",
+              "description": "PlantUML variant to exercise both engines."
+            }
+          ]
+        },
+        {
+          "id": "request",
+          "title": "Request",
+          "enabled": true,
+          "kind": "parsed",
+          "sectionType": "request",
+          "format": "curl",
+          "lastSyncedFormat": "curl",
+          "input": "curl -X POST https://api.example.com/v1/auth/token \\\n  -H \"Content-Type: application/json\" \\\n  -H \"X-CLIENT-ID: mobile-app\" \\\n  -d '{\"username\":\"demo\",\"password\":\"demo\",\"channel\":\"MOBILE\"}'",
+          "rows": [
+            {
+              "field": "X-CLIENT-ID",
+              "sourceField": "X-CLIENT-ID",
+              "origin": "generated",
+              "enabled": true,
+              "type": "string",
+              "required": "+",
+              "description": "Client system id",
+              "example": "mobile-app",
+              "source": "header"
+            },
+            {
+              "field": "X-SOURCE-SYSTEM",
+              "sourceField": "X-SOURCE-SYSTEM",
+              "origin": "generated",
+              "enabled": false,
+              "type": "string",
+              "required": "-",
+              "description": "Optional source system",
+              "example": "CRM",
+              "source": "header"
+            },
+            {
+              "field": "transactionId",
+              "sourceField": "transactionId",
+              "origin": "parsed",
+              "enabled": true,
+              "clientField": "txn_id",
+              "clientSourceField": "txn_id",
+              "clientOrigin": "manual",
+              "type": "uuid",
+              "required": "+",
+              "description": "Request correlation id",
+              "example": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+              "source": "body"
+            },
+            {
+              "field": "username",
+              "sourceField": "username",
+              "origin": "parsed",
+              "enabled": true,
+              "clientField": "login",
+              "clientSourceField": "login",
+              "clientOrigin": "manual",
+              "type": "string",
+              "required": "+",
+              "description": "User login",
+              "example": "demo",
+              "source": "body"
+            },
+            {
+              "field": "password",
+              "sourceField": "password",
+              "origin": "parsed",
+              "enabled": true,
+              "clientField": "secret",
+              "clientSourceField": "secret",
+              "clientOrigin": "manual",
+              "type": "string",
+              "required": "+",
+              "description": "User password",
+              "example": "********",
+              "source": "body"
+            },
+            {
+              "field": "channel",
+              "sourceField": "channel",
+              "origin": "manual",
+              "enabled": true,
+              "clientField": "channelCode",
+              "clientSourceField": "channelCode",
+              "clientOrigin": "manual",
+              "type": "enum",
+              "required": "\u00b1",
+              "description": "Calling channel",
+              "example": "MOBILE",
+              "source": "body"
+            },
+            {
+              "field": "requestDate",
+              "sourceField": "requestDate",
+              "origin": "manual",
+              "enabled": true,
+              "clientField": "requestDate",
+              "clientSourceField": "requestDate",
+              "clientOrigin": "parsed",
+              "type": "datetime",
+              "required": "-",
+              "description": "Client local datetime",
+              "example": "2026-03-18T12:30:00Z",
+              "source": "url"
+            }
+          ],
+          "error": "",
+          "domainModelEnabled": true,
+          "clientFormat": "json",
+          "clientLastSyncedFormat": "json",
+          "clientInput": "{\n  \"login\": \"demo\",\n  \"secret\": \"demo\",\n  \"channelCode\": \"MOBILE\"\n}",
+          "clientRows": [
+            {
+              "field": "txn_id",
+              "sourceField": "txn_id",
+              "origin": "manual",
+              "enabled": true,
+              "type": "uuid",
+              "required": "+",
+              "description": "Client transaction id",
+              "example": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+              "source": "body"
+            },
+            {
+              "field": "login",
+              "sourceField": "login",
+              "origin": "manual",
+              "enabled": true,
+              "type": "string",
+              "required": "+",
+              "description": "Client login",
+              "example": "demo",
+              "source": "body"
+            },
+            {
+              "field": "secret",
+              "sourceField": "secret",
+              "origin": "manual",
+              "enabled": true,
+              "type": "string",
+              "required": "+",
+              "description": "Client secret",
+              "example": "********",
+              "source": "body"
+            },
+            {
+              "field": "channelCode",
+              "sourceField": "channelCode",
+              "origin": "manual",
+              "enabled": true,
+              "type": "enum",
+              "required": "-",
+              "description": "Client channel",
+              "example": "MOBILE",
+              "source": "body"
+            }
+          ],
+          "clientError": "",
+          "clientMappings": {
+            "transactionId": "txn_id",
+            "username": "login",
+            "password": "secret",
+            "channel": "channelCode"
+          },
+          "requestColumnOrder": [
+            "field",
+            "clientField",
+            "type",
+            "required",
+            "description",
+            "example"
+          ],
+          "authType": "bearer",
+          "authHeaderName": "Authorization",
+          "authTokenExample": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature",
+          "authUsername": "",
+          "authPassword": "",
+          "authApiKeyExample": "",
+          "requestUrl": "https://api.example.com/v1/auth/token",
+          "requestMethod": "POST",
+          "requestProtocol": "REST",
+          "externalRequestUrl": "https://gateway.example.com/open-api/v1/token",
+          "externalRequestMethod": "POST",
+          "externalAuthType": "api-key",
+          "externalAuthHeaderName": "X-API-Key",
+          "externalAuthTokenExample": "",
+          "externalAuthUsername": "",
+          "externalAuthPassword": "",
+          "externalAuthApiKeyExample": "sk_live_51QExampleGateway"
+        },
+        {
+          "id": "response",
+          "title": "Response",
+          "enabled": true,
+          "kind": "parsed",
+          "sectionType": "response",
+          "format": "json",
+          "lastSyncedFormat": "json",
+          "input": "{\n  \"code\": \"0\",\n  \"message\": \"OK\",\n  \"data\": {\n    \"accessToken\": \"<jwt>\",\n    \"expiresIn\": 3600,\n    \"tokenType\": \"Bearer\"\n  }\n}",
+          "rows": [
+            {
+              "field": "code",
+              "sourceField": "code",
+              "origin": "parsed",
+              "enabled": true,
+              "clientField": "statusCode",
+              "clientSourceField": "statusCode",
+              "clientOrigin": "manual",
+              "type": "string",
+              "required": "+",
+              "description": "Business code",
+              "example": "0",
+              "source": "body"
+            },
+            {
+              "field": "message",
+              "sourceField": "message",
+              "origin": "parsed",
+              "enabled": true,
+              "clientField": "statusMessage",
+              "clientSourceField": "statusMessage",
+              "clientOrigin": "manual",
+              "type": "string",
+              "required": "+",
+              "description": "Result message",
+              "example": "OK",
+              "source": "body"
+            },
+            {
+              "field": "data",
+              "sourceField": "data",
+              "origin": "parsed",
+              "enabled": true,
+              "clientField": "payload",
+              "clientSourceField": "payload",
+              "clientOrigin": "manual",
+              "type": "object",
+              "required": "+",
+              "description": "Response payload",
+              "example": "-",
+              "source": "body"
+            },
+            {
+              "field": "data.accessToken",
+              "sourceField": "data.accessToken",
+              "origin": "parsed",
+              "enabled": true,
+              "clientField": "payload.token",
+              "clientSourceField": "payload.token",
+              "clientOrigin": "manual",
+              "type": "string",
+              "required": "+",
+              "description": "JWT token",
+              "example": "eyJ...",
+              "source": "body"
+            },
+            {
+              "field": "data.expiresIn",
+              "sourceField": "data.expiresIn",
+              "origin": "parsed",
+              "enabled": true,
+              "clientField": "payload.ttl",
+              "clientSourceField": "payload.ttl",
+              "clientOrigin": "manual",
+              "type": "int",
+              "required": "+",
+              "description": "TTL in seconds",
+              "example": "3600",
+              "source": "body"
+            }
+          ],
+          "error": "",
+          "domainModelEnabled": true,
+          "clientFormat": "json",
+          "clientLastSyncedFormat": "json",
+          "clientInput": "{\n  \"statusCode\": \"0\",\n  \"statusMessage\": \"OK\",\n  \"payload\": {\n    \"token\": \"<jwt>\",\n    \"ttl\": 3600\n  }\n}",
+          "clientRows": [
+            {
+              "field": "statusCode",
+              "sourceField": "statusCode",
+              "origin": "manual",
+              "enabled": true,
+              "type": "string",
+              "required": "+",
+              "description": "Client status code",
+              "example": "0",
+              "source": "body"
+            },
+            {
+              "field": "statusMessage",
+              "sourceField": "statusMessage",
+              "origin": "manual",
+              "enabled": true,
+              "type": "string",
+              "required": "+",
+              "description": "Client status message",
+              "example": "OK",
+              "source": "body"
+            },
+            {
+              "field": "payload",
+              "sourceField": "payload",
+              "origin": "manual",
+              "enabled": true,
+              "type": "object",
+              "required": "+",
+              "description": "Client payload",
+              "example": "-",
+              "source": "body"
+            }
+          ],
+          "clientError": "",
+          "clientMappings": {
+            "code": "statusCode",
+            "message": "statusMessage",
+            "data": "payload"
+          },
+          "requestColumnOrder": [
+            "field",
+            "type",
+            "required",
+            "clientField",
+            "description",
+            "example"
+          ]
+        },
+        {
+          "id": "errors",
+          "title": "Errors",
+          "enabled": true,
+          "kind": "errors",
+          "rows": [
+            {
+              "clientHttpStatus": "400",
+              "clientResponse": "{\n  \"code\": \"AUTH-001\",\n  \"message\": \"Invalid credentials\"\n}",
+              "trigger": "Wrong username or password",
+              "errorType": "BusinessException",
+              "serverHttpStatus": "400",
+              "internalCode": "AUTH-001",
+              "message": "Invalid credentials"
+            },
+            {
+              "clientHttpStatus": "429",
+              "clientResponse": "{\n  \"code\": \"AUTH-429\",\n  \"message\": \"Too many attempts\"\n}",
+              "trigger": "Rate limit exceeded",
+              "errorType": "CommonException",
+              "serverHttpStatus": "429",
+              "internalCode": "AUTH-429",
+              "message": "Too many attempts"
+            }
+          ],
+          "validationRules": [
+            {
+              "parameter": "username",
+              "validationCase": "Поле не должно быть пустым",
+              "condition": "username == null || username.trim().isEmpty()",
+              "cause": "Input validation"
+            },
+            {
+              "parameter": "password",
+              "validationCase": "Длина строки вне допустимого диапазона",
+              "condition": "password.length() < 8",
+              "cause": "Security policy"
+            }
+          ]
+        },
+        {
+          "id": "non-functional",
+          "title": "Non-functional Requirements",
+          "enabled": true,
+          "kind": "text",
+          "value": "p95 latency <= 300ms; availability 99.9%; audit logging required."
+        }
+      ]
+    },
+    {
+      "id": "method-profile",
+      "name": "Get Customer Profile",
+      "updatedAt": "2026-03-18T12:31:00.000Z",
+      "sections": [
+        {
+          "id": "goal",
+          "title": "Goal",
+          "enabled": true,
+          "kind": "text",
+          "value": "Return consolidated profile data for authorized customer."
+        },
+        {
+          "id": "request",
+          "title": "Request",
+          "enabled": true,
+          "kind": "parsed",
+          "sectionType": "request",
+          "format": "curl",
+          "lastSyncedFormat": "curl",
+          "input": "curl -X GET https://api.example.com/v1/customer/profile?customerId=100100 \\\n  -H \"Authorization: Basic <base64>\"",
+          "rows": [
+            {
+              "field": "Authorization",
+              "sourceField": "Authorization",
+              "origin": "generated",
+              "enabled": true,
+              "type": "string",
+              "required": "+",
+              "description": "Authorization header",
+              "example": "Basic <base64(username:password)>",
+              "source": "header"
+            },
+            {
+              "field": "customerId",
+              "sourceField": "customerId",
+              "origin": "parsed",
+              "enabled": true,
+              "type": "long",
+              "required": "+",
+              "description": "Customer identifier",
+              "example": "100100",
+              "source": "url"
+            },
+            {
+              "field": "includeCards",
+              "sourceField": "includeCards",
+              "origin": "manual",
+              "enabled": true,
+              "type": "boolean",
+              "required": "-",
+              "description": "Include card list",
+              "example": "true",
+              "source": "url"
+            }
+          ],
+          "error": "",
+          "domainModelEnabled": false,
+          "clientFormat": "json",
+          "clientLastSyncedFormat": "json",
+          "clientInput": "",
+          "clientRows": [],
+          "clientError": "",
+          "clientMappings": {},
+          "requestColumnOrder": [
+            "field",
+            "type",
+            "required",
+            "description",
+            "example",
+            "clientField"
+          ],
+          "authType": "basic",
+          "authHeaderName": "Authorization",
+          "authTokenExample": "",
+          "authUsername": "profile_reader",
+          "authPassword": "profile_secret",
+          "authApiKeyExample": "",
+          "requestUrl": "https://api.example.com/v1/customer/profile",
+          "requestMethod": "GET",
+          "requestProtocol": "REST",
+          "externalRequestUrl": "https://partner.example.com/customer/profile",
+          "externalRequestMethod": "GET",
+          "externalAuthType": "bearer",
+          "externalAuthHeaderName": "Authorization",
+          "externalAuthTokenExample": "partner-token-value",
+          "externalAuthUsername": "",
+          "externalAuthPassword": "",
+          "externalAuthApiKeyExample": ""
+        },
+        {
+          "id": "body",
+          "title": "Body / Output Parameters",
+          "enabled": true,
+          "kind": "parsed",
+          "sectionType": "response",
+          "format": "json",
+          "lastSyncedFormat": "json",
+          "input": "{\n  \"customerId\": 100100,\n  \"fullName\": \"John Doe\",\n  \"contacts\": [\n    {\"type\":\"PHONE\",\"value\":\"+998901112233\"}\n  ],\n  \"cards\": []\n}",
+          "rows": [
+            {
+              "field": "customerId",
+              "sourceField": "customerId",
+              "origin": "parsed",
+              "enabled": true,
+              "type": "long",
+              "required": "+",
+              "description": "Customer id",
+              "example": "100100",
+              "source": "body"
+            },
+            {
+              "field": "fullName",
+              "sourceField": "fullName",
+              "origin": "parsed",
+              "enabled": true,
+              "type": "string",
+              "required": "+",
+              "description": "Customer full name",
+              "example": "John Doe",
+              "source": "body"
+            },
+            {
+              "field": "contacts",
+              "sourceField": "contacts",
+              "origin": "parsed",
+              "enabled": true,
+              "type": "array_object",
+              "required": "-",
+              "description": "Customer contacts",
+              "example": "-",
+              "source": "body"
+            },
+            {
+              "field": "cards",
+              "sourceField": "cards",
+              "origin": "parsed",
+              "enabled": true,
+              "type": "array",
+              "required": "-",
+              "description": "Cards",
+              "example": "-",
+              "source": "body"
+            }
+          ],
+          "error": "",
+          "domainModelEnabled": false,
+          "clientFormat": "json",
+          "clientLastSyncedFormat": "json",
+          "clientInput": "",
+          "clientRows": [],
+          "clientError": "",
+          "clientMappings": {},
+          "requestColumnOrder": [
+            "field",
+            "type",
+            "required",
+            "description",
+            "example",
+            "clientField"
+          ]
+        },
+        {
+          "id": "profile-diagram",
+          "title": "Profile Retrieval Diagram",
+          "enabled": true,
+          "kind": "diagram",
+          "diagrams": [
+            {
+              "id": "diag-profile-plantuml",
+              "title": "Profile PlantUML",
+              "engine": "plantuml",
+              "code": "@startuml\nactor Frontend\nparticipant ProfileAPI\nparticipant CRM\nFrontend -> ProfileAPI: GET profile\nProfileAPI -> CRM: fetch\nCRM --> ProfileAPI: data\nProfileAPI --> Frontend: response\n@enduml",
+              "description": "Read path through CRM."
+            }
+          ]
+        },
+        {
+          "id": "errors",
+          "title": "Errors",
+          "enabled": true,
+          "kind": "errors",
+          "rows": [
+            {
+              "clientHttpStatus": "404",
+              "clientResponse": "{\n  \"code\": \"PROFILE-404\",\n  \"message\": \"Customer not found\"\n}",
+              "trigger": "Unknown customer id",
+              "errorType": "BusinessException",
+              "serverHttpStatus": "404",
+              "internalCode": "PROFILE-404",
+              "message": "Customer not found"
+            }
+          ],
+          "validationRules": [
+            {
+              "parameter": "customerId",
+              "validationCase": "Числовое значение вне допустимого диапазона",
+              "condition": "customerId <= 0",
+              "cause": "Invalid request id"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "method-limits",
+      "name": "Set Transaction Limits",
+      "updatedAt": "2026-03-18T12:32:00.000Z",
+      "sections": [
+        {
+          "id": "goal",
+          "title": "Goal",
+          "enabled": true,
+          "kind": "text",
+          "value": "Configure daily and monthly limits for customer transactions."
+        },
+        {
+          "id": "request",
+          "title": "Request",
+          "enabled": true,
+          "kind": "parsed",
+          "sectionType": "request",
+          "format": "json",
+          "lastSyncedFormat": "json",
+          "input": "{\n  \"customerId\": 100100,\n  \"dailyLimit\": 5000.5,\n  \"monthlyLimit\": 70000.75,\n  \"whitelistMcc\": [\"5411\",\"5812\"]\n}",
+          "rows": [
+            {
+              "field": "customerId",
+              "sourceField": "customerId",
+              "origin": "parsed",
+              "enabled": true,
+              "clientField": "client.customer.id",
+              "clientSourceField": "client.customer.id",
+              "clientOrigin": "manual",
+              "type": "long",
+              "required": "+",
+              "description": "Customer id",
+              "example": "100100",
+              "source": "body"
+            },
+            {
+              "field": "dailyLimit",
+              "sourceField": "dailyLimit",
+              "origin": "parsed",
+              "enabled": true,
+              "clientField": "limits.day",
+              "clientSourceField": "limits.day",
+              "clientOrigin": "manual",
+              "type": "decimal",
+              "required": "+",
+              "description": "Daily limit",
+              "example": "5000.50",
+              "source": "body"
+            },
+            {
+              "field": "monthlyLimit",
+              "sourceField": "monthlyLimit",
+              "origin": "parsed",
+              "enabled": true,
+              "clientField": "limits.month",
+              "clientSourceField": "limits.month",
+              "clientOrigin": "manual",
+              "type": "double",
+              "required": "+",
+              "description": "Monthly limit",
+              "example": "70000.75",
+              "source": "body"
+            },
+            {
+              "field": "whitelistMcc",
+              "sourceField": "whitelistMcc",
+              "origin": "parsed",
+              "enabled": true,
+              "clientField": "limits.allowedMcc",
+              "clientSourceField": "limits.allowedMcc",
+              "clientOrigin": "manual",
+              "type": "array_string",
+              "required": "-",
+              "description": "Allowed MCC list",
+              "example": "[\"5411\",\"5812\"]",
+              "source": "body"
+            }
+          ],
+          "error": "",
+          "domainModelEnabled": true,
+          "clientFormat": "json",
+          "clientLastSyncedFormat": "json",
+          "clientInput": "{\n  \"client\": {\"customer\": {\"id\": 100100}},\n  \"limits\": {\"day\": 5000.5, \"month\": 70000.75, \"allowedMcc\": [\"5411\",\"5812\"]}\n}",
+          "clientRows": [
+            {
+              "field": "client.customer.id",
+              "sourceField": "client.customer.id",
+              "origin": "manual",
+              "enabled": true,
+              "type": "long",
+              "required": "+",
+              "description": "Client customer id",
+              "example": "100100",
+              "source": "body"
+            },
+            {
+              "field": "limits.day",
+              "sourceField": "limits.day",
+              "origin": "manual",
+              "enabled": true,
+              "type": "decimal",
+              "required": "+",
+              "description": "Client day limit",
+              "example": "5000.5",
+              "source": "body"
+            },
+            {
+              "field": "limits.month",
+              "sourceField": "limits.month",
+              "origin": "manual",
+              "enabled": true,
+              "type": "double",
+              "required": "+",
+              "description": "Client month limit",
+              "example": "70000.75",
+              "source": "body"
+            },
+            {
+              "field": "limits.allowedMcc",
+              "sourceField": "limits.allowedMcc",
+              "origin": "manual",
+              "enabled": true,
+              "type": "array_string",
+              "required": "-",
+              "description": "Client allowed MCC",
+              "example": "[\"5411\",\"5812\"]",
+              "source": "body"
+            }
+          ],
+          "clientError": "",
+          "clientMappings": {
+            "customerId": "client.customer.id",
+            "dailyLimit": "limits.day",
+            "monthlyLimit": "limits.month",
+            "whitelistMcc": "limits.allowedMcc"
+          },
+          "requestColumnOrder": [
+            "field",
+            "type",
+            "required",
+            "clientField",
+            "description",
+            "example"
+          ],
+          "authType": "api-key",
+          "authHeaderName": "X-API-Key",
+          "authTokenExample": "",
+          "authUsername": "",
+          "authPassword": "",
+          "authApiKeyExample": "sk_live_51QExampleLimits",
+          "requestUrl": "https://api.example.com/v1/limits",
+          "requestMethod": "PUT",
+          "requestProtocol": "REST",
+          "externalRequestUrl": "https://limits.partner.example.com/v1/limits",
+          "externalRequestMethod": "PUT",
+          "externalAuthType": "none",
+          "externalAuthHeaderName": "",
+          "externalAuthTokenExample": "",
+          "externalAuthUsername": "",
+          "externalAuthPassword": "",
+          "externalAuthApiKeyExample": ""
+        },
+        {
+          "id": "response",
+          "title": "Response",
+          "enabled": false,
+          "kind": "parsed",
+          "sectionType": "response",
+          "format": "json",
+          "lastSyncedFormat": "json",
+          "input": "{\n  \"status\": \"UPDATED\",\n  \"updatedAt\": \"2026-03-18T12:32:00Z\"\n}",
+          "rows": [
+            {
+              "field": "status",
+              "sourceField": "status",
+              "origin": "parsed",
+              "enabled": true,
+              "type": "string",
+              "required": "+",
+              "description": "Update status",
+              "example": "UPDATED",
+              "source": "body"
+            },
+            {
+              "field": "updatedAt",
+              "sourceField": "updatedAt",
+              "origin": "parsed",
+              "enabled": true,
+              "type": "timestamp",
+              "required": "+",
+              "description": "Update timestamp",
+              "example": "2026-03-18T12:32:00Z",
+              "source": "body"
+            }
+          ],
+          "error": "",
+          "domainModelEnabled": false,
+          "clientFormat": "json",
+          "clientLastSyncedFormat": "json",
+          "clientInput": "",
+          "clientRows": [],
+          "clientError": "",
+          "clientMappings": {},
+          "requestColumnOrder": [
+            "field",
+            "type",
+            "required",
+            "description",
+            "example",
+            "clientField"
+          ]
+        },
+        {
+          "id": "custom-generic-1",
+          "title": "Internal Mapping Rules",
+          "enabled": true,
+          "kind": "parsed",
+          "sectionType": "generic",
+          "format": "json",
+          "lastSyncedFormat": "json",
+          "input": "{\n  \"rules\": [\n    {\"from\": \"MOBILE\", \"to\": \"DIGITAL\"},\n    {\"from\": \"BRANCH\", \"to\": \"OFFLINE\"}\n  ]\n}",
+          "rows": [
+            {
+              "field": "rules",
+              "sourceField": "rules",
+              "origin": "parsed",
+              "enabled": true,
+              "type": "array_object",
+              "required": "+",
+              "description": "Mapping rules",
+              "example": "-",
+              "source": "body"
+            },
+            {
+              "field": "rules[].from",
+              "sourceField": "rules[].from",
+              "origin": "manual",
+              "enabled": true,
+              "type": "string",
+              "required": "+",
+              "description": "Source code",
+              "example": "MOBILE",
+              "source": "body"
+            },
+            {
+              "field": "rules[].to",
+              "sourceField": "rules[].to",
+              "origin": "manual",
+              "enabled": true,
+              "type": "string",
+              "required": "+",
+              "description": "Target code",
+              "example": "DIGITAL",
+              "source": "body"
+            }
+          ],
+          "error": ""
+        },
+        {
+          "id": "limits-diagram",
+          "title": "Limits Flow",
+          "enabled": true,
+          "kind": "diagram",
+          "diagrams": [
+            {
+              "id": "diag-limits-mermaid",
+              "title": "Limits Update",
+              "engine": "mermaid",
+              "code": "flowchart LR\nA[Client] --> B[Limits API]\nB --> C[Validation]\nC --> D[Core Banking]\nD --> B\nB --> A",
+              "description": "Limit update flow from channel to core."
+            }
+          ]
+        },
+        {
+          "id": "errors",
+          "title": "Errors",
+          "enabled": true,
+          "kind": "errors",
+          "rows": [
+            {
+              "clientHttpStatus": "422",
+              "clientResponse": "{\n  \"code\": \"LIMIT-422\",\n  \"message\": \"Validation failed\"\n}",
+              "trigger": "Limit is out of allowed range",
+              "errorType": "AlertException",
+              "serverHttpStatus": "422",
+              "internalCode": "LIMIT-422",
+              "message": "Validation failed"
+            }
+          ],
+          "validationRules": [
+            {
+              "parameter": "dailyLimit",
+              "validationCase": "Числовое значение вне допустимого диапазона",
+              "condition": "dailyLimit <= 0 || dailyLimit > monthlyLimit",
+              "cause": "Business range rule"
+            },
+            {
+              "parameter": "whitelistMcc",
+              "validationCase": "Некорректная структура payload",
+              "condition": "whitelistMcc contains non-numeric codes",
+              "cause": "Schema validation"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "groups": [
+    {
+      "id": "group-main-chain",
+      "name": "Main API Chain",
+      "methodIds": [
+        "method-auth",
+        "method-profile",
+        "method-limits"
+      ],
+      "links": [
+        {
+          "fromMethodId": "method-auth",
+          "toMethodId": "method-profile",
+          "relationType": "request-response",
+          "note": "Use access token from Auth in profile request"
+        },
+        {
+          "fromMethodId": "method-profile",
+          "toMethodId": "method-limits",
+          "relationType": "sync",
+          "note": "Profile data required before limits update"
+        },
+        {
+          "fromMethodId": "method-auth",
+          "toMethodId": "method-limits",
+          "relationType": "event",
+          "note": "Token refresh event can trigger limits recalculation"
+        },
+        {
+          "fromMethodId": "method-limits",
+          "toMethodId": "method-profile",
+          "relationType": "custom",
+          "note": "Optional callback for profile cache invalidation"
+        }
+      ]
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import './tokens.css';
 import './App.css';
 import { parseCurlMeta, parseToRows } from './parsers';
@@ -54,6 +55,7 @@ import type {
 const STORAGE_KEY = 'doc-builder-project-v2';
 const DEFAULT_METHOD_NAME = 'Метод 1';
 const EMPTY_SECTIONS: DocSection[] = [];
+const ENABLE_MULTI_METHODS = false;
 
 type TabKey = 'editor' | 'html' | 'wiki';
 type AutosaveState = 'idle' | 'saving' | 'saved' | 'error';
@@ -83,6 +85,13 @@ type EditableTitleState = {
 };
 type DriftAlertState = Record<string, boolean>;
 type ExpanderState = Record<string, boolean>;
+type InternalCodePopoverState = {
+  top: number;
+  left: number;
+  width: number;
+  maxHeight: number;
+  openUp: boolean;
+};
 type EditableFieldOptions = {
   allowEdit?: boolean;
   onDelete?: () => void;
@@ -428,18 +437,37 @@ function createWorkspaceSeed(): WorkspaceProjectData {
   };
 }
 
-function asWorkspaceProjectData(methods: MethodDocument[], activeMethodId: string, groups: MethodGroup[] = []): WorkspaceProjectData {
+function normalizeWorkspaceForMode(workspace: WorkspaceProjectData): WorkspaceProjectData {
+  if (ENABLE_MULTI_METHODS) return workspace;
+
+  const resolvedMethod = workspace.methods.find((method) => method.id === workspace.activeMethodId) ?? workspace.methods[0] ?? createMethodDocument();
   return {
+    ...workspace,
+    activeMethodId: resolvedMethod.id,
+    methods: [resolvedMethod],
+    groups: []
+  };
+}
+
+function asWorkspaceProjectData(methods: MethodDocument[], activeMethodId: string, groups: MethodGroup[] = []): WorkspaceProjectData {
+  const normalizedMethods = methods.length > 0 ? methods : [createMethodDocument()];
+  const resolvedActiveMethodId = normalizedMethods.some((method) => method.id === activeMethodId)
+    ? activeMethodId
+    : normalizedMethods[0].id;
+
+  const workspace: WorkspaceProjectData = {
     version: 3,
     updatedAt: new Date().toISOString(),
-    activeMethodId,
-    methods: methods.map((method) => ({
+    activeMethodId: resolvedActiveMethodId,
+    methods: normalizedMethods.map((method) => ({
       ...method,
       updatedAt: method.updatedAt || new Date().toISOString(),
       sections: sanitizeSections(method.sections)
     })),
     groups
   };
+
+  return normalizeWorkspaceForMode(workspace);
 }
 
 function slugifyMethodFileName(value: string): string {
@@ -484,13 +512,15 @@ function loadWorkspaceProject(): WorkspaceProjectData {
           ? parsed.activeMethodId
           : sanitizedMethods[0].id;
 
-      return {
+      const workspace: WorkspaceProjectData = {
         version: 3,
         updatedAt: parsed.updatedAt || new Date().toISOString(),
         activeMethodId,
         methods: sanitizedMethods,
         groups
       };
+
+      return normalizeWorkspaceForMode(workspace);
     }
 
     if ('sections' in parsed && Array.isArray(parsed.sections)) {
@@ -778,10 +808,15 @@ export default function App() {
   const [editingTitle, setEditingTitle] = useState<EditableTitleState | null>(null);
   const [expandedDriftAlerts, setExpandedDriftAlerts] = useState<DriftAlertState>({});
   const [expanderState, setExpanderState] = useState<ExpanderState>({});
+  const [openInternalCodeKey, setOpenInternalCodeKey] = useState<string | null>(null);
+  const [highlightedInternalCodeIndex, setHighlightedInternalCodeIndex] = useState(0);
+  const [internalCodePopoverState, setInternalCodePopoverState] = useState<InternalCodePopoverState | null>(null);
   const [isAddBlockMenuOpen, setIsAddBlockMenuOpen] = useState(false);
   const [pendingMethodNameFocus, setPendingMethodNameFocus] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [isSectionPanelPulse, setIsSectionPanelPulse] = useState(false);
+  const internalCodeAnchorRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const internalCodePopoverRef = useRef<HTMLDivElement | null>(null);
   const activeMethod = methods.find((method) => method.id === activeMethodId) ?? methods[0];
   const sections = useMemo(() => activeMethod?.sections ?? EMPTY_SECTIONS, [activeMethod]);
   const methodNameWarning = useMemo(() => {
@@ -930,6 +965,74 @@ export default function App() {
     const timerId = window.setTimeout(() => setIsSectionPanelPulse(false), 260);
     return () => window.clearTimeout(timerId);
   }, [isSectionPanelPulse]);
+
+  useEffect(() => {
+    if (!openInternalCodeKey) {
+      setInternalCodePopoverState(null);
+      return;
+    }
+
+    const updatePopoverPosition = () => {
+      const anchor = internalCodeAnchorRefs.current[openInternalCodeKey];
+      if (!anchor) {
+        setInternalCodePopoverState(null);
+        return;
+      }
+
+      const rect = anchor.getBoundingClientRect();
+      const viewportPadding = 8;
+      const gap = 4;
+      const spaceBelow = window.innerHeight - rect.bottom - viewportPadding;
+      const spaceAbove = rect.top - viewportPadding;
+      const openUp = spaceBelow < 180 && spaceAbove > spaceBelow;
+      const available = openUp ? spaceAbove - gap : spaceBelow - gap;
+
+      setInternalCodePopoverState({
+        top: openUp ? rect.top + window.scrollY - gap : rect.bottom + window.scrollY + gap,
+        left: rect.left + window.scrollX,
+        width: rect.width,
+        maxHeight: Math.max(120, Math.min(260, available)),
+        openUp
+      });
+    };
+
+    const scheduleUpdate = () => {
+      window.requestAnimationFrame(updatePopoverPosition);
+    };
+
+    updatePopoverPosition();
+    window.addEventListener('resize', scheduleUpdate);
+    window.addEventListener('scroll', scheduleUpdate, true);
+
+    return () => {
+      window.removeEventListener('resize', scheduleUpdate);
+      window.removeEventListener('scroll', scheduleUpdate, true);
+    };
+  }, [openInternalCodeKey]);
+
+  useEffect(() => {
+    if (!openInternalCodeKey) return;
+
+    const handleOutsideClick = (event: MouseEvent) => {
+      const target = event.target as Node;
+      const anchor = internalCodeAnchorRefs.current[openInternalCodeKey];
+      const popover = internalCodePopoverRef.current;
+      if ((anchor && anchor.contains(target)) || (popover && popover.contains(target))) {
+        return;
+      }
+
+      setOpenInternalCodeKey(null);
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick, true);
+    return () => document.removeEventListener('mousedown', handleOutsideClick, true);
+  }, [openInternalCodeKey]);
+
+  useEffect(() => {
+    if (openInternalCodeKey) {
+      setHighlightedInternalCodeIndex(0);
+    }
+  }, [openInternalCodeKey]);
 
   useEffect(() => {
     if (!toastMessage) return;
@@ -1397,7 +1500,7 @@ export default function App() {
           const loaded = loadWorkspaceProjectFromPayload(parsed);
           const resolvedActiveMethod = loaded.methods.find((method) => method.id === loaded.activeMethodId) ?? loaded.methods[0];
           setMethodsState(loaded.methods);
-          setMethodGroups(loaded.groups);
+          setMethodGroups(ENABLE_MULTI_METHODS ? loaded.groups : []);
           setActiveMethodId(resolvedActiveMethod?.id ?? createMethodId());
           setSelectedId(resolvedActiveMethod?.sections[0]?.id ?? createInitialSections()[0].id);
           setImportError('');
@@ -1446,13 +1549,15 @@ export default function App() {
       ? payload.activeMethodId
       : methods[0].id;
 
-    return {
+    const workspace: WorkspaceProjectData = {
       version: 3,
       updatedAt: payload.updatedAt || new Date().toISOString(),
       methods,
       groups,
       activeMethodId
     };
+
+    return normalizeWorkspaceForMode(workspace);
   }
 
   function resetProject(): void {
@@ -3016,15 +3121,27 @@ export default function App() {
           const blockId = `diagram-item-${diagram.id}`;
           const title = diagram.title.trim() || `Диаграмма ${index + 1}`;
           const effectiveEngine = resolveDiagramEngine(diagram.code, diagram.engine);
+          const isOpen = isExpanderOpen(section.id, blockId);
+          const hasDiagramCode = Boolean(diagram.code.trim());
 
           return (
             <details
               key={diagram.id}
               className="expander"
-              open={isExpanderOpen(section.id, blockId)}
+              open={isOpen}
               onToggle={(e) => setExpanderOpen(section.id, blockId, e.currentTarget.open)}
             >
               <summary className="expander-summary">{title}</summary>
+              {!isOpen && hasDiagramCode && (
+                <div className="diagram-collapsed-preview">
+                  {effectiveEngine === 'mermaid' && <MermaidLivePreview code={diagram.code} />}
+                  {effectiveEngine === 'plantuml' && (
+                    <div className="diagram-preview">
+                      <img className="diagram-preview-image" src={getPlantUmlImageUrl(diagram.code, 'svg')} alt={title} loading="lazy" />
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="expander-body">
                 <div className="diagram-header-row">
                   <label className="field">
@@ -3057,9 +3174,9 @@ export default function App() {
                 </label>
 
                 <div className="label">Предпросмотр</div>
-                {!diagram.code.trim() && <div className="muted">Вставьте код диаграммы для предпросмотра</div>}
-                {diagram.code.trim() && effectiveEngine === 'mermaid' && <MermaidLivePreview code={diagram.code} />}
-                {diagram.code.trim() && effectiveEngine === 'plantuml' && (
+                {!hasDiagramCode && <div className="muted">Вставьте код диаграммы для предпросмотра</div>}
+                {hasDiagramCode && effectiveEngine === 'mermaid' && <MermaidLivePreview code={diagram.code} />}
+                {hasDiagramCode && effectiveEngine === 'plantuml' && (
                   <div className="diagram-preview">
                     <img className="diagram-preview-image" src={getPlantUmlImageUrl(diagram.code, 'svg')} alt={title} loading="lazy" />
                   </div>
@@ -3193,12 +3310,6 @@ export default function App() {
           <option value="-" />
         </datalist>
 
-        <datalist id="internal-code-options">
-          {ERROR_CATALOG.map((item) => (
-            <option key={item.internalCode} value={item.internalCode} label={`${item.httpStatus} - ${item.message}`} />
-          ))}
-        </datalist>
-
         <datalist id="server-request-param-options">
           {serverRequestParameterOptions.map((value) => (
             <option key={value} value={value} />
@@ -3225,6 +3336,19 @@ export default function App() {
                 const clientResponseError = validateJsonDraft(row.clientResponse);
                 const normalizedCode = row.internalCode.trim();
                 const hasUnknownInternalCode = Boolean(normalizedCode) && !ERROR_CATALOG_BY_CODE.has(normalizedCode);
+                const internalCodeKey = `${section.id}-error-${index}`;
+                const isInternalCodeOpen = openInternalCodeKey === internalCodeKey;
+                const searchValue = normalizedCode.toLowerCase();
+                const internalCodeOptions = ERROR_CATALOG
+                  .filter((item) => {
+                    if (!searchValue) return true;
+                    return (
+                      item.internalCode.toLowerCase().includes(searchValue)
+                      || item.httpStatus.toLowerCase().includes(searchValue)
+                      || item.message.toLowerCase().includes(searchValue)
+                    );
+                  })
+                  .slice(0, 25);
 
                 return (
                 <tr key={`${section.id}-error-${index}`}>
@@ -3278,14 +3402,123 @@ export default function App() {
                     />
                   </td>
                   <td>
-                    <input
-                      className={hasUnknownInternalCode ? 'input-warning' : ''}
-                      type="text"
-                      list="internal-code-options"
-                      value={row.internalCode}
-                      onChange={(e) => applyInternalCode(section.id, index, e.target.value)}
-                      title={hasUnknownInternalCode ? 'Код не найден в каталоге, заполните поля вручную или уточните internalCode' : ''}
-                    />
+                    <div
+                      className="internal-code-combobox"
+                      ref={(node) => {
+                        internalCodeAnchorRefs.current[internalCodeKey] = node;
+                      }}
+                    >
+                      <div className="internal-code-cell">
+                        <input
+                          className={hasUnknownInternalCode ? 'input-warning' : ''}
+                          type="text"
+                          value={row.internalCode}
+                          onFocus={() => {
+                            setOpenInternalCodeKey(internalCodeKey);
+                            setHighlightedInternalCodeIndex(0);
+                          }}
+                          onChange={(e) => {
+                            applyInternalCode(section.id, index, e.target.value);
+                            setOpenInternalCodeKey(internalCodeKey);
+                            setHighlightedInternalCodeIndex(0);
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Escape') {
+                              event.preventDefault();
+                              setOpenInternalCodeKey(null);
+                              return;
+                            }
+
+                            if (event.key === 'ArrowDown') {
+                              event.preventDefault();
+                              if (!isInternalCodeOpen) {
+                                setOpenInternalCodeKey(internalCodeKey);
+                                setHighlightedInternalCodeIndex(0);
+                                return;
+                              }
+
+                              setHighlightedInternalCodeIndex((current) =>
+                                Math.min(current + 1, Math.max(internalCodeOptions.length - 1, 0))
+                              );
+                              return;
+                            }
+
+                            if (event.key === 'ArrowUp') {
+                              event.preventDefault();
+                              if (!isInternalCodeOpen) {
+                                setOpenInternalCodeKey(internalCodeKey);
+                                setHighlightedInternalCodeIndex(0);
+                                return;
+                              }
+
+                              setHighlightedInternalCodeIndex((current) => Math.max(current - 1, 0));
+                              return;
+                            }
+
+                            if (event.key === 'Enter' && isInternalCodeOpen && internalCodeOptions.length > 0) {
+                              event.preventDefault();
+                              const picked = internalCodeOptions[Math.min(highlightedInternalCodeIndex, internalCodeOptions.length - 1)];
+                              if (picked) {
+                                applyInternalCode(section.id, index, picked.internalCode);
+                                setOpenInternalCodeKey(null);
+                              }
+                            }
+                          }}
+                          title={hasUnknownInternalCode ? 'Код не найден в каталоге, заполните поля вручную или уточните internalCode' : ''}
+                          placeholder="Введите internalCode"
+                          aria-label="internalCode"
+                          aria-expanded={isInternalCodeOpen}
+                          aria-controls={`${internalCodeKey}-options`}
+                          aria-autocomplete="list"
+                        />
+                        <button
+                          className="internal-code-toggle"
+                          type="button"
+                          aria-label="Показать варианты internalCode"
+                          onClick={() => {
+                            setOpenInternalCodeKey((current) => (current === internalCodeKey ? null : internalCodeKey));
+                            setHighlightedInternalCodeIndex(0);
+                          }}
+                        >
+                          ▾
+                        </button>
+                      </div>
+                      {isInternalCodeOpen && internalCodePopoverState && createPortal(
+                        <div
+                          id={`${internalCodeKey}-options`}
+                          ref={internalCodePopoverRef}
+                          className={`internal-code-dropdown internal-code-dropdown-portal ${internalCodePopoverState.openUp ? 'is-top' : ''}`}
+                          role="listbox"
+                          style={{
+                            top: `${internalCodePopoverState.top}px`,
+                            left: `${internalCodePopoverState.left}px`,
+                            width: `${internalCodePopoverState.width}px`,
+                            maxHeight: `${internalCodePopoverState.maxHeight}px`
+                          }}
+                        >
+                          {internalCodeOptions.length === 0 && (
+                            <div className="internal-code-empty">Ничего не найдено</div>
+                          )}
+                          {internalCodeOptions.map((item, optionIndex) => (
+                            <button
+                              key={item.internalCode}
+                              type="button"
+                              className={`internal-code-option ${optionIndex === Math.min(highlightedInternalCodeIndex, Math.max(internalCodeOptions.length - 1, 0)) ? 'active' : ''}`}
+                              onMouseDown={(event) => event.preventDefault()}
+                              onMouseEnter={() => setHighlightedInternalCodeIndex(optionIndex)}
+                              onClick={() => {
+                                applyInternalCode(section.id, index, item.internalCode);
+                                setOpenInternalCodeKey(null);
+                              }}
+                            >
+                              <span className="internal-code-option-code">{item.internalCode}</span>
+                              <span className="internal-code-option-meta">{`${item.httpStatus} - ${item.message}`}</span>
+                            </button>
+                          ))}
+                        </div>,
+                        document.body
+                      )}
+                    </div>
                     {hasUnknownInternalCode && <div className="inline-warning">Код не найден в каталоге</div>}
                   </td>
                   <td>
@@ -3482,48 +3715,50 @@ export default function App() {
       </div>
 
       <div className="layout">
-        <aside className="sidebar" role="region" aria-label="Методы и секции">
-          <div className="sidebar-panel method-panel">
-            <div className="sidebar-panel-head">
-              <div className="muted">Методы</div>
-            </div>
-            <div className="method-list" role="listbox" aria-label="Список методов">
-              {methods.map((method) => (
-                <button
-                  key={method.id}
-                  type="button"
-                  className={`section-item method-item ${activeMethod?.id === method.id ? 'active' : ''}`}
-                  onClick={() => switchMethod(method)}
-                >
-                  <div className="section-title">{method.name}</div>
-                  <div className="chips">
-                    <span className="chip">{method.sections.length} секц.</span>
-                  </div>
+        <aside className="sidebar" role="region" aria-label={ENABLE_MULTI_METHODS ? 'Методы и секции' : 'Секции'}>
+          {ENABLE_MULTI_METHODS && (
+            <div className="sidebar-panel method-panel">
+              <div className="sidebar-panel-head">
+                <div className="muted">Методы</div>
+              </div>
+              <div className="method-list" role="listbox" aria-label="Список методов">
+                {methods.map((method) => (
+                  <button
+                    key={method.id}
+                    type="button"
+                    className={`section-item method-item ${activeMethod?.id === method.id ? 'active' : ''}`}
+                    onClick={() => switchMethod(method)}
+                  >
+                    <div className="section-title">{method.name}</div>
+                    <div className="chips">
+                      <span className="chip">{method.sections.length} секц.</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+              <div className="method-actions">
+                <button className="ghost small" type="button" onClick={createMethod}>
+                  + Метод
                 </button>
-              ))}
+                <button className="ghost small" type="button" onClick={deleteActiveMethod} disabled={methods.length <= 1 || !activeMethod}>
+                  Удалить метод
+                </button>
+              </div>
+              {activeMethod && (
+                <input
+                  ref={methodNameInputRef}
+                  className="inline-input"
+                  type="text"
+                  value={activeMethod.name}
+                  onChange={(event) => updateActiveMethodName(event.target.value)}
+                  onBlur={normalizeActiveMethodName}
+                  placeholder="Название метода"
+                  aria-label="Название активного метода"
+                />
+              )}
+              {methodNameWarning && <div className="method-warning">{methodNameWarning}</div>}
             </div>
-            <div className="method-actions">
-              <button className="ghost small" type="button" onClick={createMethod}>
-                + Метод
-              </button>
-              <button className="ghost small" type="button" onClick={deleteActiveMethod} disabled={methods.length <= 1 || !activeMethod}>
-                Удалить метод
-              </button>
-            </div>
-            {activeMethod && (
-              <input
-                ref={methodNameInputRef}
-                className="inline-input"
-                type="text"
-                value={activeMethod.name}
-                onChange={(event) => updateActiveMethodName(event.target.value)}
-                onBlur={normalizeActiveMethodName}
-                placeholder="Название метода"
-                aria-label="Название активного метода"
-              />
-            )}
-            {methodNameWarning && <div className="method-warning">{methodNameWarning}</div>}
-          </div>
+          )}
 
           <div className={`sidebar-panel section-panel ${isSectionPanelPulse ? 'section-panel-pulse' : ''}`}>
             <div className="section-list-head">

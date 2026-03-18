@@ -1,9 +1,4 @@
 :root {
-  font-family: Inter, Arial, sans-serif;
-  line-height: 1.4;
-  font-weight: 400;
-  color: #1f2a37;
-  background-color: #f7f9fc;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -18,5 +13,5 @@ body {
 h1,
 h2,
 h3 {
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-2);
 }

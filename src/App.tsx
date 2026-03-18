@@ -1,5 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import './tokens.css';
 import './App.css';
 import { parseCurlMeta, parseToRows } from './parsers';
 import { getDiagramExportFileName, getDiagramImageUrl, getPlantUmlImageUrl, resolveDiagramEngine } from './diagramUtils';
@@ -36,6 +37,8 @@ import type {
   DocSection,
   ErrorRow,
   ErrorsSection,
+  MethodDocument,
+  MethodGroup,
   ParsedRow,
   ParsedSection,
   ParsedSectionType,
@@ -44,10 +47,13 @@ import type {
   RequestAuthType,
   RequestColumnKey,
   RequestMethod,
-  ValidationRuleRow
+  ValidationRuleRow,
+  WorkspaceProjectData
 } from './types';
 
 const STORAGE_KEY = 'doc-builder-project-v2';
+const DEFAULT_METHOD_NAME = 'Метод 1';
+const EMPTY_SECTIONS: DocSection[] = [];
 
 type TabKey = 'editor' | 'html' | 'wiki';
 type AutosaveState = 'idle' | 'saving' | 'saved' | 'error';
@@ -398,19 +404,109 @@ function validateSection(section: DocSection): string {
   return '';
 }
 
-function asProjectData(sections: DocSection[]): ProjectData {
-  return { version: 2, updatedAt: new Date().toISOString(), sections: sanitizeSections(sections) };
+function createMethodId(): string {
+  return `method-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function loadProject(): DocSection[] {
+function createMethodDocument(name = DEFAULT_METHOD_NAME, sections: DocSection[] = createInitialSections(), id = createMethodId()): MethodDocument {
+  return {
+    id,
+    name,
+    updatedAt: new Date().toISOString(),
+    sections
+  };
+}
+
+function createWorkspaceSeed(): WorkspaceProjectData {
+  const method = createMethodDocument();
+  return {
+    version: 3,
+    updatedAt: new Date().toISOString(),
+    activeMethodId: method.id,
+    methods: [method],
+    groups: []
+  };
+}
+
+function asWorkspaceProjectData(methods: MethodDocument[], activeMethodId: string, groups: MethodGroup[] = []): WorkspaceProjectData {
+  return {
+    version: 3,
+    updatedAt: new Date().toISOString(),
+    activeMethodId,
+    methods: methods.map((method) => ({
+      ...method,
+      updatedAt: method.updatedAt || new Date().toISOString(),
+      sections: sanitizeSections(method.sections)
+    })),
+    groups
+  };
+}
+
+function slugifyMethodFileName(value: string): string {
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+  return slug || 'method';
+}
+
+function loadWorkspaceProject(): WorkspaceProjectData {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return createInitialSections();
-    const parsed = JSON.parse(raw) as ProjectData;
-    if (!parsed.sections || !Array.isArray(parsed.sections)) return createInitialSections();
-    return sanitizeSections(parsed.sections);
+    if (!raw) return createWorkspaceSeed();
+    const parsed = JSON.parse(raw) as WorkspaceProjectData | ProjectData;
+
+    if ('methods' in parsed && Array.isArray(parsed.methods)) {
+      const sanitizedMethods = parsed.methods
+        .filter((method) => method && Array.isArray(method.sections))
+        .map((method, index) => ({
+          id: method.id || createMethodId(),
+          name: method.name?.trim() || `Метод ${index + 1}`,
+          updatedAt: method.updatedAt || new Date().toISOString(),
+          sections: sanitizeSections(method.sections)
+        }));
+
+      if (sanitizedMethods.length === 0) return createWorkspaceSeed();
+
+      const groups = Array.isArray(parsed.groups)
+        ? parsed.groups.map((group) => ({
+            id: group.id || `group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            name: group.name?.trim() || 'Новая цепочка',
+            methodIds: Array.isArray(group.methodIds) ? group.methodIds.filter(Boolean) : [],
+            links: Array.isArray(group.links) ? group.links : []
+          }))
+        : [];
+
+      const activeMethodId =
+        parsed.activeMethodId && sanitizedMethods.some((method) => method.id === parsed.activeMethodId)
+          ? parsed.activeMethodId
+          : sanitizedMethods[0].id;
+
+      return {
+        version: 3,
+        updatedAt: parsed.updatedAt || new Date().toISOString(),
+        activeMethodId,
+        methods: sanitizedMethods,
+        groups
+      };
+    }
+
+    if ('sections' in parsed && Array.isArray(parsed.sections)) {
+      const legacyMethod = createMethodDocument(DEFAULT_METHOD_NAME, sanitizeSections(parsed.sections));
+      return {
+        version: 3,
+        updatedAt: parsed.updatedAt || new Date().toISOString(),
+        activeMethodId: legacyMethod.id,
+        methods: [legacyMethod],
+        groups: []
+      };
+    }
+
+    return createWorkspaceSeed();
   } catch {
-    return createInitialSections();
+    return createWorkspaceSeed();
   }
 }
 
@@ -661,8 +757,13 @@ export default function App() {
   const textSelectionRef = useRef<Range | null>(null);
   const textEditorSectionRef = useRef<string | null>(null);
   const diagramTextRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const [sections, setSections] = useState<DocSection[]>(() => loadProject());
-  const [selectedId, setSelectedId] = useState<string>(() => createInitialSections()[0].id);
+  const methodNameInputRef = useRef<HTMLInputElement | null>(null);
+  const previousMethodIdRef = useRef<string | null>(null);
+  const initialWorkspace = useMemo(() => loadWorkspaceProject(), []);
+  const [methods, setMethodsState] = useState<MethodDocument[]>(() => initialWorkspace.methods);
+  const [methodGroups, setMethodGroups] = useState<MethodGroup[]>(() => initialWorkspace.groups);
+  const [activeMethodId, setActiveMethodId] = useState<string>(() => initialWorkspace.activeMethodId ?? initialWorkspace.methods[0]?.id ?? createMethodId());
+  const [selectedId, setSelectedId] = useState<string>(() => initialWorkspace.methods[0]?.sections[0]?.id ?? createInitialSections()[0].id);
   const [tab, setTab] = useState<TabKey>('editor');
   const [theme, setTheme] = useState<ThemeName>('light');
   const [autosave, setAutosave] = useState<AutosaveInfo>({ state: 'idle' });
@@ -678,12 +779,163 @@ export default function App() {
   const [expandedDriftAlerts, setExpandedDriftAlerts] = useState<DriftAlertState>({});
   const [expanderState, setExpanderState] = useState<ExpanderState>({});
   const [isAddBlockMenuOpen, setIsAddBlockMenuOpen] = useState(false);
+  const [pendingMethodNameFocus, setPendingMethodNameFocus] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [isSectionPanelPulse, setIsSectionPanelPulse] = useState(false);
+  const activeMethod = methods.find((method) => method.id === activeMethodId) ?? methods[0];
+  const sections = useMemo(() => activeMethod?.sections ?? EMPTY_SECTIONS, [activeMethod]);
+  const methodNameWarning = useMemo(() => {
+    if (!activeMethod) return '';
+    const trimmed = activeMethod.name.trim();
+    if (!trimmed) return 'Название метода не может быть пустым';
+    const normalized = trimmed.toLowerCase();
+    const hasDuplicate = methods.some((method) => method.id !== activeMethod.id && method.name.trim().toLowerCase() === normalized);
+    return hasDuplicate ? 'Метод с таким названием уже существует' : '';
+  }, [methods, activeMethod]);
+
+  const exportTitle = activeMethod ? `Экспортируется только метод "${activeMethod.name.trim() || DEFAULT_METHOD_NAME}"` : 'Выберите метод';
+
+  function switchMethod(method: MethodDocument): void {
+    setActiveMethodId(method.id);
+    setSelectedId(method.sections[0]?.id ?? createInitialSections()[0].id);
+  }
+
+  function setSections(next: DocSection[] | ((prev: DocSection[]) => DocSection[])): void {
+    setMethodsState((prev) => {
+      if (prev.length === 0) {
+        const baseSections = typeof next === 'function' ? next(createInitialSections()) : next;
+        const seedMethod = createMethodDocument(DEFAULT_METHOD_NAME, baseSections);
+        setActiveMethodId(seedMethod.id);
+        return [seedMethod];
+      }
+
+      const targetMethodId = activeMethodId || prev[0].id;
+      const methodIndex = prev.findIndex((method) => method.id === targetMethodId);
+      if (methodIndex === -1) return prev;
+
+      const currentMethod = prev[methodIndex];
+      const nextSections = typeof next === 'function' ? next(currentMethod.sections) : next;
+      const nextMethods = [...prev];
+      nextMethods[methodIndex] = {
+        ...currentMethod,
+        updatedAt: new Date().toISOString(),
+        sections: nextSections
+      };
+      return nextMethods;
+    });
+  }
+
+  function createMethod(): void {
+    const name = `Метод ${methods.length + 1}`;
+    const method = createMethodDocument(name, createInitialSections());
+    setMethodsState((prev) => [...prev, method]);
+    setActiveMethodId(method.id);
+    setSelectedId(method.sections[0]?.id ?? createInitialSections()[0].id);
+    setPendingMethodNameFocus(true);
+    setTab('editor');
+  }
+
+  function deleteActiveMethod(): void {
+    if (!activeMethod) return;
+    if (methods.length <= 1) {
+      alert('Нельзя удалить последний метод. Создайте еще один метод, затем удалите текущий.');
+      return;
+    }
+
+    const sectionCount = activeMethod.sections.length;
+    const confirmed = confirm(
+      `Удалить метод "${activeMethod.name}"?\nСекций: ${sectionCount}\nДействие необратимо.`
+    );
+    if (!confirmed) return;
+
+    setMethodsState((prev) => {
+      const currentIndex = prev.findIndex((method) => method.id === activeMethod.id);
+      if (currentIndex === -1) return prev;
+      const next = prev.filter((method) => method.id !== activeMethod.id);
+      const fallback = next[currentIndex] ?? next[currentIndex - 1] ?? next[0];
+      if (fallback) {
+        setActiveMethodId(fallback.id);
+        setSelectedId(fallback.sections[0]?.id ?? createInitialSections()[0].id);
+      }
+      return next;
+    });
+
+    setMethodGroups((prev) =>
+      prev.map((group) => ({
+        ...group,
+        methodIds: group.methodIds.filter((id) => id !== activeMethod.id),
+        links: group.links.filter((link) => link.fromMethodId !== activeMethod.id && link.toMethodId !== activeMethod.id)
+      }))
+    );
+
+    setToastMessage(`Метод "${activeMethod.name}" удален`);
+  }
+
+  function updateActiveMethodName(name: string): void {
+    if (!activeMethod) return;
+    setMethodsState((prev) =>
+      prev.map((method) =>
+        method.id === activeMethod.id
+          ? {
+              ...method,
+              name,
+              updatedAt: new Date().toISOString()
+            }
+          : method
+      )
+    );
+  }
+
+  function normalizeActiveMethodName(): void {
+    if (!activeMethod) return;
+    const resolved = activeMethod.name.trim() || DEFAULT_METHOD_NAME;
+    if (resolved === activeMethod.name) return;
+    updateActiveMethodName(resolved);
+  }
+
+  useEffect(() => {
+    if (!methods.find((method) => method.id === activeMethodId) && methods[0]) {
+      setActiveMethodId(methods[0].id);
+    }
+  }, [methods, activeMethodId]);
 
   useEffect(() => {
     if (!sections.find((section) => section.id === selectedId) && sections[0]) {
       setSelectedId(sections[0].id);
     }
-  }, [sections, selectedId]);
+  }, [sections, selectedId, activeMethodId]);
+
+  useEffect(() => {
+    if (!pendingMethodNameFocus || !activeMethod || activeMethod.id !== activeMethodId) return;
+    if (!methodNameInputRef.current) return;
+    methodNameInputRef.current.focus();
+    methodNameInputRef.current.select();
+    setPendingMethodNameFocus(false);
+  }, [pendingMethodNameFocus, activeMethod, activeMethodId]);
+
+  useEffect(() => {
+    if (!activeMethodId) return;
+    const previousMethodId = previousMethodIdRef.current;
+    previousMethodIdRef.current = activeMethodId;
+
+    if (!previousMethodId || previousMethodId === activeMethodId) return;
+    if (!activeMethod) return;
+
+    setIsSectionPanelPulse(true);
+    setToastMessage(`Выбран метод "${activeMethod.name.trim() || DEFAULT_METHOD_NAME}"`);
+  }, [activeMethodId, activeMethod]);
+
+  useEffect(() => {
+    if (!isSectionPanelPulse) return;
+    const timerId = window.setTimeout(() => setIsSectionPanelPulse(false), 260);
+    return () => window.clearTimeout(timerId);
+  }, [isSectionPanelPulse]);
+
+  useEffect(() => {
+    if (!toastMessage) return;
+    const timerId = window.setTimeout(() => setToastMessage(''), 2200);
+    return () => window.clearTimeout(timerId);
+  }, [toastMessage]);
 
   useEffect(() => {
     setTab('editor');
@@ -719,12 +971,12 @@ export default function App() {
   useEffect(() => {
     setAutosave({ state: 'saving' });
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(asProjectData(sections)));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(asWorkspaceProjectData(methods, activeMethodId, methodGroups)));
       setAutosave({ state: 'saved', at: formatTime(new Date()) });
     } catch {
       setAutosave({ state: 'error' });
     }
-  }, [sections]);
+  }, [methods, activeMethodId, methodGroups]);
 
   useEffect(() => {
     if (!selectedSection || selectedSection.kind !== 'text') {
@@ -1031,7 +1283,14 @@ export default function App() {
   }
 
   function exportProjectJson(): void {
-    downloadText('doc-project.json', JSON.stringify(asProjectData(sections), null, 2));
+    if (!activeMethod) return;
+    const methodSlug = slugifyMethodFileName(activeMethod.name);
+    const payload: ProjectData = {
+      version: 2,
+      updatedAt: new Date().toISOString(),
+      sections: sanitizeSections(sections)
+    };
+    downloadText(`${methodSlug}.project.json`, JSON.stringify(payload, null, 2));
   }
 
   function blobToDataUrl(blob: Blob): Promise<string> {
@@ -1095,18 +1354,22 @@ export default function App() {
   }
 
   async function handleExportHtml(): Promise<void> {
+    if (!activeMethod) return;
+    const methodSlug = slugifyMethodFileName(activeMethod.name);
     const diagramImageMap = await buildEmbeddedDiagramImageMap();
     const htmlForExport = renderHtmlDocument(sections, theme, {
       interactive: true,
       diagramImageSource: 'remote',
       diagramImageMap
     });
-    downloadText('documentation.html', htmlForExport);
+    downloadText(`${methodSlug}.documentation.html`, htmlForExport);
   }
 
   async function handleExportWiki(): Promise<void> {
+    if (!activeMethod) return;
+    const methodSlug = slugifyMethodFileName(activeMethod.name);
     await exportDiagramJpegs();
-    downloadText('documentation.wiki', wikiOutput);
+    downloadText(`${methodSlug}.documentation.wiki`, wikiOutput);
   }
 
   async function copyToClipboard(value: string): Promise<void> {
@@ -1128,12 +1391,29 @@ export default function App() {
     reader.onload = () => {
       try {
         const text = String(reader.result || '');
-        const parsed = JSON.parse(text) as ProjectData;
-        if (!parsed.sections || !Array.isArray(parsed.sections)) throw new Error('Неверный формат');
-        const sanitizedSections = sanitizeSections(parsed.sections);
-        setSections(sanitizedSections);
-        setSelectedId(sanitizedSections[0]?.id ?? selectedId);
-        setImportError('');
+        const parsed = JSON.parse(text) as WorkspaceProjectData | ProjectData;
+
+        if ('methods' in parsed && Array.isArray(parsed.methods)) {
+          const loaded = loadWorkspaceProjectFromPayload(parsed);
+          const resolvedActiveMethod = loaded.methods.find((method) => method.id === loaded.activeMethodId) ?? loaded.methods[0];
+          setMethodsState(loaded.methods);
+          setMethodGroups(loaded.groups);
+          setActiveMethodId(resolvedActiveMethod?.id ?? createMethodId());
+          setSelectedId(resolvedActiveMethod?.sections[0]?.id ?? createInitialSections()[0].id);
+          setImportError('');
+          return;
+        }
+
+        if ('sections' in parsed && Array.isArray(parsed.sections)) {
+          const sanitizedSections = sanitizeSections(parsed.sections);
+          setSections(sanitizedSections);
+          setSelectedId(sanitizedSections[0]?.id ?? selectedId);
+          setImportError('');
+          return;
+        }
+
+        throw new Error('Неверный формат');
+
       } catch (error) {
         setImportError(error instanceof Error ? error.message : 'Ошибка импорта');
       }
@@ -1141,11 +1421,47 @@ export default function App() {
     reader.readAsText(file);
   }
 
+  function loadWorkspaceProjectFromPayload(payload: WorkspaceProjectData): WorkspaceProjectData {
+    const methods = payload.methods
+      .filter((method) => method && Array.isArray(method.sections))
+      .map((method, index) => ({
+        id: method.id || createMethodId(),
+        name: method.name?.trim() || `Метод ${index + 1}`,
+        updatedAt: method.updatedAt || new Date().toISOString(),
+        sections: sanitizeSections(method.sections)
+      }));
+
+    if (methods.length === 0) return createWorkspaceSeed();
+
+    const groups = Array.isArray(payload.groups)
+      ? payload.groups.map((group) => ({
+          id: group.id || `group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          name: group.name?.trim() || 'Новая цепочка',
+          methodIds: Array.isArray(group.methodIds) ? group.methodIds.filter(Boolean) : [],
+          links: Array.isArray(group.links) ? group.links : []
+        }))
+      : [];
+
+    const activeMethodId = payload.activeMethodId && methods.some((method) => method.id === payload.activeMethodId)
+      ? payload.activeMethodId
+      : methods[0].id;
+
+    return {
+      version: 3,
+      updatedAt: payload.updatedAt || new Date().toISOString(),
+      methods,
+      groups,
+      activeMethodId
+    };
+  }
+
   function resetProject(): void {
     if (!confirm('Сбросить проект? Все несохраненные данные будут потеряны.')) return;
-    const seed = createInitialSections();
-    setSections(seed);
-    setSelectedId(seed[0].id);
+    const seed = createWorkspaceSeed();
+    setMethodsState(seed.methods);
+    setMethodGroups(seed.groups);
+    setActiveMethodId(seed.activeMethodId ?? seed.methods[0].id);
+    setSelectedId(seed.methods[0].sections[0].id);
     localStorage.removeItem(STORAGE_KEY);
   }
 
@@ -3101,11 +3417,11 @@ export default function App() {
             Импорт
             <input type="file" accept="application/json" onChange={(e) => importProjectJson(e.target.files?.[0])} />
           </label>
-          <button className="ghost" onClick={exportProjectJson}>
+          <button className="ghost" onClick={exportProjectJson} disabled={!activeMethod} title={exportTitle}>
             Экспорт JSON
           </button>
-          <button onClick={() => void handleExportHtml()}>Экспорт HTML</button>
-          <button onClick={() => void handleExportWiki()}>Экспорт Wiki</button>
+          <button onClick={() => void handleExportHtml()} disabled={!activeMethod} title={exportTitle}>Экспорт HTML</button>
+          <button onClick={() => void handleExportWiki()} disabled={!activeMethod} title={exportTitle}>Экспорт Wiki</button>
           </div>
           <div className="actions-side">
           <button
@@ -3118,9 +3434,14 @@ export default function App() {
             <span className="theme-mermaid-orb" aria-hidden />
             <span className="theme-mermaid-icon" aria-hidden>{theme === 'dark' ? '☾' : '☀'}</span>
           </button>
-          <div className={`badge ${autosave.state}`} aria-live="polite">
+          <div className={`badge autosave-badge ${autosave.state}`} aria-live="polite" title={autosave.state === 'saved' ? 'Автосохранение выполнено' : undefined}>
             {autosave.state === 'saving' && 'Сохранение...'}
-            {autosave.state === 'saved' && `Сохранено в ${autosave.at ?? ''}`}
+            {autosave.state === 'saved' && (
+              <>
+                <span className="status-icon" aria-hidden />
+                <span className="status-time">{autosave.at ?? '--:--'}</span>
+              </>
+            )}
             {autosave.state === 'error' && 'Ошибка сохранения'}
             {autosave.state === 'idle' && 'Готово'}
           </div>
@@ -3129,6 +3450,7 @@ export default function App() {
       </header>
 
       {importError && <div className="alert error">Ошибка импорта: {importError}</div>}
+      {toastMessage && <div className="toast-info">{toastMessage}</div>}
 
       <div className="sync-alert-stack">
         {selectedSection?.kind === 'parsed' &&
@@ -3160,68 +3482,123 @@ export default function App() {
       </div>
 
       <div className="layout">
-        <aside className="sidebar" role="listbox" aria-label="Секции">
-          <div className="sidebar-head">
-            <div className="muted">Секции</div>
-          </div>
-          <div className="section-list">
-            {sections.map((section) => {
-              const error = validationMap.get(section.id);
-              return (
+        <aside className="sidebar" role="region" aria-label="Методы и секции">
+          <div className="sidebar-panel method-panel">
+            <div className="sidebar-panel-head">
+              <div className="muted">Методы</div>
+            </div>
+            <div className="method-list" role="listbox" aria-label="Список методов">
+              {methods.map((method) => (
                 <button
-                  key={section.id}
-                  role="option"
-                  aria-selected={selectedSection?.id === section.id}
-                  className={`section-item ${selectedSection?.id === section.id ? 'active' : ''} ${error ? 'warn' : ''} ${!section.enabled ? 'disabled' : ''}`}
-                  draggable
-                  onDragStart={() => setDraggingId(section.id)}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={() => {
-                    if (draggingId) setSections((prev) => reorderSections(prev, draggingId, section.id));
-                    setDraggingId(null);
-                  }}
-                  onClick={() => setSelectedId(section.id)}
+                  key={method.id}
+                  type="button"
+                  className={`section-item method-item ${activeMethod?.id === method.id ? 'active' : ''}`}
+                  onClick={() => switchMethod(method)}
                 >
-                  <div className="section-title">{resolveSectionTitle(section.title)}</div>
+                  <div className="section-title">{method.name}</div>
                   <div className="chips">
-                    {section.kind === 'parsed' && (
-                      <span className="chip">
-                        {section.sectionType === 'request'
-                          ? 'REQUEST'
-                          : section.sectionType === 'response'
-                            ? 'RESPONSE'
-                            : section.format.toUpperCase()}
-                      </span>
-                    )}
-                    {section.kind === 'diagram' && <span className="chip">DIAGRAM</span>}
-                    {section.kind === 'errors' && <span className="chip">ERRORS</span>}
-                    {!section.enabled && <span className="chip muted">off</span>}
-                    {error && <span className="chip danger">err</span>}
+                    <span className="chip">{method.sections.length} секц.</span>
                   </div>
                 </button>
-              );
-            })}
-          </div>
-          <div className="sidebar-footer">
-            <div className="add-block-menu">
-              <button className="ghost small" type="button" onClick={() => setIsAddBlockMenuOpen((current) => !current)}>
-                + Добавить секцию
+              ))}
+            </div>
+            <div className="method-actions">
+              <button className="ghost small" type="button" onClick={createMethod}>
+                + Метод
               </button>
-              {isAddBlockMenuOpen && (
-                <div className="add-block-popover" role="menu" aria-label="Тип нового блока">
-                  {ADDABLE_BLOCK_TYPES.map((item) => (
-                    <button
-                      key={item.type}
-                      className="add-block-option"
-                      type="button"
-                      role="menuitem"
-                      onClick={() => addSectionByType(item.type)}
-                    >
-                      <span className="add-block-option-title">{item.label}</span>
-                    </button>
-                  ))}
+              <button className="ghost small" type="button" onClick={deleteActiveMethod} disabled={methods.length <= 1 || !activeMethod}>
+                Удалить метод
+              </button>
+            </div>
+            {activeMethod && (
+              <input
+                ref={methodNameInputRef}
+                className="inline-input"
+                type="text"
+                value={activeMethod.name}
+                onChange={(event) => updateActiveMethodName(event.target.value)}
+                onBlur={normalizeActiveMethodName}
+                placeholder="Название метода"
+                aria-label="Название активного метода"
+              />
+            )}
+            {methodNameWarning && <div className="method-warning">{methodNameWarning}</div>}
+          </div>
+
+          <div className={`sidebar-panel section-panel ${isSectionPanelPulse ? 'section-panel-pulse' : ''}`}>
+            <div className="section-list-head">
+              <div className="muted">Секции</div>
+              <div className="context-pill context-pill-transition" aria-live="polite">
+                {activeMethod ? activeMethod.name : 'Метод не выбран'}
+              </div>
+            </div>
+            <div className="section-list">
+              {sections.map((section) => {
+                const error = validationMap.get(section.id);
+                return (
+                  <button
+                    key={section.id}
+                    role="option"
+                    aria-selected={selectedSection?.id === section.id}
+                    className={`section-item ${selectedSection?.id === section.id ? 'active' : ''} ${error ? 'warn' : ''} ${!section.enabled ? 'disabled' : ''}`}
+                    draggable
+                    onDragStart={() => setDraggingId(section.id)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => {
+                      if (draggingId) setSections((prev) => reorderSections(prev, draggingId, section.id));
+                      setDraggingId(null);
+                    }}
+                    onClick={() => setSelectedId(section.id)}
+                  >
+                    <div className="section-title">{resolveSectionTitle(section.title)}</div>
+                    <div className="chips">
+                      {section.kind === 'parsed' && (
+                        <span className="chip">
+                          {section.sectionType === 'request'
+                            ? 'REQUEST'
+                            : section.sectionType === 'response'
+                              ? 'RESPONSE'
+                              : section.format.toUpperCase()}
+                        </span>
+                      )}
+                      {section.kind === 'diagram' && <span className="chip">DIAGRAM</span>}
+                      {section.kind === 'errors' && <span className="chip">ERRORS</span>}
+                      {!section.enabled && <span className="chip muted">off</span>}
+                      {error && <span className="chip danger">err</span>}
+                    </div>
+                  </button>
+                );
+              })}
+              {sections.length === 0 && (
+                <div className="empty-state">
+                  <div>У выбранного метода пока нет секций.</div>
+                  <button className="ghost small" type="button" onClick={() => addSectionByType('text')}>
+                    + Добавить первую секцию
+                  </button>
                 </div>
               )}
+            </div>
+            <div className="sidebar-footer">
+              <div className="add-block-menu">
+                <button className="ghost small" type="button" onClick={() => setIsAddBlockMenuOpen((current) => !current)}>
+                  + Добавить секцию
+                </button>
+                {isAddBlockMenuOpen && (
+                  <div className="add-block-popover" role="menu" aria-label="Тип нового блока">
+                    {ADDABLE_BLOCK_TYPES.map((item) => (
+                      <button
+                        key={item.type}
+                        className="add-block-option"
+                        type="button"
+                        role="menuitem"
+                        onClick={() => addSectionByType(item.type)}
+                      >
+                        <span className="add-block-option-title">{item.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </aside>

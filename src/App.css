@@ -725,6 +725,10 @@ td {
   padding: 10px;
   border-bottom: 1px solid var(--border);
   text-align: left;
+  vertical-align: top;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 th {
@@ -743,9 +747,15 @@ th {
 
 .field-display {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
+}
+
+.field-display > span:first-child {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .field-actions {

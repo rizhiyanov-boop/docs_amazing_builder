@@ -51,6 +51,12 @@ export function sanitizeSections(sections: DocSection[]): DocSection[] {
           serverHttpStatus: row.serverHttpStatus ?? '',
           internalCode: row.internalCode ?? '',
           message: row.message ?? ''
+        })),
+        validationRules: (section.validationRules ?? []).map((rule) => ({
+          parameter: rule.parameter ?? '',
+          validationCase: rule.validationCase ?? '',
+          condition: rule.condition ?? '',
+          cause: rule.cause ?? ''
         }))
       };
     }
@@ -73,7 +79,8 @@ export function sanitizeSections(sections: DocSection[]): DocSection[] {
             internalCode: '',
             message: ''
           }
-        ]
+        ],
+        validationRules: []
       };
     }
 

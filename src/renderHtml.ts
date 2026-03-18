@@ -4,12 +4,15 @@ import { richTextToHtml } from './richText';
 import { resolveSectionTitle } from './sectionTitles';
 import { buildInputFromRows } from './sourceSync';
 import { getThemeTokens } from './theme';
-import { getDiagramImageUrl } from './diagramUtils';
+import { getDiagramExportFileName, getDiagramImageUrl, resolveDiagramEngine } from './diagramUtils';
 import type { ThemeName } from './theme';
 import type { DiagramSection, DocSection, ErrorsSection, ParseFormat, ParsedRow, ParsedSection, TextSection } from './types';
 
 type RenderHtmlOptions = {
   interactive?: boolean;
+  diagramImageSource?: 'remote' | 'local-jpeg';
+  diagramImageMap?: Record<string, string>;
+  diagramLocalFiles?: Record<string, boolean>;
 };
 
 function escapeHtml(value: string): string {
@@ -40,11 +43,13 @@ function shouldRenderDiagramSection(section: DiagramSection): boolean {
 }
 
 function shouldRenderErrorsSection(section: ErrorsSection): boolean {
-  return section.enabled && section.rows.length > 0;
+  return section.enabled && (section.rows.length > 0 || section.validationRules.length > 0);
 }
 
 function renderCell(value: string): string {
-  return escapeHtml(value.trim()) || '&mdash;';
+  const normalized = value.replaceAll('\r\n', '\n').replaceAll('\r', '\n').trim();
+  if (!normalized) return '&mdash;';
+  return escapeHtml(normalized).replaceAll('\n', '<br/>');
 }
 
 function renderTextValue(value: string): string {
@@ -353,18 +358,45 @@ function renderParsedSection(section: ParsedSection, interactive = true): string
   return renderGenericParsedSection(section, interactive);
 }
 
-function renderDiagramSection(section: DiagramSection): string {
+function renderDiagramSection(
+  section: DiagramSection,
+  diagramImageSource: 'remote' | 'local-jpeg' = 'remote',
+  diagramImageMap?: Record<string, string>,
+  diagramLocalFiles?: Record<string, boolean>,
+  interactive = true
+): string {
   const title = resolveSectionTitle(section.title);
   const body = section.diagrams
     .filter((diagram) => diagram.code.trim())
     .map((diagram, index) => {
       const diagramTitle = diagram.title.trim() || `Диаграмма ${index + 1}`;
-      const imageUrl = getDiagramImageUrl(diagram.engine, diagram.code, 'jpeg');
+      const effectiveEngine = resolveDiagramEngine(diagram.code, diagram.engine);
+      const localFileName = getDiagramExportFileName(title, section.id, diagram.title, index, 'jpeg');
+      const embeddedImage = diagramImageMap?.[localFileName];
+      const remoteUrl = getDiagramImageUrl(effectiveEngine, diagram.code, 'jpeg');
+      const hasLocalFile = Boolean(diagramLocalFiles?.[localFileName]);
+      const imageUrl = embeddedImage ?? (diagramImageSource === 'local-jpeg' && hasLocalFile ? localFileName : remoteUrl);
 
       return [
         '<details open>',
-        `<summary>${escapeHtml(diagramTitle)} <span class="sumhint">${escapeHtml(diagram.engine.toUpperCase())}</span></summary>`,
-        `<div class="section-text"><img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(diagramTitle)}" style="max-width:100%;border:1px solid var(--border);border-radius:10px;" /></div>`,
+        `<summary>${escapeHtml(diagramTitle)} <span class="sumhint">${escapeHtml(effectiveEngine.toUpperCase())}</span></summary>`,
+        interactive
+          ? [
+              '<div class="diagram-viewer" data-diagram-viewer>',
+              '<div class="diagram-viewer-toolbar">',
+              '<span class="diagram-viewer-hint">Drag to move, wheel to zoom</span>',
+              '<span class="diagram-viewer-controls">',
+              '<button class="smallbtn" type="button" data-diagram-action="zoom-out">-</button>',
+              '<button class="smallbtn" type="button" data-diagram-action="zoom-in">+</button>',
+              '<button class="smallbtn" type="button" data-diagram-action="fit">Fit</button>',
+              '</span>',
+              '</div>',
+              '<div class="diagram-viewport" data-diagram-viewport>',
+              `<img class="diagram-image-interactive" data-diagram-image src="${escapeHtml(imageUrl)}" alt="${escapeHtml(diagramTitle)}" draggable="false" />`,
+              '</div>',
+              '</div>'
+            ].join('')
+          : `<div class="section-text"><img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(diagramTitle)}" style="max-width:100%;border:1px solid var(--border);border-radius:10px;" /></div>`,
         diagram.description?.trim() ? `<div class="note">${renderTextValue(diagram.description)}</div>` : '',
         `<details><summary>Код диаграммы</summary><pre><code>${escapeHtml(diagram.code)}</code></pre></details>`,
         '</details>'
@@ -386,7 +418,20 @@ function renderErrorsSection(section: ErrorsSection): string {
     )
     .join('');
 
-  const body = `<table><thead><tr><th>№</th><th>Client HTTP Status</th><th>Client Response</th><th>Trigger (условия возникновения)</th><th>Error Type</th><th>Server HTTP Status</th><th>Полный internalCode</th><th>Server Response</th></tr></thead><tbody>${bodyRows}</tbody></table>`;
+  const validationRows = section.validationRules
+    .map(
+      (row, index) =>
+        `<tr><td>${index + 1}</td><td>${renderCell(row.parameter)}</td><td>${renderCell(row.validationCase)}</td><td>${renderCell(row.condition)}</td><td>${renderCell(row.cause)}</td></tr>`
+    )
+    .join('');
+
+  const errorsTable = section.rows.length
+    ? `<table><thead><tr><th>№</th><th>Client HTTP Status</th><th>Client Response</th><th>Trigger (условия возникновения)</th><th>Error Type</th><th>Server HTTP Status</th><th>Полный internalCode</th><th>Server Response</th></tr></thead><tbody>${bodyRows}</tbody></table>`
+    : '';
+  const validationTable = section.validationRules.length
+    ? `<h3>Правила валидации</h3><table><thead><tr><th>№</th><th>Параметр (server request)</th><th>Кейс валидации</th><th>Условие возникновения</th><th>cause</th></tr></thead><tbody>${validationRows}</tbody></table>`
+    : '';
+  const body = [errorsTable, validationTable].filter(Boolean).join('');
   return wrapCard(section.id, title, renderTag('ERRORS'), body);
 }
 
@@ -417,11 +462,14 @@ function renderSidebar(sections: DocSection[], interactive = true): string {
 
 export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'dark', options: RenderHtmlOptions = {}): string {
   const interactive = options.interactive ?? true;
+  const diagramImageSource = options.diagramImageSource ?? 'remote';
+  const diagramImageMap = options.diagramImageMap;
+  const diagramLocalFiles = options.diagramLocalFiles;
   const visibleSections = getVisibleSections(sections);
   const blocks = visibleSections.map((section) => {
     if (section.kind === 'text') return renderTextSection(section);
     if (section.kind === 'parsed') return renderParsedSection(section, interactive);
-    if (section.kind === 'diagram') return renderDiagramSection(section);
+    if (section.kind === 'diagram') return renderDiagramSection(section, diagramImageSource, diagramImageMap, diagramLocalFiles, interactive);
     return renderErrorsSection(section);
   });
   const darkTokens = getThemeTokens('dark');
@@ -799,6 +847,9 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
         border-bottom:1px solid var(--border);
         text-align:left;
         vertical-align:top;
+        white-space:pre-wrap;
+        overflow-wrap:anywhere;
+        word-break:break-word;
       }
       th{
         background:var(--preview-table-head);
@@ -810,6 +861,54 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
         background:color-mix(in srgb, var(--card) 96%, transparent);
       }
       .table-shell{border-top:1px solid var(--border);overflow:auto}
+      .diagram-viewer{
+        border:1px solid var(--border);
+        border-radius:10px;
+        background:var(--input-bg);
+        overflow:hidden;
+      }
+      .diagram-viewer-toolbar{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:8px;
+        padding:8px 10px;
+        border-bottom:1px solid var(--border);
+        background:color-mix(in srgb, var(--panel) 92%, transparent);
+      }
+      .diagram-viewer-hint{
+        font-size:12px;
+        color:var(--muted);
+      }
+      .diagram-viewer-controls{
+        display:inline-flex;
+        align-items:center;
+        gap:6px;
+      }
+      .diagram-viewport{
+        position:relative;
+        width:100%;
+        min-height:280px;
+        height:clamp(280px, 62vh, 860px);
+        overflow:hidden;
+        touch-action:none;
+        cursor:grab;
+      }
+      .diagram-viewport.dragging{
+        cursor:grabbing;
+      }
+      .diagram-image-interactive{
+        position:absolute;
+        left:50%;
+        top:50%;
+        transform-origin:center center;
+        will-change:transform;
+        user-select:none;
+        -webkit-user-drag:none;
+        border:1px solid var(--border);
+        border-radius:10px;
+        background:#fff;
+      }
       pre{
         margin:0;
         background:var(--input-bg);
@@ -1017,6 +1116,123 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
       };
       window.addEventListener('hashchange', syncCurrentFromHash);
       syncCurrentFromHash();
+
+      const initDiagramViewer = (viewer) => {
+        const viewport = viewer.querySelector('[data-diagram-viewport]');
+        const image = viewer.querySelector('[data-diagram-image]');
+        if (!(viewport instanceof HTMLElement) || !(image instanceof HTMLImageElement)) return;
+
+        const controls = viewer.querySelectorAll('[data-diagram-action]');
+        const state = {
+          scale: 1,
+          minScale: 0.08,
+          maxScale: 8,
+          x: 0,
+          y: 0,
+          fitScale: 1,
+          dragging: false,
+          lastX: 0,
+          lastY: 0
+        };
+
+        const render = () => {
+          image.style.transform = 'translate(-50%, -50%) translate(' + state.x + 'px, ' + state.y + 'px) scale(' + state.scale + ')';
+        };
+
+        const fitToWidth = () => {
+          if (!image.naturalWidth) return;
+          state.fitScale = Math.max(0.01, viewport.clientWidth / image.naturalWidth);
+          state.scale = state.fitScale;
+          state.x = 0;
+          state.y = 0;
+          render();
+        };
+
+        const applyZoom = (nextScale, anchorClientX, anchorClientY) => {
+          const prevScale = state.scale;
+          const clamped = Math.min(state.maxScale, Math.max(state.minScale, nextScale));
+          if (clamped === prevScale) return;
+
+          const rect = viewport.getBoundingClientRect();
+          const cx = rect.left + rect.width / 2;
+          const cy = rect.top + rect.height / 2;
+          const localX = anchorClientX - cx - state.x;
+          const localY = anchorClientY - cy - state.y;
+          const ratio = clamped / prevScale;
+
+          state.x -= localX * (ratio - 1);
+          state.y -= localY * (ratio - 1);
+          state.scale = clamped;
+          render();
+        };
+
+        image.addEventListener('load', fitToWidth);
+        if (image.complete) fitToWidth();
+
+        const observer = new ResizeObserver(() => {
+          if (Math.abs(state.scale - state.fitScale) < 0.001) {
+            fitToWidth();
+          }
+        });
+        observer.observe(viewport);
+
+        viewport.addEventListener('wheel', (event) => {
+          event.preventDefault();
+          const factor = event.deltaY < 0 ? 1.1 : 0.9;
+          applyZoom(state.scale * factor, event.clientX, event.clientY);
+        }, { passive: false });
+
+        viewport.addEventListener('pointerdown', (event) => {
+          if (event.button !== 0) return;
+          state.dragging = true;
+          state.lastX = event.clientX;
+          state.lastY = event.clientY;
+          viewport.classList.add('dragging');
+          viewport.setPointerCapture(event.pointerId);
+        });
+
+        viewport.addEventListener('pointermove', (event) => {
+          if (!state.dragging) return;
+          state.x += event.clientX - state.lastX;
+          state.y += event.clientY - state.lastY;
+          state.lastX = event.clientX;
+          state.lastY = event.clientY;
+          render();
+        });
+
+        const stopDragging = (event) => {
+          if (!state.dragging) return;
+          state.dragging = false;
+          viewport.classList.remove('dragging');
+          if (viewport.hasPointerCapture(event.pointerId)) {
+            viewport.releasePointerCapture(event.pointerId);
+          }
+        };
+
+        viewport.addEventListener('pointerup', stopDragging);
+        viewport.addEventListener('pointercancel', stopDragging);
+
+        controls.forEach((control) => {
+          if (!(control instanceof HTMLElement)) return;
+          control.addEventListener('click', () => {
+            const action = control.dataset.diagramAction;
+            const rect = viewport.getBoundingClientRect();
+            const anchorX = rect.left + rect.width / 2;
+            const anchorY = rect.top + rect.height / 2;
+
+            if (action === 'zoom-in') applyZoom(state.scale * 1.2, anchorX, anchorY);
+            if (action === 'zoom-out') applyZoom(state.scale / 1.2, anchorX, anchorY);
+            if (action === 'fit') fitToWidth();
+          });
+        });
+
+        render();
+      };
+
+      document.querySelectorAll('[data-diagram-viewer]').forEach((viewer) => {
+        if (viewer instanceof HTMLElement) initDiagramViewer(viewer);
+      });
+
       applyTheme(body.dataset.theme || 'dark');
     </script>`
       : '',

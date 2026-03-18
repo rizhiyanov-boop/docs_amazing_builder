@@ -95,9 +95,17 @@ export interface ErrorRow {
   message: string;
 }
 
+export interface ValidationRuleRow {
+  parameter: string;
+  validationCase: string;
+  condition: string;
+  cause: string;
+}
+
 export interface ErrorsSection extends BaseSection {
   kind: 'errors';
   rows: ErrorRow[];
+  validationRules: ValidationRuleRow[];
 }
 
 export type DocSection = TextSection | ParsedSection | DiagramSection | ErrorsSection;

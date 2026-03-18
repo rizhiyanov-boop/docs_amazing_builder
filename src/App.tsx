@@ -2,7 +2,7 @@
 import type { ReactNode } from 'react';
 import './App.css';
 import { parseCurlMeta, parseToRows } from './parsers';
-import { getDiagramImageUrl, getPlantUmlImageUrl, slugifyDiagramName } from './diagramUtils';
+import { getDiagramExportFileName, getDiagramImageUrl, getPlantUmlImageUrl, resolveDiagramEngine } from './diagramUtils';
 import { ERROR_CATALOG, ERROR_CATALOG_BY_CODE, POPULAR_HTTP_STATUS_CODES } from './errorCatalog';
 import { getRequestColumnLabel, getRequestColumnOrder, moveRequestColumn } from './requestColumns';
 import {
@@ -30,7 +30,22 @@ import { DEFAULT_SECTION_TITLE, resolveSectionTitle, sanitizeSections } from './
 import { buildInputFromRows } from './sourceSync';
 import { applyThemeToRoot } from './theme';
 import type { ThemeName } from './theme';
-import type { DiagramItem, DiagramSection, DocSection, ErrorRow, ErrorsSection, ParsedRow, ParsedSection, ParsedSectionType, ParseFormat, ProjectData, RequestAuthType, RequestColumnKey, RequestMethod } from './types';
+import type {
+  DiagramItem,
+  DiagramSection,
+  DocSection,
+  ErrorRow,
+  ErrorsSection,
+  ParsedRow,
+  ParsedSection,
+  ParsedSectionType,
+  ParseFormat,
+  ProjectData,
+  RequestAuthType,
+  RequestColumnKey,
+  RequestMethod,
+  ValidationRuleRow
+} from './types';
 
 const STORAGE_KEY = 'doc-builder-project-v2';
 
@@ -91,6 +106,23 @@ const TYPE_OPTIONS_EXTENDED = [
 ];
 const REQUIRED_OPTIONS = ['+', OPTIONAL_MARK, '-'];
 const STRUCTURED_EXAMPLE_PLACEHOLDER = '-';
+const VALIDATION_CASE_OPTIONS = [
+  'Отсутствует обязательное поле',
+  'Поле не должно быть пустым',
+  'Некорректный тип данных',
+  'Неверный формат значения (regex)',
+  'Длина строки вне допустимого диапазона',
+  'Числовое значение вне допустимого диапазона',
+  'Значение не входит в допустимый список',
+  'Значение должно быть уникальным',
+  'Некорректный формат даты/времени',
+  'Неверный диапазон даты/времени',
+  'Нарушена межпараметрическая валидация',
+  'Нарушено бизнес-правило',
+  'Неподдерживаемое значение',
+  'Некорректная структура payload',
+  'Ошибка проверки контрольной суммы/подписи'
+];
 type AddableBlockType = 'text' | 'request' | 'response' | 'error-logic' | 'diagram';
 
 const ADDABLE_BLOCK_TYPES: Array<{ type: AddableBlockType; label: string }> = [
@@ -205,13 +237,23 @@ function createErrorRow(): ErrorRow {
   };
 }
 
+function createValidationRuleRow(): ValidationRuleRow {
+  return {
+    parameter: '',
+    validationCase: VALIDATION_CASE_OPTIONS[0],
+    condition: '',
+    cause: ''
+  };
+}
+
 function createErrorsSection(id = 'errors', title = 'Ошибки'): ErrorsSection {
   return {
     id,
     title,
     enabled: true,
     kind: 'errors',
-    rows: [createErrorRow()]
+    rows: [createErrorRow()],
+    validationRules: [createValidationRuleRow()]
   };
 }
 
@@ -558,6 +600,13 @@ function validateJsonDraft(value: string): string {
   }
 }
 
+function getDynamicTextareaRows(value: string, minRows = 1, maxRows = 8): number {
+  const normalized = value.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+  const lines = normalized.split('\n');
+  const wrappedLineEstimate = lines.reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / 56)), 0);
+  return Math.max(minRows, Math.min(maxRows, wrappedLineEstimate));
+}
+
 function MermaidLivePreview({ code }: { code: string }): ReactNode {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [error, setError] = useState('');
@@ -660,7 +709,6 @@ export default function App() {
       ? Boolean((selectedSection.clientRows ?? []).length > 0 && selectedSection.clientLastSyncedFormat && selectedSection.clientLastSyncedFormat !== (selectedSection.clientFormat ?? 'json'))
       : false;
 
-  const htmlOutput = useMemo(() => renderHtmlDocument(sections, theme, { interactive: true }), [sections, theme]);
   const htmlPreviewOutput = useMemo(() => renderHtmlDocument(sections, theme, { interactive: false }), [sections, theme]);
   const wikiOutput = useMemo(() => renderWikiDocument(sections), [sections]);
 
@@ -819,6 +867,16 @@ export default function App() {
     });
   }
 
+  function updateValidationRuleRow(sectionId: string, rowIndex: number, updater: (row: ValidationRuleRow) => ValidationRuleRow): void {
+    updateSection(sectionId, (section) => {
+      if (section.kind !== 'errors') return section;
+      return {
+        ...section,
+        validationRules: section.validationRules.map((row, index) => (index === rowIndex ? updater(row) : row))
+      };
+    });
+  }
+
   function addErrorRow(sectionId: string): void {
     updateSection(sectionId, (section) => {
       if (section.kind !== 'errors') return section;
@@ -831,6 +889,70 @@ export default function App() {
       if (section.kind !== 'errors') return section;
       const nextRows = section.rows.filter((_, index) => index !== rowIndex);
       return { ...section, rows: nextRows.length > 0 ? nextRows : [createErrorRow()] };
+    });
+  }
+
+  function addValidationRuleRow(sectionId: string): void {
+    updateSection(sectionId, (section) => {
+      if (section.kind !== 'errors') return section;
+
+      const nextValidationRules = [...section.validationRules, createValidationRuleRow()];
+      if (section.validationRules.length > 0) {
+        return { ...section, validationRules: nextValidationRules };
+      }
+
+      const preset = ERROR_CATALOG_BY_CODE.get('100101');
+      const hasValidationErrorRow = section.rows.some((row) => row.internalCode === '100101' || row.trigger.trim() === 'Ошибка валидации');
+
+      if (hasValidationErrorRow) {
+        return {
+          ...section,
+          validationRules: nextValidationRules,
+          rows: section.rows.map((row) =>
+            row.internalCode === '100101' || row.trigger.trim() === 'Ошибка валидации'
+              ? {
+                  ...row,
+                  trigger: row.trigger.trim() || 'Ошибка валидации',
+                  message: preset?.message ?? row.message
+                }
+              : row
+          )
+        };
+      }
+
+      const validationErrorRow: ErrorRow = {
+        clientHttpStatus: '-',
+        clientResponse: '',
+        trigger: 'Ошибка валидации',
+        errorType: 'BusinessException',
+        serverHttpStatus: preset?.httpStatus ?? '400',
+        internalCode: '100101',
+        message: preset?.message ?? 'Bad request sent to the system'
+      };
+
+      const isSingleEmptyRow =
+        section.rows.length === 1 &&
+        !section.rows[0].clientHttpStatus.trim() &&
+        !section.rows[0].clientResponse.trim() &&
+        !section.rows[0].trigger.trim() &&
+        section.rows[0].errorType === '-' &&
+        !section.rows[0].serverHttpStatus.trim() &&
+        !section.rows[0].internalCode.trim() &&
+        !section.rows[0].message.trim();
+
+      return {
+        ...section,
+        validationRules: nextValidationRules,
+        rows: isSingleEmptyRow ? [validationErrorRow] : [...section.rows, validationErrorRow]
+      };
+    });
+  }
+
+  function deleteValidationRuleRow(sectionId: string, rowIndex: number): void {
+    updateSection(sectionId, (section) => {
+      if (section.kind !== 'errors') return section;
+      const nextRows = section.validationRules.filter((_, index) => index !== rowIndex);
+      return { ...section, validationRules: nextRows.length > 0 ? nextRows : [createValidationRuleRow()] };
     });
   }
 
@@ -912,32 +1034,74 @@ export default function App() {
     downloadText('doc-project.json', JSON.stringify(asProjectData(sections), null, 2));
   }
 
-  async function exportDiagramJpegs(): Promise<void> {
+  function blobToDataUrl(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result ?? ''));
+      reader.onerror = () => reject(reader.error ?? new Error('Failed to convert blob to data URL'));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function buildEmbeddedDiagramImageMap(): Promise<Record<string, string>> {
     const diagramSections = sections.filter((section): section is DiagramSection => section.kind === 'diagram');
+    const imageMap: Record<string, string> = {};
 
     for (const section of diagramSections) {
-      const sectionSlug = slugifyDiagramName(resolveSectionTitle(section.title)) || section.id;
+      const diagrams = section.diagrams.filter((diagram) => diagram.code.trim());
+
+      for (let index = 0; index < diagrams.length; index += 1) {
+        const diagram = diagrams[index];
+        const fileName = getDiagramExportFileName(resolveSectionTitle(section.title), section.id, diagram.title, index, 'jpeg');
+        try {
+          const imageUrl = getDiagramImageUrl(resolveDiagramEngine(diagram.code, diagram.engine), diagram.code, 'jpeg');
+          const response = await fetch(imageUrl);
+          if (!response.ok) continue;
+          const blob = await response.blob();
+          imageMap[fileName] = await blobToDataUrl(blob);
+        } catch {
+          // Keep fallback link behavior when image embedding fails.
+        }
+      }
+    }
+
+    return imageMap;
+  }
+
+  async function exportDiagramJpegs(): Promise<Set<string>> {
+    const diagramSections = sections.filter((section): section is DiagramSection => section.kind === 'diagram');
+    const downloadedFiles = new Set<string>();
+
+    for (const section of diagramSections) {
       const diagrams = section.diagrams.filter((diagram) => diagram.code.trim());
 
       for (let index = 0; index < diagrams.length; index += 1) {
         const diagram = diagrams[index];
         try {
-          const imageUrl = getDiagramImageUrl(diagram.engine, diagram.code, 'jpeg');
+          const imageUrl = getDiagramImageUrl(resolveDiagramEngine(diagram.code, diagram.engine), diagram.code, 'jpeg');
           const response = await fetch(imageUrl);
           if (!response.ok) continue;
           const blob = await response.blob();
-          const titleSlug = slugifyDiagramName(diagram.title) || `diagram-${index + 1}`;
-          downloadBlob(`${sectionSlug}-${titleSlug}.jpeg`, blob);
+          const fileName = getDiagramExportFileName(resolveSectionTitle(section.title), section.id, diagram.title, index, 'jpeg');
+          downloadBlob(fileName, blob);
+          downloadedFiles.add(fileName);
         } catch {
           // Skip broken diagram export and continue for remaining diagrams.
         }
       }
     }
+
+    return downloadedFiles;
   }
 
   async function handleExportHtml(): Promise<void> {
-    await exportDiagramJpegs();
-    downloadText('documentation.html', htmlOutput);
+    const diagramImageMap = await buildEmbeddedDiagramImageMap();
+    const htmlForExport = renderHtmlDocument(sections, theme, {
+      interactive: true,
+      diagramImageSource: 'remote',
+      diagramImageMap
+    });
+    downloadText('documentation.html', htmlForExport);
   }
 
   async function handleExportWiki(): Promise<void> {
@@ -1554,7 +1718,7 @@ export default function App() {
             value={editingRequestCell.draft}
             onChange={(e) => setEditingRequestCell((current) => (current ? { ...current, draft: e.target.value } : current))}
             onBlur={saveRequestCellEditing}
-            rows={column === 'example' ? 4 : 1}
+            rows={getDynamicTextareaRows(editingRequestCell.draft, column === 'example' ? 3 : 1, column === 'example' ? 10 : 6)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) saveRequestCellEditing();
               if (e.key === 'Escape') cancelRequestCellEditing();
@@ -2535,6 +2699,7 @@ export default function App() {
         {section.diagrams.map((diagram, index) => {
           const blockId = `diagram-item-${diagram.id}`;
           const title = diagram.title.trim() || `Диаграмма ${index + 1}`;
+          const effectiveEngine = resolveDiagramEngine(diagram.code, diagram.engine);
 
           return (
             <details
@@ -2555,22 +2720,7 @@ export default function App() {
                       placeholder="Например: Общий процесс"
                     />
                   </label>
-                  <div className="diagram-engine-toggle" role="group" aria-label="Движок диаграммы">
-                    <button
-                      type="button"
-                      className={`ghost small ${diagram.engine === 'mermaid' ? 'active' : ''}`}
-                      onClick={() => updateDiagram(section.id, diagram.id, (current) => ({ ...current, engine: 'mermaid' }))}
-                    >
-                      Mermaid
-                    </button>
-                    <button
-                      type="button"
-                      className={`ghost small ${diagram.engine === 'plantuml' ? 'active' : ''}`}
-                      onClick={() => updateDiagram(section.id, diagram.id, (current) => ({ ...current, engine: 'plantuml' }))}
-                    >
-                      PlantUML
-                    </button>
-                  </div>
+                  <div className="badge">{effectiveEngine === 'plantuml' ? 'PLANTUML (AUTO)' : 'MERMAID (AUTO)'}</div>
                 </div>
 
                 <label className="field">
@@ -2579,15 +2729,21 @@ export default function App() {
                     className="source-edit"
                     rows={10}
                     value={diagram.code}
-                    onChange={(e) => updateDiagram(section.id, diagram.id, (current) => ({ ...current, code: e.target.value }))}
-                    placeholder={diagram.engine === 'mermaid' ? 'sequenceDiagram\nA->>B: Hello' : '@startuml\nAlice -> Bob: Hello\n@enduml'}
+                    onChange={(e) =>
+                      updateDiagram(section.id, diagram.id, (current) => ({
+                        ...current,
+                        code: e.target.value,
+                        engine: resolveDiagramEngine(e.target.value, current.engine)
+                      }))
+                    }
+                    placeholder={effectiveEngine === 'mermaid' ? 'sequenceDiagram\nA->>B: Hello' : '@startuml\nAlice -> Bob: Hello\n@enduml'}
                   />
                 </label>
 
                 <div className="label">Предпросмотр</div>
                 {!diagram.code.trim() && <div className="muted">Вставьте код диаграммы для предпросмотра</div>}
-                {diagram.code.trim() && diagram.engine === 'mermaid' && <MermaidLivePreview code={diagram.code} />}
-                {diagram.code.trim() && diagram.engine === 'plantuml' && (
+                {diagram.code.trim() && effectiveEngine === 'mermaid' && <MermaidLivePreview code={diagram.code} />}
+                {diagram.code.trim() && effectiveEngine === 'plantuml' && (
                   <div className="diagram-preview">
                     <img className="diagram-preview-image" src={getPlantUmlImageUrl(diagram.code, 'svg')} alt={title} loading="lazy" />
                   </div>
@@ -2702,6 +2858,16 @@ export default function App() {
   }
 
   function renderErrorsEditor(section: ErrorsSection): ReactNode {
+    const serverRequestParameterOptions = Array.from(
+      new Set(
+        sections
+          .filter((item): item is ParsedSection => item.kind === 'parsed' && item.sectionType === 'request')
+          .flatMap((item) => getSectionRows(item))
+          .map((row) => row.field.trim())
+          .filter(Boolean)
+      )
+    ).sort((left, right) => left.localeCompare(right));
+
     return (
       <div className="stack">
         <datalist id="http-status-options">
@@ -2714,6 +2880,12 @@ export default function App() {
         <datalist id="internal-code-options">
           {ERROR_CATALOG.map((item) => (
             <option key={item.internalCode} value={item.internalCode} label={`${item.httpStatus} - ${item.message}`} />
+          ))}
+        </datalist>
+
+        <datalist id="server-request-param-options">
+          {serverRequestParameterOptions.map((value) => (
+            <option key={value} value={value} />
           ))}
         </datalist>
 
@@ -2753,7 +2925,7 @@ export default function App() {
                     <div className="error-response-cell">
                       <textarea
                         className={clientResponseError ? 'input-warning' : ''}
-                        rows={3}
+                        rows={getDynamicTextareaRows(row.clientResponse, 3, 10)}
                         value={row.clientResponse}
                         onChange={(e) => updateErrorRow(section.id, index, (current) => ({ ...current, clientResponse: e.target.value }))}
                       />
@@ -2765,7 +2937,7 @@ export default function App() {
                   </td>
                   <td>
                     <textarea
-                      rows={2}
+                      rows={getDynamicTextareaRows(row.trigger, 2, 8)}
                       value={row.trigger}
                       onChange={(e) => updateErrorRow(section.id, index, (current) => ({ ...current, trigger: e.target.value }))}
                     />
@@ -2821,6 +2993,83 @@ export default function App() {
           <div className="table-actions">
             <button className="ghost small" type="button" onClick={() => addErrorRow(section.id)}>
               + Строка ошибки
+            </button>
+          </div>
+        </div>
+
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>№</th>
+                <th>Параметр (server request)</th>
+                <th>Кейс валидации</th>
+                <th>Условие возникновения</th>
+                <th>cause</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {section.validationRules.map((rule, index) => (
+                <tr key={`${section.id}-validation-${index}`}>
+                  <td>{index + 1}</td>
+                  <td>
+                    <input
+                      type="text"
+                      list="server-request-param-options"
+                      value={rule.parameter}
+                      onChange={(e) => updateValidationRuleRow(section.id, index, (current) => ({ ...current, parameter: e.target.value }))}
+                      placeholder="Выберите из server request или введите вручную"
+                    />
+                  </td>
+                  <td>
+                    <select
+                      value={rule.validationCase}
+                      onChange={(e) =>
+                        updateValidationRuleRow(section.id, index, (current) => ({
+                          ...current,
+                          validationCase: e.target.value
+                        }))
+                      }
+                    >
+                      {VALIDATION_CASE_OPTIONS.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <textarea
+                      rows={getDynamicTextareaRows(rule.condition, 1, 6)}
+                      value={rule.condition}
+                      onChange={(e) => updateValidationRuleRow(section.id, index, (current) => ({ ...current, condition: e.target.value }))}
+                    />
+                  </td>
+                  <td>
+                    <textarea
+                      rows={getDynamicTextareaRows(rule.cause, 1, 6)}
+                      value={rule.cause}
+                      onChange={(e) => updateValidationRuleRow(section.id, index, (current) => ({ ...current, cause: e.target.value }))}
+                    />
+                  </td>
+                  <td>
+                    <button
+                      className="icon-button danger"
+                      type="button"
+                      onClick={() => deleteValidationRuleRow(section.id, index)}
+                      aria-label="Удалить правило валидации"
+                    >
+                      ×
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="table-actions">
+            <button className="ghost small" type="button" onClick={() => addValidationRuleRow(section.id)}>
+              + Правило валидации
             </button>
           </div>
         </div>

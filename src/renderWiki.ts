@@ -1,7 +1,7 @@
 ﻿import { getRequestColumnLabel, getRequestColumnOrder } from './requestColumns';
 import { getRequestAuthInfo, getRequestRows, requestHasRows, splitRequestRows } from './requestHeaders';
 import { resolveSectionTitle } from './sectionTitles';
-import { getDiagramImageUrl } from './diagramUtils';
+import { getDiagramImageUrl, resolveDiagramEngine } from './diagramUtils';
 import type { DiagramSection, DocSection, ErrorsSection, ParsedRow, ParsedSection, TextSection } from './types';
 
 const EMPTY_WIKI_CELL = '&#160;';
@@ -20,11 +20,10 @@ function toWikiCell(value: string): string {
     .replaceAll('\r', '\n')
     .replaceAll('\t', ' ')
     .split('\n')
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0)
+    .map((part) => part.trimEnd())
     .join('<br/>');
 
-  return normalized || EMPTY_WIKI_CELL;
+  return normalized.trim() ? normalized : EMPTY_WIKI_CELL;
 }
 
 function toWikiExampleCell(value: string): string {
@@ -60,7 +59,7 @@ function shouldRenderDiagramSection(section: DiagramSection): boolean {
 }
 
 function shouldRenderErrorsSection(section: ErrorsSection): boolean {
-  return section.enabled && section.rows.length > 0;
+  return section.enabled && (section.rows.length > 0 || section.validationRules.length > 0);
 }
 
 function renderDefaultTable(rows: ParsedRow[]): string[] {
@@ -200,7 +199,7 @@ function renderDiagramSection(section: DiagramSection): string[] {
     .filter((diagram) => diagram.code.trim())
     .forEach((diagram, index) => {
       const title = diagram.title.trim() || `Диаграмма ${index + 1}`;
-      const imageUrl = getDiagramImageUrl(diagram.engine, diagram.code, 'jpeg');
+      const imageUrl = getDiagramImageUrl(resolveDiagramEngine(diagram.code, diagram.engine), diagram.code, 'jpeg');
 
       lines.push('');
       lines.push(`h3. ${escapeWiki(title)}`);
@@ -220,14 +219,29 @@ function renderDiagramSection(section: DiagramSection): string[] {
 
 function renderErrorsSection(section: ErrorsSection): string[] {
   const lines: string[] = [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`];
-  lines.push('');
-  lines.push('||№||Client HTTP Status||Client Response||Trigger (условия возникновения)||Error Type||Server HTTP Status||Полный internalCode||Server Response||');
 
-  section.rows.forEach((row, index) => {
-    lines.push(
-      `|${toWikiCell(String(index + 1))}|${toWikiCell(row.clientHttpStatus)}|${toWikiCell(row.clientResponse)}|${toWikiCell(row.trigger)}|${toWikiCell(row.errorType)}|${toWikiCell(row.serverHttpStatus)}|${toWikiCell(row.internalCode)}|${toWikiCell(row.message)}|`
-    );
-  });
+  if (section.rows.length > 0) {
+    lines.push('');
+    lines.push('||№||Client HTTP Status||Client Response||Trigger (условия возникновения)||Error Type||Server HTTP Status||Полный internalCode||Server Response||');
+
+    section.rows.forEach((row, index) => {
+      lines.push(
+        `|${toWikiCell(String(index + 1))}|${toWikiCell(row.clientHttpStatus)}|${toWikiCell(row.clientResponse)}|${toWikiCell(row.trigger)}|${toWikiCell(row.errorType)}|${toWikiCell(row.serverHttpStatus)}|${toWikiCell(row.internalCode)}|${toWikiCell(row.message)}|`
+      );
+    });
+  }
+
+  if (section.validationRules.length > 0) {
+    lines.push('');
+    lines.push('h3. Правила валидации');
+    lines.push('||№||Параметр (server request)||Кейс валидации||Условие возникновения||cause||');
+
+    section.validationRules.forEach((row, index) => {
+      lines.push(
+        `|${toWikiCell(String(index + 1))}|${toWikiCell(row.parameter)}|${toWikiCell(row.validationCase)}|${toWikiCell(row.condition)}|${toWikiCell(row.cause)}|`
+      );
+    });
+  }
 
   return lines;
 }

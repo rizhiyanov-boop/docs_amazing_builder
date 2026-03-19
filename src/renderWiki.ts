@@ -28,11 +28,72 @@ function toWikiCell(value: string): string {
 
 function toWikiExampleCell(value: string): string {
   const trimmed = value.trim();
-  const looksLikeJson = (trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'));
 
   if (!trimmed) return EMPTY_WIKI_CELL;
-  if (looksLikeJson) return `{json}${escapeWiki(trimmed)}{json}`;
+  const looksLikeJson = (trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'));
+  if (looksLikeJson) {
+    try {
+      // Keep JSON in table cells single-line so wiki table markup remains valid.
+      return toWikiCell(JSON.stringify(JSON.parse(trimmed)));
+    } catch {
+      return toWikiCell(trimmed);
+    }
+  }
   return toWikiCell(trimmed);
+}
+
+function toWikiSourceCodeBlock(value: string, format: 'json' | 'curl'): string[] {
+  const normalized = value
+    .replaceAll('\r\n', '\n')
+    .replaceAll('\r', '\n')
+    .trim();
+
+  if (!normalized) return [];
+
+  let payload = normalized;
+  if (format === 'json') {
+    try {
+      payload = JSON.stringify(JSON.parse(normalized), null, 2);
+    } catch {
+      // Keep original content if it isn't valid JSON.
+    }
+  }
+
+  const codeLanguage = format === 'json' ? 'json' : 'bash';
+
+  return [`{code:${codeLanguage}}`, ...payload.split('\n').map((line) => escapeWiki(line)), '{code}'];
+}
+
+function renderParsedSourceExamples(section: ParsedSection): string[] {
+  const lines: string[] = [];
+  const serverInput = section.input.trim();
+  const clientInput = section.domainModelEnabled ? (section.clientInput ?? '').trim() : '';
+  const sectionLabel = section.sectionType === 'response' ? 'response' : 'request';
+  const serverFormat = section.format;
+  const clientFormat = section.clientFormat ?? 'json';
+
+  const serverFormatLabel = serverFormat === 'curl' ? 'cURL' : 'JSON';
+  const clientFormatLabel = clientFormat === 'curl' ? 'cURL' : 'JSON';
+
+  if (serverInput) {
+    lines.push('');
+    lines.push(`{expand:title=Пример ${serverFormatLabel} (Server ${sectionLabel})}`);
+    lines.push(...toWikiSourceCodeBlock(serverInput, serverFormat));
+    lines.push('{expand}');
+  }
+
+  if (clientInput) {
+    lines.push('');
+    lines.push(`{expand:title=Пример ${clientFormatLabel} (Client ${sectionLabel})}`);
+    lines.push(...toWikiSourceCodeBlock(clientInput, clientFormat));
+    lines.push('{expand}');
+  }
+
+  return lines;
+}
+
+function hasParsedSourceExample(section: ParsedSection): boolean {
+  return Boolean(section.input.trim()) || Boolean(section.domainModelEnabled && (section.clientInput ?? '').trim());
 }
 
 function toWikiTextBlock(value: string): string[] {
@@ -44,22 +105,26 @@ function toWikiTextBlock(value: string): string[] {
 }
 
 function shouldRenderTextSection(section: TextSection): boolean {
-  return section.enabled && Boolean(section.value.trim());
+  if (!section.enabled) return true;
+  return Boolean(section.value.trim());
 }
 
 function shouldRenderParsedSection(section: ParsedSection): boolean {
-  if (!section.enabled) return false;
-  if (isDualModelSection(section)) return Boolean(section.error) || Boolean(section.clientError) || requestHasRows(section);
+  if (!section.enabled) return true;
+  if (isDualModelSection(section)) {
+    return Boolean(section.error) || Boolean(section.clientError) || requestHasRows(section) || hasParsedSourceExample(section);
+  }
   return Boolean(section.error) || section.rows.length > 0;
 }
 
 function shouldRenderDiagramSection(section: DiagramSection): boolean {
-  if (!section.enabled) return false;
+  if (!section.enabled) return true;
   return section.diagrams.some((diagram) => diagram.code.trim());
 }
 
 function shouldRenderErrorsSection(section: ErrorsSection): boolean {
-  return section.enabled && (section.rows.length > 0 || section.validationRules.length > 0);
+  if (!section.enabled) return true;
+  return section.rows.length > 0 || section.validationRules.length > 0;
 }
 
 function renderDefaultTable(rows: ParsedRow[]): string[] {
@@ -99,11 +164,21 @@ function renderStructuredTable(rows: ParsedRow[], section: ParsedSection): strin
 }
 
 function renderTextSection(section: TextSection): string[] {
+  if (!section.enabled) {
+    return [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`, '', '_Не используется_'];
+  }
+
   return [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`, '', ...toWikiTextBlock(section.value)];
 }
 
 function renderRequestSection(section: ParsedSection): string[] {
   const lines: string[] = [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`];
+  if (!section.enabled) {
+    lines.push('');
+    lines.push('_Не используется_');
+    return lines;
+  }
+
   const { headers, otherRows, urlRow } = splitRequestRows(getRequestRows(section));
   const requestError = section.error || section.clientError;
   const authInfo = getRequestAuthInfo(section);
@@ -163,17 +238,26 @@ function renderRequestSection(section: ParsedSection): string[] {
     lines.push(...renderStructuredTable(otherRows, section));
   }
 
+  lines.push(...renderParsedSourceExamples(section));
+
   return lines;
 }
 function renderResponseSection(section: ParsedSection): string[] {
   const lines: string[] = [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`];
+  if (!section.enabled) {
+    lines.push('');
+    lines.push('_Не используется_');
+    return lines;
+  }
 
   if (section.error || section.clientError) {
     lines.push(`*Секция заблокирована:* ${toWikiCell(section.error || section.clientError || '')}`);
+    lines.push(...renderParsedSourceExamples(section));
     return lines;
   }
 
   lines.push(...renderStructuredTable(getRequestRows(section), section));
+  lines.push(...renderParsedSourceExamples(section));
   return lines;
 }
 
@@ -182,6 +266,12 @@ function renderParsedSection(section: ParsedSection): string[] {
   if (section.sectionType === 'response') return renderResponseSection(section);
 
   const lines: string[] = [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`];
+
+  if (!section.enabled) {
+    lines.push('');
+    lines.push('_Не используется_');
+    return lines;
+  }
 
   if (section.error) {
     lines.push(`*Секция заблокирована:* ${toWikiCell(section.error)}`);
@@ -194,6 +284,12 @@ function renderParsedSection(section: ParsedSection): string[] {
 
 function renderDiagramSection(section: DiagramSection): string[] {
   const lines: string[] = [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`];
+
+  if (!section.enabled) {
+    lines.push('');
+    lines.push('_Не используется_');
+    return lines;
+  }
 
   section.diagrams
     .filter((diagram) => diagram.code.trim())
@@ -219,6 +315,12 @@ function renderDiagramSection(section: DiagramSection): string[] {
 
 function renderErrorsSection(section: ErrorsSection): string[] {
   const lines: string[] = [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`];
+
+  if (!section.enabled) {
+    lines.push('');
+    lines.push('_Не используется_');
+    return lines;
+  }
 
   if (section.rows.length > 0) {
     lines.push('');
@@ -247,7 +349,7 @@ function renderErrorsSection(section: ErrorsSection): string[] {
 }
 
 export function renderWikiDocument(sections: DocSection[]): string {
-  const lines: string[] = ['h1. Документация API'];
+  const lines: string[] = ['{toc}', '', 'h1. Документация API'];
 
   for (const section of sections) {
     const rendered =

@@ -28,22 +28,32 @@ function isDualModelSection(section: ParsedSection): boolean {
 }
 
 function shouldRenderTextSection(section: TextSection): boolean {
-  return section.enabled && Boolean(section.value.trim());
+  if (!section.enabled) return true;
+  return Boolean(section.value.trim());
+}
+
+function hasParsedSourceExample(section: ParsedSection): boolean {
+  const hasServerInput = Boolean(section.input.trim());
+  const hasClientInput = Boolean(section.domainModelEnabled && (section.clientInput ?? '').trim());
+  return hasServerInput || hasClientInput;
 }
 
 function shouldRenderParsedSection(section: ParsedSection): boolean {
-  if (!section.enabled) return false;
-  if (isDualModelSection(section)) return Boolean(section.error) || Boolean(section.clientError) || requestHasRows(section);
+  if (!section.enabled) return true;
+  if (isDualModelSection(section)) {
+    return Boolean(section.error) || Boolean(section.clientError) || requestHasRows(section) || hasParsedSourceExample(section);
+  }
   return Boolean(section.error) || section.rows.length > 0;
 }
 
 function shouldRenderDiagramSection(section: DiagramSection): boolean {
-  if (!section.enabled) return false;
+  if (!section.enabled) return true;
   return section.diagrams.some((diagram) => diagram.code.trim());
 }
 
 function shouldRenderErrorsSection(section: ErrorsSection): boolean {
-  return section.enabled && (section.rows.length > 0 || section.validationRules.length > 0);
+  if (!section.enabled) return true;
+  return section.rows.length > 0 || section.validationRules.length > 0;
 }
 
 function renderCell(value: string): string {
@@ -145,11 +155,19 @@ function renderButton(label: string, href: string, kind = 'ghost', interactive =
   return `<a class="doc-btn ${kind}" href="${escapeHtml(href)}">${escapeHtml(label)}</a>`;
 }
 
+function renderCopyIconButton(dataAttr: string, value: string): string {
+  return [
+    `<button class="smallbtn icon-copy-btn" type="button" ${dataAttr}="${escapeHtml(value)}" aria-label="Копировать" title="Копировать">`,
+    '<svg class="copy-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 1H6a2 2 0 0 0-2 2v12h2V3h10V1zm3 4H10a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H10V7h9v14z"/></svg>',
+    '<svg class="copy-check-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 16.2l-3.5-3.5L4 14.2l5 5 11-11-1.5-1.5z"/></svg>',
+    '<span class="visually-hidden">Копировать</span>',
+    '</button>'
+  ].join('');
+}
+
 function renderUrl(value: string, label = 'URL', interactive = true): string {
   if (!value.trim()) return '';
-  const action = interactive
-    ? `<button class="smallbtn" type="button" data-copy-text="${escapeHtml(value)}">Copy</button>`
-    : '';
+  const action = interactive ? renderCopyIconButton('data-copy-text', value) : '';
   return `<div class="url"><span>${escapeHtml(label)}: ${escapeHtml(value)}</span>${action}</div>`;
 }
 
@@ -160,7 +178,7 @@ function renderCodeBlock(id: string, title: string, content: string, interactive
     `<summary>${escapeHtml(title)} <span class="sumhint">example</span></summary>`,
     `<pre>${
       interactive
-        ? `<div class="pretools"><button class="smallbtn" type="button" data-copy-target="${escapeHtml(id)}">Copy</button></div>`
+        ? `<div class="pretools">${renderCopyIconButton('data-copy-target', id)}</div>`
         : ''
     }<code class="code-block language-${format}" id="${escapeHtml(id)}">${highlightCode(format, content.trim())}</code></pre>`,
     '</details>'
@@ -175,7 +193,7 @@ function renderDefaultTable(rows: ParsedRow[]): string {
     )
     .join('');
 
-  return `<table><thead><tr><th>Поле</th><th>Тип</th><th>Обязательность</th><th>Описание</th><th>Пример</th></tr></thead><tbody>${body}</tbody></table>`;
+  return `<div class="table-shell"><table><thead><tr><th>Поле</th><th>Тип</th><th>Обязательность</th><th>Описание</th><th>Пример</th></tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
 function renderStructuredTable(rows: ParsedRow[], section: ParsedSection): string {
@@ -196,7 +214,7 @@ function renderStructuredTable(rows: ParsedRow[], section: ParsedSection): strin
     })
     .join('');
 
-  return `<table><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table>`;
+  return `<div class="table-shell"><table><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
 function wrapCard(id: string, title: string, meta: string, body: string, path = '', method = '', interactive = true): string {
@@ -216,6 +234,9 @@ function wrapCard(id: string, title: string, meta: string, body: string, path = 
 
 function renderTextSection(section: TextSection): string {
   const title = resolveSectionTitle(section.title);
+  if (!section.enabled) {
+    return wrapCard(section.id, title, '', '<span class="muted">Не используется</span>');
+  }
   return wrapCard(section.id, title, '', `<div class="section-text">${renderProseValue(section.value)}</div>`);
 }
 
@@ -231,18 +252,22 @@ function renderAuthDetails(section: ParsedSection): string {
   return [
     '<details open>',
     `<summary>Authorization <span class="sumhint">${escapeHtml(authInfo.schemeLabel)}</span></summary>`,
-    '<table>',
+    '<div class="table-shell"><table>',
     '<thead><tr><th>Параметр</th><th>Значение</th></tr></thead>',
     '<tbody>',
     ...authInfo.details.map((detail) => `<tr><td>${escapeHtml(detail.label)}</td><td>${renderCell(detail.value)}</td></tr>`),
     '</tbody>',
-    '</table>',
+    '</table></div>',
     '</details>'
   ].join('');
 }
 
 function renderRequestSection(section: ParsedSection, interactive = true): string {
   const title = resolveSectionTitle(section.title);
+  if (!section.enabled) {
+    return wrapCard(section.id, title, [renderTag('REQUEST'), renderTag(section.format.toUpperCase())].join(' '), '<span class="muted">Не используется</span>');
+  }
+
   const requestRows = getRequestRows(section);
   const { headers, otherRows, urlRow } = splitRequestRows(requestRows);
   const requestError = section.error || section.clientError;
@@ -281,9 +306,9 @@ function renderRequestSection(section: ParsedSection, interactive = true): strin
   const meta = [renderTag(requestMethod), renderTag(requestProtocol), renderTag(section.format.toUpperCase())].join(' ');
   const body = [
     renderInfoNote('Назначение', title),
-    `<details open><summary>Общее описание метода <span class="sumhint">${escapeHtml(requestProtocol)}</span></summary><table><tbody><tr><td>URL</td><td>${renderCell(
+    `<details open><summary>Общее описание метода <span class="sumhint">${escapeHtml(requestProtocol)}</span></summary><div class="table-shell"><table><tbody><tr><td>URL</td><td>${renderCell(
       requestUrl
-    )}</td></tr><tr><td>Метод</td><td>${renderCell(requestMethod)}</td></tr><tr><td>Протокол</td><td>${renderCell(requestProtocol)}</td></tr></tbody></table></details>`,
+    )}</td></tr><tr><td>Метод</td><td>${renderCell(requestMethod)}</td></tr><tr><td>Протокол</td><td>${renderCell(requestProtocol)}</td></tr></tbody></table></div></details>`,
     renderAuthDetails(section),
     headers.length > 0
       ? `<details open><summary>Headers <span class="sumhint">${headers.length} headers</span></summary>${renderStructuredTable(headers, section)}</details>`
@@ -294,9 +319,9 @@ function renderRequestSection(section: ParsedSection, interactive = true): strin
     renderCodeBlock(`${section.id}-server-example`, 'Server request example', section.input, interactive, section.format),
     renderCodeBlock(`${section.id}-server-curl`, 'Server cURL', serverCurl, interactive),
     section.domainModelEnabled
-      ? `<details open><summary>Внешний вызов <span class="sumhint">${escapeHtml(requestProtocol)}</span></summary><table><tbody><tr><td>Внешний URL</td><td>${renderCell(
+      ? `<details open><summary>Внешний вызов <span class="sumhint">${escapeHtml(requestProtocol)}</span></summary><div class="table-shell"><table><tbody><tr><td>Внешний URL</td><td>${renderCell(
           externalRequestUrl
-        )}</td></tr><tr><td>Метод</td><td>${renderCell(externalRequestMethod)}</td></tr><tr><td>Протокол</td><td>${renderCell(requestProtocol)}</td></tr></tbody></table></details>`
+        )}</td></tr><tr><td>Метод</td><td>${renderCell(externalRequestMethod)}</td></tr><tr><td>Протокол</td><td>${renderCell(requestProtocol)}</td></tr></tbody></table></div></details>`
       : '',
     section.domainModelEnabled && externalHeaders.length > 0
       ? `<details open><summary>Внешние headers <span class="sumhint">${externalHeaders.length} headers</span></summary>${renderStructuredTable(
@@ -318,6 +343,10 @@ function renderRequestSection(section: ParsedSection, interactive = true): strin
 
 function renderResponseSection(section: ParsedSection, interactive = true): string {
   const title = resolveSectionTitle(section.title);
+  if (!section.enabled) {
+    return wrapCard(section.id, title, [renderTag('RESPONSE'), renderTag(section.format.toUpperCase())].join(' '), '<span class="muted">Не используется</span>');
+  }
+
   const rows = getRequestRows(section);
   const responseError = section.error || section.clientError;
   const meta = renderTag(section.format.toUpperCase());
@@ -340,6 +369,10 @@ function renderResponseSection(section: ParsedSection, interactive = true): stri
 
 function renderGenericParsedSection(section: ParsedSection, interactive = true): string {
   const title = resolveSectionTitle(section.title);
+  if (!section.enabled) {
+    return wrapCard(section.id, title, renderTag(section.format.toUpperCase()), '<span class="muted">Не используется</span>');
+  }
+
   const meta = renderTag(section.format.toUpperCase());
   const body = [
     `<details open><summary>Schema <span class="sumhint">${section.rows.length} rows</span></summary>${renderDefaultTable(section.rows)}</details>`,
@@ -366,6 +399,10 @@ function renderDiagramSection(
   interactive = true
 ): string {
   const title = resolveSectionTitle(section.title);
+  if (!section.enabled) {
+    return wrapCard(section.id, title, renderTag('DIAGRAM'), '<span class="muted">Не используется</span>');
+  }
+
   const body = section.diagrams
     .filter((diagram) => diagram.code.trim())
     .map((diagram, index) => {
@@ -411,6 +448,10 @@ function renderDiagramSection(
 
 function renderErrorsSection(section: ErrorsSection): string {
   const title = resolveSectionTitle(section.title);
+  if (!section.enabled) {
+    return wrapCard(section.id, title, renderTag('ERRORS'), '<span class="muted">Не используется</span>');
+  }
+
   const bodyRows = section.rows
     .map(
       (row, index) =>
@@ -426,10 +467,10 @@ function renderErrorsSection(section: ErrorsSection): string {
     .join('');
 
   const errorsTable = section.rows.length
-    ? `<table><thead><tr><th>№</th><th>Client HTTP Status</th><th>Client Response</th><th>Trigger (условия возникновения)</th><th>Error Type</th><th>Server HTTP Status</th><th>Полный internalCode</th><th>Server Response</th></tr></thead><tbody>${bodyRows}</tbody></table>`
+    ? `<div class="table-shell"><table><thead><tr><th>№</th><th>Client HTTP Status</th><th>Client Response</th><th>Trigger (условия возникновения)</th><th>Error Type</th><th>Server HTTP Status</th><th>Полный internalCode</th><th>Server Response</th></tr></thead><tbody>${bodyRows}</tbody></table></div>`
     : '';
   const validationTable = section.validationRules.length
-    ? `<h3>Правила валидации</h3><table><thead><tr><th>№</th><th>Параметр (server request)</th><th>Кейс валидации</th><th>Условие возникновения</th><th>cause</th></tr></thead><tbody>${validationRows}</tbody></table>`
+    ? `<h3>Правила валидации</h3><div class="table-shell"><table><thead><tr><th>№</th><th>Параметр (server request)</th><th>Кейс валидации</th><th>Условие возникновения</th><th>cause</th></tr></thead><tbody>${validationRows}</tbody></table></div>`
     : '';
   const body = [errorsTable, validationTable].filter(Boolean).join('');
   return wrapCard(section.id, title, renderTag('ERRORS'), body);
@@ -447,7 +488,16 @@ function getVisibleSections(sections: DocSection[]): DocSection[] {
 function renderSidebar(sections: DocSection[], interactive = true): string {
   const items = sections
     .map((section) => {
-      const badge = section.kind === 'parsed' ? `<span class="chip">${escapeHtml(section.format.toUpperCase())}</span>` : '';
+      const badge =
+        section.kind === 'parsed'
+          ? `<span class="chip">${escapeHtml(
+              section.sectionType === 'request'
+                ? 'REQUEST'
+                : section.sectionType === 'response'
+                  ? 'RESPONSE'
+                  : section.format.toUpperCase()
+            )}</span>`
+          : '';
       if (!interactive) {
         return `<div class="section-item">${badge}<span class="section-title">${escapeHtml(resolveSectionTitle(section.title))}</span></div>`;
       }
@@ -474,12 +524,6 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
   });
   const darkTokens = getThemeTokens('dark');
   const lightTokens = getThemeTokens('light');
-  const requestSections = sections.filter(
-    (section): section is ParsedSection => section.kind === 'parsed' && section.sectionType === 'request'
-  );
-  const responseSections = sections.filter(
-    (section): section is ParsedSection => section.kind === 'parsed' && section.sectionType === 'response'
-  );
   const themeConfig = {
     dark: darkTokens,
     light: lightTokens
@@ -516,6 +560,7 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
         --active-bg:${themeConfig[initialTheme].activeBg};
         --active-text:${themeConfig[initialTheme].activeText};
         --preview-table-head:${themeConfig[initialTheme].previewTableHead};
+        --font-sans:"Segoe UI Variable Text", "Segoe UI", "Noto Sans", "Helvetica Neue", system-ui, -apple-system, sans-serif;
         --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       }
       *{box-sizing:border-box}
@@ -536,7 +581,10 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
         margin:0;
         background: var(--bg);
         color: var(--text);
-        font-family: Inter, system-ui, -apple-system, sans-serif;
+        font-family:var(--font-sans);
+        font-size:13px;
+        line-height:1.45;
+        font-weight:400;
       }
       body[data-theme="light"]{
         background:
@@ -559,18 +607,22 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
         background:var(--panel);
         border:1px solid var(--border);
         border-radius:14px;
-        padding:14px 16px;
+        padding:12px 14px;
         box-shadow:var(--shadow);
+        position:sticky;
+        top:12px;
+        z-index:40;
+        backdrop-filter:saturate(140%) blur(6px);
       }
       .brand{display:flex;align-items:center;gap:12px}
       .logo{
         width:44px;height:44px;border-radius:12px;background-image:var(--accent);
         display:grid;place-items:center;font-weight:700;color:var(--button-text);letter-spacing:.04em;
       }
-      .brand h1{margin:0 0 6px;font-size:18px;line-height:1.2}
-      .brand p{margin:0;color:var(--muted);font-size:13px;line-height:1.45}
+      .brand h1{margin:0 0 4px;font-size:15px;line-height:1.2;font-weight:600;letter-spacing:.01em}
+      .brand p{margin:0;color:var(--muted);font-size:12px;line-height:1.4}
       .actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:flex-end}
-      .toolbar-stack{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+      .toolbar-stack{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
       .toolbar-meta,.toolbar-nav{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:flex-end}
       .doc-btn, .smallbtn{
         border:none;
@@ -609,55 +661,76 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
         border-radius:10px;
         border:1px solid var(--border);
         color:var(--muted);
-        font-size:12px;
+        font-size:11px;
         background:var(--panel);
       }
-      .theme-toggle{
+      .theme-switch{
         display:inline-flex;
         align-items:center;
-        gap:10px;
-        padding:8px 12px;
+        gap:4px;
+        padding:4px;
         border:1px solid var(--border);
         border-radius:999px;
         background:var(--panel);
-        color:var(--text);
-        cursor:pointer;
       }
-      .theme-toggle-label{
-        font-size:12px;
+      .theme-switch-btn{
+        border:none;
+        background:transparent;
         color:var(--muted);
-        user-select:none;
-      }
-      .theme-toggle input{
-        position:absolute;
-        opacity:0;
-        pointer-events:none;
-      }
-      .theme-toggle-track{
-        width:42px;
-        height:24px;
+        width:34px;
+        height:34px;
+        display:inline-grid;
+        place-items:center;
         border-radius:999px;
-        background:color-mix(in srgb, var(--border) 80%, transparent);
-        border:1px solid var(--border);
-        padding:2px;
-        display:inline-flex;
-        align-items:center;
+        cursor:pointer;
+        transition:background 120ms ease, color 120ms ease;
       }
-      .theme-toggle-thumb{
-        width:18px;
-        height:18px;
-        border-radius:999px;
-        background:var(--text);
-        transform:translateX(0);
-        transition:transform 140ms ease, background 140ms ease;
+      .theme-switch-btn:hover{
+        color:var(--text);
+        background:color-mix(in srgb, var(--panel) 84%, var(--border));
       }
-      .theme-toggle input:checked + .theme-toggle-track{
+      .theme-switch-btn.active{
         background:var(--button-bg);
-        border-color:color-mix(in srgb, var(--button-text) 16%, var(--border));
+        color:var(--button-text);
       }
-      .theme-toggle input:checked + .theme-toggle-track .theme-toggle-thumb{
-        transform:translateX(18px);
-        background:var(--button-text);
+      .theme-switch-icon{
+        width:16px;
+        height:16px;
+        display:block;
+        fill:currentColor;
+      }
+      .icon-copy-btn{
+        width:30px;
+        height:30px;
+        padding:0;
+        display:inline-grid;
+        place-items:center;
+      }
+      .icon-copy-btn .copy-icon,
+      .icon-copy-btn .copy-check-icon{
+        width:14px;
+        height:14px;
+        display:block;
+        fill:currentColor;
+      }
+      .icon-copy-btn .copy-check-icon{display:none}
+      .icon-copy-btn.copied{
+        background:var(--button-bg);
+        color:var(--button-text);
+        border-color:color-mix(in srgb, var(--button-text) 12%, transparent);
+      }
+      .icon-copy-btn.copied .copy-icon{display:none}
+      .icon-copy-btn.copied .copy-check-icon{display:block}
+      .visually-hidden{
+        position:absolute;
+        width:1px;
+        height:1px;
+        padding:0;
+        margin:-1px;
+        overflow:hidden;
+        clip:rect(0, 0, 0, 0);
+        white-space:nowrap;
+        border:0;
       }
       .layout{display:grid;grid-template-columns:280px 1fr;gap:16px}
       .sidebar{
@@ -670,8 +743,10 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
         flex-direction:column;
         gap:10px;
         position:sticky;
-        top:20px;
+        top:88px;
         height:fit-content;
+        max-height:calc(100vh - 112px);
+        overflow:auto;
       }
       .sidebar-head{display:flex;justify-content:space-between;align-items:center;padding:2px 2px 6px}
       .section-list{display:flex;flex-direction:column;gap:8px}
@@ -711,11 +786,11 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
         background:var(--panel);
         border:1px solid var(--border);
         border-radius:14px;
-        padding:12px;
+        padding:14px;
         box-shadow:var(--shadow);
         display:flex;
         flex-direction:column;
-        gap:10px;
+        gap:12px;
       }
       .summary-row{display:flex;flex-direction:column;gap:12px}
       .card{
@@ -725,15 +800,15 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
         overflow:hidden;
       }
       .cardhead{
-        padding:14px 16px 12px;
+        padding:13px 15px 10px;
         border-bottom:1px solid var(--border);
         display:flex;
-        align-items:flex-start;
+        align-items:center;
         justify-content:space-between;
         gap:12px;
       }
       .methodtitle{display:flex;flex-direction:column;gap:8px}
-      .methodtitle h2{margin:0;font-size:18px;line-height:1.25}
+      .methodtitle h2{margin:0;font-size:16px;line-height:1.25;font-weight:600}
       .methodmeta{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
       .tag{
         font-size:11px;
@@ -745,12 +820,13 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
       }
       .tag.get,.tag.post{color:var(--text)}
       .section{display:flex;flex-direction:column;gap:12px}
+      .section{padding:12px 14px 14px}
       .section-text{
         max-width: 78ch;
-        font-size:16px;
-        line-height:1.75;
+        font-size:14px;
+        line-height:1.65;
         color:var(--text);
-        margin-top:6px;
+        margin-top:2px;
         font-weight:400;
         letter-spacing:.01em;
       }
@@ -809,13 +885,13 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
       }
       .url{
         font-family:var(--mono);
-        font-size:12px;
+        font-size:11px;
         padding:10px 12px;
         border-radius:10px;
         border:1px dashed var(--border);
         background:var(--input-bg);
         color:var(--input-text);
-        display:flex;gap:10px;align-items:center;justify-content:space-between;
+        display:flex;gap:10px;align-items:flex-start;justify-content:space-between;
         max-width:100%;overflow:auto;
       }
       details{
@@ -827,23 +903,23 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
       summary{
         cursor:pointer;
         list-style:none;
-        padding:12px 14px;
-        font-weight:600;
+        padding:10px 12px;
+        font-weight:550;
         display:flex;
         align-items:center;
         justify-content:space-between;
-        font-size:15px;
+        font-size:14px;
       }
       summary::-webkit-details-marker{display:none}
-      .sumhint{color:var(--muted);font-weight:500;font-size:12px}
+      .sumhint{color:var(--muted);font-weight:500;font-size:11px}
       table{
         width:100%;
         border-collapse:collapse;
-        min-width:600px;
-        font-size:13px;
+        min-width:640px;
+        font-size:12px;
       }
       th,td{
-        padding:11px 12px;
+        padding:9px 10px;
         border-bottom:1px solid var(--border);
         text-align:left;
         vertical-align:top;
@@ -854,13 +930,20 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
       th{
         background:var(--preview-table-head);
         font-weight:600;
-        font-size:12px;
+        font-size:11px;
         letter-spacing:.01em;
+        position:sticky;
+        top:0;
+        z-index:3;
       }
       tbody tr:nth-child(odd) td{
         background:color-mix(in srgb, var(--card) 96%, transparent);
       }
-      .table-shell{border-top:1px solid var(--border);overflow:auto}
+      .table-shell{
+        border-top:1px solid var(--border);
+        overflow:auto;
+        max-height:min(62vh, 520px);
+      }
       .diagram-viewer{
         border:1px solid var(--border);
         border-radius:10px;
@@ -915,10 +998,10 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
         color:var(--input-text);
         border:1px solid var(--border);
         border-radius:10px;
-        padding:12px;
+        padding:10px;
         overflow:auto;
         position:relative;
-        font-size:12px;
+        font-size:11px;
         line-height:1.5;
         font-family:var(--mono);
       }
@@ -931,29 +1014,19 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
       .pretools{position:absolute;top:8px;right:8px;display:flex;gap:8px}
       .note{
         border-radius:10px;
-        padding:10px 12px;
+        padding:9px 10px;
         border:1px solid var(--border);
         background:color-mix(in srgb, var(--panel) 92%, transparent);
       }
       .note.bad{border-color:#ef4444;color:#ef4444}
       .muted{color:var(--muted)}
-      body[data-theme="light"] .theme-toggle{
+      body[data-theme="light"] .theme-switch{
         background:#fffdfa;
         border-color:#d8d1c2;
       }
-      body[data-theme="light"] .theme-toggle-track{
-        background:#ece6da;
-        border-color:#d6cdbc;
-      }
-      body[data-theme="light"] .theme-toggle-thumb{
-        background:#111111;
-      }
-      body[data-theme="light"] .theme-toggle input:checked + .theme-toggle-track{
-        background:#111111;
-        border-color:#111111;
-      }
-      body[data-theme="light"] .theme-toggle input:checked + .theme-toggle-track .theme-toggle-thumb{
-        background:#ffffff;
+      body[data-theme="light"] .theme-switch-btn:hover{
+        background:#f1ece2;
+        color:#171717;
       }
       body[data-theme="light"] .topbar,
       body[data-theme="light"] .sidebar,
@@ -999,7 +1072,12 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
       @media (max-width: 1024px){
         .layout{grid-template-columns:1fr}
         .sidebar{position:static;min-height:auto}
-        .actions,.toolbar-stack,.toolbar-meta,.toolbar-nav{justify-content:flex-start;align-items:flex-start}
+        .actions,.toolbar-stack,.toolbar-meta,.toolbar-nav{justify-content:flex-start;align-items:center}
+      }
+      @media (max-width: 720px){
+        .shell{padding:14px 12px 24px}
+        .topbar{top:8px;padding:12px}
+        .cardhead{align-items:flex-start;flex-direction:column}
       }
     </style>`,
     '</head>',
@@ -1015,21 +1093,20 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
     '</div>',
     '<div class="toolbar-stack">',
     '<div class="toolbar-meta">',
-    `<span class="badge">Sections: ${visibleSections.length}</span>`,
-    requestSections.length > 0 ? `<span class="badge">Request blocks: ${requestSections.length}</span>` : '',
-    responseSections.length > 0 ? `<span class="badge">Response blocks: ${responseSections.length}</span>` : '',
     interactive
       ? [
-          '<label class="theme-toggle" aria-label="Переключить тему">',
-          '<span class="theme-toggle-label">Темная</span>',
-          `<input type="checkbox" id="theme-toggle" ${initialTheme === 'light' ? 'checked' : ''} />`,
-          '<span class="theme-toggle-track" aria-hidden="true"><span class="theme-toggle-thumb"></span></span>',
-          '<span class="theme-toggle-label">Светлая</span>',
-          '</label>'
+          '<div class="theme-switch" role="group" aria-label="Переключить тему">',
+          '<button type="button" class="theme-switch-btn" data-theme-select="dark" aria-pressed="false" aria-label="Темная тема" title="Темная тема">',
+          '<svg class="theme-switch-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.354 15.354A9 9 0 0 1 8.646 3.646a1 1 0 0 0-1.205-1.542A11 11 0 1 0 21.896 16.56a1 1 0 0 0-1.542-1.206z"/></svg>',
+          '<span class="visually-hidden">Темная</span>',
+          '</button>',
+          '<button type="button" class="theme-switch-btn" data-theme-select="light" aria-pressed="false" aria-label="Светлая тема" title="Светлая тема">',
+          '<svg class="theme-switch-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0V5a1 1 0 0 1 1-1zm0 14a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0v-1a1 1 0 0 1 1-1zm8-7a1 1 0 1 1 0 2h-1a1 1 0 1 1 0-2h1zM6 12a1 1 0 0 1-1 1H4a1 1 0 1 1 0-2h1a1 1 0 0 1 1 1zm10.95-5.536a1 1 0 0 1 1.414 1.414l-.707.707a1 1 0 1 1-1.414-1.414l.707-.707zM7.757 15.95a1 1 0 0 1 1.414 1.414l-.707.707A1 1 0 0 1 7.05 16.657l.707-.707zm9.9 2.121a1 1 0 0 1-1.414 0l-.707-.707a1 1 0 0 1 1.414-1.414l.707.707a1 1 0 0 1 0 1.414zM8.464 8.464A1 1 0 0 1 7.05 7.05l.707-.707a1 1 0 0 1 1.414 1.414l-.707.707zM12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8z"/></svg>',
+          '<span class="visually-hidden">Светлая</span>',
+          '</button>',
+          '</div>'
         ].join('')
       : '<span class="badge">Preview</span>',
-    '</div>',
-    '<div class="toolbar-nav">',
     renderButton('К началу', '#top', 'ghost', interactive),
     '</div>',
     '</div>',
@@ -1044,7 +1121,9 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
       const themes = ${JSON.stringify(themeConfig)};
       const root = document.documentElement;
       const body = document.body;
-      const toggle = document.getElementById('theme-toggle');
+      const themeButtons = Array.from(document.querySelectorAll('[data-theme-select]'));
+      const preferredThemeMedia = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+      let themeLockedByUser = false;
       const tokenMap = {
         bg: '--bg',
         panel: '--panel',
@@ -1075,18 +1154,37 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
         Object.entries(tokenMap).forEach(([key, cssVar]) => {
           root.style.setProperty(cssVar, tokens[key]);
         });
-        if (toggle instanceof HTMLInputElement) {
-          toggle.checked = nextTheme === 'light';
-        }
+        themeButtons.forEach((button) => {
+          if (!(button instanceof HTMLElement)) return;
+          const isActive = button.dataset.themeSelect === nextTheme;
+          button.classList.toggle('active', isActive);
+          button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+        });
       }
-      toggle?.addEventListener('change', () => {
-        applyTheme(body.dataset.theme === 'dark' ? 'light' : 'dark');
+      function getSystemTheme() {
+        return preferredThemeMedia?.matches ? 'dark' : 'light';
+      }
+      themeButtons.forEach((button) => {
+        if (!(button instanceof HTMLElement)) return;
+        button.addEventListener('click', () => {
+          const targetTheme = button.dataset.themeSelect;
+          if (targetTheme === 'dark' || targetTheme === 'light') {
+            themeLockedByUser = true;
+            applyTheme(targetTheme);
+          }
+        });
+      });
+      preferredThemeMedia?.addEventListener?.('change', () => {
+        if (themeLockedByUser) return;
+        applyTheme(getSystemTheme());
       });
       document.addEventListener('click', async (event) => {
         const target = event.target;
         if (!(target instanceof HTMLElement)) return;
-        const copyText = target.dataset.copyText;
-        const copyTarget = target.dataset.copyTarget;
+        const actionNode = target.closest('[data-copy-text], [data-copy-target]');
+        if (!(actionNode instanceof HTMLElement)) return;
+        const copyText = actionNode.dataset.copyText;
+        const copyTarget = actionNode.dataset.copyTarget;
         if (!copyText && !copyTarget) return;
         let value = copyText || '';
         if (copyTarget) {
@@ -1096,10 +1194,13 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
         if (!value) return;
         try {
           await navigator.clipboard.writeText(value);
-          const previous = target.textContent;
-          target.textContent = 'Copied';
+          actionNode.classList.add('copied');
+          actionNode.setAttribute('aria-label', 'Скопировано');
+          actionNode.setAttribute('title', 'Скопировано');
           setTimeout(() => {
-            target.textContent = previous;
+            actionNode.classList.remove('copied');
+            actionNode.setAttribute('aria-label', 'Копировать');
+            actionNode.setAttribute('title', 'Копировать');
           }, 900);
         } catch {}
       });
@@ -1233,7 +1334,7 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
         if (viewer instanceof HTMLElement) initDiagramViewer(viewer);
       });
 
-      applyTheme(body.dataset.theme || 'dark');
+      applyTheme(getSystemTheme());
     </script>`
       : '',
     '</body>',

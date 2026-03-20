@@ -155,11 +155,12 @@ function renderButton(label: string, href: string, kind = 'ghost', interactive =
   return `<a class="doc-btn ${kind}" href="${escapeHtml(href)}">${escapeHtml(label)}</a>`;
 }
 
-function renderCopyIconButton(dataAttr: string, value: string): string {
+function renderCopyIconButton(dataAttr: string, value: string, label = 'значение'): string {
   return [
-    `<button class="smallbtn icon-copy-btn" type="button" ${dataAttr}="${escapeHtml(value)}" aria-label="Копировать" title="Копировать">`,
+    `<button class="smallbtn icon-copy-btn" type="button" ${dataAttr}="${escapeHtml(value)}" data-copy-label="${escapeHtml(label)}" aria-label="Копировать" title="Копировать">`,
     '<svg class="copy-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 1H6a2 2 0 0 0-2 2v12h2V3h10V1zm3 4H10a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H10V7h9v14z"/></svg>',
     '<svg class="copy-check-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 16.2l-3.5-3.5L4 14.2l5 5 11-11-1.5-1.5z"/></svg>',
+    '<svg class="copy-error-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 7h2v7h-2zm0 9h2v2h-2z"/><path d="M1 21h22L12 2 1 21zm3.45-2L12 5.99 19.55 19H4.45z"/></svg>',
     '<span class="visually-hidden">Копировать</span>',
     '</button>'
   ].join('');
@@ -167,7 +168,7 @@ function renderCopyIconButton(dataAttr: string, value: string): string {
 
 function renderUrl(value: string, label = 'URL', interactive = true): string {
   if (!value.trim()) return '';
-  const action = interactive ? renderCopyIconButton('data-copy-text', value) : '';
+  const action = interactive ? renderCopyIconButton('data-copy-text', value, label) : '';
   return `<div class="url"><span>${escapeHtml(label)}: ${escapeHtml(value)}</span>${action}</div>`;
 }
 
@@ -178,7 +179,7 @@ function renderCodeBlock(id: string, title: string, content: string, interactive
     `<summary>${escapeHtml(title)} <span class="sumhint">example</span></summary>`,
     `<pre>${
       interactive
-        ? `<div class="pretools">${renderCopyIconButton('data-copy-target', id)}</div>`
+        ? `<div class="pretools">${renderCopyIconButton('data-copy-target', id, title)}</div>`
         : ''
     }<code class="code-block language-${format}" id="${escapeHtml(id)}">${highlightCode(format, content.trim())}</code></pre>`,
     '</details>'
@@ -434,7 +435,7 @@ function renderDiagramSection(
               '</div>'
             ].join('')
           : `<div class="section-text"><img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(diagramTitle)}" style="max-width:100%;border:1px solid var(--border);border-radius:10px;" /></div>`,
-        diagram.description?.trim() ? `<div class="note">${renderTextValue(diagram.description)}</div>` : '',
+        diagram.description?.trim() ? `<div class="note section-text">${renderProseValue(diagram.description)}</div>` : '',
         `<details><summary>Код диаграммы</summary><pre><code>${escapeHtml(diagram.code)}</code></pre></details>`,
         '</details>'
       ]
@@ -705,22 +706,75 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
         padding:0;
         display:inline-grid;
         place-items:center;
+        transform:translateY(0) scale(1);
+        transition:transform 120ms ease, border-color 120ms ease, background 120ms ease, color 120ms ease;
       }
       .icon-copy-btn .copy-icon,
-      .icon-copy-btn .copy-check-icon{
+      .icon-copy-btn .copy-check-icon,
+      .icon-copy-btn .copy-error-icon{
         width:14px;
         height:14px;
         display:block;
         fill:currentColor;
       }
-      .icon-copy-btn .copy-check-icon{display:none}
-      .icon-copy-btn.copied{
+      .icon-copy-btn .copy-check-icon,
+      .icon-copy-btn .copy-error-icon{display:none}
+      .icon-copy-btn:focus-visible{
+        outline:none;
+        box-shadow:0 0 0 3px color-mix(in srgb, var(--accent-solid) 24%, transparent);
+      }
+      .icon-copy-btn.is-pressing{transform:translateY(0) scale(.96)}
+      .icon-copy-btn.is-success{
         background:var(--button-bg);
         color:var(--button-text);
         border-color:color-mix(in srgb, var(--button-text) 12%, transparent);
       }
-      .icon-copy-btn.copied .copy-icon{display:none}
-      .icon-copy-btn.copied .copy-check-icon{display:block}
+      .icon-copy-btn.is-success .copy-icon{display:none}
+      .icon-copy-btn.is-success .copy-check-icon{display:block}
+      .icon-copy-btn.is-error{
+        background:color-mix(in srgb, #ef4444 14%, var(--panel));
+        color:#ef4444;
+        border-color:#ef4444;
+      }
+      .icon-copy-btn.is-error .copy-icon{display:none}
+      .icon-copy-btn.is-error .copy-error-icon{display:block}
+      .copy-toast-layer{
+        position:fixed;
+        right:16px;
+        bottom:16px;
+        z-index:120;
+        display:flex;
+        flex-direction:column;
+        align-items:flex-end;
+        gap:8px;
+        pointer-events:none;
+      }
+      .copy-toast{
+        max-width:min(88vw, 360px);
+        border:1px solid var(--border);
+        border-radius:10px;
+        background:var(--panel);
+        color:var(--text);
+        box-shadow:var(--shadow);
+        padding:8px 10px;
+        font-size:12px;
+        line-height:1.4;
+        opacity:0;
+        transform:translateY(6px);
+        transition:opacity 150ms ease, transform 150ms ease;
+      }
+      .copy-toast.show{
+        opacity:1;
+        transform:translateY(0);
+      }
+      .copy-toast.success{
+        border-color:#16a34a;
+        background:color-mix(in srgb, #16a34a 16%, var(--panel));
+      }
+      .copy-toast.error{
+        border-color:#ef4444;
+        background:color-mix(in srgb, #ef4444 14%, var(--panel));
+      }
       .visually-hidden{
         position:absolute;
         width:1px;
@@ -867,6 +921,76 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
         background:var(--input-bg);
         color:var(--input-text);
       }
+      .section-text .doc-color{font-weight:500}
+      .section-text mark,
+      .section-text .doc-highlight{
+        color:inherit;
+        border-radius:4px;
+        padding:0 2px;
+      }
+      .section-text .rich-code-block{
+        margin:0 0 14px;
+        border:1px solid var(--border);
+        border-radius:10px;
+        overflow:hidden;
+        background:color-mix(in srgb, var(--panel) 94%, transparent);
+      }
+      .section-text .rich-code-block:last-child{margin-bottom:0}
+      .section-text .rich-code-block-head{
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        gap:8px;
+        padding:8px 10px;
+        border-bottom:1px solid var(--border);
+        font-size:11px;
+        color:var(--muted);
+        text-transform:uppercase;
+        letter-spacing:.04em;
+      }
+      .section-text .rich-code-block-head .rich-code-block-lang{
+        font-family:var(--mono);
+        text-transform:none;
+        letter-spacing:0;
+      }
+      .section-text .rich-code-block code.hljs{
+        display:block;
+        margin:0;
+        padding:11px 12px;
+        background:transparent;
+        border:0;
+        border-radius:0;
+        font-size:12px;
+        line-height:1.55;
+      }
+      .hljs-keyword,.hljs-selector-tag,.hljs-literal,.hljs-section,.hljs-link{color:#7c3aed}
+      .hljs-string,.hljs-title,.hljs-name,.hljs-type,.hljs-attr,.hljs-symbol,.hljs-bullet,.hljs-addition,.hljs-template-tag,.hljs-template-variable{color:#0f766e}
+      .hljs-comment,.hljs-quote,.hljs-deletion,.hljs-meta{color:#64748b}
+      .hljs-number,.hljs-regexp,.hljs-variable,.hljs-selector-id,.hljs-selector-class{color:#b45309}
+      body[data-theme="dark"] .hljs-keyword,
+      body[data-theme="dark"] .hljs-selector-tag,
+      body[data-theme="dark"] .hljs-literal,
+      body[data-theme="dark"] .hljs-section,
+      body[data-theme="dark"] .hljs-link{color:#c4b5fd}
+      body[data-theme="dark"] .hljs-string,
+      body[data-theme="dark"] .hljs-title,
+      body[data-theme="dark"] .hljs-name,
+      body[data-theme="dark"] .hljs-type,
+      body[data-theme="dark"] .hljs-attr,
+      body[data-theme="dark"] .hljs-symbol,
+      body[data-theme="dark"] .hljs-bullet,
+      body[data-theme="dark"] .hljs-addition,
+      body[data-theme="dark"] .hljs-template-tag,
+      body[data-theme="dark"] .hljs-template-variable{color:#5eead4}
+      body[data-theme="dark"] .hljs-comment,
+      body[data-theme="dark"] .hljs-quote,
+      body[data-theme="dark"] .hljs-deletion,
+      body[data-theme="dark"] .hljs-meta{color:#94a3b8}
+      body[data-theme="dark"] .hljs-number,
+      body[data-theme="dark"] .hljs-regexp,
+      body[data-theme="dark"] .hljs-variable,
+      body[data-theme="dark"] .hljs-selector-id,
+      body[data-theme="dark"] .hljs-selector-class{color:#fbbf24}
       .section-text a{
         color:var(--accent-solid);
         text-decoration:underline;
@@ -1083,6 +1207,8 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
     '</head>',
     `<body data-theme="${initialTheme}">`,
     '<div class="shell">',
+    '<div class="copy-toast-layer" id="copy-toast-layer" aria-live="polite" aria-atomic="true"></div>',
+    '<div class="visually-hidden" id="copy-live-region" aria-live="polite" aria-atomic="true"></div>',
     '<header class="topbar">',
     '<div class="brand">',
     '<div class="logo">DB</div>',
@@ -1192,17 +1318,85 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
           value = node?.textContent || '';
         }
         if (!value) return;
+
+        const copyLabel = actionNode.dataset.copyLabel || 'значение';
+        const liveRegion = document.getElementById('copy-live-region');
+        const toastLayer = document.getElementById('copy-toast-layer');
+        const successDuration = 1500;
+        const errorDuration = 2200;
+        const pressDuration = 100;
+
+        const existingResetTimer = Number(actionNode.dataset.copyResetTimer || '0');
+        if (existingResetTimer) window.clearTimeout(existingResetTimer);
+        const existingPressTimer = Number(actionNode.dataset.copyPressTimer || '0');
+        if (existingPressTimer) window.clearTimeout(existingPressTimer);
+
+        const showToast = (message, kind, duration) => {
+          if (!(toastLayer instanceof HTMLElement)) return;
+          const toast = document.createElement('div');
+          toast.className = 'copy-toast ' + kind;
+          toast.textContent = message;
+          toastLayer.appendChild(toast);
+          requestAnimationFrame(() => toast.classList.add('show'));
+          window.setTimeout(() => {
+            toast.classList.remove('show');
+            window.setTimeout(() => toast.remove(), 180);
+          }, duration);
+        };
+
+        const announce = (message) => {
+          if (!(liveRegion instanceof HTMLElement)) return;
+          liveRegion.textContent = '';
+          window.setTimeout(() => {
+            liveRegion.textContent = message;
+          }, 10);
+        };
+
+        actionNode.classList.remove('is-success', 'is-error');
+        actionNode.classList.add('is-pressing');
+        const pressTimer = window.setTimeout(() => {
+          actionNode.classList.remove('is-pressing');
+          actionNode.dataset.copyPressTimer = '';
+        }, pressDuration);
+        actionNode.dataset.copyPressTimer = String(pressTimer);
+
         try {
           await navigator.clipboard.writeText(value);
-          actionNode.classList.add('copied');
+
+          actionNode.classList.remove('is-pressing', 'is-error');
+          actionNode.classList.add('is-success');
           actionNode.setAttribute('aria-label', 'Скопировано');
           actionNode.setAttribute('title', 'Скопировано');
-          setTimeout(() => {
-            actionNode.classList.remove('copied');
+
+          const message = 'Скопировано: ' + copyLabel;
+          showToast(message, 'success', 1800);
+          announce(message);
+
+          const resetTimer = window.setTimeout(() => {
+            actionNode.classList.remove('is-success');
             actionNode.setAttribute('aria-label', 'Копировать');
             actionNode.setAttribute('title', 'Копировать');
-          }, 900);
-        } catch {}
+            actionNode.dataset.copyResetTimer = '';
+          }, successDuration);
+          actionNode.dataset.copyResetTimer = String(resetTimer);
+        } catch {
+          actionNode.classList.remove('is-pressing', 'is-success');
+          actionNode.classList.add('is-error');
+          actionNode.setAttribute('aria-label', 'Ошибка копирования');
+          actionNode.setAttribute('title', 'Не удалось скопировать');
+
+          const message = 'Не удалось скопировать. Нажмите Ctrl+C';
+          showToast(message, 'error', 3000);
+          announce(message);
+
+          const resetTimer = window.setTimeout(() => {
+            actionNode.classList.remove('is-error');
+            actionNode.setAttribute('aria-label', 'Копировать');
+            actionNode.setAttribute('title', 'Копировать');
+            actionNode.dataset.copyResetTimer = '';
+          }, errorDuration);
+          actionNode.dataset.copyResetTimer = String(resetTimer);
+        }
       });
       const navLinks = Array.from(document.querySelectorAll('[data-section-link]'));
       const setCurrentSection = (id) => {

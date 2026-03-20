@@ -31,7 +31,7 @@ import { renderWikiDocument } from './renderWiki';
 import { DEFAULT_SECTION_TITLE, resolveSectionTitle, sanitizeSections } from './sectionTitles';
 import { buildInputFromRows } from './sourceSync';
 import { ONBOARDING_FEATURES } from './onboarding/featureFlags';
-import { ONBOARDING_STEPS, evaluateOnboardingProgress, resolveOnboardingStep } from './onboarding/steps';
+import { ONBOARDING_STEPS, evaluateOnboardingProgress, resolveOnboardingStep, type OnboardingStepId } from './onboarding/steps';
 import { loadOnboardingState, markOnboardingCompleted, markOnboardingStarted, saveOnboardingState } from './onboarding/storage';
 import { emitOnboardingEvent } from './onboarding/telemetry';
 import type { OnboardingState } from './onboarding/types';
@@ -133,6 +133,32 @@ type JsonImportRoutingState = {
   targetSide: JsonImportTargetSide;
 };
 
+type ProjectTextImportState = {
+  rawText: string;
+  fromOnboarding: boolean;
+};
+
+type SourceTextImportState = {
+  sectionId: string;
+  target: ParseTarget;
+  draft: string;
+};
+
+type RichTextAction = 'bold' | 'italic' | 'code' | 'h3' | 'ul' | 'ol' | 'quote' | 'highlight' | 'code-block';
+type RichTextCommandOptions = {
+  color?: string;
+  language?: string;
+};
+
+type OnboardingNavSource = 'prev' | 'next' | 'chip' | 'cta' | 'hint';
+type OnboardingStepTarget = {
+  tab: TabKey;
+  sectionId?: string;
+  openExpander?: 'source-server' | 'source-client';
+  anchor: string;
+  hintMessage?: string;
+};
+
 function guessJsonSampleType(value: unknown): JsonImportSampleType {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return 'response';
 
@@ -190,6 +216,28 @@ const VALIDATION_CASE_OPTIONS = [
   'Некорректная структура payload',
   'Ошибка проверки контрольной суммы/подписи'
 ];
+
+const RICH_TEXT_HIGHLIGHT_OPTIONS = [
+  { value: '#fef08a', label: 'Желтый' },
+  { value: '#bbf7d0', label: 'Зеленый' },
+  { value: '#fde68a', label: 'Песочный' },
+  { value: '#fecdd3', label: 'Розовый' },
+  { value: '#bfdbfe', label: 'Синий' }
+] as const;
+
+const RICH_TEXT_CODE_LANGUAGES = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'bash', label: 'Bash' },
+  { value: 'json', label: 'JSON' },
+  { value: 'javascript', label: 'JavaScript' },
+  { value: 'typescript', label: 'TypeScript' },
+  { value: 'python', label: 'Python' },
+  { value: 'java', label: 'Java' },
+  { value: 'kotlin', label: 'Kotlin' },
+  { value: 'sql', label: 'SQL' },
+  { value: 'xml', label: 'XML' }
+] as const;
+
 type AddableBlockType = 'text' | 'request' | 'response' | 'error-logic' | 'diagram';
 
 const ADDABLE_BLOCK_TYPES: Array<{ type: AddableBlockType; label: string }> = [
@@ -1002,6 +1050,8 @@ function MermaidLivePreview({ code }: { code: string }): ReactNode {
 export default function App() {
   const textSectionRef = useRef<HTMLDivElement | null>(null);
   const textSelectionRef = useRef<Range | null>(null);
+  const richEditorSelectionRef = useRef<{ editor: HTMLElement; range: Range } | null>(null);
+  const topbarRef = useRef<HTMLElement | null>(null);
   const textEditorSectionRef = useRef<string | null>(null);
   const diagramTextRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const methodNameInputRef = useRef<HTMLInputElement | null>(null);
@@ -1015,6 +1065,8 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string>(() => initialWorkspace.methods[0]?.sections[0]?.id ?? createInitialSections()[0].id);
   const [tab, setTab] = useState<TabKey>('editor');
   const [theme, setTheme] = useState<ThemeName>('light');
+  const [selectedHighlightColor, setSelectedHighlightColor] = useState<string>(RICH_TEXT_HIGHLIGHT_OPTIONS[0].value);
+  const [selectedCodeLanguage, setSelectedCodeLanguage] = useState<string>('auto');
   const [autosave, setAutosave] = useState<AutosaveInfo>({ state: 'idle' });
   const [importError, setImportError] = useState('');
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -1040,11 +1092,19 @@ export default function App() {
     () => ONBOARDING_FEATURES.onboardingV1 && !initialOnboarding.dismissed && !loadOnboardingEntrySuppressed()
   );
   const [jsonImportRouting, setJsonImportRouting] = useState<JsonImportRoutingState | null>(null);
+  const [projectTextImport, setProjectTextImport] = useState<ProjectTextImportState | null>(null);
+  const [sourceTextImport, setSourceTextImport] = useState<SourceTextImportState | null>(null);
   const [hasOnboardingExport, setHasOnboardingExport] = useState(false);
   const [dismissedOnboardingHints, setDismissedOnboardingHints] = useState<Record<string, true>>({});
+  const [onboardingNavStep, setOnboardingNavStep] = useState<OnboardingStepId>(() => initialOnboarding.currentStep);
+  const [onboardingNavError, setOnboardingNavError] = useState('');
+  const [onboardingLiveMessage, setOnboardingLiveMessage] = useState('');
   const internalCodeAnchorRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const internalCodePopoverRef = useRef<HTMLDivElement | null>(null);
   const previousOnboardingStepRef = useRef(onboardingState.currentStep);
+  const onboardingNavErrorTimerRef = useRef<number | null>(null);
+  const onboardingSpotlightTimerRef = useRef<number | null>(null);
+  const onboardingSpotlightNodeRef = useRef<HTMLElement | null>(null);
   const activeMethod = methods.find((method) => method.id === activeMethodId) ?? methods[0];
   const sections = useMemo(() => activeMethod?.sections ?? EMPTY_SECTIONS, [activeMethod]);
   const methodNameWarning = useMemo(() => {
@@ -1057,6 +1117,33 @@ export default function App() {
   }, [methods, activeMethod]);
 
   const exportTitle = activeMethod ? `Экспортируется только метод "${activeMethod.name.trim() || DEFAULT_METHOD_NAME}"` : 'Выберите метод';
+
+  useEffect(() => {
+    const topbar = topbarRef.current;
+    const root = document.documentElement;
+    if (!topbar) return;
+
+    const updateStickyOffset = (): void => {
+      // Keep a small visual gap between sticky topbar and sticky onboarding panel.
+      const offset = Math.ceil(topbar.offsetHeight + 24);
+      root.style.setProperty('--sticky-topbar-offset', `${offset}px`);
+    };
+
+    updateStickyOffset();
+    window.addEventListener('resize', updateStickyOffset);
+
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(updateStickyOffset);
+      observer.observe(topbar);
+    }
+
+    return () => {
+      window.removeEventListener('resize', updateStickyOffset);
+      observer?.disconnect();
+      root.style.removeProperty('--sticky-topbar-offset');
+    };
+  }, []);
 
   function applyWorkspaceState(workspace: WorkspaceProjectData): void {
     const resolvedActiveMethod = workspace.methods.find((method) => method.id === workspace.activeMethodId) ?? workspace.methods[0];
@@ -1093,7 +1180,16 @@ export default function App() {
 
   function handleImportOnboarding(): void {
     startOnboardingEntry('import');
-    importInputRef.current?.click();
+    setProjectTextImport({ rawText: '', fromOnboarding: true });
+  }
+
+  function openProjectImportDialog(fromOnboarding = false): void {
+    setProjectTextImport({ rawText: '', fromOnboarding });
+    setImportError('');
+  }
+
+  function closeProjectImportDialog(): void {
+    setProjectTextImport(null);
   }
 
   function getParsedSectionIdByType(type: JsonImportSampleType): string | undefined {
@@ -1487,22 +1583,205 @@ export default function App() {
 
   const htmlPreviewOutput = useMemo(() => renderHtmlDocument(sections, theme, { interactive: false }), [sections, theme]);
   const wikiOutput = useMemo(() => renderWikiDocument(sections), [sections]);
-  const onboardingStepIndex = useMemo(
+  const onboardingResolvedStepIndex = useMemo(
     () => Math.max(0, ONBOARDING_STEPS.findIndex((step) => step.id === onboardingState.currentStep)),
     [onboardingState.currentStep]
   );
-  const activeOnboardingStep = ONBOARDING_STEPS[onboardingStepIndex] ?? ONBOARDING_STEPS[0];
+  const onboardingNavStepIndex = useMemo(
+    () => Math.max(0, ONBOARDING_STEPS.findIndex((step) => step.id === onboardingNavStep)),
+    [onboardingNavStep]
+  );
+  const activeOnboardingStep = ONBOARDING_STEPS[onboardingNavStepIndex] ?? ONBOARDING_STEPS[0];
   const requestSectionId = useMemo(
     () => sections.find((section) => section.kind === 'parsed' && section.sectionType === 'request')?.id ?? sections.find((section) => section.kind === 'parsed')?.id,
     [sections]
   );
   const firstTextSectionId = useMemo(() => sections.find((section) => section.kind === 'text')?.id, [sections]);
+
+  useEffect(() => {
+    if (onboardingState.status !== 'active') return;
+    setOnboardingNavStep(onboardingState.currentStep);
+  }, [onboardingState.status, onboardingState.currentStep]);
+
+  useEffect(() => {
+    return () => {
+      if (onboardingNavErrorTimerRef.current) {
+        window.clearTimeout(onboardingNavErrorTimerRef.current);
+      }
+      if (onboardingSpotlightTimerRef.current) {
+        window.clearTimeout(onboardingSpotlightTimerRef.current);
+      }
+      onboardingSpotlightNodeRef.current?.classList.remove('onboarding-spotlight-active');
+    };
+  }, []);
+
+  function setOnboardingNavErrorMessage(message: string): void {
+    setOnboardingNavError(message);
+    if (onboardingNavErrorTimerRef.current) {
+      window.clearTimeout(onboardingNavErrorTimerRef.current);
+    }
+    onboardingNavErrorTimerRef.current = window.setTimeout(() => {
+      setOnboardingNavError('');
+      onboardingNavErrorTimerRef.current = null;
+    }, 2800);
+  }
+
+  function announceOnboarding(message: string): void {
+    setOnboardingLiveMessage('');
+    window.setTimeout(() => {
+      setOnboardingLiveMessage(message);
+    }, 10);
+  }
+
+  function getOnboardingStepTarget(stepId: OnboardingStepId): OnboardingStepTarget {
+    if (stepId === 'prepare-source') {
+      return {
+        tab: 'editor',
+        sectionId: requestSectionId,
+        openExpander: 'source-server',
+        anchor: 'prepare-source'
+      };
+    }
+
+    if (stepId === 'run-parse') {
+      return {
+        tab: 'editor',
+        sectionId: requestSectionId,
+        openExpander: 'source-server',
+        anchor: 'run-parse'
+      };
+    }
+
+    if (stepId === 'refine-structure') {
+      return {
+        tab: 'editor',
+        sectionId: firstTextSectionId,
+        anchor: 'refine-structure'
+      };
+    }
+
+    if (stepId === 'export-docs') {
+      return {
+        tab: 'editor',
+        anchor: 'export-docs',
+        hintMessage: 'Используйте кнопки Экспорт HTML/Wiki в верхней панели.'
+      };
+    }
+
+    if (stepId === 'complete') {
+      return {
+        tab: 'editor',
+        anchor: 'choose-entry',
+        hintMessage: 'Онбординг пройден. Можно продолжать работу в любом режиме.'
+      };
+    }
+
+    return {
+      tab: 'editor',
+      anchor: 'choose-entry'
+    };
+  }
+
+  function canNavigateToOnboardingStep(stepId: OnboardingStepId): { allowed: boolean; reason?: string } {
+    const targetIndex = ONBOARDING_STEPS.findIndex((step) => step.id === stepId);
+    if (targetIndex < 0) return { allowed: false, reason: 'Шаг не найден.' };
+
+    // Going to current or previous steps should always be allowed.
+    if (targetIndex <= onboardingNavStepIndex) return { allowed: true };
+
+    // Forward jumps are limited by completed progress.
+    if (targetIndex <= onboardingResolvedStepIndex) return { allowed: true };
+
+    const previousStep = ONBOARDING_STEPS[Math.max(0, targetIndex - 1)];
+    return {
+      allowed: false,
+      reason: `Сначала завершите шаг: ${previousStep?.title ?? 'предыдущий шаг'}`
+    };
+  }
+
+  function spotlightOnboardingAnchor(anchor: string, stepTitle: string): void {
+    const selector = `[data-onboarding-anchor="${anchor}"]`;
+    window.setTimeout(() => {
+      const target = document.querySelector<HTMLElement>(selector);
+      if (!target) return;
+
+      if (onboardingSpotlightTimerRef.current) {
+        window.clearTimeout(onboardingSpotlightTimerRef.current);
+      }
+
+      onboardingSpotlightNodeRef.current?.classList.remove('onboarding-spotlight-active');
+      onboardingSpotlightNodeRef.current = target;
+
+      target.classList.remove('onboarding-spotlight-active');
+      void target.offsetWidth;
+      target.classList.add('onboarding-spotlight-active');
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+      const focusCandidate =
+        target.matches('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
+          ? target
+          : target.querySelector<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+
+      focusCandidate?.focus({ preventScroll: true });
+
+      onboardingSpotlightTimerRef.current = window.setTimeout(() => {
+        target.classList.remove('onboarding-spotlight-active');
+        onboardingSpotlightTimerRef.current = null;
+      }, 2100);
+    }, 90);
+
+    announceOnboarding(`Переход к шагу: ${stepTitle}`);
+  }
+
+  function goToOnboardingStep(stepId: OnboardingStepId, source: OnboardingNavSource, force = false): void {
+    const access = canNavigateToOnboardingStep(stepId);
+    if (!force && !access.allowed) {
+      setOnboardingNavErrorMessage(access.reason ?? 'Переход недоступен.');
+      emitOnboardingEvent('onboarding_step_blocked', { stepId, source });
+      announceOnboarding(access.reason ?? 'Переход к шагу недоступен.');
+      return;
+    }
+
+    setOnboardingNavError('');
+    setOnboardingNavStep(stepId);
+
+    const target = getOnboardingStepTarget(stepId);
+    if (target.sectionId) {
+      setSelectedId(target.sectionId);
+    }
+    setTab(target.tab);
+    if (target.sectionId && target.openExpander) {
+      setExpanderOpen(target.sectionId, target.openExpander, true);
+    }
+    if (target.hintMessage) {
+      setToastMessage(target.hintMessage);
+    }
+
+    spotlightOnboardingAnchor(target.anchor, ONBOARDING_STEPS.find((step) => step.id === stepId)?.title ?? stepId);
+    emitOnboardingEvent('onboarding_step_jump', { stepId, source });
+  }
+
+  function navigateOnboardingStep(direction: 'prev' | 'next'): void {
+    const nextIndex = direction === 'prev' ? onboardingNavStepIndex - 1 : onboardingNavStepIndex + 1;
+    const nextStep = ONBOARDING_STEPS[nextIndex];
+    if (!nextStep) return;
+    goToOnboardingStep(nextStep.id, direction);
+  }
+
+  function focusOnboardingCurrentStep(): void {
+    goToOnboardingStep(onboardingNavStep, 'cta', true);
+  }
+
+  function jumpToOnboardingStep(stepId: OnboardingStepId): void {
+    goToOnboardingStep(stepId, 'chip');
+  }
+
   const activeOnboardingHint = useMemo(() => {
     if (!ONBOARDING_FEATURES.onboardingV1 || !ONBOARDING_FEATURES.onboardingGuidedMode) return null;
     if (onboardingState.status !== 'active') return null;
-    if (dismissedOnboardingHints[onboardingState.currentStep]) return null;
+    if (dismissedOnboardingHints[onboardingNavStep]) return null;
 
-    if (onboardingState.currentStep === 'prepare-source') {
+    if (onboardingNavStep === 'prepare-source') {
       return {
         title: 'Добавьте источник данных',
         description: 'Откройте request/response и вставьте JSON или cURL в Source-блок, чтобы начать парсинг.',
@@ -1510,7 +1789,7 @@ export default function App() {
       };
     }
 
-    if (onboardingState.currentStep === 'run-parse') {
+    if (onboardingNavStep === 'run-parse') {
       return {
         title: 'Запустите парсер',
         description: 'После вставки источника нажмите Парсить, чтобы таблица параметров заполнилась автоматически.',
@@ -1518,7 +1797,7 @@ export default function App() {
       };
     }
 
-    if (onboardingState.currentStep === 'refine-structure') {
+    if (onboardingNavStep === 'refine-structure') {
       return {
         title: 'Заполните смысловые блоки',
         description: 'Добавьте описание в текст, диаграмму или раздел ошибок, чтобы структура документа была полной.',
@@ -1526,7 +1805,7 @@ export default function App() {
       };
     }
 
-    if (onboardingState.currentStep === 'export-docs') {
+    if (onboardingNavStep === 'export-docs') {
       return {
         title: 'Экспортируйте документацию',
         description: 'Скачайте HTML или Wiki, чтобы зафиксировать результат и завершить базовый сценарий.',
@@ -1535,69 +1814,19 @@ export default function App() {
     }
 
     return null;
-  }, [onboardingState.status, onboardingState.currentStep, dismissedOnboardingHints]);
-
-  function focusOnboardingCurrentStep(): void {
-    if (!activeOnboardingStep) return;
-
-    if (activeOnboardingStep.id === 'prepare-source' || activeOnboardingStep.id === 'run-parse') {
-      if (requestSectionId) {
-        setSelectedId(requestSectionId);
-        setTab('editor');
-      }
-      return;
-    }
-
-    if (activeOnboardingStep.id === 'refine-structure') {
-      if (firstTextSectionId) {
-        setSelectedId(firstTextSectionId);
-        setTab('editor');
-      }
-      return;
-    }
-
-    if (activeOnboardingStep.id === 'export-docs') {
-      setTab('html');
-      setToastMessage('Используйте кнопки Экспорт HTML/Wiki в верхней панели.');
-      return;
-    }
-
-    if (activeOnboardingStep.id === 'complete') {
-      setToastMessage('Онбординг пройден. Можно продолжать работу в любом режиме.');
-    }
-  }
+  }, [onboardingState.status, onboardingNavStep, dismissedOnboardingHints]);
 
   function handleActiveOnboardingHintAction(): void {
     if (!activeOnboardingHint) return;
 
-    if (onboardingState.currentStep === 'prepare-source' || onboardingState.currentStep === 'run-parse') {
-      if (requestSectionId) {
-        setSelectedId(requestSectionId);
-        setTab('editor');
-        setExpanderOpen(requestSectionId, 'source-server', true);
-      }
-      return;
-    }
-
-    if (onboardingState.currentStep === 'refine-structure') {
-      if (firstTextSectionId) {
-        setSelectedId(firstTextSectionId);
-        setTab('editor');
-      }
-      return;
-    }
-
-    if (onboardingState.currentStep === 'export-docs') {
-      setTab('html');
-      return;
-    }
+    goToOnboardingStep(onboardingNavStep, 'hint', true);
   }
 
   function dismissActiveOnboardingHint(): void {
     if (!activeOnboardingHint) return;
     setDismissedOnboardingHints((prev) => ({
       ...prev,
-      [onboardingState.currentStep]: true
+      [onboardingNavStep]: true
     }));
   }
 
@@ -1624,7 +1853,7 @@ export default function App() {
     const editor = textSectionRef.current;
     if (!editor) return;
 
-    const nextHtml = richTextToHtml(selectedSection.value);
+    const nextHtml = richTextToHtml(selectedSection.value, { editable: true });
     const sameSection = textEditorSectionRef.current === selectedSection.id;
     const isFocused = document.activeElement === editor;
 
@@ -1646,7 +1875,7 @@ export default function App() {
         const editor = diagramTextRefs.current[editorKey];
         if (!editor || editor === focusedElement) continue;
 
-        const nextHtml = richTextToHtml(diagram.description ?? '');
+        const nextHtml = richTextToHtml(diagram.description ?? '', { editable: true });
         if (editor.innerHTML !== nextHtml) editor.innerHTML = nextHtml;
       }
     }
@@ -2054,50 +2283,118 @@ export default function App() {
     }
   }
 
+  function processImportedText(rawText: string, fileName: string): void {
+    try {
+      const text = rawText.trim();
+      if (!text) {
+        setImportError('Вставьте JSON или cURL.');
+        return;
+      }
+
+      const parsed = JSON.parse(text) as WorkspaceProjectData | ProjectData | Record<string, unknown>;
+
+      if ('methods' in parsed && Array.isArray(parsed.methods)) {
+        const loaded = loadWorkspaceProjectFromPayload(parsed as WorkspaceProjectData);
+        applyWorkspaceState({ ...loaded, groups: ENABLE_MULTI_METHODS ? loaded.groups : [] });
+        setImportError('');
+        setProjectTextImport(null);
+        return;
+      }
+
+      if ('sections' in parsed && Array.isArray(parsed.sections)) {
+        const sanitizedSections = sanitizeSections((parsed as ProjectData).sections);
+        setSections(sanitizedSections);
+        setSelectedId(sanitizedSections[0]?.id ?? selectedId);
+        setImportError('');
+        setProjectTextImport(null);
+        return;
+      }
+
+      const guessedType = guessJsonSampleType(parsed);
+      const linkedSectionId = getParsedSectionIdByType(guessedType);
+      const linkedSection = sections.find(
+        (section): section is ParsedSection => section.kind === 'parsed' && section.id === linkedSectionId
+      );
+
+      const domainModelEnabled = Boolean(linkedSection?.domainModelEnabled);
+      setJsonImportRouting({
+        fileName,
+        rawText: text,
+        sampleType: guessedType,
+        domainModelEnabled,
+        targetSide: domainModelEnabled ? 'client' : 'server'
+      });
+      setImportError('');
+      setProjectTextImport(null);
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : 'Ошибка импорта');
+    }
+  }
+
   function importProjectJson(file: File | undefined): void {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      try {
-        const text = String(reader.result || '');
-        const parsed = JSON.parse(text) as WorkspaceProjectData | ProjectData | Record<string, unknown>;
-
-        if ('methods' in parsed && Array.isArray(parsed.methods)) {
-          const loaded = loadWorkspaceProjectFromPayload(parsed as WorkspaceProjectData);
-          applyWorkspaceState({ ...loaded, groups: ENABLE_MULTI_METHODS ? loaded.groups : [] });
-          setImportError('');
-          return;
-        }
-
-        if ('sections' in parsed && Array.isArray(parsed.sections)) {
-          const sanitizedSections = sanitizeSections((parsed as ProjectData).sections);
-          setSections(sanitizedSections);
-          setSelectedId(sanitizedSections[0]?.id ?? selectedId);
-          setImportError('');
-          return;
-        }
-
-        const guessedType = guessJsonSampleType(parsed);
-        const linkedSectionId = getParsedSectionIdByType(guessedType);
-        const linkedSection = sections.find(
-          (section): section is ParsedSection => section.kind === 'parsed' && section.id === linkedSectionId
-        );
-
-        const domainModelEnabled = Boolean(linkedSection?.domainModelEnabled);
-        setJsonImportRouting({
-          fileName: file.name,
-          rawText: text,
-          sampleType: guessedType,
-          domainModelEnabled,
-          targetSide: domainModelEnabled ? 'client' : 'server'
-        });
-        setImportError('');
-
-      } catch (error) {
-        setImportError(error instanceof Error ? error.message : 'Ошибка импорта');
-      }
+      processImportedText(String(reader.result || ''), file.name);
     };
     reader.readAsText(file);
+  }
+
+  function openSourceTextImport(section: ParsedSection, target: ParseTarget): void {
+    setSourceTextImport({
+      sectionId: section.id,
+      target,
+      draft: getSourceValue(section, target)
+    });
+    setSourceEditorError('');
+  }
+
+  function applySourceTextImport(): void {
+    if (!sourceTextImport) return;
+
+    const section = sections.find((item): item is ParsedSection => item.kind === 'parsed' && item.id === sourceTextImport.sectionId);
+    if (!section) {
+      setSourceTextImport(null);
+      return;
+    }
+
+    const rawDraft = sourceTextImport.draft;
+    const currentFormat = getSourceFormat(section, sourceTextImport.target);
+    const nextFormat = applyDetectedSourceFormat(section.id, sourceTextImport.target, rawDraft, currentFormat);
+    const validationError = validateSourceDraft(nextFormat, rawDraft);
+
+    if (validationError) {
+      setSourceEditorError(validationError);
+      return;
+    }
+
+    updateSection(section.id, (current) => {
+      if (current.kind !== 'parsed') return current;
+
+      if (sourceTextImport.target === 'client' && isDualModelSection(current)) {
+        return {
+          ...current,
+          clientFormat: nextFormat,
+          clientInput: rawDraft,
+          clientError: ''
+        };
+      }
+
+      return {
+        ...current,
+        format: nextFormat,
+        input: rawDraft,
+        error: ''
+      };
+    });
+
+    setSelectedId(section.id);
+    setTab('editor');
+    setExpanderOpen(section.id, sourceTextImport.target === 'client' ? 'source-client' : 'source-server', true);
+    setEditingSource(null);
+    setSourceEditorError('');
+    setSourceTextImport(null);
+    setToastMessage(`Текст импортирован в ${sourceTextImport.target === 'client' ? 'Client source' : 'Server source'}.`);
   }
 
   function loadWorkspaceProjectFromPayload(payload: WorkspaceProjectData): WorkspaceProjectData {
@@ -2172,26 +2469,284 @@ export default function App() {
     updateDiagram(sectionId, diagramId, (current) => ({ ...current, description: nextValue }));
   }
 
+  function findClosestInEditor(node: Node | null, selector: string, editor: HTMLElement): HTMLElement | null {
+    let current: HTMLElement | null =
+      node instanceof HTMLElement
+        ? node
+        : node instanceof Text
+          ? node.parentElement
+          : null;
+
+    while (current) {
+      if (current.matches(selector)) return current;
+      if (current === editor) break;
+      current = current.parentElement;
+    }
+
+    return null;
+  }
+
+  function getSelectionInEditor(editor: HTMLElement): Selection | null {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return null;
+    const range = selection.getRangeAt(0);
+    if (!editor.contains(range.commonAncestorContainer)) return null;
+    return selection;
+  }
+
+  function unwrapElement(element: HTMLElement): void {
+    const parent = element.parentNode;
+    if (!parent) return;
+
+    while (element.firstChild) {
+      parent.insertBefore(element.firstChild, element);
+    }
+
+    parent.removeChild(element);
+  }
+
+  function normalizeRichTextColor(value: string): string {
+    const normalized = value.trim().toLowerCase();
+    if (/^#[0-9a-f]{3,8}$/i.test(normalized)) return normalized;
+    if (/^rgba?\([0-9\s.,%+-]+\)$/i.test(normalized)) return normalized;
+    if (/^hsla?\([0-9\s.,%+-]+\)$/i.test(normalized)) return normalized;
+    if (/^[a-z][a-z-]*$/i.test(normalized)) return normalized;
+    return RICH_TEXT_HIGHLIGHT_OPTIONS[0].value;
+  }
+
+  function normalizeRichTextLanguage(value: string): string {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return 'auto';
+    return /^[a-z0-9+#-]+$/i.test(normalized) ? normalized : 'auto';
+  }
+
+  function parseNodeColor(node: HTMLElement): string {
+    const inlineColor = node.dataset.highlight || node.style.backgroundColor || node.getAttribute('color') || '';
+    return normalizeRichTextColor(inlineColor);
+  }
+
+  function resolveCssBackgroundColor(value: string): string {
+    const probe = document.createElement('span');
+    probe.style.backgroundColor = value;
+    probe.style.position = 'absolute';
+    probe.style.left = '-9999px';
+    document.body.appendChild(probe);
+    const resolved = getComputedStyle(probe).backgroundColor || value;
+    probe.remove();
+    return resolved.toLowerCase();
+  }
+
+  function areHighlightColorsEqual(left: string, right: string): boolean {
+    return resolveCssBackgroundColor(left) === resolveCssBackgroundColor(right);
+  }
+
+  function rememberSelectionForEditor(editor: HTMLElement | null): void {
+    const selection = window.getSelection();
+    if (!editor || !selection || selection.rangeCount === 0) return;
+
+    const range = selection.getRangeAt(0);
+    if (!editor.contains(range.commonAncestorContainer)) return;
+
+    richEditorSelectionRef.current = { editor, range: range.cloneRange() };
+  }
+
+  function restoreSelectionForEditor(editor: HTMLElement | null): void {
+    const stored = richEditorSelectionRef.current;
+    const selection = window.getSelection();
+    if (!editor || !stored || !selection || stored.editor !== editor) return;
+
+    selection.removeAllRanges();
+    selection.addRange(stored.range);
+    editor.focus();
+  }
+
+  function pickHighlightColor(currentColor: string): string | null {
+    const optionsHint = RICH_TEXT_HIGHLIGHT_OPTIONS
+      .map((option, index) => `${index + 1}. ${option.label} (${option.value})`)
+      .join('\n');
+    const rawValue = window.prompt(
+      `Выберите цвет выделения (номер или код):\n${optionsHint}`,
+      currentColor
+    );
+
+    if (rawValue === null) return null;
+
+    const trimmedValue = rawValue.trim();
+    if (!trimmedValue) return normalizeRichTextColor(currentColor);
+
+    const byIndex = Number.parseInt(trimmedValue, 10);
+    if (!Number.isNaN(byIndex) && byIndex >= 1 && byIndex <= RICH_TEXT_HIGHLIGHT_OPTIONS.length) {
+      return RICH_TEXT_HIGHLIGHT_OPTIONS[byIndex - 1].value;
+    }
+
+    const byLabel = RICH_TEXT_HIGHLIGHT_OPTIONS.find((option) => option.label.toLowerCase() === trimmedValue.toLowerCase());
+    if (byLabel) return byLabel.value;
+
+    return normalizeRichTextColor(trimmedValue);
+  }
+
+  function pickCodeLanguage(currentLanguage: string): string | null {
+    const optionsHint = RICH_TEXT_CODE_LANGUAGES
+      .map((option, index) => `${index + 1}. ${option.label}`)
+      .join('\n');
+    const rawValue = window.prompt(
+      `Выберите язык блока кода (номер или название):\n${optionsHint}`,
+      currentLanguage
+    );
+
+    if (rawValue === null) return null;
+
+    const trimmedValue = rawValue.trim();
+    if (!trimmedValue) return normalizeRichTextLanguage(currentLanguage);
+
+    const byIndex = Number.parseInt(trimmedValue, 10);
+    if (!Number.isNaN(byIndex) && byIndex >= 1 && byIndex <= RICH_TEXT_CODE_LANGUAGES.length) {
+      return RICH_TEXT_CODE_LANGUAGES[byIndex - 1].value;
+    }
+
+    const byLabel = RICH_TEXT_CODE_LANGUAGES.find((option) => option.label.toLowerCase() === trimmedValue.toLowerCase());
+    if (byLabel) return byLabel.value;
+
+    return normalizeRichTextLanguage(trimmedValue);
+  }
+
+  function toggleFormatBlock(editor: HTMLElement, tag: 'h3' | 'blockquote'): void {
+    const selection = getSelectionInEditor(editor);
+    if (!selection) return;
+
+    const anchorBlock = findClosestInEditor(selection.anchorNode, tag, editor);
+    const focusBlock = findClosestInEditor(selection.focusNode, tag, editor);
+    const shouldUnset = Boolean(anchorBlock && focusBlock && anchorBlock === focusBlock);
+
+    document.execCommand('formatBlock', false, shouldUnset ? 'p' : tag);
+  }
+
+  function toggleInlineCode(editor: HTMLElement): void {
+    const selection = getSelectionInEditor(editor);
+    if (!selection) return;
+
+    const anchorCode = findClosestInEditor(selection.anchorNode, 'code', editor);
+    const focusCode = findClosestInEditor(selection.focusNode, 'code', editor);
+
+    if (anchorCode && focusCode && anchorCode === focusCode) {
+      unwrapElement(anchorCode);
+      return;
+    }
+
+    const selectedText = selection.toString() || 'code';
+    document.execCommand('insertHTML', false, `<code>${escapeRichTextHtml(selectedText)}</code>`);
+  }
+
+  function toggleInlineHighlight(editor: HTMLElement, color: string): void {
+    const selection = getSelectionInEditor(editor);
+    if (!selection) return;
+
+    const anchorHighlight =
+      findClosestInEditor(selection.anchorNode, 'mark[data-highlight]', editor) ??
+      findClosestInEditor(selection.anchorNode, 'span[style*="background-color"]', editor);
+    const focusHighlight =
+      findClosestInEditor(selection.focusNode, 'mark[data-highlight]', editor) ??
+      findClosestInEditor(selection.focusNode, 'span[style*="background-color"]', editor);
+    const targetColor = normalizeRichTextColor(color);
+
+    if (selection.isCollapsed) {
+      if (anchorHighlight) {
+        unwrapElement(anchorHighlight);
+      }
+      return;
+    }
+
+    if (
+      anchorHighlight &&
+      focusHighlight &&
+      anchorHighlight === focusHighlight
+    ) {
+      const currentColor = parseNodeColor(anchorHighlight);
+      if (areHighlightColorsEqual(currentColor, targetColor)) {
+        unwrapElement(anchorHighlight);
+      } else {
+        anchorHighlight.dataset.highlight = targetColor;
+        anchorHighlight.style.backgroundColor = targetColor;
+      }
+      return;
+    }
+
+    document.execCommand('styleWithCSS', false, 'true');
+    document.execCommand('hiliteColor', false, targetColor);
+  }
+
+  function insertCodeBlock(editor: HTMLElement, language: string): void {
+    const selection = getSelectionInEditor(editor);
+    const selectedText = selection?.toString().trim() || 'code';
+    const normalizedLanguage = normalizeRichTextLanguage(language);
+    const languageAttr = ` data-code-language="${escapeRichTextHtml(normalizedLanguage)}"`;
+
+    document.execCommand(
+      'insertHTML',
+      false,
+      `<pre class="rich-code-block" data-rich-code-block="1"${languageAttr}><code>${escapeRichTextHtml(selectedText)}</code></pre><p></p>`
+    );
+  }
+
+  function applyRichTextCommand(editor: HTMLElement, action: RichTextAction, options?: RichTextCommandOptions): void {
+    editor.focus();
+
+    if (action === 'bold') {
+      document.execCommand('bold');
+      return;
+    }
+
+    if (action === 'italic') {
+      document.execCommand('italic');
+      return;
+    }
+
+    if (action === 'ul') {
+      document.execCommand('insertUnorderedList');
+      return;
+    }
+
+    if (action === 'ol') {
+      document.execCommand('insertOrderedList');
+      return;
+    }
+
+    if (action === 'h3') {
+      toggleFormatBlock(editor, 'h3');
+      return;
+    }
+
+    if (action === 'quote') {
+      toggleFormatBlock(editor, 'blockquote');
+      return;
+    }
+
+    if (action === 'code') {
+      toggleInlineCode(editor);
+      return;
+    }
+
+    if (action === 'highlight') {
+      toggleInlineHighlight(editor, options?.color ?? selectedHighlightColor);
+      return;
+    }
+
+    if (action === 'code-block') {
+      insertCodeBlock(editor, options?.language ?? selectedCodeLanguage);
+    }
+  }
+
   function applyDiagramTextCommand(
     sectionId: string,
     diagramId: string,
-    action: 'bold' | 'italic' | 'code' | 'h3' | 'ul' | 'ol' | 'quote'
+    action: RichTextAction,
+    options?: RichTextCommandOptions
   ): void {
     const editor = diagramTextRefs.current[getDiagramEditorKey(sectionId, diagramId)];
     if (!editor) return;
 
-    editor.focus();
-
-    if (action === 'bold') document.execCommand('bold');
-    if (action === 'italic') document.execCommand('italic');
-    if (action === 'ul') document.execCommand('insertUnorderedList');
-    if (action === 'ol') document.execCommand('insertOrderedList');
-    if (action === 'h3') document.execCommand('formatBlock', false, 'h3');
-    if (action === 'quote') document.execCommand('formatBlock', false, 'blockquote');
-    if (action === 'code') {
-      const selection = window.getSelection()?.toString() || 'code';
-      document.execCommand('insertHTML', false, `<code>${escapeRichTextHtml(selection)}</code>`);
-    }
+    restoreSelectionForEditor(editor);
+    applyRichTextCommand(editor, action, options);
 
     syncDiagramDescriptionFromEditor(sectionId, diagramId);
   }
@@ -2217,22 +2772,13 @@ export default function App() {
     editor.focus();
   }
 
-  function applyTextEditorCommand(sectionId: string, action: 'bold' | 'italic' | 'code' | 'h3' | 'ul' | 'ol' | 'quote'): void {
+  function applyTextEditorCommand(sectionId: string, action: RichTextAction, options?: RichTextCommandOptions): void {
     const editor = textSectionRef.current;
     if (!editor) return;
 
     restoreTextSelection();
 
-    if (action === 'bold') document.execCommand('bold');
-    if (action === 'italic') document.execCommand('italic');
-    if (action === 'ul') document.execCommand('insertUnorderedList');
-    if (action === 'ol') document.execCommand('insertOrderedList');
-    if (action === 'h3') document.execCommand('formatBlock', false, 'h3');
-    if (action === 'quote') document.execCommand('formatBlock', false, 'blockquote');
-    if (action === 'code') {
-      const selection = window.getSelection()?.toString() || 'code';
-      document.execCommand('insertHTML', false, `<code>${escapeRichTextHtml(selection)}</code>`);
-    }
+    applyRichTextCommand(editor, action, options);
     rememberTextSelection();
     syncTextSectionFromEditor(sectionId);
   }
@@ -3476,6 +4022,16 @@ export default function App() {
                 <button
                   className="icon-button"
                   type="button"
+                  title="Импорт текста"
+                  aria-label="Импорт текста"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => openSourceTextImport(section, target)}
+                >
+                  ⇣
+                </button>
+                <button
+                  className="icon-button"
+                  type="button"
                   title="Редактировать"
                   aria-label="Редактировать"
                   onMouseDown={(event) => event.preventDefault()}
@@ -3524,64 +4080,77 @@ export default function App() {
           </div>
         </div>
 
-        {shouldOpenEmptyInput && (
-          <div className="source-edit-wrap">
-            <textarea
-              className="source-edit"
-              rows={12}
-              value=""
-              onChange={(e) => {
-                const nextDraft = e.target.value;
-                const nextFormat = applyDetectedSourceFormat(section.id, target, nextDraft, format);
-                setEditingSource({
-                  sectionId: section.id,
-                  target,
-                  draft: nextDraft
-                });
-                setSourceEditorError(validateSourceDraft(nextFormat, nextDraft));
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') cancelSourceEditing();
-              }}
-              placeholder="Вставьте JSON или cURL"
-              autoFocus
-            />
-          </div>
-        )}
+        <div className="source-input-area">
+          {shouldOpenEmptyInput && (
+            <div className="source-edit-wrap">
+              <textarea
+                className="source-edit"
+                rows={12}
+                value=""
+                onChange={(e) => {
+                  const nextDraft = e.target.value;
+                  const nextFormat = applyDetectedSourceFormat(section.id, target, nextDraft, format);
+                  setEditingSource({
+                    sectionId: section.id,
+                    target,
+                    draft: nextDraft
+                  });
+                  setSourceEditorError(validateSourceDraft(nextFormat, nextDraft));
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') cancelSourceEditing();
+                }}
+                placeholder="Вставьте JSON или cURL"
+                autoFocus
+              />
+            </div>
+          )}
 
-        {!isEditing && !shouldOpenEmptyInput && (
-          <div className={`source-code source-code-display language-${format}`} onDoubleClick={() => startSourceEditing(section, target)}>
-            <pre className={`source-code language-${format}`}>
-              <code dangerouslySetInnerHTML={{ __html: highlightCode(format, currentValue || '') || '&nbsp;' }} />
-            </pre>
-          </div>
-        )}
+          {!isEditing && !shouldOpenEmptyInput && (
+            <div className={`source-code source-code-display language-${format}`} onDoubleClick={() => startSourceEditing(section, target)}>
+              <pre className={`source-code language-${format}`}>
+                <code dangerouslySetInnerHTML={{ __html: highlightCode(format, currentValue || '') || '&nbsp;' }} />
+              </pre>
+            </div>
+          )}
 
-        {isEditing && (
-          <div className="source-edit-wrap">
-            <textarea
-              className="source-edit"
-              rows={12}
-              value={editingSource.draft}
-              onChange={(e) => {
-                const nextDraft = e.target.value;
-                const nextFormat = applyDetectedSourceFormat(section.id, target, nextDraft, format);
-                setEditingSource((current) => (current ? { ...current, draft: nextDraft } : current));
-                setSourceEditorError(validateSourceDraft(nextFormat, nextDraft));
-              }}
-              onBlur={() => {
-                if (format !== 'json') saveSourceEditing();
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') cancelSourceEditing();
-                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) saveSourceEditing();
-              }}
-              placeholder="Вставьте JSON или cURL"
-              autoFocus
-            />
-            {sourceEditorError && <div className="inline-error">{sourceEditorError}</div>}
-          </div>
-        )}
+          {isEditing && (
+            <div className="source-edit-wrap">
+              <textarea
+                className="source-edit"
+                rows={12}
+                value={editingSource.draft}
+                onChange={(e) => {
+                  const nextDraft = e.target.value;
+                  const nextFormat = applyDetectedSourceFormat(section.id, target, nextDraft, format);
+                  setEditingSource((current) => (current ? { ...current, draft: nextDraft } : current));
+                  setSourceEditorError(validateSourceDraft(nextFormat, nextDraft));
+                }}
+                onBlur={() => {
+                  if (format !== 'json') saveSourceEditing();
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') cancelSourceEditing();
+                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) saveSourceEditing();
+                }}
+                placeholder="Вставьте JSON или cURL"
+                autoFocus
+              />
+              {sourceEditorError && <div className="inline-error">{sourceEditorError}</div>}
+            </div>
+          )}
+
+          <button
+            className="source-parse-fab"
+            type="button"
+            data-onboarding-anchor={target === 'server' ? 'run-parse' : undefined}
+            onClick={() => runParser(section, target)}
+            disabled={!currentValue.trim()}
+            title="Запустить парсер"
+          >
+            Парсить
+          </button>
+        </div>
       </div>
     );
   }
@@ -3639,17 +4208,12 @@ export default function App() {
 
         <details
           className="expander"
+          data-onboarding-anchor="prepare-source"
           open={isExpanderOpen(section.id, 'source-server')}
           onToggle={(e) => setExpanderOpen(section.id, 'source-server', e.currentTarget.open)}
         >
           <summary className="expander-summary">{serverLabel}</summary>
           <div className="expander-body">
-            <div className="row gap">
-              <button className="primary" type="button" onClick={() => runParser(section, 'server')}>
-                Парсить
-              </button>
-            </div>
-
             {renderSourceEditor(section, 'server', `${exampleLabel} (${serverLabel})`)}
           </div>
         </details>
@@ -3673,12 +4237,6 @@ export default function App() {
             >
               <summary className="expander-summary">{clientLabel}</summary>
               <div className="expander-body">
-                <div className="row gap">
-                  <button className="primary" type="button" onClick={() => runParser(section, 'client')}>
-                    Парсить
-                  </button>
-                </div>
-
                 {renderSourceEditor(section, 'client', `${exampleLabel} (${clientLabel})`)}
               </div>
             </details>
@@ -3803,6 +4361,27 @@ export default function App() {
                       >
                         <span className="toolbar-icon">&lt;/&gt;</span>
                       </button>
+                      <button
+                        className="ghost small toolbar-button"
+                        type="button"
+                        title="Выделение цветом"
+                        aria-label="Выделение цветом"
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          const editor = diagramTextRefs.current[getDiagramEditorKey(section.id, diagram.id)];
+                          rememberSelectionForEditor(editor);
+                        }}
+                        onClick={() => {
+                          const nextColor = pickHighlightColor(selectedHighlightColor);
+                          if (!nextColor) return;
+                          setSelectedHighlightColor(nextColor);
+                          applyDiagramTextCommand(section.id, diagram.id, 'highlight', {
+                            color: nextColor
+                          });
+                        }}
+                      >
+                        <span className="toolbar-icon">🖍</span>
+                      </button>
                     </div>
                     <div className="toolbar-group" aria-label="Структура текста">
                       <button
@@ -3849,6 +4428,29 @@ export default function App() {
                         onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'ol')}
                       >
                         <span className="toolbar-icon">1.</span>
+                      </button>
+                    </div>
+                    <div className="toolbar-group toolbar-group-controls" aria-label="Кодовые блоки">
+                      <button
+                        className="ghost small toolbar-button toolbar-button-wide"
+                        type="button"
+                        title="Вставить блок кода"
+                        aria-label="Вставить блок кода"
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          const editor = diagramTextRefs.current[getDiagramEditorKey(section.id, diagram.id)];
+                          rememberSelectionForEditor(editor);
+                        }}
+                        onClick={() => {
+                          const nextLanguage = pickCodeLanguage(selectedCodeLanguage);
+                          if (!nextLanguage) return;
+                          setSelectedCodeLanguage(nextLanguage);
+                          applyDiagramTextCommand(section.id, diagram.id, 'code-block', {
+                            language: nextLanguage
+                          });
+                        }}
+                      >
+                        <span className="toolbar-icon">{`{ }`}</span>
                       </button>
                     </div>
                   </div>
@@ -4324,7 +4926,93 @@ export default function App() {
         </div>
       )}
 
-      <header className="topbar">
+      {projectTextImport && (
+        <div className="import-routing-backdrop" role="dialog" aria-modal="true" aria-label="Импорт проекта из текста">
+          <div className="import-routing-card">
+            <h2>Импорт JSON</h2>
+            <p className="import-routing-file">Вставьте JSON или cURL</p>
+
+            <div className="row gap import-routing-actions-start">
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => importInputRef.current?.click()}
+              >
+                Выбрать файл
+              </button>
+            </div>
+
+            <label className="field">
+              <div className="label">Текст для импорта</div>
+              <textarea
+                className="source-edit"
+                rows={10}
+                value={projectTextImport.rawText}
+                onChange={(event) =>
+                  setProjectTextImport((current) =>
+                    current
+                      ? {
+                          ...current,
+                          rawText: event.target.value
+                        }
+                      : current
+                  )
+                }
+                placeholder="Вставьте JSON или cURL"
+              />
+            </label>
+
+            <div className="import-routing-actions">
+              <button type="button" className="ghost" onClick={closeProjectImportDialog}>Отмена</button>
+              <button
+                type="button"
+                onClick={() => processImportedText(projectTextImport.rawText, 'Вставленный JSON')}
+                disabled={!projectTextImport.rawText.trim()}
+              >
+                Импортировать текст
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {sourceTextImport && (
+        <div className="import-routing-backdrop" role="dialog" aria-modal="true" aria-label="Импорт source текста">
+          <div className="import-routing-card">
+            <h2>Импорт в Source</h2>
+            <p className="import-routing-file">Поддерживается JSON и cURL</p>
+
+            <label className="field">
+              <div className="label">Текст source</div>
+              <textarea
+                className="source-edit"
+                rows={10}
+                value={sourceTextImport.draft}
+                onChange={(event) =>
+                  setSourceTextImport((current) =>
+                    current
+                      ? {
+                          ...current,
+                          draft: event.target.value
+                        }
+                      : current
+                  )
+                }
+                placeholder="Вставьте JSON или cURL"
+              />
+            </label>
+
+            <div className="import-routing-actions">
+              <button type="button" className="ghost" onClick={() => setSourceTextImport(null)}>Отмена</button>
+              <button type="button" onClick={applySourceTextImport} disabled={!sourceTextImport.draft.trim()}>
+                Импортировать текст
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <header ref={topbarRef} className="topbar">
         <div className="brand">
           <span className="logo" aria-hidden>
             API
@@ -4338,14 +5026,12 @@ export default function App() {
           <button className="ghost" onClick={resetProject}>
             Новый эндпоинт
           </button>
-          <label className="ghost file-input" aria-label="Импортировать проект JSON">
-            Импорт
-            <input ref={importInputRef} type="file" accept="application/json" onChange={(e) => importProjectJson(e.target.files?.[0])} />
-          </label>
+          <button className="ghost" type="button" onClick={() => openProjectImportDialog(false)}>Импорт</button>
+          <input ref={importInputRef} className="hidden-file-input" type="file" accept="application/json" onChange={(e) => importProjectJson(e.target.files?.[0])} />
           <button className="ghost" onClick={exportProjectJson} disabled={!activeMethod} title={exportTitle}>
             Экспорт JSON
           </button>
-          <button onClick={() => void handleExportHtml()} disabled={!activeMethod} title={exportTitle}>Экспорт HTML</button>
+          <button data-onboarding-anchor="export-docs" onClick={() => void handleExportHtml()} disabled={!activeMethod} title={exportTitle}>Экспорт HTML</button>
           <button onClick={() => void handleExportWiki()} disabled={!activeMethod} title={exportTitle}>Экспорт Wiki</button>
           </div>
           <div className="actions-side">
@@ -4376,40 +5062,64 @@ export default function App() {
 
       {importError && <div className="alert error">Ошибка импорта: {importError}</div>}
       {toastMessage && <div className="toast-info">{toastMessage}</div>}
+      <div className="visually-hidden" aria-live="polite" aria-atomic="true">{onboardingLiveMessage}</div>
 
       {ONBOARDING_FEATURES.onboardingV1 &&
         ONBOARDING_FEATURES.onboardingGuidedMode &&
         onboardingState.status === 'active' &&
         !showOnboardingEntry && (
-          <section className="onboarding-stepbar" aria-live="polite" aria-label="Пошаговый онбординг">
+          <section className="onboarding-stepbar" data-onboarding-anchor="choose-entry" aria-live="polite" aria-label="Пошаговый онбординг">
             <div className="onboarding-stepbar-head">
               <span className="onboarding-stepbar-kicker">Онбординг</span>
               <strong>
-                Шаг {Math.min(onboardingStepIndex + 1, ONBOARDING_STEPS.length)} из {ONBOARDING_STEPS.length}: {activeOnboardingStep.title}
+                Шаг {Math.min(onboardingNavStepIndex + 1, ONBOARDING_STEPS.length)} из {ONBOARDING_STEPS.length}: {activeOnboardingStep.title}
               </strong>
             </div>
             <p>{activeOnboardingStep.description}</p>
             <div className="onboarding-stepbar-track" role="list" aria-label="Прогресс шагов">
               {ONBOARDING_STEPS.map((step, index) => {
-                const isDone = index < onboardingStepIndex;
+                const isDone = index < onboardingResolvedStepIndex;
                 const isCurrent = step.id === activeOnboardingStep.id;
+                const access = canNavigateToOnboardingStep(step.id);
                 return (
-                  <span
+                  <button
                     key={step.id}
+                    type="button"
                     role="listitem"
-                    className={`onboarding-step-chip ${isDone ? 'done' : ''} ${isCurrent ? 'current' : ''}`}
+                    className={`onboarding-step-chip ${isDone ? 'done' : ''} ${isCurrent ? 'current' : ''} ${access.allowed ? 'available' : 'blocked'}`}
                     aria-current={isCurrent ? 'step' : undefined}
+                    aria-disabled={!access.allowed}
+                    disabled={!access.allowed}
+                    title={access.allowed ? step.description : access.reason}
+                    onClick={() => jumpToOnboardingStep(step.id)}
                   >
                     {step.title}
-                  </span>
+                  </button>
                 );
               })}
             </div>
             <div className="onboarding-stepbar-actions">
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => navigateOnboardingStep('prev')}
+                disabled={onboardingNavStepIndex <= 0}
+              >
+                Назад
+              </button>
               <button type="button" className="ghost" onClick={focusOnboardingCurrentStep}>
                 Перейти к шагу
               </button>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => navigateOnboardingStep('next')}
+                disabled={onboardingNavStepIndex >= ONBOARDING_STEPS.length - 1}
+              >
+                Далее
+              </button>
             </div>
+            {onboardingNavError && <div className="onboarding-nav-error">{onboardingNavError}</div>}
           </section>
         )}
 
@@ -4630,7 +5340,7 @@ export default function App() {
 
                   {selectedSection.kind === 'text' && (
                     <div className="stack">
-                      <div className="editor-toolbar-shell">
+                      <div className="editor-toolbar-shell" data-onboarding-anchor="refine-structure">
                         <div className="editor-toolbar-head">
                           <div className="editor-toolbar-title">Редактор текста</div>
                           <div className="editor-toolbar-note">Выделите текст и примените форматирование</div>
@@ -4675,6 +5385,26 @@ export default function App() {
                               onClick={() => applyTextEditorCommand(selectedSection.id, 'code')}
                             >
                               <span className="toolbar-icon">&lt;/&gt;</span>
+                            </button>
+                            <button
+                              className="ghost small toolbar-button"
+                              type="button"
+                              title="Выделение цветом"
+                              aria-label="Выделение цветом"
+                              onMouseDown={(event) => {
+                                event.preventDefault();
+                                rememberTextSelection();
+                              }}
+                              onClick={() => {
+                                const nextColor = pickHighlightColor(selectedHighlightColor);
+                                if (!nextColor) return;
+                                setSelectedHighlightColor(nextColor);
+                                applyTextEditorCommand(selectedSection.id, 'highlight', {
+                                  color: nextColor
+                                });
+                              }}
+                            >
+                              <span className="toolbar-icon">🖍</span>
                             </button>
                           </div>
                           <div className="toolbar-group" aria-label="Структура текста">
@@ -4736,6 +5466,28 @@ export default function App() {
                               <span className="toolbar-icon">1.</span>
                             </button>
                           </div>
+                          <div className="toolbar-group toolbar-group-controls" aria-label="Кодовые блоки">
+                            <button
+                              className="ghost small toolbar-button toolbar-button-wide"
+                              type="button"
+                              title="Вставить блок кода"
+                              aria-label="Вставить блок кода"
+                              onMouseDown={(event) => {
+                                event.preventDefault();
+                                rememberTextSelection();
+                              }}
+                              onClick={() => {
+                                const nextLanguage = pickCodeLanguage(selectedCodeLanguage);
+                                if (!nextLanguage) return;
+                                setSelectedCodeLanguage(nextLanguage);
+                                applyTextEditorCommand(selectedSection.id, 'code-block', {
+                                  language: nextLanguage
+                                });
+                              }}
+                            >
+                              <span className="toolbar-icon">{`{ }`}</span>
+                            </button>
+                          </div>
                         </div>
                       </div>
                       <div className="panel-sub">Поддерживаются подзаголовки, цитаты, код и вложенные списки с Tab.</div>
@@ -4781,12 +5533,6 @@ export default function App() {
                         renderRequestEditor(selectedSection)
                       ) : (
                         <div className="stack">
-                          <div className="row gap">
-                            <button className="primary" type="button" onClick={() => runParser(selectedSection)}>
-                              Парсить
-                            </button>
-                          </div>
-
                           {renderSourceEditor(selectedSection, 'server')}
                           <div className="row gap">
                             <button className="ghost small" type="button" onClick={() => addManualRow(selectedSection)}>

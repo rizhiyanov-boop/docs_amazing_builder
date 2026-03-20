@@ -3,7 +3,9 @@ type OnboardingEventName =
   | 'onboarding_skipped'
   | 'onboarding_completed'
   | 'onboarding_step_changed'
-  | 'first_export_done';
+  | 'first_export_done'
+  | 'onboarding_step_jump'
+  | 'onboarding_step_blocked';
 
 interface OnboardingEventPayload {
   stepId?: string;

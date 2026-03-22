@@ -1,11 +1,18 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { createPortal } from 'react-dom';
 import './tokens.css';
 import './App.css';
+import { AppHeader } from './components/AppHeader';
+import { DiagramEditor } from './components/DiagramEditor';
+import { ErrorsEditor } from './components/ErrorsEditor';
+import { RequestEditor } from './components/RequestEditor';
+import { RequestHeadersTable } from './components/RequestHeadersTable';
+import { SectionSidebar } from './components/SectionSidebar';
+import { SourceEditor } from './components/SourceEditor';
+import { TextSectionEditor } from './components/TextSectionEditor';
 import { parseCurlMeta, parseToRows } from './parsers';
-import { getDiagramExportFileName, getDiagramImageUrl, getPlantUmlImageUrl, resolveDiagramEngine } from './diagramUtils';
-import { ERROR_CATALOG, ERROR_CATALOG_BY_CODE, POPULAR_HTTP_STATUS_CODES } from './errorCatalog';
+import { getDiagramExportFileName, getDiagramImageUrl, resolveDiagramEngine } from './diagramUtils';
+import { ERROR_CATALOG_BY_CODE } from './errorCatalog';
 import { getRequestColumnLabel, getRequestColumnOrder, moveRequestColumn } from './requestColumns';
 import {
   DEFAULT_API_KEY_EXAMPLE,
@@ -20,16 +27,25 @@ import {
   getParsedRowKey,
   getRequestHeaderRows,
   getPreviouslyUsedClientKeys,
-  isAuthHeader,
-  isDefaultRequestHeader,
   isRequestMappingRow,
   OPTIONAL_MARK
 } from './requestHeaders';
 import { renderHtmlDocument } from './renderHtml';
-import { editorElementToWikiText, escapeRichTextHtml, richTextToHtml } from './richText';
+import { editorElementToWikiText, escapeRichTextHtml, renderEditableCodeBlockHtml, richTextToHtml } from './richText';
 import { renderWikiDocument } from './renderWiki';
 import { DEFAULT_SECTION_TITLE, resolveSectionTitle, sanitizeSections } from './sectionTitles';
-import { buildInputFromRows } from './sourceSync';
+import {
+  applyDetectedSourceFormatToSection,
+  beautifySourceDraft,
+  buildSectionAfterParseFailure,
+  buildSectionAfterParseSuccess,
+  buildSectionAfterSourceSave,
+  buildSectionAfterSyncInput,
+  detectSourceFormat,
+  getSourceFormat,
+  getSourceValue,
+  validateSourceDraft
+} from './parsedSectionLogic';
 import { ONBOARDING_FEATURES } from './onboarding/featureFlags';
 import { ONBOARDING_STEPS, evaluateOnboardingProgress, resolveOnboardingStep, type OnboardingStepId } from './onboarding/steps';
 import { loadOnboardingState, markOnboardingCompleted, markOnboardingStarted, saveOnboardingState } from './onboarding/storage';
@@ -37,6 +53,7 @@ import { emitOnboardingEvent } from './onboarding/telemetry';
 import type { OnboardingState } from './onboarding/types';
 import { applyThemeToRoot } from './theme';
 import type { ThemeName } from './theme';
+import { asWorkspaceProjectData, loadWorkspaceProject, loadWorkspaceProjectFromPayload } from './workspacePersistence';
 import type {
   DiagramItem,
   DiagramSection,
@@ -50,9 +67,7 @@ import type {
   ParsedSectionType,
   ParseFormat,
   ProjectData,
-  RequestAuthType,
   RequestColumnKey,
-  RequestMethod,
   ValidationRuleRow,
   WorkspaceProjectData
 } from './types';
@@ -671,39 +686,6 @@ function createOnboardingDemoWorkspace(): WorkspaceProjectData {
   };
 }
 
-function normalizeWorkspaceForMode(workspace: WorkspaceProjectData): WorkspaceProjectData {
-  if (ENABLE_MULTI_METHODS) return workspace;
-
-  const resolvedMethod = workspace.methods.find((method) => method.id === workspace.activeMethodId) ?? workspace.methods[0] ?? createMethodDocument();
-  return {
-    ...workspace,
-    activeMethodId: resolvedMethod.id,
-    methods: [resolvedMethod],
-    groups: []
-  };
-}
-
-function asWorkspaceProjectData(methods: MethodDocument[], activeMethodId: string, groups: MethodGroup[] = []): WorkspaceProjectData {
-  const normalizedMethods = methods.length > 0 ? methods : [createMethodDocument()];
-  const resolvedActiveMethodId = normalizedMethods.some((method) => method.id === activeMethodId)
-    ? activeMethodId
-    : normalizedMethods[0].id;
-
-  const workspace: WorkspaceProjectData = {
-    version: 3,
-    updatedAt: new Date().toISOString(),
-    activeMethodId: resolvedActiveMethodId,
-    methods: normalizedMethods.map((method) => ({
-      ...method,
-      updatedAt: method.updatedAt || new Date().toISOString(),
-      sections: sanitizeSections(method.sections)
-    })),
-    groups
-  };
-
-  return normalizeWorkspaceForMode(workspace);
-}
-
 function slugifyMethodFileName(value: string): string {
   const slug = value
     .trim()
@@ -712,66 +694,6 @@ function slugifyMethodFileName(value: string): string {
     .replace(/^-+|-+$/g, '');
 
   return slug || 'method';
-}
-
-function loadWorkspaceProject(): WorkspaceProjectData {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return createWorkspaceSeed();
-    const parsed = JSON.parse(raw) as WorkspaceProjectData | ProjectData;
-
-    if ('methods' in parsed && Array.isArray(parsed.methods)) {
-      const sanitizedMethods = parsed.methods
-        .filter((method) => method && Array.isArray(method.sections))
-        .map((method, index) => ({
-          id: method.id || createMethodId(),
-          name: method.name?.trim() || `Метод ${index + 1}`,
-          updatedAt: method.updatedAt || new Date().toISOString(),
-          sections: sanitizeSections(method.sections)
-        }));
-
-      if (sanitizedMethods.length === 0) return createWorkspaceSeed();
-
-      const groups = Array.isArray(parsed.groups)
-        ? parsed.groups.map((group) => ({
-            id: group.id || `group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-            name: group.name?.trim() || 'Новая цепочка',
-            methodIds: Array.isArray(group.methodIds) ? group.methodIds.filter(Boolean) : [],
-            links: Array.isArray(group.links) ? group.links : []
-          }))
-        : [];
-
-      const activeMethodId =
-        parsed.activeMethodId && sanitizedMethods.some((method) => method.id === parsed.activeMethodId)
-          ? parsed.activeMethodId
-          : sanitizedMethods[0].id;
-
-      const workspace: WorkspaceProjectData = {
-        version: 3,
-        updatedAt: parsed.updatedAt || new Date().toISOString(),
-        activeMethodId,
-        methods: sanitizedMethods,
-        groups
-      };
-
-      return normalizeWorkspaceForMode(workspace);
-    }
-
-    if ('sections' in parsed && Array.isArray(parsed.sections)) {
-      const legacyMethod = createMethodDocument(DEFAULT_METHOD_NAME, sanitizeSections(parsed.sections));
-      return {
-        version: 3,
-        updatedAt: parsed.updatedAt || new Date().toISOString(),
-        activeMethodId: legacyMethod.id,
-        methods: [legacyMethod],
-        groups: []
-      };
-    }
-
-    return createWorkspaceSeed();
-  } catch {
-    return createWorkspaceSeed();
-  }
 }
 
 function downloadText(filename: string, content: string): void {
@@ -1057,7 +979,17 @@ export default function App() {
   const methodNameInputRef = useRef<HTMLInputElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const previousMethodIdRef = useRef<string | null>(null);
-  const initialWorkspace = useMemo(() => loadWorkspaceProject(), []);
+  const workspacePersistenceDeps = useMemo(
+    () => ({
+      createMethodId,
+      createMethodDocument,
+      createWorkspaceSeed,
+      sanitizeSections,
+      enableMultiMethods: ENABLE_MULTI_METHODS
+    }),
+    []
+  );
+  const initialWorkspace = useMemo(() => loadWorkspaceProject(STORAGE_KEY, localStorage, workspacePersistenceDeps), [workspacePersistenceDeps]);
   const initialOnboarding = useMemo(() => loadOnboardingState(), []);
   const [methods, setMethodsState] = useState<MethodDocument[]>(() => initialWorkspace.methods);
   const [methodGroups, setMethodGroups] = useState<MethodGroup[]>(() => initialWorkspace.groups);
@@ -1837,12 +1769,12 @@ export default function App() {
   useEffect(() => {
     setAutosave({ state: 'saving' });
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(asWorkspaceProjectData(methods, activeMethodId, methodGroups)));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(asWorkspaceProjectData(methods, activeMethodId, methodGroups, workspacePersistenceDeps)));
       setAutosave({ state: 'saved', at: formatTime(new Date()) });
     } catch {
       setAutosave({ state: 'error' });
     }
-  }, [methods, activeMethodId, methodGroups]);
+  }, [methods, activeMethodId, methodGroups, workspacePersistenceDeps]);
 
   useEffect(() => {
     if (!selectedSection || selectedSection.kind !== 'text') {
@@ -2126,28 +2058,7 @@ export default function App() {
       const curlMeta = isRequestSection(section) && format === 'curl' ? parseCurlMeta(input) : null;
       updateSection(section.id, (current) => {
         if (current.kind !== 'parsed') return current;
-        if (target === 'client' && isDualModelSection(current)) {
-          return {
-            ...current,
-            clientFormat: format,
-            clientInput: input,
-            clientRows: rows,
-            clientError: '',
-            clientLastSyncedFormat: format,
-            externalRequestUrl: isRequestSection(current) ? curlMeta?.url ?? current.externalRequestUrl ?? '' : current.externalRequestUrl,
-            externalRequestMethod: isRequestSection(current) ? curlMeta?.method ?? current.externalRequestMethod ?? 'POST' : current.externalRequestMethod
-          };
-        }
-        return {
-          ...current,
-          format,
-          input,
-          rows,
-          error: '',
-          lastSyncedFormat: format,
-          requestUrl: isRequestSection(current) ? curlMeta?.url ?? current.requestUrl ?? '' : current.requestUrl,
-          requestMethod: isRequestSection(current) ? curlMeta?.method ?? current.requestMethod ?? 'POST' : current.requestMethod
-        };
+        return buildSectionAfterParseSuccess(current, target, format, input, rows, curlMeta);
       });
       if (isEditingCurrentTarget) {
         setEditingSource(null);
@@ -2157,22 +2068,7 @@ export default function App() {
       updateSection(section.id, (current) => {
         if (current.kind !== 'parsed') return current;
         const message = error instanceof Error ? error.message : 'Ошибка парсинга';
-        if (target === 'client' && isDualModelSection(current)) {
-          return {
-            ...current,
-            clientFormat: format,
-            clientInput: input,
-            clientRows: [],
-            clientError: message
-          };
-        }
-        return {
-          ...current,
-          format,
-          input,
-          rows: [],
-          error: message
-        };
+        return buildSectionAfterParseFailure(current, target, format, input, message);
       });
     }
   }
@@ -2294,7 +2190,7 @@ export default function App() {
       const parsed = JSON.parse(text) as WorkspaceProjectData | ProjectData | Record<string, unknown>;
 
       if ('methods' in parsed && Array.isArray(parsed.methods)) {
-        const loaded = loadWorkspaceProjectFromPayload(parsed as WorkspaceProjectData);
+        const loaded = loadWorkspaceProjectFromPayload(parsed as WorkspaceProjectData, workspacePersistenceDeps);
         applyWorkspaceState({ ...loaded, groups: ENABLE_MULTI_METHODS ? loaded.groups : [] });
         setImportError('');
         setProjectTextImport(null);
@@ -2360,7 +2256,7 @@ export default function App() {
 
     const rawDraft = sourceTextImport.draft;
     const currentFormat = getSourceFormat(section, sourceTextImport.target);
-    const nextFormat = applyDetectedSourceFormat(section.id, sourceTextImport.target, rawDraft, currentFormat);
+    const nextFormat = detectSourceFormat(rawDraft) ?? currentFormat;
     const validationError = validateSourceDraft(nextFormat, rawDraft);
 
     if (validationError) {
@@ -2370,22 +2266,8 @@ export default function App() {
 
     updateSection(section.id, (current) => {
       if (current.kind !== 'parsed') return current;
-
-      if (sourceTextImport.target === 'client' && isDualModelSection(current)) {
-        return {
-          ...current,
-          clientFormat: nextFormat,
-          clientInput: rawDraft,
-          clientError: ''
-        };
-      }
-
-      return {
-        ...current,
-        format: nextFormat,
-        input: rawDraft,
-        error: ''
-      };
+      const withDetectedFormat = applyDetectedSourceFormatToSection(current, sourceTextImport.target, rawDraft);
+      return buildSectionAfterSourceSave(withDetectedFormat.nextSection, sourceTextImport.target, nextFormat, rawDraft);
     });
 
     setSelectedId(section.id);
@@ -2395,42 +2277,6 @@ export default function App() {
     setSourceEditorError('');
     setSourceTextImport(null);
     setToastMessage(`Текст импортирован в ${sourceTextImport.target === 'client' ? 'Client source' : 'Server source'}.`);
-  }
-
-  function loadWorkspaceProjectFromPayload(payload: WorkspaceProjectData): WorkspaceProjectData {
-    const methods = payload.methods
-      .filter((method) => method && Array.isArray(method.sections))
-      .map((method, index) => ({
-        id: method.id || createMethodId(),
-        name: method.name?.trim() || `Метод ${index + 1}`,
-        updatedAt: method.updatedAt || new Date().toISOString(),
-        sections: sanitizeSections(method.sections)
-      }));
-
-    if (methods.length === 0) return createWorkspaceSeed();
-
-    const groups = Array.isArray(payload.groups)
-      ? payload.groups.map((group) => ({
-          id: group.id || `group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          name: group.name?.trim() || 'Новая цепочка',
-          methodIds: Array.isArray(group.methodIds) ? group.methodIds.filter(Boolean) : [],
-          links: Array.isArray(group.links) ? group.links : []
-        }))
-      : [];
-
-    const activeMethodId = payload.activeMethodId && methods.some((method) => method.id === payload.activeMethodId)
-      ? payload.activeMethodId
-      : methods[0].id;
-
-    const workspace: WorkspaceProjectData = {
-      version: 3,
-      updatedAt: payload.updatedAt || new Date().toISOString(),
-      methods,
-      groups,
-      activeMethodId
-    };
-
-    return normalizeWorkspaceForMode(workspace);
   }
 
   function resetProject(): void {
@@ -2462,8 +2308,16 @@ export default function App() {
     return `${sectionId}:${diagramId}`;
   }
 
+  function setDiagramTextRef(sectionId: string, diagramId: string, node: HTMLDivElement | null): void {
+    diagramTextRefs.current[getDiagramEditorKey(sectionId, diagramId)] = node;
+  }
+
+  function getDiagramTextEditor(sectionId: string, diagramId: string): HTMLDivElement | null {
+    return diagramTextRefs.current[getDiagramEditorKey(sectionId, diagramId)] ?? null;
+  }
+
   function syncDiagramDescriptionFromEditor(sectionId: string, diagramId: string): void {
-    const editor = diagramTextRefs.current[getDiagramEditorKey(sectionId, diagramId)];
+    const editor = getDiagramTextEditor(sectionId, diagramId);
     if (!editor) return;
     const nextValue = editorElementToWikiText(editor);
     updateDiagram(sectionId, diagramId, (current) => ({ ...current, description: nextValue }));
@@ -2679,12 +2533,11 @@ export default function App() {
     const selection = getSelectionInEditor(editor);
     const selectedText = selection?.toString().trim() || 'code';
     const normalizedLanguage = normalizeRichTextLanguage(language);
-    const languageAttr = ` data-code-language="${escapeRichTextHtml(normalizedLanguage)}"`;
 
     document.execCommand(
       'insertHTML',
       false,
-      `<pre class="rich-code-block" data-rich-code-block="1"${languageAttr}><code>${escapeRichTextHtml(selectedText)}</code></pre><p></p>`
+      `${renderEditableCodeBlockHtml(selectedText, normalizedLanguage)}<p></p>`
     );
   }
 
@@ -2742,7 +2595,7 @@ export default function App() {
     action: RichTextAction,
     options?: RichTextCommandOptions
   ): void {
-    const editor = diagramTextRefs.current[getDiagramEditorKey(sectionId, diagramId)];
+    const editor = getDiagramTextEditor(sectionId, diagramId);
     if (!editor) return;
 
     restoreSelectionForEditor(editor);
@@ -2885,105 +2738,8 @@ export default function App() {
   function syncInputFromRows(section: ParsedSection, target: ParseTarget = 'server'): void {
     updateSection(section.id, (current) => {
       if (current.kind !== 'parsed') return current;
-
-      if (target === 'client' && isDualModelSection(current)) {
-        const clientRows = current.clientRows ?? [];
-        return {
-          ...current,
-          clientInput: buildInputFromRows(current.clientFormat ?? 'json', getExternalSourceRows(current), {
-            requestUrl: current.externalRequestUrl,
-            requestMethod: current.externalRequestMethod
-          }),
-          clientLastSyncedFormat: current.clientFormat ?? 'json',
-          clientRows: clientRows.map((row) =>
-            row.origin === 'generated'
-              ? row
-              : { ...row, sourceField: row.field, origin: row.origin === 'manual' ? 'parsed' : row.origin }
-          )
-        };
-      }
-
-      const serverRows = isRequestSection(current)
-        ? [
-            ...getRequestHeaderRowsForEditor(current).filter((row) => row.enabled !== false),
-            ...current.rows.filter((row) => row.source !== 'header')
-          ]
-        : current.rows;
-
-      return {
-        ...current,
-        input: buildInputFromRows(current.format, serverRows, {
-          requestUrl: current.requestUrl,
-          requestMethod: current.requestMethod
-        }),
-        lastSyncedFormat: current.format,
-        rows: current.rows.map((row) =>
-          row.origin === 'generated'
-            ? row
-            : { ...row, sourceField: row.field, origin: row.origin === 'manual' ? 'parsed' : row.origin }
-        )
-      };
+      return buildSectionAfterSyncInput(current, target, getExternalSourceRows(current), getRequestHeaderRowsForEditor(current));
     });
-  }
-
-  function getSourceValue(section: ParsedSection, target: ParseTarget): string {
-    return target === 'client' && isDualModelSection(section) ? section.clientInput ?? '' : section.input;
-  }
-
-  function getSourceFormat(section: ParsedSection, target: ParseTarget): ParseFormat {
-    return target === 'client' && isDualModelSection(section) ? section.clientFormat ?? 'json' : section.format;
-  }
-
-  function detectSourceFormat(draft: string): ParseFormat | null {
-    const trimmed = draft.trim();
-    if (!trimmed) return null;
-
-    if (/^curl(?:\s|$)/i.test(trimmed)) return 'curl';
-
-    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-      try {
-        JSON.parse(trimmed);
-        return 'json';
-      } catch {
-        return null;
-      }
-    }
-
-    return null;
-  }
-
-  function applyDetectedSourceFormat(sectionId: string, target: ParseTarget, draft: string, currentFormat: ParseFormat): ParseFormat {
-    const detectedFormat = detectSourceFormat(draft);
-    if (!detectedFormat || detectedFormat === currentFormat) return currentFormat;
-
-    updateSection(sectionId, (current) => {
-      if (current.kind !== 'parsed') return current;
-
-      if (target === 'client' && isDualModelSection(current)) {
-        return { ...current, clientFormat: detectedFormat, clientError: '' };
-      }
-
-      return { ...current, format: detectedFormat, error: '' };
-    });
-
-    return detectedFormat;
-  }
-
-  function validateSourceDraft(format: ParseFormat, draft: string): string {
-    if (format !== 'json') return '';
-    if (!draft.trim()) return '';
-
-    try {
-      JSON.parse(draft);
-      return '';
-    } catch (error) {
-      return error instanceof Error ? error.message : 'Некорректный JSON';
-    }
-  }
-
-  function beautifySourceDraft(format: ParseFormat, draft: string): string {
-    if (format === 'json') return JSON.stringify(JSON.parse(draft), null, 2);
-    return draft.trim();
   }
 
   function startSourceEditing(section: ParsedSection, target: ParseTarget): void {
@@ -3006,12 +2762,8 @@ export default function App() {
     const section = sections.find((item) => item.id === editingSource.sectionId);
     if (!section || section.kind !== 'parsed') return;
 
-    const format = applyDetectedSourceFormat(
-      editingSource.sectionId,
-      editingSource.target,
-      editingSource.draft,
-      getSourceFormat(section, editingSource.target)
-    );
+    const withDetectedFormat = applyDetectedSourceFormatToSection(section, editingSource.target, editingSource.draft);
+    const format = withDetectedFormat.format;
     const error = validateSourceDraft(format, editingSource.draft);
     if (error) {
       setSourceEditorError(error);
@@ -3020,11 +2772,7 @@ export default function App() {
 
     updateSection(editingSource.sectionId, (current) => {
       if (current.kind !== 'parsed') return current;
-      if (editingSource.target === 'client' && isDualModelSection(current)) {
-        return { ...current, clientFormat: format, clientInput: editingSource.draft, clientError: '' };
-      }
-
-      return { ...current, format, input: editingSource.draft, error: '' };
+      return buildSectionAfterSourceSave(withDetectedFormat.nextSection, editingSource.target, format, editingSource.draft);
     });
 
     cancelSourceEditing();
@@ -3534,142 +3282,22 @@ export default function App() {
   }
 
   function renderRequestHeadersTable(section: ParsedSection, target: ParseTarget = 'server'): ReactNode {
-    const isExternal = target === 'client';
-    const headers = isExternal ? getExternalRequestHeaderRowsForEditor(section) : getRequestHeaderRowsForEditor(section);
-
     return (
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Вкл.</th>
-              <th>Header</th>
-              <th>Обязательность</th>
-              <th>Описание</th>
-              <th>Пример</th>
-            </tr>
-          </thead>
-          <tbody>
-            {headers.map((row, index) => {
-              const rowKey = getParsedRowKey(row);
-              const isDefault = isExternal ? false : isDefaultRequestHeader(row);
-              const isAuto = isExternal ? false : isAuthHeader(section, row);
-              const persistedRows = isExternal ? section.clientRows ?? [] : section.rows;
-              const isPersisted = persistedRows.some((item) => getParsedRowKey(item) === rowKey);
-
-              return (
-                <tr key={`${rowKey}-${index}`}>
-                  <td>
-                    {isAuto ? (
-                      <span className="chip">auto</span>
-                    ) : (
-                      <input
-                        type="checkbox"
-                        checked={row.enabled !== false}
-                        onChange={(e) => {
-                          if (isPersisted) {
-                            if (isExternal) {
-                              updateSection(section.id, (current) => {
-                                if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
-                                return {
-                                  ...current,
-                                  clientRows: (current.clientRows ?? []).map((item) =>
-                                    getParsedRowKey(item) === rowKey ? { ...item, enabled: e.target.checked } : item
-                                  )
-                                };
-                              });
-                            } else {
-                              updateServerRow(section.id, rowKey, (current) => ({ ...current, enabled: e.target.checked }));
-                            }
-                            return;
-                          }
-
-                          updateSection(section.id, (current) => {
-                            if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
-                            return {
-                              ...current,
-                              [isExternal ? 'clientRows' : 'rows']: [
-                                ...(isExternal ? current.clientRows ?? [] : current.rows),
-                                {
-                                  ...row,
-                                  enabled: e.target.checked
-                                }
-                              ]
-                            };
-                          });
-                        }}
-                      />
-                    )}
-                  </td>
-                  <td>
-                    {renderEditableFieldCell(
-                      section,
-                      row,
-                      isAuto || isDefault
-                        ? { allowEdit: false }
-                        : {
-                            onDelete: () => (isExternal ? deleteExternalRequestHeader(section.id, rowKey) : deleteRequestHeader(section.id, rowKey))
-                          }
-                    )}
-                  </td>
-                  <td>{row.required || '—'}</td>
-                  <td>
-                    {isAuto || isDefault ? (
-                      row.description || '—'
-                    ) : (
-                      <input
-                        type="text"
-                        value={isPersisted ? persistedRows.find((item) => getParsedRowKey(item) === rowKey)?.description ?? row.description : row.description}
-                        onChange={(e) =>
-                          isExternal
-                            ? updateSection(section.id, (current) => {
-                                if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
-                                return {
-                                  ...current,
-                                  clientRows: (current.clientRows ?? []).map((item) =>
-                                    getParsedRowKey(item) === rowKey ? { ...item, description: e.target.value } : item
-                                  )
-                                };
-                              })
-                            : updateServerRow(section.id, rowKey, (current) => ({ ...current, description: e.target.value }))
-                        }
-                      />
-                    )}
-                  </td>
-                  <td className="mono">
-                    {isAuto || isDefault ? (
-                      row.example || '—'
-                    ) : (
-                      <input
-                        type="text"
-                        value={isPersisted ? persistedRows.find((item) => getParsedRowKey(item) === rowKey)?.example ?? row.example : row.example}
-                        onChange={(e) =>
-                          isExternal
-                            ? updateSection(section.id, (current) => {
-                                if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
-                                return {
-                                  ...current,
-                                  clientRows: (current.clientRows ?? []).map((item) =>
-                                    getParsedRowKey(item) === rowKey ? { ...item, example: e.target.value } : item
-                                  )
-                                };
-                              })
-                            : updateServerRow(section.id, rowKey, (current) => ({ ...current, example: e.target.value }))
-                        }
-                      />
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        <div className="table-actions">
-          <button className="ghost small" type="button" onClick={() => (isExternal ? addExternalRequestHeader(section) : addRequestHeader(section))}>
-            + Header
-          </button>
-        </div>
-      </div>
+      <RequestHeadersTable
+        section={section}
+        target={target}
+        getExternalRequestHeaderRowsForEditor={getExternalRequestHeaderRowsForEditor}
+        getRequestHeaderRowsForEditor={getRequestHeaderRowsForEditor}
+        renderEditableFieldCell={renderEditableFieldCell}
+        updateParsedSection={(id, updater) =>
+          updateSection(id, (current) => (current.kind === 'parsed' && isRequestSection(current) ? updater(current) : current))
+        }
+        updateServerRow={updateServerRow}
+        addRequestHeader={addRequestHeader}
+        addExternalRequestHeader={addExternalRequestHeader}
+        deleteRequestHeader={deleteRequestHeader}
+        deleteExternalRequestHeader={deleteExternalRequestHeader}
+      />
     );
   }
 
@@ -3741,1077 +3369,56 @@ export default function App() {
     );
   }
 
-  function renderRequestAuthEditor(section: ParsedSection, target: ParseTarget = 'server'): ReactNode {
-    if (!isRequestSection(section)) return null;
-    const isExternal = target === 'client';
-    const authType = isExternal ? section.externalAuthType ?? 'none' : section.authType ?? 'none';
-    const tokenExample = isExternal ? section.externalAuthTokenExample ?? '' : section.authTokenExample ?? '';
-    const username = isExternal ? section.externalAuthUsername ?? '' : section.authUsername ?? '';
-    const password = isExternal ? section.externalAuthPassword ?? '' : section.authPassword ?? '';
-    const headerName = isExternal ? section.externalAuthHeaderName ?? DEFAULT_API_KEY_HEADER : section.authHeaderName ?? DEFAULT_API_KEY_HEADER;
-    const apiKeyExample = isExternal ? section.externalAuthApiKeyExample ?? '' : section.authApiKeyExample ?? '';
-    const title = isExternal ? 'Авторизация внешнего запроса' : 'Авторизация';
-    const blockId = isExternal ? 'auth-client' : 'auth-server';
-
-    return (
-      <details
-        className="expander"
-        open={isExpanderOpen(section.id, blockId)}
-        onToggle={(e) => setExpanderOpen(section.id, blockId, e.currentTarget.open)}
-      >
-        <summary className="expander-summary">{title}</summary>
-        <div className="expander-body">
-          <label className="field">
-            <div className="label">Способ</div>
-            <select
-              value={authType}
-              onChange={(e) =>
-                updateSection(section.id, (current) =>
-                  current.kind === 'parsed' && isRequestSection(current)
-                    ? {
-                        ...current,
-                        ...(isExternal
-                          ? {
-                              externalAuthType: e.target.value as RequestAuthType,
-                              externalAuthHeaderName: current.externalAuthHeaderName || DEFAULT_API_KEY_HEADER,
-                              externalAuthTokenExample: current.externalAuthTokenExample || DEFAULT_BEARER_TOKEN_EXAMPLE,
-                              externalAuthUsername: current.externalAuthUsername || DEFAULT_BASIC_USERNAME,
-                              externalAuthPassword: current.externalAuthPassword || DEFAULT_BASIC_PASSWORD,
-                              externalAuthApiKeyExample: current.externalAuthApiKeyExample || DEFAULT_API_KEY_EXAMPLE
-                            }
-                          : {
-                              authType: e.target.value as RequestAuthType,
-                              authHeaderName: current.authHeaderName || DEFAULT_API_KEY_HEADER,
-                              authTokenExample: current.authTokenExample || DEFAULT_BEARER_TOKEN_EXAMPLE,
-                              authUsername: current.authUsername || DEFAULT_BASIC_USERNAME,
-                              authPassword: current.authPassword || DEFAULT_BASIC_PASSWORD,
-                              authApiKeyExample: current.authApiKeyExample || DEFAULT_API_KEY_EXAMPLE
-                            })
-                      }
-                    : current
-                )
-              }
-            >
-              <option value="none">Без авторизации</option>
-              <option value="bearer">Bearer token</option>
-              <option value="basic">Basic auth</option>
-              <option value="api-key">API key</option>
-            </select>
-          </label>
-
-          {authType === 'bearer' && (
-            <label className="field">
-              <div className="label">Пример токена</div>
-              <input
-                type="text"
-                value={tokenExample}
-                onChange={(e) =>
-                  updateSection(section.id, (current) =>
-                    current.kind === 'parsed' && isRequestSection(current)
-                      ? { ...current, ...(isExternal ? { externalAuthTokenExample: e.target.value } : { authTokenExample: e.target.value }) }
-                      : current
-                  )
-                }
-                placeholder={DEFAULT_BEARER_TOKEN_EXAMPLE}
-              />
-            </label>
-          )}
-
-          {authType === 'basic' && (
-            <div className="row gap auth-grid">
-              <label className="field">
-                <div className="label">Логин</div>
-                <input
-                  type="text"
-                  value={username}
-                  onChange={(e) =>
-                    updateSection(section.id, (current) =>
-                      current.kind === 'parsed' && isRequestSection(current)
-                        ? { ...current, ...(isExternal ? { externalAuthUsername: e.target.value } : { authUsername: e.target.value }) }
-                        : current
-                    )
-                  }
-                  placeholder={DEFAULT_BASIC_USERNAME}
-                />
-              </label>
-              <label className="field">
-                <div className="label">Пароль</div>
-                <input
-                  type="text"
-                  value={password}
-                  onChange={(e) =>
-                    updateSection(section.id, (current) =>
-                      current.kind === 'parsed' && isRequestSection(current)
-                        ? { ...current, ...(isExternal ? { externalAuthPassword: e.target.value } : { authPassword: e.target.value }) }
-                        : current
-                    )
-                  }
-                  placeholder={DEFAULT_BASIC_PASSWORD}
-                />
-              </label>
-            </div>
-          )}
-
-          {authType === 'api-key' && (
-            <div className="row gap auth-grid">
-              <label className="field">
-                <div className="label">Имя header</div>
-                <input
-                  type="text"
-                  value={headerName}
-                  onChange={(e) =>
-                    updateSection(section.id, (current) =>
-                      current.kind === 'parsed' && isRequestSection(current)
-                        ? { ...current, ...(isExternal ? { externalAuthHeaderName: e.target.value } : { authHeaderName: e.target.value }) }
-                        : current
-                    )
-                  }
-                  placeholder={DEFAULT_API_KEY_HEADER}
-                />
-              </label>
-              <label className="field">
-                <div className="label">Пример API key</div>
-                <input
-                  type="text"
-                  value={apiKeyExample}
-                  onChange={(e) =>
-                    updateSection(section.id, (current) =>
-                      current.kind === 'parsed' && isRequestSection(current)
-                        ? { ...current, ...(isExternal ? { externalAuthApiKeyExample: e.target.value } : { authApiKeyExample: e.target.value }) }
-                        : current
-                    )
-                  }
-                  placeholder={DEFAULT_API_KEY_EXAMPLE}
-                />
-              </label>
-            </div>
-          )}
-
-          <div className="muted">Настройка автоматически попадет в headers и в итоговую документацию.</div>
-        </div>
-      </details>
-    );
-  }
-
-  function renderRequestMetaEditor(section: ParsedSection, target: ParseTarget = 'server'): ReactNode {
-    if (!isRequestSection(section)) return null;
-    const isExternal = target === 'client';
-    const title = isExternal ? 'Внешний вызов' : 'Общее описание метода';
-    const urlLabel = isExternal ? 'Внешний URL' : 'URL метода';
-    const blockId = isExternal ? 'meta-client' : 'meta-server';
-
-    const applyRequestMeta = (patch: Partial<Pick<ParsedSection, 'requestUrl' | 'requestMethod' | 'externalRequestUrl' | 'externalRequestMethod'>>) => {
-      updateSection(section.id, (current) => {
-        if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
-
-        const next = { ...current, ...patch };
-        const targetFormat = isExternal ? next.clientFormat ?? 'json' : next.format;
-        if (targetFormat !== 'curl') return next;
-
-        const syncRows = isExternal
-          ? next.clientRows ?? []
-          : [...getRequestHeaderRowsForEditor(next).filter((row) => row.enabled !== false), ...next.rows.filter((row) => row.source !== 'header')];
-
-        return {
-          ...next,
-          ...(isExternal
-            ? {
-                clientInput: buildInputFromRows(targetFormat, getExternalSourceRows(next), {
-                  requestUrl: next.externalRequestUrl,
-                  requestMethod: next.externalRequestMethod
-                }),
-                clientLastSyncedFormat: targetFormat
-              }
-            : {
-                input: buildInputFromRows(targetFormat, syncRows, {
-                  requestUrl: next.requestUrl,
-                  requestMethod: next.requestMethod
-                }),
-                lastSyncedFormat: targetFormat
-              })
-        };
-      });
-    };
-
-    return (
-      <details
-        className="expander"
-        open={isExpanderOpen(section.id, blockId)}
-        onToggle={(e) => setExpanderOpen(section.id, blockId, e.currentTarget.open)}
-      >
-        <summary className="expander-summary">{title}</summary>
-        <div className="expander-body">
-          <div className="row gap auth-grid">
-            <label className="field">
-              <div className="label">{urlLabel}</div>
-              <input
-                type="text"
-                value={isExternal ? section.externalRequestUrl ?? '' : section.requestUrl ?? ''}
-                onChange={(e) => applyRequestMeta(isExternal ? { externalRequestUrl: e.target.value } : { requestUrl: e.target.value })}
-                placeholder="https://api.example.com/v1/method"
-              />
-            </label>
-            <label className="field">
-              <div className="label">Тип метода</div>
-              <select
-                value={isExternal ? section.externalRequestMethod ?? 'POST' : section.requestMethod ?? 'POST'}
-                onChange={(e) => applyRequestMeta(isExternal ? { externalRequestMethod: e.target.value as RequestMethod } : { requestMethod: e.target.value as RequestMethod })}
-              >
-                <option value="GET">GET</option>
-                <option value="POST">POST</option>
-                <option value="PUT">PUT</option>
-                <option value="PATCH">PATCH</option>
-                <option value="DELETE">DELETE</option>
-              </select>
-            </label>
-            <label className="field">
-              <div className="label">Протокол</div>
-              <input type="text" value="REST" readOnly />
-            </label>
-          </div>
-          <div className="muted">Для MVP протокол фиксирован как REST. URL и HTTP-метод автоматически используются при генерации cURL.</div>
-        </div>
-      </details>
-    );
-  }
-
   function renderSourceEditor(section: ParsedSection, target: ParseTarget, title = 'Исходные данные'): ReactNode {
-    const format = getSourceFormat(section, target);
-    const value = getSourceValue(section, target);
-    const isEditing = editingSource?.sectionId === section.id && editingSource.target === target;
-    const currentValue = isEditing ? editingSource.draft : value;
-    const shouldOpenEmptyInput = !value.trim() && !isEditing;
-    const hasSourceValue = Boolean(currentValue.trim());
-
     return (
-      <div className="source-panel">
-        <div className="source-panel-head">
-          <div className="label">{title}</div>
-          <div className="source-format-status">
-            <span className={`source-format-badge ${hasSourceValue ? 'active' : ''}`}>{format.toUpperCase()}</span>
-          </div>
-          <div className="field-actions visible">
-            {!isEditing && (
-              <>
-                <button className="icon-button" type="button" title="Копировать" aria-label="Копировать" onClick={() => copyToClipboard(value)}>
-                  ⧉
-                </button>
-                {format === 'json' && (
-                  <button
-                    className="icon-button"
-                    type="button"
-                    title="Beautify"
-                    aria-label="Beautify"
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() =>
-                      updateSection(section.id, (current) => {
-                        if (current.kind !== 'parsed') return current;
-                        try {
-                          const nextValue = beautifySourceDraft(format, value);
-                          if (target === 'client' && isDualModelSection(current)) return { ...current, clientInput: nextValue, clientError: '' };
-                          return { ...current, input: nextValue, error: '' };
-                        } catch {
-                          return current;
-                        }
-                      })
-                    }
-                  >
-                    ✨
-                  </button>
-                )}
-                <button
-                  className="icon-button"
-                  type="button"
-                  title="Импорт текста"
-                  aria-label="Импорт текста"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => openSourceTextImport(section, target)}
-                >
-                  ⇣
-                </button>
-                <button
-                  className="icon-button"
-                  type="button"
-                  title="Редактировать"
-                  aria-label="Редактировать"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => startSourceEditing(section, target)}
-                >
-                  ✎
-                </button>
-              </>
-            )}
-            {isEditing && (
-              <>
-                {format === 'json' && (
-                  <button
-                    className="icon-button"
-                    type="button"
-                    title="Beautify"
-                    aria-label="Beautify"
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={beautifySourceEditing}
-                  >
-                    ✨
-                  </button>
-                )}
-                <button
-                  className="icon-button"
-                  type="button"
-                  title="Сохранить"
-                  aria-label="Сохранить"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={saveSourceEditing}
-                >
-                  ✓
-                </button>
-                <button
-                  className="icon-button danger"
-                  type="button"
-                  title="Отменить"
-                  aria-label="Отменить"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={cancelSourceEditing}
-                >
-                  ✕
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-
-        <div className="source-input-area">
-          {shouldOpenEmptyInput && (
-            <div className="source-edit-wrap">
-              <textarea
-                className="source-edit"
-                rows={12}
-                value=""
-                onChange={(e) => {
-                  const nextDraft = e.target.value;
-                  const nextFormat = applyDetectedSourceFormat(section.id, target, nextDraft, format);
-                  setEditingSource({
-                    sectionId: section.id,
-                    target,
-                    draft: nextDraft
-                  });
-                  setSourceEditorError(validateSourceDraft(nextFormat, nextDraft));
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') cancelSourceEditing();
-                }}
-                placeholder="Вставьте JSON или cURL"
-                autoFocus
-              />
-            </div>
-          )}
-
-          {!isEditing && !shouldOpenEmptyInput && (
-            <div className={`source-code source-code-display language-${format}`} onDoubleClick={() => startSourceEditing(section, target)}>
-              <pre className={`source-code language-${format}`}>
-                <code dangerouslySetInnerHTML={{ __html: highlightCode(format, currentValue || '') || '&nbsp;' }} />
-              </pre>
-            </div>
-          )}
-
-          {isEditing && (
-            <div className="source-edit-wrap">
-              <textarea
-                className="source-edit"
-                rows={12}
-                value={editingSource.draft}
-                onChange={(e) => {
-                  const nextDraft = e.target.value;
-                  const nextFormat = applyDetectedSourceFormat(section.id, target, nextDraft, format);
-                  setEditingSource((current) => (current ? { ...current, draft: nextDraft } : current));
-                  setSourceEditorError(validateSourceDraft(nextFormat, nextDraft));
-                }}
-                onBlur={() => {
-                  if (format !== 'json') saveSourceEditing();
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') cancelSourceEditing();
-                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) saveSourceEditing();
-                }}
-                placeholder="Вставьте JSON или cURL"
-                autoFocus
-              />
-              {sourceEditorError && <div className="inline-error">{sourceEditorError}</div>}
-            </div>
-          )}
-
-          <button
-            className="source-parse-fab"
-            type="button"
-            data-onboarding-anchor={target === 'server' ? 'run-parse' : undefined}
-            onClick={() => runParser(section, target)}
-            disabled={!currentValue.trim()}
-            title="Запустить парсер"
-          >
-            Парсить
-          </button>
-        </div>
-      </div>
+      <SourceEditor
+        section={section}
+        target={target}
+        title={title}
+        editingSource={editingSource}
+        sourceEditorError={sourceEditorError}
+        getSourceFormat={getSourceFormat}
+        getSourceValue={getSourceValue}
+        detectSourceFormat={detectSourceFormat}
+        validateSourceDraft={validateSourceDraft}
+        beautifySourceDraft={beautifySourceDraft}
+        highlightCode={highlightCode}
+        setEditingSource={setEditingSource}
+        setSourceEditorError={setSourceEditorError}
+        updateParsedSection={(id, updater) =>
+          updateSection(id, (current) => (current.kind === 'parsed' ? updater(current) : current))
+        }
+        copyToClipboard={copyToClipboard}
+        openSourceTextImport={openSourceTextImport}
+        startSourceEditing={startSourceEditing}
+        cancelSourceEditing={cancelSourceEditing}
+        saveSourceEditing={saveSourceEditing}
+        beautifySourceEditing={beautifySourceEditing}
+        runParser={runParser}
+      />
     );
   }
 
   function renderRequestEditor(section: ParsedSection) {
-    const serverLabel = getSectionSideLabel(section, 'server');
-    const clientLabel = getSectionSideLabel(section, 'client');
-    const exampleLabel = isResponseSection(section) ? 'Пример ответа' : 'Пример запроса';
     return (
-      <div className="stack">
-        <label className="switch">
-          <input
-            type="checkbox"
-            checked={Boolean(section.domainModelEnabled)}
-            onChange={(e) =>
-              updateSection(section.id, (current) => {
-                if (current.kind !== 'parsed' || !isDualModelSection(current)) return current;
-                if (e.target.checked) {
-                  return {
-                    ...current,
-                    domainModelEnabled: true,
-                    clientFormat: current.clientFormat ?? 'json',
-                    clientInput: current.clientInput ?? '',
-                    clientRows: current.clientRows ?? [],
-                    clientError: current.clientError ?? '',
-                    clientMappings: current.clientMappings ?? {}
-                  };
-                }
-
-                return {
-                  ...current,
-                  domainModelEnabled: false,
-                  clientFormat: 'json',
-                  clientInput: '',
-                  clientRows: [],
-                  clientError: '',
-                  clientMappings: {}
-                };
-              })
-            }
-          />
-          <span>Доменная модель</span>
-        </label>
-
-        {isRequestSection(section) && (
-          <>
-            {renderRequestMetaEditor(section, 'server')}
-            {renderRequestAuthEditor(section, 'server')}
-            <div className="stack">
-              <div className="label">Headers</div>
-              {renderRequestHeadersTable(section, 'server')}
-            </div>
-          </>
-        )}
-
-        <details
-          className="expander"
-          data-onboarding-anchor="prepare-source"
-          open={isExpanderOpen(section.id, 'source-server')}
-          onToggle={(e) => setExpanderOpen(section.id, 'source-server', e.currentTarget.open)}
-        >
-          <summary className="expander-summary">{serverLabel}</summary>
-          <div className="expander-body">
-            {renderSourceEditor(section, 'server', `${exampleLabel} (${serverLabel})`)}
-          </div>
-        </details>
-
-        {section.domainModelEnabled && (
-          <>
-            {isRequestSection(section) && (
-              <>
-                {renderRequestMetaEditor(section, 'client')}
-                {renderRequestAuthEditor(section, 'client')}
-                <div className="stack">
-                  <div className="label">Внешние headers</div>
-                  {renderRequestHeadersTable(section, 'client')}
-                </div>
-              </>
-            )}
-            <details
-              className="expander"
-              open={isExpanderOpen(section.id, 'source-client')}
-              onToggle={(e) => setExpanderOpen(section.id, 'source-client', e.currentTarget.open)}
-            >
-              <summary className="expander-summary">{clientLabel}</summary>
-              <div className="expander-body">
-                {renderSourceEditor(section, 'client', `${exampleLabel} (${clientLabel})`)}
-              </div>
-            </details>
-          </>
-        )}
-
-        {section.error && <div className="alert error">{serverLabel}: {section.error}</div>}
-        {section.clientError && <div className="alert error">{clientLabel}: {section.clientError}</div>}
-        {requestCellError && <div className="alert error">{requestCellError}</div>}
-        {renderParsedTable(section)}
-      </div>
-    );
-  }
-
-  function renderDiagramEditor(section: DiagramSection): ReactNode {
-    return (
-      <div className="stack">
-        <div className="row gap">
-          <button className="ghost small" type="button" onClick={() => addDiagram(section.id)}>
-            + Диаграмма
-          </button>
-        </div>
-
-        {section.diagrams.map((diagram, index) => {
-          const blockId = `diagram-item-${diagram.id}`;
-          const title = diagram.title.trim() || `Диаграмма ${index + 1}`;
-          const effectiveEngine = resolveDiagramEngine(diagram.code, diagram.engine);
-          const isOpen = isExpanderOpen(section.id, blockId);
-          const hasDiagramCode = Boolean(diagram.code.trim());
-
-          return (
-            <details
-              key={diagram.id}
-              className="expander"
-              open={isOpen}
-              onToggle={(e) => setExpanderOpen(section.id, blockId, e.currentTarget.open)}
-            >
-              <summary className={`expander-summary ${!isOpen && hasDiagramCode ? 'with-diagram-preview' : ''}`}>
-                <span className="expander-summary-title">{title}</span>
-                {!isOpen && hasDiagramCode && (
-                  <span className="diagram-collapsed-preview">
-                    {effectiveEngine === 'mermaid' && <MermaidLivePreview code={diagram.code} />}
-                    {effectiveEngine === 'plantuml' && (
-                      <span className="diagram-preview">
-                        <img className="diagram-preview-image" src={getPlantUmlImageUrl(diagram.code, 'svg')} alt={title} loading="lazy" />
-                      </span>
-                    )}
-                  </span>
-                )}
-              </summary>
-              <div className="expander-body">
-                <div className="diagram-header-row">
-                  <label className="field">
-                    <div className="label">Название</div>
-                    <input
-                      type="text"
-                      value={diagram.title}
-                      onChange={(e) => updateDiagram(section.id, diagram.id, (current) => ({ ...current, title: e.target.value }))}
-                      placeholder="Например: Общий процесс"
-                    />
-                  </label>
-                  <div className="badge">{effectiveEngine === 'plantuml' ? 'PLANTUML (AUTO)' : 'MERMAID (AUTO)'}</div>
-                </div>
-
-                <label className="field">
-                  <div className="label">Код диаграммы</div>
-                  <textarea
-                    className="source-edit"
-                    rows={10}
-                    value={diagram.code}
-                    onChange={(e) =>
-                      updateDiagram(section.id, diagram.id, (current) => ({
-                        ...current,
-                        code: e.target.value,
-                        engine: resolveDiagramEngine(e.target.value, current.engine)
-                      }))
-                    }
-                    placeholder={effectiveEngine === 'mermaid' ? 'sequenceDiagram\nA->>B: Hello' : '@startuml\nAlice -> Bob: Hello\n@enduml'}
-                  />
-                </label>
-
-                <div className="label">Предпросмотр</div>
-                {!hasDiagramCode && <div className="muted">Вставьте код диаграммы для предпросмотра</div>}
-                {hasDiagramCode && effectiveEngine === 'mermaid' && <MermaidLivePreview code={diagram.code} />}
-                {hasDiagramCode && effectiveEngine === 'plantuml' && (
-                  <div className="diagram-preview">
-                    <img className="diagram-preview-image" src={getPlantUmlImageUrl(diagram.code, 'svg')} alt={title} loading="lazy" />
-                  </div>
-                )}
-
-                <div className="diagram-description-block">
-                  <div className="label">Текст под диаграммой</div>
-                  <div className="text-toolbar" role="toolbar" aria-label="Форматирование текста под диаграммой">
-                    <div className="toolbar-group" aria-label="Базовое форматирование">
-                      <button
-                        className="ghost small toolbar-button"
-                        type="button"
-                        title="Жирный"
-                        aria-label="Жирный"
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'bold')}
-                      >
-                        <span className="toolbar-icon toolbar-icon-bold">B</span>
-                      </button>
-                      <button
-                        className="ghost small toolbar-button"
-                        type="button"
-                        title="Курсив"
-                        aria-label="Курсив"
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'italic')}
-                      >
-                        <span className="toolbar-icon toolbar-icon-italic">I</span>
-                      </button>
-                      <button
-                        className="ghost small toolbar-button"
-                        type="button"
-                        title="Код"
-                        aria-label="Код"
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'code')}
-                      >
-                        <span className="toolbar-icon">&lt;/&gt;</span>
-                      </button>
-                      <button
-                        className="ghost small toolbar-button"
-                        type="button"
-                        title="Выделение цветом"
-                        aria-label="Выделение цветом"
-                        onMouseDown={(event) => {
-                          event.preventDefault();
-                          const editor = diagramTextRefs.current[getDiagramEditorKey(section.id, diagram.id)];
-                          rememberSelectionForEditor(editor);
-                        }}
-                        onClick={() => {
-                          const nextColor = pickHighlightColor(selectedHighlightColor);
-                          if (!nextColor) return;
-                          setSelectedHighlightColor(nextColor);
-                          applyDiagramTextCommand(section.id, diagram.id, 'highlight', {
-                            color: nextColor
-                          });
-                        }}
-                      >
-                        <span className="toolbar-icon">🖍</span>
-                      </button>
-                    </div>
-                    <div className="toolbar-group" aria-label="Структура текста">
-                      <button
-                        className="ghost small toolbar-button"
-                        type="button"
-                        title="Подзаголовок"
-                        aria-label="Подзаголовок"
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'h3')}
-                      >
-                        <span className="toolbar-heading-glyph" aria-hidden="true">
-                          <span className="toolbar-heading-main">T</span>
-                          <span className="toolbar-heading-level">3</span>
-                        </span>
-                      </button>
-                      <button
-                        className="ghost small toolbar-button"
-                        type="button"
-                        title="Цитата"
-                        aria-label="Цитата"
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'quote')}
-                      >
-                        <span className="toolbar-icon">❝</span>
-                      </button>
-                    </div>
-                    <div className="toolbar-group" aria-label="Списки">
-                      <button
-                        className="ghost small toolbar-button"
-                        type="button"
-                        title="Маркированный список"
-                        aria-label="Маркированный список"
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'ul')}
-                      >
-                        <span className="toolbar-icon">•</span>
-                      </button>
-                      <button
-                        className="ghost small toolbar-button"
-                        type="button"
-                        title="Нумерованный список"
-                        aria-label="Нумерованный список"
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'ol')}
-                      >
-                        <span className="toolbar-icon">1.</span>
-                      </button>
-                    </div>
-                    <div className="toolbar-group toolbar-group-controls" aria-label="Кодовые блоки">
-                      <button
-                        className="ghost small toolbar-button toolbar-button-wide"
-                        type="button"
-                        title="Вставить блок кода"
-                        aria-label="Вставить блок кода"
-                        onMouseDown={(event) => {
-                          event.preventDefault();
-                          const editor = diagramTextRefs.current[getDiagramEditorKey(section.id, diagram.id)];
-                          rememberSelectionForEditor(editor);
-                        }}
-                        onClick={() => {
-                          const nextLanguage = pickCodeLanguage(selectedCodeLanguage);
-                          if (!nextLanguage) return;
-                          setSelectedCodeLanguage(nextLanguage);
-                          applyDiagramTextCommand(section.id, diagram.id, 'code-block', {
-                            language: nextLanguage
-                          });
-                        }}
-                      >
-                        <span className="toolbar-icon">{`{ }`}</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  <div
-                    ref={(node) => {
-                      diagramTextRefs.current[getDiagramEditorKey(section.id, diagram.id)] = node;
-                    }}
-                    className="rich-text-editor"
-                    contentEditable
-                    suppressContentEditableWarning
-                    onInput={() => syncDiagramDescriptionFromEditor(section.id, diagram.id)}
-                  />
-                </div>
-
-                <div className="row gap">
-                  <button className="ghost small" type="button" onClick={() => deleteDiagram(section.id, diagram.id)}>
-                    Удалить диаграмму
-                  </button>
-                </div>
-              </div>
-            </details>
-          );
-        })}
-      </div>
-    );
-  }
-
-  function renderErrorsEditor(section: ErrorsSection): ReactNode {
-    const serverRequestParameterOptions = Array.from(
-      new Set(
-        sections
-          .filter((item): item is ParsedSection => item.kind === 'parsed' && item.sectionType === 'request')
-          .flatMap((item) => getSectionRows(item))
-          .map((row) => row.field.trim())
-          .filter(Boolean)
-      )
-    ).sort((left, right) => left.localeCompare(right));
-
-    return (
-      <div className="stack">
-        <datalist id="http-status-options">
-          {POPULAR_HTTP_STATUS_CODES.map((code) => (
-            <option key={code} value={code} />
-          ))}
-          <option value="-" />
-        </datalist>
-
-        <datalist id="server-request-param-options">
-          {serverRequestParameterOptions.map((value) => (
-            <option key={value} value={value} />
-          ))}
-        </datalist>
-
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>№</th>
-                <th>Client HTTP Status</th>
-                <th>Client Response</th>
-                <th>Trigger (условия возникновения)</th>
-                <th>Error Type</th>
-                <th>Server HTTP Status</th>
-                <th>Полный internalCode</th>
-                <th>Server Response</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {section.rows.map((row, index) => {
-                const clientResponseError = validateJsonDraft(row.clientResponse);
-                const normalizedCode = row.internalCode.trim();
-                const hasUnknownInternalCode = Boolean(normalizedCode) && !ERROR_CATALOG_BY_CODE.has(normalizedCode);
-                const internalCodeKey = `${section.id}-error-${index}`;
-                const isInternalCodeOpen = openInternalCodeKey === internalCodeKey;
-                const searchValue = normalizedCode.toLowerCase();
-                const internalCodeOptions = ERROR_CATALOG
-                  .filter((item) => {
-                    if (!searchValue) return true;
-                    return (
-                      item.internalCode.toLowerCase().includes(searchValue)
-                      || item.httpStatus.toLowerCase().includes(searchValue)
-                      || item.message.toLowerCase().includes(searchValue)
-                    );
-                  })
-                  .slice(0, 25);
-
-                return (
-                <tr key={`${section.id}-error-${index}`}>
-                  <td>{index + 1}</td>
-                  <td>
-                    <input
-                      type="text"
-                      list="http-status-options"
-                      value={row.clientHttpStatus}
-                      onChange={(e) => updateErrorRow(section.id, index, (current) => ({ ...current, clientHttpStatus: e.target.value }))}
-                    />
-                  </td>
-                  <td>
-                    <div className="error-response-cell">
-                      <textarea
-                        className={clientResponseError ? 'input-warning' : ''}
-                        rows={getDynamicTextareaRows(row.clientResponse, 3, 10)}
-                        value={row.clientResponse}
-                        onChange={(e) => updateErrorRow(section.id, index, (current) => ({ ...current, clientResponse: e.target.value }))}
-                      />
-                      <button className="ghost small" type="button" onClick={() => insertJsonResponse(section.id, index)}>
-                        + JSON
-                      </button>
-                      {clientResponseError && <div className="inline-error">{clientResponseError}</div>}
-                    </div>
-                  </td>
-                  <td>
-                    <textarea
-                      rows={getDynamicTextareaRows(row.trigger, 2, 8)}
-                      value={row.trigger}
-                      onChange={(e) => updateErrorRow(section.id, index, (current) => ({ ...current, trigger: e.target.value }))}
-                    />
-                  </td>
-                  <td>
-                    <select
-                      value={row.errorType}
-                      onChange={(e) => updateErrorRow(section.id, index, (current) => ({ ...current, errorType: e.target.value as ErrorRow['errorType'] }))}
-                    >
-                      <option value="-">-</option>
-                      <option value="CommonException">CommonException</option>
-                      <option value="BusinessException">BusinessException</option>
-                      <option value="AlertException">AlertException</option>
-                    </select>
-                  </td>
-                  <td>
-                    <input
-                      type="text"
-                      disabled
-                      value={row.serverHttpStatus}
-                      title="Поле заполняется автоматически по internalCode"
-                    />
-                  </td>
-                  <td>
-                    <div
-                      className="internal-code-combobox"
-                      ref={(node) => {
-                        internalCodeAnchorRefs.current[internalCodeKey] = node;
-                      }}
-                    >
-                      <div className="internal-code-cell">
-                        <input
-                          className={hasUnknownInternalCode ? 'input-warning' : ''}
-                          type="text"
-                          value={row.internalCode}
-                          onFocus={() => {
-                            setOpenInternalCodeKey(internalCodeKey);
-                            setHighlightedInternalCodeIndex(0);
-                          }}
-                          onChange={(e) => {
-                            applyInternalCode(section.id, index, e.target.value);
-                            setOpenInternalCodeKey(internalCodeKey);
-                            setHighlightedInternalCodeIndex(0);
-                          }}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Escape') {
-                              event.preventDefault();
-                              setOpenInternalCodeKey(null);
-                              return;
-                            }
-
-                            if (event.key === 'ArrowDown') {
-                              event.preventDefault();
-                              if (!isInternalCodeOpen) {
-                                setOpenInternalCodeKey(internalCodeKey);
-                                setHighlightedInternalCodeIndex(0);
-                                return;
-                              }
-
-                              setHighlightedInternalCodeIndex((current) =>
-                                Math.min(current + 1, Math.max(internalCodeOptions.length - 1, 0))
-                              );
-                              return;
-                            }
-
-                            if (event.key === 'ArrowUp') {
-                              event.preventDefault();
-                              if (!isInternalCodeOpen) {
-                                setOpenInternalCodeKey(internalCodeKey);
-                                setHighlightedInternalCodeIndex(0);
-                                return;
-                              }
-
-                              setHighlightedInternalCodeIndex((current) => Math.max(current - 1, 0));
-                              return;
-                            }
-
-                            if (event.key === 'Enter' && isInternalCodeOpen && internalCodeOptions.length > 0) {
-                              event.preventDefault();
-                              const picked = internalCodeOptions[Math.min(highlightedInternalCodeIndex, internalCodeOptions.length - 1)];
-                              if (picked) {
-                                applyInternalCode(section.id, index, picked.internalCode);
-                                setOpenInternalCodeKey(null);
-                              }
-                            }
-                          }}
-                          title={hasUnknownInternalCode ? 'Код не найден в каталоге, заполните поля вручную или уточните internalCode' : ''}
-                          placeholder="Введите internalCode"
-                          aria-label="internalCode"
-                          aria-expanded={isInternalCodeOpen}
-                          aria-controls={`${internalCodeKey}-options`}
-                          aria-autocomplete="list"
-                        />
-                        <button
-                          className="internal-code-toggle"
-                          type="button"
-                          aria-label="Показать варианты internalCode"
-                          onClick={() => {
-                            setOpenInternalCodeKey((current) => (current === internalCodeKey ? null : internalCodeKey));
-                            setHighlightedInternalCodeIndex(0);
-                          }}
-                        >
-                          ▾
-                        </button>
-                      </div>
-                      {isInternalCodeOpen && internalCodePopoverState && createPortal(
-                        <div
-                          id={`${internalCodeKey}-options`}
-                          ref={internalCodePopoverRef}
-                          className={`internal-code-dropdown internal-code-dropdown-portal ${internalCodePopoverState.openUp ? 'is-top' : ''}`}
-                          role="listbox"
-                          style={{
-                            top: `${internalCodePopoverState.top}px`,
-                            left: `${internalCodePopoverState.left}px`,
-                            width: `${internalCodePopoverState.width}px`,
-                            maxHeight: `${internalCodePopoverState.maxHeight}px`
-                          }}
-                        >
-                          {internalCodeOptions.length === 0 && (
-                            <div className="internal-code-empty">Ничего не найдено</div>
-                          )}
-                          {internalCodeOptions.map((item, optionIndex) => (
-                            <button
-                              key={item.internalCode}
-                              type="button"
-                              className={`internal-code-option ${optionIndex === Math.min(highlightedInternalCodeIndex, Math.max(internalCodeOptions.length - 1, 0)) ? 'active' : ''}`}
-                              onMouseDown={(event) => event.preventDefault()}
-                              onMouseEnter={() => setHighlightedInternalCodeIndex(optionIndex)}
-                              onClick={() => {
-                                applyInternalCode(section.id, index, item.internalCode);
-                                setOpenInternalCodeKey(null);
-                              }}
-                            >
-                              <span className="internal-code-option-code">{item.internalCode}</span>
-                              <span className="internal-code-option-meta">{`${item.httpStatus} - ${item.message}`}</span>
-                            </button>
-                          ))}
-                        </div>,
-                        document.body
-                      )}
-                    </div>
-                    {hasUnknownInternalCode && <div className="inline-warning">Код не найден в каталоге</div>}
-                  </td>
-                  <td>
-                    <input
-                      type="text"
-                      disabled
-                      value={row.message}
-                      title="Поле заполняется автоматически по internalCode"
-                    />
-                  </td>
-                  <td>
-                    <button className="icon-button danger" type="button" onClick={() => deleteErrorRow(section.id, index)} aria-label="Удалить строку">
-                      ×
-                    </button>
-                  </td>
-                </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          <div className="table-actions">
-            <button className="ghost small" type="button" onClick={() => addErrorRow(section.id)}>
-              + Строка ошибки
-            </button>
-          </div>
-        </div>
-
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>№</th>
-                <th>Параметр (server request)</th>
-                <th>Кейс валидации</th>
-                <th>Условие возникновения</th>
-                <th>cause</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {section.validationRules.map((rule, index) => (
-                <tr key={`${section.id}-validation-${index}`}>
-                  <td>{index + 1}</td>
-                  <td>
-                    <input
-                      type="text"
-                      list="server-request-param-options"
-                      value={rule.parameter}
-                      onChange={(e) => updateValidationRuleRow(section.id, index, (current) => ({ ...current, parameter: e.target.value }))}
-                      placeholder="Выберите из server request или введите вручную"
-                    />
-                  </td>
-                  <td>
-                    <select
-                      value={rule.validationCase}
-                      onChange={(e) =>
-                        updateValidationRuleRow(section.id, index, (current) => ({
-                          ...current,
-                          validationCase: e.target.value
-                        }))
-                      }
-                    >
-                      {VALIDATION_CASE_OPTIONS.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <textarea
-                      rows={getDynamicTextareaRows(rule.condition, 1, 6)}
-                      value={rule.condition}
-                      onChange={(e) => updateValidationRuleRow(section.id, index, (current) => ({ ...current, condition: e.target.value }))}
-                    />
-                  </td>
-                  <td>
-                    <textarea
-                      rows={getDynamicTextareaRows(rule.cause, 1, 6)}
-                      value={rule.cause}
-                      onChange={(e) => updateValidationRuleRow(section.id, index, (current) => ({ ...current, cause: e.target.value }))}
-                    />
-                  </td>
-                  <td>
-                    <button
-                      className="icon-button danger"
-                      type="button"
-                      onClick={() => deleteValidationRuleRow(section.id, index)}
-                      aria-label="Удалить правило валидации"
-                    >
-                      ×
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="table-actions">
-            <button className="ghost small" type="button" onClick={() => addValidationRuleRow(section.id)}>
-              + Правило валидации
-            </button>
-          </div>
-        </div>
-      </div>
+      <RequestEditor
+        section={section}
+        getSectionSideLabel={getSectionSideLabel}
+        isResponseSection={isResponseSection}
+        isRequestSection={isRequestSection}
+        isDualModelSection={isDualModelSection}
+        isExpanderOpen={isExpanderOpen}
+        setExpanderOpen={setExpanderOpen}
+        getExternalSourceRows={getExternalSourceRows}
+        getRequestHeaderRowsForEditor={getRequestHeaderRowsForEditor}
+        renderRequestHeadersTable={renderRequestHeadersTable}
+        renderSourceEditor={renderSourceEditor}
+        renderParsedTable={renderParsedTable}
+        updateParsedSection={(id, updater) =>
+          updateSection(id, (current) => (current.kind === 'parsed' ? updater(current) : current))
+        }
+        requestCellError={requestCellError}
+      />
     );
   }
 
@@ -5012,53 +3619,21 @@ export default function App() {
         </div>
       )}
 
-      <header ref={topbarRef} className="topbar">
-        <div className="brand">
-          <span className="logo" aria-hidden>
-            API
-          </span>
-          <div>
-            <h1>Doc Builder</h1>
-          </div>
-        </div>
-        <div className="actions">
-          <div className="actions-main">
-          <button className="ghost" onClick={resetProject}>
-            Новый эндпоинт
-          </button>
-          <button className="ghost" type="button" onClick={() => openProjectImportDialog(false)}>Импорт</button>
-          <input ref={importInputRef} className="hidden-file-input" type="file" accept="application/json" onChange={(e) => importProjectJson(e.target.files?.[0])} />
-          <button className="ghost" onClick={exportProjectJson} disabled={!activeMethod} title={exportTitle}>
-            Экспорт JSON
-          </button>
-          <button data-onboarding-anchor="export-docs" onClick={() => void handleExportHtml()} disabled={!activeMethod} title={exportTitle}>Экспорт HTML</button>
-          <button onClick={() => void handleExportWiki()} disabled={!activeMethod} title={exportTitle}>Экспорт Wiki</button>
-          </div>
-          <div className="actions-side">
-          <button
-            type="button"
-            className="theme-mermaid-toggle"
-            onClick={toggleTheme}
-            aria-label={theme === 'dark' ? 'Включить светлую тему' : 'Включить ночную тему'}
-            title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-          >
-            <span className="theme-mermaid-orb" aria-hidden />
-            <span className="theme-mermaid-icon" aria-hidden>{theme === 'dark' ? '☾' : '☀'}</span>
-          </button>
-          <div className={`badge autosave-badge ${autosave.state}`} aria-live="polite" title={autosave.state === 'saved' ? 'Автосохранение выполнено' : undefined}>
-            {autosave.state === 'saving' && 'Сохранение...'}
-            {autosave.state === 'saved' && (
-              <>
-                <span className="status-icon" aria-hidden />
-                <span className="status-time">{autosave.at ?? '--:--'}</span>
-              </>
-            )}
-            {autosave.state === 'error' && 'Ошибка сохранения'}
-            {autosave.state === 'idle' && 'Готово'}
-          </div>
-          </div>
-        </div>
-      </header>
+      <AppHeader
+        topbarRef={topbarRef}
+        importInputRef={importInputRef}
+        resetProject={resetProject}
+        openProjectImportDialog={openProjectImportDialog}
+        importProjectJson={importProjectJson}
+        exportProjectJson={exportProjectJson}
+        handleExportHtml={handleExportHtml}
+        handleExportWiki={handleExportWiki}
+        activeMethod={activeMethod}
+        exportTitle={exportTitle}
+        toggleTheme={toggleTheme}
+        theme={theme}
+        autosave={autosave}
+      />
 
       {importError && <div className="alert error">Ошибка импорта: {importError}</div>}
       {toastMessage && <div className="toast-info">{toastMessage}</div>}
@@ -5156,128 +3731,32 @@ export default function App() {
       </div>
 
       <div className="layout">
-        <aside className="sidebar" role="region" aria-label={ENABLE_MULTI_METHODS ? 'Методы и секции' : 'Секции'}>
-          {ENABLE_MULTI_METHODS && (
-            <div className="sidebar-panel method-panel">
-              <div className="sidebar-panel-head">
-                <div className="muted">Методы</div>
-              </div>
-              <div className="method-list" role="listbox" aria-label="Список методов">
-                {methods.map((method) => (
-                  <button
-                    key={method.id}
-                    type="button"
-                    className={`section-item method-item ${activeMethod?.id === method.id ? 'active' : ''}`}
-                    onClick={() => switchMethod(method)}
-                  >
-                    <div className="section-title">{method.name}</div>
-                    <div className="chips">
-                      <span className="chip">{method.sections.length} секц.</span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-              <div className="method-actions">
-                <button className="ghost small" type="button" onClick={createMethod}>
-                  + Метод
-                </button>
-                <button className="ghost small" type="button" onClick={deleteActiveMethod} disabled={methods.length <= 1 || !activeMethod}>
-                  Удалить метод
-                </button>
-              </div>
-              {activeMethod && (
-                <input
-                  ref={methodNameInputRef}
-                  className="inline-input"
-                  type="text"
-                  value={activeMethod.name}
-                  onChange={(event) => updateActiveMethodName(event.target.value)}
-                  onBlur={normalizeActiveMethodName}
-                  placeholder="Название метода"
-                  aria-label="Название активного метода"
-                />
-              )}
-              {methodNameWarning && <div className="method-warning">{methodNameWarning}</div>}
-            </div>
-          )}
-
-          <div className={`sidebar-panel section-panel ${isSectionPanelPulse ? 'section-panel-pulse' : ''}`}>
-            <div className="section-list-head">
-              <div className="muted">Секции</div>
-              <div className="context-pill context-pill-transition" aria-live="polite">
-                {activeMethod ? activeMethod.name : 'Метод не выбран'}
-              </div>
-            </div>
-            <div className="section-list">
-              {sections.map((section) => {
-                const error = validationMap.get(section.id);
-                return (
-                  <button
-                    key={section.id}
-                    role="option"
-                    aria-selected={selectedSection?.id === section.id}
-                    className={`section-item ${selectedSection?.id === section.id ? 'active' : ''} ${error ? 'warn' : ''} ${!section.enabled ? 'disabled' : ''}`}
-                    draggable
-                    onDragStart={() => setDraggingId(section.id)}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={() => {
-                      if (draggingId) setSections((prev) => reorderSections(prev, draggingId, section.id));
-                      setDraggingId(null);
-                    }}
-                    onClick={() => setSelectedId(section.id)}
-                  >
-                    <div className="section-title">{resolveSectionTitle(section.title)}</div>
-                    <div className="chips">
-                      {section.kind === 'parsed' && (
-                        <span className="chip">
-                          {section.sectionType === 'request'
-                            ? 'REQUEST'
-                            : section.sectionType === 'response'
-                              ? 'RESPONSE'
-                              : section.format.toUpperCase()}
-                        </span>
-                      )}
-                      {section.kind === 'diagram' && <span className="chip">DIAGRAM</span>}
-                      {section.kind === 'errors' && <span className="chip">ERRORS</span>}
-                      {!section.enabled && <span className="chip muted">off</span>}
-                      {error && <span className="chip danger">err</span>}
-                    </div>
-                  </button>
-                );
-              })}
-              {sections.length === 0 && (
-                <div className="empty-state">
-                  <div>У выбранного метода пока нет секций.</div>
-                  <button className="ghost small" type="button" onClick={() => addSectionByType('text')}>
-                    + Добавить первую секцию
-                  </button>
-                </div>
-              )}
-            </div>
-            <div className="sidebar-footer">
-              <div className="add-block-menu">
-                <button className="ghost small" type="button" onClick={() => setIsAddBlockMenuOpen((current) => !current)}>
-                  + Добавить секцию
-                </button>
-                {isAddBlockMenuOpen && (
-                  <div className="add-block-popover" role="menu" aria-label="Тип нового блока">
-                    {ADDABLE_BLOCK_TYPES.map((item) => (
-                      <button
-                        key={item.type}
-                        className="add-block-option"
-                        type="button"
-                        role="menuitem"
-                        onClick={() => addSectionByType(item.type)}
-                      >
-                        <span className="add-block-option-title">{item.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </aside>
+        <SectionSidebar
+          enableMultiMethods={ENABLE_MULTI_METHODS}
+          methods={methods}
+          activeMethod={activeMethod}
+          switchMethod={switchMethod}
+          createMethod={createMethod}
+          deleteActiveMethod={deleteActiveMethod}
+          methodNameInputRef={methodNameInputRef}
+          updateActiveMethodName={updateActiveMethodName}
+          normalizeActiveMethodName={normalizeActiveMethodName}
+          methodNameWarning={methodNameWarning}
+          isSectionPanelPulse={isSectionPanelPulse}
+          sections={sections}
+          validationMap={validationMap}
+          selectedSection={selectedSection}
+          setDraggingId={setDraggingId}
+          draggingId={draggingId}
+          reorderSections={reorderSections}
+          setSections={setSections}
+          setSelectedId={setSelectedId}
+          resolveSectionTitle={resolveSectionTitle}
+          addSectionByType={addSectionByType}
+          isAddBlockMenuOpen={isAddBlockMenuOpen}
+          setIsAddBlockMenuOpen={setIsAddBlockMenuOpen}
+          addableBlockTypes={ADDABLE_BLOCK_TYPES}
+        />
 
         <main className="workspace" role="main">
           <div className="tabs" role="tablist" aria-label="Просмотр">
@@ -5339,192 +3818,17 @@ export default function App() {
                   </div>
 
                   {selectedSection.kind === 'text' && (
-                    <div className="stack">
-                      <div className="editor-toolbar-shell" data-onboarding-anchor="refine-structure">
-                        <div className="editor-toolbar-head">
-                          <div className="editor-toolbar-title">Редактор текста</div>
-                          <div className="editor-toolbar-note">Выделите текст и примените форматирование</div>
-                        </div>
-                        <div className="text-toolbar" role="toolbar" aria-label="Форматирование текста">
-                          <div className="toolbar-group" aria-label="Базовое форматирование">
-                            <button
-                              className="ghost small toolbar-button"
-                              type="button"
-                              title="Жирный"
-                              aria-label="Жирный"
-                              onMouseDown={(event) => {
-                                event.preventDefault();
-                                rememberTextSelection();
-                              }}
-                              onClick={() => applyTextEditorCommand(selectedSection.id, 'bold')}
-                            >
-                              <span className="toolbar-icon toolbar-icon-bold">B</span>
-                            </button>
-                            <button
-                              className="ghost small toolbar-button"
-                              type="button"
-                              title="Курсив"
-                              aria-label="Курсив"
-                              onMouseDown={(event) => {
-                                event.preventDefault();
-                                rememberTextSelection();
-                              }}
-                              onClick={() => applyTextEditorCommand(selectedSection.id, 'italic')}
-                            >
-                              <span className="toolbar-icon toolbar-icon-italic">I</span>
-                            </button>
-                            <button
-                              className="ghost small toolbar-button"
-                              type="button"
-                              title="Код"
-                              aria-label="Код"
-                              onMouseDown={(event) => {
-                                event.preventDefault();
-                                rememberTextSelection();
-                              }}
-                              onClick={() => applyTextEditorCommand(selectedSection.id, 'code')}
-                            >
-                              <span className="toolbar-icon">&lt;/&gt;</span>
-                            </button>
-                            <button
-                              className="ghost small toolbar-button"
-                              type="button"
-                              title="Выделение цветом"
-                              aria-label="Выделение цветом"
-                              onMouseDown={(event) => {
-                                event.preventDefault();
-                                rememberTextSelection();
-                              }}
-                              onClick={() => {
-                                const nextColor = pickHighlightColor(selectedHighlightColor);
-                                if (!nextColor) return;
-                                setSelectedHighlightColor(nextColor);
-                                applyTextEditorCommand(selectedSection.id, 'highlight', {
-                                  color: nextColor
-                                });
-                              }}
-                            >
-                              <span className="toolbar-icon">🖍</span>
-                            </button>
-                          </div>
-                          <div className="toolbar-group" aria-label="Структура текста">
-                            <button
-                              className="ghost small toolbar-button"
-                              type="button"
-                              title="Подзаголовок"
-                              aria-label="Подзаголовок"
-                              onMouseDown={(event) => {
-                                event.preventDefault();
-                                rememberTextSelection();
-                              }}
-                              onClick={() => applyTextEditorCommand(selectedSection.id, 'h3')}
-                            >
-                              <span className="toolbar-heading-glyph" aria-hidden="true">
-                                <span className="toolbar-heading-main">T</span>
-                                <span className="toolbar-heading-level">3</span>
-                              </span>
-                            </button>
-                            <button
-                              className="ghost small toolbar-button"
-                              type="button"
-                              title="Цитата"
-                              aria-label="Цитата"
-                              onMouseDown={(event) => {
-                                event.preventDefault();
-                                rememberTextSelection();
-                              }}
-                              onClick={() => applyTextEditorCommand(selectedSection.id, 'quote')}
-                            >
-                              <span className="toolbar-icon">❝</span>
-                            </button>
-                          </div>
-                          <div className="toolbar-group" aria-label="Списки">
-                            <button
-                              className="ghost small toolbar-button"
-                              type="button"
-                              title="Маркированный список"
-                              aria-label="Маркированный список"
-                              onMouseDown={(event) => {
-                                event.preventDefault();
-                                rememberTextSelection();
-                              }}
-                              onClick={() => applyTextEditorCommand(selectedSection.id, 'ul')}
-                            >
-                              <span className="toolbar-icon">•</span>
-                            </button>
-                            <button
-                              className="ghost small toolbar-button"
-                              type="button"
-                              title="Нумерованный список"
-                              aria-label="Нумерованный список"
-                              onMouseDown={(event) => {
-                                event.preventDefault();
-                                rememberTextSelection();
-                              }}
-                              onClick={() => applyTextEditorCommand(selectedSection.id, 'ol')}
-                            >
-                              <span className="toolbar-icon">1.</span>
-                            </button>
-                          </div>
-                          <div className="toolbar-group toolbar-group-controls" aria-label="Кодовые блоки">
-                            <button
-                              className="ghost small toolbar-button toolbar-button-wide"
-                              type="button"
-                              title="Вставить блок кода"
-                              aria-label="Вставить блок кода"
-                              onMouseDown={(event) => {
-                                event.preventDefault();
-                                rememberTextSelection();
-                              }}
-                              onClick={() => {
-                                const nextLanguage = pickCodeLanguage(selectedCodeLanguage);
-                                if (!nextLanguage) return;
-                                setSelectedCodeLanguage(nextLanguage);
-                                applyTextEditorCommand(selectedSection.id, 'code-block', {
-                                  language: nextLanguage
-                                });
-                              }}
-                            >
-                              <span className="toolbar-icon">{`{ }`}</span>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="panel-sub">Поддерживаются подзаголовки, цитаты, код и вложенные списки с Tab.</div>
-                      <label className="field">
-                        <div className="label">Содержимое</div>
-                        <div
-                          ref={textSectionRef}
-                          className="rich-text-editor"
-                          contentEditable
-                          suppressContentEditableWarning
-                          onInput={() => {
-                            rememberTextSelection();
-                            syncTextSectionFromEditor(selectedSection.id);
-                          }}
-                          onMouseUp={rememberTextSelection}
-                          onKeyUp={rememberTextSelection}
-                          onKeyDown={(event) => {
-                            if (event.key !== 'Tab') return;
-
-                            const selection = window.getSelection();
-                            const anchorNode = selection?.anchorNode;
-                            const anchorElement =
-                              anchorNode instanceof Element ? anchorNode : anchorNode?.parentElement;
-                            const listItem = anchorElement?.closest('li');
-
-                            if (!listItem || !textSectionRef.current?.contains(listItem)) return;
-
-                            event.preventDefault();
-                            rememberTextSelection();
-                            restoreTextSelection();
-                            document.execCommand(event.shiftKey ? 'outdent' : 'indent');
-                            rememberTextSelection();
-                            syncTextSectionFromEditor(selectedSection.id);
-                          }}
-                        />
-                      </label>
-                    </div>
+                    <TextSectionEditor
+                      section={selectedSection}
+                      textSectionRef={textSectionRef}
+                      selectedHighlightColor={selectedHighlightColor}
+                      setSelectedHighlightColor={setSelectedHighlightColor}
+                      rememberTextSelection={rememberTextSelection}
+                      restoreTextSelection={restoreTextSelection}
+                      syncTextSectionFromEditor={syncTextSectionFromEditor}
+                      applyTextEditorCommand={applyTextEditorCommand}
+                      pickHighlightColor={pickHighlightColor}
+                    />
                   )}
 
                   {selectedSection.kind === 'parsed' && (
@@ -5546,8 +3850,53 @@ export default function App() {
                     </>
                   )}
 
-                  {selectedSection.kind === 'diagram' && renderDiagramEditor(selectedSection)}
-                  {selectedSection.kind === 'errors' && renderErrorsEditor(selectedSection)}
+                  {selectedSection.kind === 'diagram' && (
+                    <DiagramEditor
+                      section={selectedSection}
+                      selectedHighlightColor={selectedHighlightColor}
+                      selectedCodeLanguage={selectedCodeLanguage}
+                      addDiagram={addDiagram}
+                      updateDiagram={updateDiagram}
+                      deleteDiagram={deleteDiagram}
+                      isExpanderOpen={isExpanderOpen}
+                      setExpanderOpen={setExpanderOpen}
+                      setDiagramTextRef={setDiagramTextRef}
+                      getDiagramTextEditor={getDiagramTextEditor}
+                      syncDiagramDescriptionFromEditor={syncDiagramDescriptionFromEditor}
+                      applyDiagramTextCommand={applyDiagramTextCommand}
+                      rememberSelectionForEditor={rememberSelectionForEditor}
+                      pickHighlightColor={pickHighlightColor}
+                      pickCodeLanguage={pickCodeLanguage}
+                      setSelectedHighlightColor={setSelectedHighlightColor}
+                      setSelectedCodeLanguage={setSelectedCodeLanguage}
+                      MermaidPreview={MermaidLivePreview}
+                    />
+                  )}
+                {selectedSection.kind === 'errors' && (
+                  <ErrorsEditor
+                    section={selectedSection}
+                    sections={sections.filter((item): item is ParsedSection => item.kind === 'parsed')}
+                    openInternalCodeKey={openInternalCodeKey}
+                    setOpenInternalCodeKey={setOpenInternalCodeKey}
+                    highlightedInternalCodeIndex={highlightedInternalCodeIndex}
+                    setHighlightedInternalCodeIndex={setHighlightedInternalCodeIndex}
+                    internalCodePopoverState={internalCodePopoverState}
+                    internalCodeAnchorRefs={internalCodeAnchorRefs}
+                    internalCodePopoverRef={internalCodePopoverRef}
+                    validationCaseOptions={VALIDATION_CASE_OPTIONS}
+                    getSectionRows={getSectionRows}
+                    getDynamicTextareaRows={getDynamicTextareaRows}
+                    validateJsonDraft={validateJsonDraft}
+                    updateErrorRow={updateErrorRow}
+                    insertJsonResponse={insertJsonResponse}
+                    applyInternalCode={applyInternalCode}
+                    deleteErrorRow={deleteErrorRow}
+                    addErrorRow={addErrorRow}
+                    updateValidationRuleRow={updateValidationRuleRow}
+                    deleteValidationRuleRow={deleteValidationRuleRow}
+                    addValidationRuleRow={addValidationRuleRow}
+                  />
+                )}
                 </section>
               )}
 

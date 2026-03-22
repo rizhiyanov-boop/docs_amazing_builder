@@ -318,7 +318,7 @@ function renderRequestSection(section: ParsedSection, interactive = true): strin
       ? `<details open><summary>Request schema <span class="sumhint">${section.format.toUpperCase()}</span></summary>${renderStructuredTable(otherRows, section)}</details>`
       : '',
     renderCodeBlock(`${section.id}-server-example`, 'Server request example', section.input, interactive, section.format),
-    renderCodeBlock(`${section.id}-server-curl`, 'Server cURL', serverCurl, interactive),
+    renderCodeBlock(`${section.id}-server-curl`, 'Server cURL', serverCurl, interactive, 'curl'),
     section.domainModelEnabled
       ? `<details open><summary>Внешний вызов <span class="sumhint">${escapeHtml(requestProtocol)}</span></summary><div class="table-shell"><table><tbody><tr><td>Внешний URL</td><td>${renderCell(
           externalRequestUrl
@@ -333,7 +333,7 @@ function renderRequestSection(section: ParsedSection, interactive = true): strin
     section.domainModelEnabled
       ? renderCodeBlock(`${section.id}-client-example`, 'Client request example', section.clientInput ?? '', interactive, section.clientFormat ?? 'json')
       : '',
-    section.domainModelEnabled ? renderCodeBlock(`${section.id}-client-curl`, 'Client cURL', clientCurl, interactive) : '',
+    section.domainModelEnabled ? renderCodeBlock(`${section.id}-client-curl`, 'Client cURL', clientCurl, interactive, 'curl') : '',
     requestError ? `<div class="note bad"><b>Ошибка секции</b><br/>${escapeHtml(requestError)}</div>` : ''
   ]
     .filter(Boolean)

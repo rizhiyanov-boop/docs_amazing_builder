@@ -28,6 +28,19 @@ const HIGHLIGHT_RE = /\{highlight:([^}]+)\}([\s\S]*?)\{highlight\}/g;
 const CODE_BLOCK_OPEN_RE = /^\{code(?::([^}\s]+))?\}$/i;
 const CODE_BLOCK_CLOSE_RE = /^\{code\}$/i;
 
+export const RICH_TEXT_CODE_LANGUAGE_OPTIONS = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'bash', label: 'Bash' },
+  { value: 'json', label: 'JSON' },
+  { value: 'javascript', label: 'JavaScript' },
+  { value: 'typescript', label: 'TypeScript' },
+  { value: 'python', label: 'Python' },
+  { value: 'java', label: 'Java' },
+  { value: 'kotlin', label: 'Kotlin' },
+  { value: 'sql', label: 'SQL' },
+  { value: 'xml', label: 'XML' }
+] as const;
+
 type RichTextRenderOptions = {
   editable?: boolean;
 };
@@ -87,8 +100,19 @@ function renderRichCodeBlock(code: string, languageHint: string, options?: RichT
 
   if (editable) {
     const languageAttr = ` data-code-language="${escapeRichTextHtml(normalizedLanguage)}"`;
+    const languageOptions = RICH_TEXT_CODE_LANGUAGE_OPTIONS.map((option) => {
+      const isSelected = option.value === normalizedLanguage ? ' selected' : '';
+      return `<option value="${escapeRichTextHtml(option.value)}"${isSelected}>${escapeRichTextHtml(option.label)}</option>`;
+    }).join('');
+
     return [
       `<pre class="rich-code-block" data-rich-code-block="1"${languageAttr}>`,
+      '<div class="rich-code-block-toolbar" contenteditable="false">',
+      '<label class="rich-code-block-language">',
+      '<span class="rich-code-block-language-label">Language</span>',
+      `<select class="rich-code-block-language-select" data-code-language-select="1" aria-label="Code block language">${languageOptions}</select>`,
+      '</label>',
+      '</div>',
       `<code>${escapeRichTextHtml(code)}</code>`,
       '</pre>'
     ].join('');
@@ -114,6 +138,10 @@ function renderRichCodeBlock(code: string, languageHint: string, options?: RichT
     `<code class="hljs language-${escapeRichTextHtml(detectedLanguage)}">${autoHighlighted.value}</code>`,
     '</pre>'
   ].join('');
+}
+
+export function renderEditableCodeBlockHtml(code: string, languageHint = 'auto'): string {
+  return renderRichCodeBlock(code, languageHint, { editable: true });
 }
 
 export function extractAnchorsFromText(value: string): RichTextAnchor[] {

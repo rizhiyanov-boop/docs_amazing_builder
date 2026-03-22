@@ -1,0 +1,29 @@
+{
+  "version": 3,
+  "updatedAt": "2026-03-21T00:00:00.000Z",
+  "activeMethodId": "method-imported",
+  "methods": [
+    {
+      "id": "method-imported",
+      "name": "Imported smoke method",
+      "updatedAt": "2026-03-21T00:00:00.000Z",
+      "sections": [
+        {
+          "id": "goal",
+          "title": "Цель",
+          "enabled": true,
+          "kind": "text",
+          "value": "Imported goal content"
+        },
+        {
+          "id": "imported-notes",
+          "title": "Imported notes",
+          "enabled": true,
+          "kind": "text",
+          "value": "Imported smoke content"
+        }
+      ]
+    }
+  ],
+  "groups": []
+}

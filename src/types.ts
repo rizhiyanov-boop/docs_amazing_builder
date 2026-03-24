@@ -1,5 +1,5 @@
 export type ParseFormat = 'json' | 'curl';
-export type RequestColumnKey = 'field' | 'type' | 'required' | 'clientField' | 'description' | 'example';
+export type RequestColumnKey = 'field' | 'type' | 'required' | 'clientField' | 'description' | 'maskInLogs' | 'example';
 export type RequestAuthType = 'none' | 'bearer' | 'basic' | 'api-key';
 export type RequestMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 export type RequestProtocol = 'REST';
@@ -28,6 +28,7 @@ export interface ParsedRow {
   type: string;
   required: string;
   description: string;
+  maskInLogs?: boolean;
   example: string;
   source?: 'header' | 'body' | 'url' | 'parsed';
 }
@@ -88,11 +89,13 @@ export interface DiagramSection extends BaseSection {
 export interface ErrorRow {
   clientHttpStatus: string;
   clientResponse: string;
+  clientResponseCode: string;
   trigger: string;
   errorType: ErrorType;
   serverHttpStatus: string;
   internalCode: string;
   message: string;
+  responseCode: string;
 }
 
 export interface ValidationRuleRow {

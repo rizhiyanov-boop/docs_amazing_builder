@@ -10,12 +10,16 @@ function escapeWiki(value: string): string {
   return value.replaceAll('|', '&#124;');
 }
 
+function escapeWikiTableText(value: string): string {
+  return escapeWiki(value).replaceAll('{', '&#123;').replaceAll('}', '&#125;');
+}
+
 function isDualModelSection(section: ParsedSection): boolean {
   return section.sectionType === 'request' || section.sectionType === 'response';
 }
 
 function toWikiCell(value: string): string {
-  const normalized = escapeWiki(value)
+  const normalized = escapeWikiTableText(value)
     .replaceAll('\r\n', '\n')
     .replaceAll('\r', '\n')
     .replaceAll('\t', ' ')
@@ -64,6 +68,36 @@ function toWikiSourceCodeBlock(value: string, format: 'json' | 'curl'): string[]
   return [`{code:${codeLanguage}}`, ...payload.split('\n').map((line) => escapeWiki(line)), '{code}'];
 }
 
+function toWikiInlineCodeMacro(value: string, format: 'json' | 'curl' = 'json'): string {
+  const normalized = value
+    .replaceAll('\r\n', '\n')
+    .replaceAll('\r', '\n')
+    .trim();
+
+  if (!normalized) return '';
+
+  let payload = normalized;
+  if (format === 'json') {
+    try {
+      payload = JSON.stringify(JSON.parse(normalized));
+    } catch {
+      payload = normalized.replaceAll('\n', '\\n');
+    }
+  }
+
+  return `{code:${format === 'json' ? 'json' : 'bash'}}${escapeWiki(payload)}{code}`;
+}
+
+function renderErrorResponseCell(text: string, responseCode: string): string {
+  const messageText = text.trim();
+  const codeMacro = toWikiInlineCodeMacro(responseCode, 'json');
+
+  if (messageText && codeMacro) return `${toWikiCell(messageText)}<br/><br/>${codeMacro}`;
+  if (messageText) return toWikiCell(messageText);
+  if (codeMacro) return codeMacro;
+  return EMPTY_WIKI_CELL;
+}
+
 function renderParsedSourceExamples(section: ParsedSection): string[] {
   const lines: string[] = [];
   const serverInput = section.input.trim();
@@ -101,7 +135,7 @@ function toWikiTextBlock(value: string): string[] {
     .replaceAll('\r\n', '\n')
     .replaceAll('\r', '\n')
     .split('\n')
-    .map((line) => escapeWiki(line));
+    .map((line) => escapeWikiTableText(line));
 }
 
 function shouldRenderTextSection(section: TextSection): boolean {
@@ -128,9 +162,16 @@ function shouldRenderErrorsSection(section: ErrorsSection): boolean {
 }
 
 function renderDefaultTable(rows: ParsedRow[]): string[] {
-  const lines = ['||Поле||Тип||Обязательность||Описание||Пример||'];
+  const lines = ['||Поле||Тип||Обязательность||Описание||Маскирование в логах||Пример||'];
   for (const row of rows) {
-    const cells = [toWikiCell(row.field), toWikiCell(row.type), toWikiCell(row.required), toWikiCell(row.description), toWikiExampleCell(row.example)];
+    const cells = [
+      toWikiCell(row.field),
+      toWikiCell(row.type),
+      toWikiCell(row.required),
+      toWikiCell(row.description),
+      row.maskInLogs ? '***' : '   ',
+      toWikiExampleCell(row.example)
+    ];
     lines.push(`|${cells.join('|')}|`);
   }
   return lines;
@@ -148,11 +189,13 @@ function renderStructuredTable(rows: ParsedRow[], section: ParsedSection): strin
       type: row.type,
       required: row.required,
       description: row.description,
+      maskInLogs: row.maskInLogs ? '***' : '   ',
       example: row.example
     };
 
     const cells = columns.map((column) => {
       const value = cellMap[column];
+      if (column === 'maskInLogs') return value;
       if (column === 'example') return toWikiExampleCell(value);
       return toWikiCell(value);
     });
@@ -328,7 +371,7 @@ function renderErrorsSection(section: ErrorsSection): string[] {
 
     section.rows.forEach((row, index) => {
       lines.push(
-        `|${toWikiCell(String(index + 1))}|${toWikiCell(row.clientHttpStatus)}|${toWikiCell(row.clientResponse)}|${toWikiCell(row.trigger)}|${toWikiCell(row.errorType)}|${toWikiCell(row.serverHttpStatus)}|${toWikiCell(row.internalCode)}|${toWikiCell(row.message)}|`
+        `|${toWikiCell(String(index + 1))}|${toWikiCell(row.clientHttpStatus)}|${renderErrorResponseCell(row.clientResponse, row.clientResponseCode)}|${toWikiCell(row.trigger)}|${toWikiCell(row.errorType)}|${toWikiCell(row.serverHttpStatus)}|${toWikiCell(row.internalCode)}|${renderErrorResponseCell(row.message, row.responseCode)}|`
       );
     });
   }
@@ -348,8 +391,29 @@ function renderErrorsSection(section: ErrorsSection): string[] {
   return lines;
 }
 
+function renderWikiTemplateIntro(): string[] {
+  return [
+    'h2. История изменений',
+    '',
+    '||Версия||Описание||Исполнитель||Дата||Jira||',
+    `|v.1|Создание документа|${EMPTY_WIKI_CELL}|${EMPTY_WIKI_CELL}|${EMPTY_WIKI_CELL}|`,
+    '',
+    'h2. Постановка задачи',
+    '',
+    `|Epic|${EMPTY_WIKI_CELL}|`,
+    `|Цель|${EMPTY_WIKI_CELL}|`,
+    `|Инициаторы|${EMPTY_WIKI_CELL}|`,
+    `|Ответственный разработчик / модуль|${EMPTY_WIKI_CELL}|`,
+    '',
+    'h2. Общая информация',
+    '',
+    `|Метод|${EMPTY_WIKI_CELL}|`,
+    `|Внешний URL|${EMPTY_WIKI_CELL}|`
+  ];
+}
+
 export function renderWikiDocument(sections: DocSection[]): string {
-  const lines: string[] = ['{toc}', '', 'h1. Документация API'];
+  const lines: string[] = ['{toc}', '', ...renderWikiTemplateIntro()];
 
   for (const section of sections) {
     const rendered =

@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import './tokens.css';
 import './App.css';
@@ -62,6 +62,7 @@ const ONBOARDING_ENTRY_SUPPRESS_KEY = 'doc-builder-onboarding-entry-suppressed-v
 const DEFAULT_METHOD_NAME = 'Метод 1';
 const EMPTY_SECTIONS: DocSection[] = [];
 const ENABLE_MULTI_METHODS = false;
+const DEFAULT_RICH_TEXT_HIGHLIGHT = '#fef08a';
 
 function loadOnboardingEntrySuppressed(): boolean {
   try {
@@ -144,7 +145,7 @@ type SourceTextImportState = {
   draft: string;
 };
 
-type RichTextAction = 'bold' | 'italic' | 'code' | 'h3' | 'ul' | 'ol' | 'quote' | 'highlight' | 'code-block';
+type RichTextAction = 'bold' | 'italic' | 'code' | 'h3' | 'ul' | 'ol' | 'quote' | 'highlight';
 type RichTextCommandOptions = {
   color?: string;
   language?: string;
@@ -223,19 +224,6 @@ const RICH_TEXT_HIGHLIGHT_OPTIONS = [
   { value: '#fde68a', label: 'Песочный' },
   { value: '#fecdd3', label: 'Розовый' },
   { value: '#bfdbfe', label: 'Синий' }
-] as const;
-
-const RICH_TEXT_CODE_LANGUAGES = [
-  { value: 'auto', label: 'Auto' },
-  { value: 'bash', label: 'Bash' },
-  { value: 'json', label: 'JSON' },
-  { value: 'javascript', label: 'JavaScript' },
-  { value: 'typescript', label: 'TypeScript' },
-  { value: 'python', label: 'Python' },
-  { value: 'java', label: 'Java' },
-  { value: 'kotlin', label: 'Kotlin' },
-  { value: 'sql', label: 'SQL' },
-  { value: 'xml', label: 'XML' }
 ] as const;
 
 type AddableBlockType = 'text' | 'request' | 'response' | 'error-logic' | 'diagram';
@@ -344,11 +332,13 @@ function createErrorRow(): ErrorRow {
   return {
     clientHttpStatus: '',
     clientResponse: '',
+    clientResponseCode: '',
     trigger: '',
     errorType: '-',
     serverHttpStatus: '',
     internalCode: '',
-    message: ''
+    message: '',
+    responseCode: ''
   };
 }
 
@@ -370,6 +360,58 @@ function createErrorsSection(id = 'errors', title = 'Ошибки'): ErrorsSecti
     rows: [createErrorRow()],
     validationRules: [createValidationRuleRow()]
   };
+}
+
+function normalizeLegacyErrorRowsInSections(sections: DocSection[]): DocSection[] {
+  let changed = false;
+
+  const nextSections = sections.map((section) => {
+    if (section.kind !== 'errors') return section;
+
+    let sectionChanged = false;
+    const nextRows = section.rows.map((row) => {
+      let nextRow = row;
+
+      if (!(row.clientResponseCode ?? '').trim()) {
+        const trimmedClientResponse = row.clientResponse.trim();
+        const looksLikeJson =
+          (trimmedClientResponse.startsWith('{') && trimmedClientResponse.endsWith('}'))
+          || (trimmedClientResponse.startsWith('[') && trimmedClientResponse.endsWith(']'));
+
+        if (looksLikeJson) {
+          nextRow = {
+            ...nextRow,
+            clientResponse: '',
+            clientResponseCode: row.clientResponse
+          };
+          sectionChanged = true;
+        }
+      }
+
+      const legacyCode = row.internalCode.trim();
+      if (legacyCode !== 'payments.transfer.validation.amount.invalid') return nextRow;
+
+      sectionChanged = true;
+      const normalizedInternalCode = '100101';
+      const preset = ERROR_CATALOG_BY_CODE.get(normalizedInternalCode);
+
+      return {
+        ...nextRow,
+        internalCode: normalizedInternalCode,
+        serverHttpStatus: preset?.httpStatus ?? nextRow.serverHttpStatus,
+        message: preset?.message ?? nextRow.message
+      };
+    });
+
+    if (!sectionChanged) return section;
+    changed = true;
+    return {
+      ...section,
+      rows: nextRows
+    };
+  });
+
+  return changed ? nextSections : sections;
 }
 
 function createInitialSections(): DocSection[] {
@@ -639,12 +681,14 @@ function createOnboardingDemoWorkspace(): WorkspaceProjectData {
         rows: [
           {
             clientHttpStatus: '400',
-            clientResponse: '{"code":"VAL_001","message":"Invalid amount"}',
+            clientResponse: 'Некорректная сумма перевода',
+            clientResponseCode: '{"code":"VAL_001","message":"Invalid amount"}',
             trigger: 'Сумма <= 0 или превышен лимит клиента',
             errorType: 'BusinessException',
             serverHttpStatus: '400',
-            internalCode: 'payments.transfer.validation.amount.invalid',
-            message: 'Некорректная сумма перевода'
+            internalCode: '100101',
+            message: ERROR_CATALOG_BY_CODE.get('100101')?.message ?? 'Bad request sent to the system',
+            responseCode: '{"code":"100101","message":"Bad request sent to the system"}'
           }
         ],
         validationRules: [
@@ -1065,8 +1109,6 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string>(() => initialWorkspace.methods[0]?.sections[0]?.id ?? createInitialSections()[0].id);
   const [tab, setTab] = useState<TabKey>('editor');
   const [theme, setTheme] = useState<ThemeName>('light');
-  const [selectedHighlightColor, setSelectedHighlightColor] = useState<string>(RICH_TEXT_HIGHLIGHT_OPTIONS[0].value);
-  const [selectedCodeLanguage, setSelectedCodeLanguage] = useState<string>('auto');
   const [autosave, setAutosave] = useState<AutosaveInfo>({ state: 'idle' });
   const [importError, setImportError] = useState('');
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -1143,6 +1185,23 @@ export default function App() {
       observer?.disconnect();
       root.style.removeProperty('--sticky-topbar-offset');
     };
+  }, []);
+
+  useEffect(() => {
+    setMethodsState((prev) => {
+      let changed = false;
+      const next = prev.map((method) => {
+        const normalizedSections = normalizeLegacyErrorRowsInSections(method.sections);
+        if (normalizedSections === method.sections) return method;
+        changed = true;
+        return {
+          ...method,
+          sections: normalizedSections
+        };
+      });
+
+      return changed ? next : prev;
+    });
   }, []);
 
   function applyWorkspaceState(workspace: WorkspaceProjectData): void {
@@ -2041,22 +2100,26 @@ export default function App() {
       const validationErrorRow: ErrorRow = {
         clientHttpStatus: '-',
         clientResponse: '',
+        clientResponseCode: '',
         trigger: 'Ошибка валидации',
         errorType: 'BusinessException',
         serverHttpStatus: preset?.httpStatus ?? '400',
         internalCode: '100101',
-        message: preset?.message ?? 'Bad request sent to the system'
+        message: preset?.message ?? 'Bad request sent to the system',
+        responseCode: ''
       };
 
       const isSingleEmptyRow =
         section.rows.length === 1 &&
         !section.rows[0].clientHttpStatus.trim() &&
         !section.rows[0].clientResponse.trim() &&
+        !(section.rows[0].clientResponseCode ?? '').trim() &&
         !section.rows[0].trigger.trim() &&
         section.rows[0].errorType === '-' &&
         !section.rows[0].serverHttpStatus.trim() &&
         !section.rows[0].internalCode.trim() &&
-        !section.rows[0].message.trim();
+        !section.rows[0].message.trim() &&
+        !section.rows[0].responseCode.trim();
 
       return {
         ...section,
@@ -2095,13 +2158,26 @@ export default function App() {
     });
   }
 
-  function insertJsonResponse(sectionId: string, rowIndex: number): void {
+  function formatClientResponseCode(sectionId: string, rowIndex: number): void {
     updateErrorRow(sectionId, rowIndex, (row) => {
-      const trimmed = row.clientResponse.trim();
-      if (!trimmed) return { ...row, clientResponse: '{\n  \n}' };
+      const trimmed = (row.clientResponseCode ?? '').trim();
+      if (!trimmed) return { ...row, clientResponseCode: '{\n  \n}' };
 
       try {
-        return { ...row, clientResponse: JSON.stringify(JSON.parse(trimmed), null, 2) };
+        return { ...row, clientResponseCode: JSON.stringify(JSON.parse(trimmed), null, 2) };
+      } catch {
+        return row;
+      }
+    });
+  }
+
+  function formatErrorResponseCode(sectionId: string, rowIndex: number): void {
+    updateErrorRow(sectionId, rowIndex, (row) => {
+      const trimmed = row.responseCode.trim();
+      if (!trimmed) return { ...row, responseCode: '{\n  \n}' };
+
+      try {
+        return { ...row, responseCode: JSON.stringify(JSON.parse(trimmed), null, 2) };
       } catch {
         return row;
       }
@@ -2514,12 +2590,6 @@ export default function App() {
     return RICH_TEXT_HIGHLIGHT_OPTIONS[0].value;
   }
 
-  function normalizeRichTextLanguage(value: string): string {
-    const normalized = value.trim().toLowerCase();
-    if (!normalized) return 'auto';
-    return /^[a-z0-9+#-]+$/i.test(normalized) ? normalized : 'auto';
-  }
-
   function parseNodeColor(node: HTMLElement): string {
     const inlineColor = node.dataset.highlight || node.style.backgroundColor || node.getAttribute('color') || '';
     return normalizeRichTextColor(inlineColor);
@@ -2560,56 +2630,6 @@ export default function App() {
     editor.focus();
   }
 
-  function pickHighlightColor(currentColor: string): string | null {
-    const optionsHint = RICH_TEXT_HIGHLIGHT_OPTIONS
-      .map((option, index) => `${index + 1}. ${option.label} (${option.value})`)
-      .join('\n');
-    const rawValue = window.prompt(
-      `Выберите цвет выделения (номер или код):\n${optionsHint}`,
-      currentColor
-    );
-
-    if (rawValue === null) return null;
-
-    const trimmedValue = rawValue.trim();
-    if (!trimmedValue) return normalizeRichTextColor(currentColor);
-
-    const byIndex = Number.parseInt(trimmedValue, 10);
-    if (!Number.isNaN(byIndex) && byIndex >= 1 && byIndex <= RICH_TEXT_HIGHLIGHT_OPTIONS.length) {
-      return RICH_TEXT_HIGHLIGHT_OPTIONS[byIndex - 1].value;
-    }
-
-    const byLabel = RICH_TEXT_HIGHLIGHT_OPTIONS.find((option) => option.label.toLowerCase() === trimmedValue.toLowerCase());
-    if (byLabel) return byLabel.value;
-
-    return normalizeRichTextColor(trimmedValue);
-  }
-
-  function pickCodeLanguage(currentLanguage: string): string | null {
-    const optionsHint = RICH_TEXT_CODE_LANGUAGES
-      .map((option, index) => `${index + 1}. ${option.label}`)
-      .join('\n');
-    const rawValue = window.prompt(
-      `Выберите язык блока кода (номер или название):\n${optionsHint}`,
-      currentLanguage
-    );
-
-    if (rawValue === null) return null;
-
-    const trimmedValue = rawValue.trim();
-    if (!trimmedValue) return normalizeRichTextLanguage(currentLanguage);
-
-    const byIndex = Number.parseInt(trimmedValue, 10);
-    if (!Number.isNaN(byIndex) && byIndex >= 1 && byIndex <= RICH_TEXT_CODE_LANGUAGES.length) {
-      return RICH_TEXT_CODE_LANGUAGES[byIndex - 1].value;
-    }
-
-    const byLabel = RICH_TEXT_CODE_LANGUAGES.find((option) => option.label.toLowerCase() === trimmedValue.toLowerCase());
-    if (byLabel) return byLabel.value;
-
-    return normalizeRichTextLanguage(trimmedValue);
-  }
-
   function toggleFormatBlock(editor: HTMLElement, tag: 'h3' | 'blockquote'): void {
     const selection = getSelectionInEditor(editor);
     if (!selection) return;
@@ -2635,6 +2655,51 @@ export default function App() {
 
     const selectedText = selection.toString() || 'code';
     document.execCommand('insertHTML', false, `<code>${escapeRichTextHtml(selectedText)}</code>`);
+  }
+
+  function wrapSelectionWithInlineElement(editor: HTMLElement, tagName: 'em'): void {
+    const selection = getSelectionInEditor(editor);
+    if (!selection || selection.rangeCount === 0) return;
+
+    const range = selection.getRangeAt(0);
+    const wrapper = document.createElement(tagName);
+
+    if (range.collapsed) {
+      const textNode = document.createTextNode('\u200b');
+      wrapper.appendChild(textNode);
+      range.insertNode(wrapper);
+
+      const nextRange = document.createRange();
+      nextRange.setStart(textNode, 1);
+      nextRange.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(nextRange);
+      return;
+    }
+
+    const content = range.extractContents();
+    wrapper.appendChild(content);
+    range.insertNode(wrapper);
+
+    const nextRange = document.createRange();
+    nextRange.selectNodeContents(wrapper);
+    selection.removeAllRanges();
+    selection.addRange(nextRange);
+  }
+
+  function toggleInlineItalic(editor: HTMLElement): void {
+    const selection = getSelectionInEditor(editor);
+    if (!selection) return;
+
+    const anchorItalic = findClosestInEditor(selection.anchorNode, 'em, i', editor);
+    const focusItalic = findClosestInEditor(selection.focusNode, 'em, i', editor);
+
+    if (anchorItalic && focusItalic && anchorItalic === focusItalic) {
+      unwrapElement(anchorItalic);
+      return;
+    }
+
+    wrapSelectionWithInlineElement(editor, 'em');
   }
 
   function toggleInlineHighlight(editor: HTMLElement, color: string): void {
@@ -2675,19 +2740,6 @@ export default function App() {
     document.execCommand('hiliteColor', false, targetColor);
   }
 
-  function insertCodeBlock(editor: HTMLElement, language: string): void {
-    const selection = getSelectionInEditor(editor);
-    const selectedText = selection?.toString().trim() || 'code';
-    const normalizedLanguage = normalizeRichTextLanguage(language);
-    const languageAttr = ` data-code-language="${escapeRichTextHtml(normalizedLanguage)}"`;
-
-    document.execCommand(
-      'insertHTML',
-      false,
-      `<pre class="rich-code-block" data-rich-code-block="1"${languageAttr}><code>${escapeRichTextHtml(selectedText)}</code></pre><p></p>`
-    );
-  }
-
   function applyRichTextCommand(editor: HTMLElement, action: RichTextAction, options?: RichTextCommandOptions): void {
     editor.focus();
 
@@ -2697,7 +2749,7 @@ export default function App() {
     }
 
     if (action === 'italic') {
-      document.execCommand('italic');
+      toggleInlineItalic(editor);
       return;
     }
 
@@ -2727,13 +2779,22 @@ export default function App() {
     }
 
     if (action === 'highlight') {
-      toggleInlineHighlight(editor, options?.color ?? selectedHighlightColor);
+      toggleInlineHighlight(editor, options?.color ?? DEFAULT_RICH_TEXT_HIGHLIGHT);
       return;
     }
+  }
 
-    if (action === 'code-block') {
-      insertCodeBlock(editor, options?.language ?? selectedCodeLanguage);
+  function handleRichTextHotkeys(event: ReactKeyboardEvent<HTMLElement>, onAction: (action: RichTextAction) => void): boolean {
+    if (!(event.ctrlKey || event.metaKey) || event.altKey) return false;
+
+    const key = event.key.toLowerCase();
+    if (key === 'i') {
+      event.preventDefault();
+      onAction('italic');
+      return true;
     }
+
+    return false;
   }
 
   function applyDiagramTextCommand(
@@ -3332,6 +3393,7 @@ export default function App() {
       type: row.type || '—',
       required: row.required || '—',
       description: row.description || '—',
+      maskInLogs: row.maskInLogs ? '***' : ' ',
       example: row.example || '—'
     } satisfies Record<RequestColumnKey, string>;
 
@@ -3405,6 +3467,17 @@ export default function App() {
 
     if (column === 'type' || column === 'required' || column === 'description' || column === 'example') {
       return renderEditableRequestCell(section, row, column);
+    }
+
+    if (column === 'maskInLogs') {
+      return (
+        <input
+          type="checkbox"
+          checked={Boolean(row.maskInLogs)}
+          onChange={(e) => updateServerRow(section.id, getParsedRowKey(row), (current) => ({ ...current, maskInLogs: e.target.checked }))}
+          aria-label="Маскирование в логах"
+        />
+      );
     }
 
     return cellMap[column];
@@ -3505,6 +3578,7 @@ export default function App() {
               <th>Тип</th>
               <th>Обязательность</th>
               <th>Описание</th>
+              <th>Маскирование в логах</th>
               <th>Пример</th>
             </tr>
           </thead>
@@ -3524,6 +3598,14 @@ export default function App() {
                 <td className="mono">{row.type}</td>
                 <td>{row.required}</td>
                 <td>{row.description || '—'}</td>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(row.maskInLogs)}
+                    onChange={(e) => updateServerRow(section.id, getParsedRowKey(row), (current) => ({ ...current, maskInLogs: e.target.checked }))}
+                    aria-label="Маскирование в логах"
+                  />
+                </td>
                 <td className="mono">{row.example || '—'}</td>
               </tr>
             ))}
@@ -3546,6 +3628,7 @@ export default function App() {
               <th>Header</th>
               <th>Обязательность</th>
               <th>Описание</th>
+              <th>Маскирование в логах</th>
               <th>Пример</th>
             </tr>
           </thead>
@@ -3633,6 +3716,34 @@ export default function App() {
                               })
                             : updateServerRow(section.id, rowKey, (current) => ({ ...current, description: e.target.value }))
                         }
+                      />
+                    )}
+                  </td>
+                  <td>
+                    {isAuto || isDefault ? (
+                      <input type="checkbox" checked={Boolean(row.maskInLogs)} disabled aria-label="Маскирование в логах" />
+                    ) : (
+                      <input
+                        type="checkbox"
+                        checked={Boolean(
+                          isPersisted
+                            ? persistedRows.find((item) => getParsedRowKey(item) === rowKey)?.maskInLogs
+                            : row.maskInLogs
+                        )}
+                        onChange={(e) =>
+                          isExternal
+                            ? updateSection(section.id, (current) => {
+                                if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
+                                return {
+                                  ...current,
+                                  clientRows: (current.clientRows ?? []).map((item) =>
+                                    getParsedRowKey(item) === rowKey ? { ...item, maskInLogs: e.target.checked } : item
+                                  )
+                                };
+                              })
+                            : updateServerRow(section.id, rowKey, (current) => ({ ...current, maskInLogs: e.target.checked }))
+                        }
+                        aria-label="Маскирование в логах"
                       />
                     )}
                   </td>
@@ -4344,16 +4455,6 @@ export default function App() {
                       <button
                         className="ghost small toolbar-button"
                         type="button"
-                        title="Курсив"
-                        aria-label="Курсив"
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'italic')}
-                      >
-                        <span className="toolbar-icon toolbar-icon-italic">I</span>
-                      </button>
-                      <button
-                        className="ghost small toolbar-button"
-                        type="button"
                         title="Код"
                         aria-label="Код"
                         onMouseDown={(event) => event.preventDefault()}
@@ -4371,14 +4472,7 @@ export default function App() {
                           const editor = diagramTextRefs.current[getDiagramEditorKey(section.id, diagram.id)];
                           rememberSelectionForEditor(editor);
                         }}
-                        onClick={() => {
-                          const nextColor = pickHighlightColor(selectedHighlightColor);
-                          if (!nextColor) return;
-                          setSelectedHighlightColor(nextColor);
-                          applyDiagramTextCommand(section.id, diagram.id, 'highlight', {
-                            color: nextColor
-                          });
-                        }}
+                        onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'highlight', { color: DEFAULT_RICH_TEXT_HIGHLIGHT })}
                       >
                         <span className="toolbar-icon">🖍</span>
                       </button>
@@ -4430,29 +4524,6 @@ export default function App() {
                         <span className="toolbar-icon">1.</span>
                       </button>
                     </div>
-                    <div className="toolbar-group toolbar-group-controls" aria-label="Кодовые блоки">
-                      <button
-                        className="ghost small toolbar-button toolbar-button-wide"
-                        type="button"
-                        title="Вставить блок кода"
-                        aria-label="Вставить блок кода"
-                        onMouseDown={(event) => {
-                          event.preventDefault();
-                          const editor = diagramTextRefs.current[getDiagramEditorKey(section.id, diagram.id)];
-                          rememberSelectionForEditor(editor);
-                        }}
-                        onClick={() => {
-                          const nextLanguage = pickCodeLanguage(selectedCodeLanguage);
-                          if (!nextLanguage) return;
-                          setSelectedCodeLanguage(nextLanguage);
-                          applyDiagramTextCommand(section.id, diagram.id, 'code-block', {
-                            language: nextLanguage
-                          });
-                        }}
-                      >
-                        <span className="toolbar-icon">{`{ }`}</span>
-                      </button>
-                    </div>
                   </div>
 
                   <div
@@ -4463,6 +4534,19 @@ export default function App() {
                     contentEditable
                     suppressContentEditableWarning
                     onInput={() => syncDiagramDescriptionFromEditor(section.id, diagram.id)}
+                    onMouseUp={() => rememberSelectionForEditor(diagramTextRefs.current[getDiagramEditorKey(section.id, diagram.id)])}
+                    onKeyUp={() => rememberSelectionForEditor(diagramTextRefs.current[getDiagramEditorKey(section.id, diagram.id)])}
+                    onKeyDown={(event) => {
+                      const editor = diagramTextRefs.current[getDiagramEditorKey(section.id, diagram.id)];
+                      if (!editor) return;
+
+                      const handled = handleRichTextHotkeys(event, (action) => {
+                        rememberSelectionForEditor(editor);
+                        applyDiagramTextCommand(section.id, diagram.id, action);
+                      });
+
+                      if (handled) return;
+                    }}
                   />
                 </div>
 
@@ -4522,7 +4606,7 @@ export default function App() {
             </thead>
             <tbody>
               {section.rows.map((row, index) => {
-                const clientResponseError = validateJsonDraft(row.clientResponse);
+                const clientResponseError = validateJsonDraft(row.clientResponseCode ?? '');
                 const normalizedCode = row.internalCode.trim();
                 const hasUnknownInternalCode = Boolean(normalizedCode) && !ERROR_CATALOG_BY_CODE.has(normalizedCode);
                 const internalCodeKey = `${section.id}-error-${index}`;
@@ -4552,14 +4636,21 @@ export default function App() {
                   </td>
                   <td>
                     <div className="error-response-cell">
-                      <textarea
-                        className={clientResponseError ? 'input-warning' : ''}
-                        rows={getDynamicTextareaRows(row.clientResponse, 3, 10)}
+                      <input
+                        type="text"
                         value={row.clientResponse}
                         onChange={(e) => updateErrorRow(section.id, index, (current) => ({ ...current, clientResponse: e.target.value }))}
+                        placeholder="Описание client response"
                       />
-                      <button className="ghost small" type="button" onClick={() => insertJsonResponse(section.id, index)}>
-                        + JSON
+                      <textarea
+                        className={clientResponseError ? 'input-warning' : ''}
+                        rows={getDynamicTextareaRows(row.clientResponseCode ?? '', 3, 10)}
+                        value={row.clientResponseCode ?? ''}
+                        onChange={(e) => updateErrorRow(section.id, index, (current) => ({ ...current, clientResponseCode: e.target.value }))}
+                        placeholder="Код client response для WIKI (JSON)"
+                      />
+                      <button className="ghost small" type="button" onClick={() => formatClientResponseCode(section.id, index)}>
+                        Форматировать JSON
                       </button>
                       {clientResponseError && <div className="inline-error">{clientResponseError}</div>}
                     </div>
@@ -4711,12 +4802,23 @@ export default function App() {
                     {hasUnknownInternalCode && <div className="inline-warning">Код не найден в каталоге</div>}
                   </td>
                   <td>
-                    <input
-                      type="text"
-                      disabled
-                      value={row.message}
-                      title="Поле заполняется автоматически по internalCode"
-                    />
+                    <div className="error-response-cell">
+                      <input
+                        type="text"
+                        disabled
+                        value={row.message}
+                        title="Описание заполняется автоматически по internalCode"
+                      />
+                      <textarea
+                        rows={getDynamicTextareaRows(row.responseCode, 3, 10)}
+                        value={row.responseCode}
+                        onChange={(e) => updateErrorRow(section.id, index, (current) => ({ ...current, responseCode: e.target.value }))}
+                        placeholder="Код ответа для WIKI (JSON)"
+                      />
+                      <button className="ghost small" type="button" onClick={() => formatErrorResponseCode(section.id, index)}>
+                        Форматировать JSON
+                      </button>
+                    </div>
                   </td>
                   <td>
                     <button className="icon-button danger" type="button" onClick={() => deleteErrorRow(section.id, index)} aria-label="Удалить строку">
@@ -5363,19 +5465,6 @@ export default function App() {
                             <button
                               className="ghost small toolbar-button"
                               type="button"
-                              title="Курсив"
-                              aria-label="Курсив"
-                              onMouseDown={(event) => {
-                                event.preventDefault();
-                                rememberTextSelection();
-                              }}
-                              onClick={() => applyTextEditorCommand(selectedSection.id, 'italic')}
-                            >
-                              <span className="toolbar-icon toolbar-icon-italic">I</span>
-                            </button>
-                            <button
-                              className="ghost small toolbar-button"
-                              type="button"
                               title="Код"
                               aria-label="Код"
                               onMouseDown={(event) => {
@@ -5395,14 +5484,7 @@ export default function App() {
                                 event.preventDefault();
                                 rememberTextSelection();
                               }}
-                              onClick={() => {
-                                const nextColor = pickHighlightColor(selectedHighlightColor);
-                                if (!nextColor) return;
-                                setSelectedHighlightColor(nextColor);
-                                applyTextEditorCommand(selectedSection.id, 'highlight', {
-                                  color: nextColor
-                                });
-                              }}
+                              onClick={() => applyTextEditorCommand(selectedSection.id, 'highlight', { color: DEFAULT_RICH_TEXT_HIGHLIGHT })}
                             >
                               <span className="toolbar-icon">🖍</span>
                             </button>
@@ -5466,28 +5548,6 @@ export default function App() {
                               <span className="toolbar-icon">1.</span>
                             </button>
                           </div>
-                          <div className="toolbar-group toolbar-group-controls" aria-label="Кодовые блоки">
-                            <button
-                              className="ghost small toolbar-button toolbar-button-wide"
-                              type="button"
-                              title="Вставить блок кода"
-                              aria-label="Вставить блок кода"
-                              onMouseDown={(event) => {
-                                event.preventDefault();
-                                rememberTextSelection();
-                              }}
-                              onClick={() => {
-                                const nextLanguage = pickCodeLanguage(selectedCodeLanguage);
-                                if (!nextLanguage) return;
-                                setSelectedCodeLanguage(nextLanguage);
-                                applyTextEditorCommand(selectedSection.id, 'code-block', {
-                                  language: nextLanguage
-                                });
-                              }}
-                            >
-                              <span className="toolbar-icon">{`{ }`}</span>
-                            </button>
-                          </div>
                         </div>
                       </div>
                       <div className="panel-sub">Поддерживаются подзаголовки, цитаты, код и вложенные списки с Tab.</div>
@@ -5505,6 +5565,9 @@ export default function App() {
                           onMouseUp={rememberTextSelection}
                           onKeyUp={rememberTextSelection}
                           onKeyDown={(event) => {
+                            const handled = handleRichTextHotkeys(event, (action) => applyTextEditorCommand(selectedSection.id, action));
+                            if (handled) return;
+
                             if (event.key !== 'Tab') return;
 
                             const selection = window.getSelection();

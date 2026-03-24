@@ -6,6 +6,7 @@ import {
   DEFAULT_BASIC_USERNAME,
   DEFAULT_BEARER_TOKEN_EXAMPLE
 } from './requestHeaders';
+import { ERROR_CATALOG_BY_CODE } from './errorCatalog';
 import type { DocSection, ParsedRow, ParsedSectionType } from './types';
 
 export const DEFAULT_SECTION_TITLE = 'Новая секция';
@@ -15,7 +16,8 @@ function normalizeRow(row: ParsedRow): ParsedRow {
     ...row,
     sourceField: row.sourceField ?? (row.origin === 'manual' ? undefined : row.field),
     origin: row.origin ?? 'parsed',
-    enabled: row.enabled ?? true
+    enabled: row.enabled ?? true,
+    maskInLogs: row.maskInLogs ?? false
   };
 }
 
@@ -35,6 +37,19 @@ export function resolveSectionTitle(title: string): string {
   return trimmed || DEFAULT_SECTION_TITLE;
 }
 
+function normalizeInternalCode(internalCode: string): string {
+  const trimmed = internalCode.trim();
+  if (trimmed === 'payments.transfer.validation.amount.invalid') {
+    return '100101';
+  }
+  return trimmed;
+}
+
+function looksLikeJson(value: string): boolean {
+  const trimmed = value.trim();
+  return (trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'));
+}
+
 export function sanitizeSections(sections: DocSection[]): DocSection[] {
   return sections
     .filter((section) => section.id !== 'external-url')
@@ -43,15 +58,25 @@ export function sanitizeSections(sections: DocSection[]): DocSection[] {
       return {
         ...section,
         title: resolveSectionTitle(section.title),
-        rows: (section.rows ?? []).map((row) => ({
-          clientHttpStatus: row.clientHttpStatus ?? '',
-          clientResponse: row.clientResponse ?? '',
-          trigger: row.trigger ?? '',
-          errorType: row.errorType ?? '-',
-          serverHttpStatus: row.serverHttpStatus ?? '',
-          internalCode: row.internalCode ?? '',
-          message: row.message ?? ''
-        })),
+        rows: (section.rows ?? []).map((row) => {
+          const normalizedInternalCode = normalizeInternalCode(row.internalCode ?? '');
+          const preset = ERROR_CATALOG_BY_CODE.get(normalizedInternalCode);
+          const legacyClientResponse = row.clientResponse ?? '';
+          const normalizedClientResponseCode = row.clientResponseCode ?? '';
+          const useLegacyClientResponseAsCode = !normalizedClientResponseCode.trim() && looksLikeJson(legacyClientResponse);
+
+          return {
+            clientHttpStatus: row.clientHttpStatus ?? '',
+            clientResponse: useLegacyClientResponseAsCode ? '' : legacyClientResponse,
+            clientResponseCode: useLegacyClientResponseAsCode ? legacyClientResponse : normalizedClientResponseCode,
+            trigger: row.trigger ?? '',
+            errorType: row.errorType ?? '-',
+            serverHttpStatus: preset?.httpStatus ?? row.serverHttpStatus ?? '',
+            internalCode: normalizedInternalCode,
+            message: preset?.message ?? row.message ?? '',
+            responseCode: row.responseCode ?? ''
+          };
+        }),
         validationRules: (section.validationRules ?? []).map((rule) => ({
           parameter: rule.parameter ?? '',
           validationCase: rule.validationCase ?? '',
@@ -73,11 +98,13 @@ export function sanitizeSections(sections: DocSection[]): DocSection[] {
           {
             clientHttpStatus: '',
             clientResponse: '',
+            clientResponseCode: '',
             trigger: legacyTrigger,
             errorType: '-',
             serverHttpStatus: '',
             internalCode: '',
-            message: ''
+            message: '',
+            responseCode: ''
           }
         ],
         validationRules: []

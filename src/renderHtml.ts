@@ -198,7 +198,7 @@ function renderDefaultTable(rows: ParsedRow[]): string {
 }
 
 function renderStructuredTable(rows: ParsedRow[], section: ParsedSection): string {
-  const columns = getRequestColumnOrder(section, rows);
+  const columns = getRequestColumnOrder(section, rows).filter((column) => column !== 'maskInLogs');
   const header = columns.map((column) => `<th>${escapeHtml(getRequestColumnLabel(section, column))}</th>`).join('');
   const body = rows
     .map((row) => {
@@ -208,6 +208,7 @@ function renderStructuredTable(rows: ParsedRow[], section: ParsedSection): strin
         type: row.type || '—',
         required: row.required || '—',
         description: row.description || '—',
+        maskInLogs: row.maskInLogs ? '***' : ' ',
         example: row.example || '—'
       };
 

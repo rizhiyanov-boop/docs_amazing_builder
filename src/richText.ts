@@ -59,7 +59,7 @@ type ListToken = {
   content: string;
 };
 
-const LIST_LINE_RE = /^(\t*)(-|\#|\d+[.)]|[A-Za-z][.)])\s+(.+)$/;
+const LIST_LINE_RE = /^(\t*)(-|#|\d+[.)]|[A-Za-z][.)])\s+(.+)$/;
 
 function parseListToken(line: string): ListToken | null {
   const match = line.match(LIST_LINE_RE);

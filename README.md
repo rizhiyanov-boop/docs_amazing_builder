@@ -87,6 +87,16 @@
    - [output/smoke-test.html](output/smoke-test.html)
    - [output/smoke-test.wiki](output/smoke-test.wiki)
 
+## Автотесты MVP
+
+- Локальный запуск:
+   - `npm run test`
+   - `npm run test:coverage`
+- Для CI и локального полного quality-check:
+   - `npm run test:ci`
+- План покрытия и quality gates:
+   - [docs/TEST_PLAN_MVP.md](docs/TEST_PLAN_MVP.md)
+
 ## Основные файлы
 
 - Интерфейс: [src/App.tsx](src/App.tsx)

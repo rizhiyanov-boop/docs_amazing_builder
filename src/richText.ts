@@ -134,7 +134,7 @@ export function renderInlineRichText(value: string): string {
 }
 
 type ListKind = 'ul' | 'ol';
-type OrderedStyle = 'decimal' | 'lower-alpha';
+type OrderedStyle = 'decimal' | 'lower-alpha' | 'lower-roman';
 type ListToken = {
   depth: number;
   kind: ListKind;
@@ -142,20 +142,22 @@ type ListToken = {
   content: string;
 };
 
-const LIST_LINE_RE = /^(\t*)(-|#|\d+[.)]|[A-Za-z][.)])\s+(.+)$/;
+const LIST_LINE_RE = /^([ \t]*)(-|#|\d+[.)]|[A-Za-z][.)]|[IVXLCDMivxlcdm]+[.)])(?:\s+(.*))?$/;
 
 function parseListToken(line: string): ListToken | null {
   const match = line.match(LIST_LINE_RE);
   if (!match) return null;
 
-  const [, indent, marker, content] = match;
+  const [, indent, marker, content = ''] = match;
   const normalizedMarker = marker.toLowerCase();
   const isAlphabetic = /^[a-z][.)]$/.test(normalizedMarker);
+  const isRoman = /^[ivxlcdm]+[.)]$/.test(normalizedMarker);
+  const depth = Math.floor(indent.replace(/\t/g, '  ').length / 2);
 
   return {
-    depth: indent.length,
+    depth,
     kind: normalizedMarker === '-' ? 'ul' : 'ol',
-    orderedStyle: isAlphabetic ? 'lower-alpha' : 'decimal',
+    orderedStyle: isRoman ? 'lower-roman' : isAlphabetic ? 'lower-alpha' : 'decimal',
     content
   };
 }
@@ -348,35 +350,115 @@ function isListElement(node: Element): node is HTMLUListElement | HTMLOListEleme
   return node.tagName === 'UL' || node.tagName === 'OL';
 }
 
-function getOrderedListMarker(list: HTMLOListElement): string {
+function serializeListItemNode(node: Node, nestedLists: Array<HTMLUListElement | HTMLOListElement>): string {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return node.textContent?.replace(/\u00a0/g, ' ') ?? '';
+  }
+
+  if (!(node instanceof HTMLElement)) return '';
+  if (isListElement(node)) {
+    nestedLists.push(node);
+    return '';
+  }
+
+  const hasNestedList = Array.from(node.children).some(isListElement);
+  if (!hasNestedList) return serializeInlineNode(node, 'inline');
+
+  return Array.from(node.childNodes)
+    .map((child) => serializeListItemNode(child, nestedLists))
+    .join('');
+}
+
+function getOrderedListStyle(list: HTMLOListElement): OrderedStyle {
   const explicitType = (list.getAttribute('type') || '').toLowerCase();
-  if (explicitType === 'a') return 'a.';
-  if (explicitType === '1') return '1.';
+  if (explicitType === 'a') return 'lower-alpha';
+  if (explicitType === 'i') return 'lower-roman';
+  if (explicitType === '1') return 'decimal';
 
   const inlineStyle = list.style.listStyleType.toLowerCase();
-  if (inlineStyle.includes('alpha')) return 'a.';
+  if (inlineStyle.includes('alpha')) return 'lower-alpha';
+  if (inlineStyle.includes('roman')) return 'lower-roman';
 
   const computedStyle = typeof window === 'undefined' ? '' : window.getComputedStyle(list).listStyleType.toLowerCase();
-  if (computedStyle.includes('alpha')) return 'a.';
+  if (computedStyle.includes('alpha')) return 'lower-alpha';
+  if (computedStyle.includes('roman')) return 'lower-roman';
 
-  return '1.';
+  return 'decimal';
+}
+
+function toAlphabeticIndex(index: number): string {
+  let value = Math.max(1, index);
+  let output = '';
+
+  while (value > 0) {
+    value -= 1;
+    output = String.fromCharCode(97 + (value % 26)) + output;
+    value = Math.floor(value / 26);
+  }
+
+  return output;
+}
+
+function toRomanIndex(index: number): string {
+  let value = Math.max(1, Math.min(3999, index));
+  const parts: Array<[number, string]> = [
+    [1000, 'm'],
+    [900, 'cm'],
+    [500, 'd'],
+    [400, 'cd'],
+    [100, 'c'],
+    [90, 'xc'],
+    [50, 'l'],
+    [40, 'xl'],
+    [10, 'x'],
+    [9, 'ix'],
+    [5, 'v'],
+    [4, 'iv'],
+    [1, 'i']
+  ];
+
+  let output = '';
+  for (const [arabic, roman] of parts) {
+    while (value >= arabic) {
+      output += roman;
+      value -= arabic;
+    }
+  }
+
+  return output;
+}
+
+function formatOrderedMarker(style: OrderedStyle, index: number): string {
+  if (style === 'lower-alpha') return `${toAlphabeticIndex(index)}.`;
+  if (style === 'lower-roman') return `${toRomanIndex(index)}.`;
+  return `${index}.`;
 }
 
 function serializeList(list: HTMLUListElement | HTMLOListElement, depth: number): string[] {
-  const marker = list instanceof HTMLOListElement ? `${getOrderedListMarker(list)} ` : '- ';
   const lines: string[] = [];
+  let hasListItem = false;
+  const orderedStyle = list instanceof HTMLOListElement ? getOrderedListStyle(list) : null;
+  const parsedStart = list instanceof HTMLOListElement ? Number.parseInt(list.getAttribute('start') ?? '', 10) : Number.NaN;
+  let orderedIndex = list instanceof HTMLOListElement ? (Number.isFinite(parsedStart) ? parsedStart : 1) : 1;
 
-  for (const item of Array.from(list.children)) {
-    if (!(item instanceof HTMLLIElement)) continue;
+  for (const node of Array.from(list.childNodes)) {
+    if (node instanceof HTMLUListElement || node instanceof HTMLOListElement) {
+      const nestedDepth = hasListItem ? depth + 1 : depth;
+      lines.push(...serializeList(node, nestedDepth));
+      continue;
+    }
 
-    const nestedLists = Array.from(item.children).filter(isListElement);
-    const inlineNodes = Array.from(item.childNodes).filter((child) => {
-      if (!(child instanceof HTMLElement)) return true;
-      return !isListElement(child);
-    });
+    if (!(node instanceof HTMLLIElement)) continue;
+    hasListItem = true;
 
-    const content = inlineNodes.map((child) => serializeInlineNode(child, 'inline')).join('').trim();
+    const nestedLists: Array<HTMLUListElement | HTMLOListElement> = [];
+    const content = Array.from(node.childNodes)
+      .map((child) => serializeListItemNode(child, nestedLists))
+      .join('')
+      .trim();
+    const marker = orderedStyle ? `${formatOrderedMarker(orderedStyle, orderedIndex)} ` : '- ';
     lines.push(`${'\t'.repeat(depth)}${marker}${content}`);
+    orderedIndex += 1;
 
     for (const nestedList of nestedLists) {
       lines.push(...serializeList(nestedList, depth + 1));
@@ -386,16 +468,57 @@ function serializeList(list: HTMLUListElement | HTMLOListElement, depth: number)
   return lines;
 }
 
-export function editorElementToWikiText(root: HTMLElement): string {
-  const blocks = Array.from(root.childNodes)
-    .map((node) => {
-      if (node instanceof HTMLUListElement || node instanceof HTMLOListElement) {
-        return serializeList(node, 0).join('\n');
-      }
+function hasListDescendant(node: HTMLElement): boolean {
+  if (Array.from(node.childNodes).some((child) => child instanceof HTMLUListElement || child instanceof HTMLOListElement)) {
+    return true;
+  }
 
-      return serializeInlineNode(node, 'root').trim();
-    })
-    .filter(Boolean);
+  return Array.from(node.children).some((child) => hasListDescendant(child as HTMLElement));
+}
+
+function serializeContainerWithLists(container: HTMLElement): string[] {
+  const blocks: string[] = [];
+  let inlineBuffer = '';
+
+  const flushInlineBuffer = (): void => {
+    const value = inlineBuffer.trim();
+    if (value) blocks.push(value);
+    inlineBuffer = '';
+  };
+
+  for (const child of Array.from(container.childNodes)) {
+    if (child instanceof HTMLUListElement || child instanceof HTMLOListElement) {
+      flushInlineBuffer();
+      blocks.push(serializeList(child, 0).join('\n'));
+      continue;
+    }
+
+    if (child instanceof HTMLElement && hasListDescendant(child)) {
+      flushInlineBuffer();
+      blocks.push(...serializeContainerWithLists(child));
+      continue;
+    }
+
+    inlineBuffer += serializeInlineNode(child, 'inline');
+  }
+
+  flushInlineBuffer();
+  return blocks;
+}
+
+export function editorElementToWikiText(root: HTMLElement): string {
+  const blocks = Array.from(root.childNodes).flatMap((node) => {
+    if (node instanceof HTMLUListElement || node instanceof HTMLOListElement) {
+      return [serializeList(node, 0).join('\n')];
+    }
+
+    if (node instanceof HTMLElement && hasListDescendant(node)) {
+      return serializeContainerWithLists(node);
+    }
+
+    const serialized = serializeInlineNode(node, 'root').trim();
+    return serialized ? [serialized] : [];
+  });
 
   return blocks.join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
 }

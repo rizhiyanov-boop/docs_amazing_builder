@@ -2534,6 +2534,10 @@ export default function App() {
     updateSection(sectionId, (current) => (current.kind === 'text' && current.value !== nextValue ? { ...current, value: nextValue } : current));
   }
 
+  function syncTextSectionFromEditorDeferred(sectionId: string): void {
+    window.requestAnimationFrame(() => syncTextSectionFromEditor(sectionId));
+  }
+
   function getDiagramEditorKey(sectionId: string, diagramId: string): string {
     return `${sectionId}:${diagramId}`;
   }
@@ -5562,6 +5566,7 @@ export default function App() {
                             rememberTextSelection();
                             syncTextSectionFromEditor(selectedSection.id);
                           }}
+                          onBlur={() => syncTextSectionFromEditor(selectedSection.id)}
                           onMouseUp={rememberTextSelection}
                           onKeyUp={rememberTextSelection}
                           onKeyDown={(event) => {
@@ -5583,7 +5588,7 @@ export default function App() {
                             restoreTextSelection();
                             document.execCommand(event.shiftKey ? 'outdent' : 'indent');
                             rememberTextSelection();
-                            syncTextSectionFromEditor(selectedSection.id);
+                            syncTextSectionFromEditorDeferred(selectedSection.id);
                           }}
                         />
                       </label>

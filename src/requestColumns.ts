@@ -6,6 +6,7 @@ export const DEFAULT_REQUEST_COLUMN_ORDER: RequestColumnKey[] = [
   'required',
   'clientField',
   'description',
+  'maskInLogs',
   'example'
 ];
 
@@ -15,6 +16,7 @@ const BASE_COLUMN_LABELS: Record<RequestColumnKey, string> = {
   required: 'Обязательность',
   clientField: 'Client request',
   description: 'Описание',
+  maskInLogs: 'Маскирование в логах',
   example: 'Пример'
 };
 
@@ -40,6 +42,14 @@ export function getRequestColumnOrder(section: ParsedSection, rows: ParsedRow[])
     if (!normalized.includes(column)) {
       normalized.push(column);
     }
+  }
+
+  const exampleIndex = normalized.indexOf('example');
+  const maskIndex = normalized.indexOf('maskInLogs');
+  if (exampleIndex !== -1 && maskIndex !== -1 && maskIndex !== exampleIndex - 1) {
+    normalized.splice(maskIndex, 1);
+    const nextExampleIndex = normalized.indexOf('example');
+    normalized.splice(Math.max(nextExampleIndex, 0), 0, 'maskInLogs');
   }
 
   return normalized;

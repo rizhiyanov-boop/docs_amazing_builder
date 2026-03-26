@@ -1,0 +1,37 @@
+:root {
+  --bg: #0b1021;
+  --panel: #0f172a;
+  --card: #111827;
+  --text: #e5e7eb;
+  --muted: #9ca3af;
+  --accent: linear-gradient(135deg, #6366f1, #22d3ee);
+  --accent-solid: #6366f1;
+  --border: #1f2937;
+  --shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+  --success: #22c55e;
+  --danger: #ef4444;
+  --warning: #f59e0b;
+  --input-bg: #0c1429;
+  --input-text: #e5e7eb;
+  --scrollbar-track: #0f172a;
+  --scrollbar-thumb: #475569;
+  --scrollbar-thumb-hover: #64748b;
+  --button-bg: linear-gradient(135deg, #6366f1, #22d3ee);
+  --button-text: #0b1021;
+  --button-shadow: 0 10px 20px rgba(99, 102, 241, 0.25);
+  --button-shadow-hover: 0 14px 28px rgba(99, 102, 241, 0.35);
+  --active-bg: #6366f1;
+  --active-text: #0b1021;
+
+  color-scheme: light dark;
+  background-color: var(--bg);
+  color: var(--text);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}

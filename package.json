@@ -11,10 +11,13 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:ci": "npm run lint && npm run test:coverage && npm run build",
+    "lint:tokens": "node scripts/check-css-tokens.mjs",
+    "lint:all": "npm run lint && npm run lint:tokens",
     "preview": "vite preview",
     "smoke:test": "node scripts/smoke-test.mjs"
   },
   "dependencies": {
+    "highlight.js": "^11.11.1",
     "mermaid": "^11.13.0",
     "pako": "^2.1.0",
     "react": "^19.2.0",

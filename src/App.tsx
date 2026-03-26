@@ -1,5 +1,7 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import './tokens.css';
 import './App.css';
 import { parseCurlMeta, parseToRows } from './parsers';
 import { getDiagramExportFileName, getDiagramImageUrl, getPlantUmlImageUrl, resolveDiagramEngine } from './diagramUtils';
@@ -28,6 +30,11 @@ import { editorElementToWikiText, escapeRichTextHtml, richTextToHtml } from './r
 import { renderWikiDocument } from './renderWiki';
 import { DEFAULT_SECTION_TITLE, resolveSectionTitle, sanitizeSections } from './sectionTitles';
 import { buildInputFromRows } from './sourceSync';
+import { ONBOARDING_FEATURES } from './onboarding/featureFlags';
+import { ONBOARDING_STEPS, evaluateOnboardingProgress, resolveOnboardingStep, type OnboardingStepId } from './onboarding/steps';
+import { loadOnboardingState, markOnboardingCompleted, markOnboardingStarted, saveOnboardingState } from './onboarding/storage';
+import { emitOnboardingEvent } from './onboarding/telemetry';
+import type { OnboardingState } from './onboarding/types';
 import { applyThemeToRoot } from './theme';
 import type { ThemeName } from './theme';
 import type {
@@ -36,6 +43,8 @@ import type {
   DocSection,
   ErrorRow,
   ErrorsSection,
+  MethodDocument,
+  MethodGroup,
   ParsedRow,
   ParsedSection,
   ParsedSectionType,
@@ -44,14 +53,42 @@ import type {
   RequestAuthType,
   RequestColumnKey,
   RequestMethod,
-  ValidationRuleRow
+  ValidationRuleRow,
+  WorkspaceProjectData
 } from './types';
 
 const STORAGE_KEY = 'doc-builder-project-v2';
+const ONBOARDING_ENTRY_SUPPRESS_KEY = 'doc-builder-onboarding-entry-suppressed-v1';
+const DEFAULT_METHOD_NAME = 'Метод 1';
+const EMPTY_SECTIONS: DocSection[] = [];
+const ENABLE_MULTI_METHODS = false;
+const DEFAULT_RICH_TEXT_HIGHLIGHT = '#fef08a';
+
+function loadOnboardingEntrySuppressed(): boolean {
+  try {
+    return localStorage.getItem(ONBOARDING_ENTRY_SUPPRESS_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function saveOnboardingEntrySuppressed(value: boolean): void {
+  try {
+    if (value) {
+      localStorage.setItem(ONBOARDING_ENTRY_SUPPRESS_KEY, '1');
+    } else {
+      localStorage.removeItem(ONBOARDING_ENTRY_SUPPRESS_KEY);
+    }
+  } catch {
+    // Ignore persistence errors for local preference.
+  }
+}
 
 type TabKey = 'editor' | 'html' | 'wiki';
 type AutosaveState = 'idle' | 'saving' | 'saved' | 'error';
 type ParseTarget = 'server' | 'client';
+type JsonImportSampleType = 'request' | 'response';
+type JsonImportTargetSide = 'server' | 'client';
 
 type AutosaveInfo = { state: AutosaveState; at?: string };
 type TableValidation = Map<string, string>;
@@ -77,10 +114,67 @@ type EditableTitleState = {
 };
 type DriftAlertState = Record<string, boolean>;
 type ExpanderState = Record<string, boolean>;
+type InternalCodePopoverState = {
+  top: number;
+  left: number;
+  width: number;
+  maxHeight: number;
+  openUp: boolean;
+};
 type EditableFieldOptions = {
   allowEdit?: boolean;
   onDelete?: () => void;
 };
+
+type JsonImportRoutingState = {
+  fileName: string;
+  rawText: string;
+  sampleType: JsonImportSampleType;
+  domainModelEnabled: boolean;
+  targetSide: JsonImportTargetSide;
+};
+
+type ProjectTextImportState = {
+  rawText: string;
+  fromOnboarding: boolean;
+};
+
+type SourceTextImportState = {
+  sectionId: string;
+  target: ParseTarget;
+  draft: string;
+};
+
+type RichTextAction = 'bold' | 'italic' | 'code' | 'h3' | 'ul' | 'ol' | 'quote' | 'highlight';
+type RichTextCommandOptions = {
+  color?: string;
+  language?: string;
+};
+
+type OnboardingNavSource = 'prev' | 'next' | 'chip' | 'cta' | 'hint';
+type OnboardingStepTarget = {
+  tab: TabKey;
+  sectionId?: string;
+  openExpander?: 'source-server' | 'source-client';
+  anchor: string;
+  hintMessage?: string;
+};
+
+function guessJsonSampleType(value: unknown): JsonImportSampleType {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return 'response';
+
+  const payload = value as Record<string, unknown>;
+  const keys = Object.keys(payload).map((key) => key.toLowerCase());
+
+  const requestMarkers = ['request', 'headers', 'params', 'query', 'body', 'payload', 'method', 'path', 'url'];
+  const responseMarkers = ['response', 'result', 'status', 'code', 'message', 'error'];
+
+  const requestHits = requestMarkers.filter((marker) => keys.some((key) => key.includes(marker))).length;
+  const responseHits = responseMarkers.filter((marker) => keys.some((key) => key.includes(marker))).length;
+
+  if (responseHits >= requestHits) return 'response';
+  return 'request';
+}
 
 const TYPE_OPTIONS_COMMON = ['string', 'int', 'long', 'boolean', 'number', 'object', 'array', 'array_object', 'null'];
 const TYPE_OPTIONS_EXTENDED = [
@@ -123,6 +217,15 @@ const VALIDATION_CASE_OPTIONS = [
   'Некорректная структура payload',
   'Ошибка проверки контрольной суммы/подписи'
 ];
+
+const RICH_TEXT_HIGHLIGHT_OPTIONS = [
+  { value: '#fef08a', label: 'Желтый' },
+  { value: '#bbf7d0', label: 'Зеленый' },
+  { value: '#fde68a', label: 'Песочный' },
+  { value: '#fecdd3', label: 'Розовый' },
+  { value: '#bfdbfe', label: 'Синий' }
+] as const;
+
 type AddableBlockType = 'text' | 'request' | 'response' | 'error-logic' | 'diagram';
 
 const ADDABLE_BLOCK_TYPES: Array<{ type: AddableBlockType; label: string }> = [
@@ -229,11 +332,13 @@ function createErrorRow(): ErrorRow {
   return {
     clientHttpStatus: '',
     clientResponse: '',
+    clientResponseCode: '',
     trigger: '',
     errorType: '-',
     serverHttpStatus: '',
     internalCode: '',
-    message: ''
+    message: '',
+    responseCode: ''
   };
 }
 
@@ -255,6 +360,58 @@ function createErrorsSection(id = 'errors', title = 'Ошибки'): ErrorsSecti
     rows: [createErrorRow()],
     validationRules: [createValidationRuleRow()]
   };
+}
+
+function normalizeLegacyErrorRowsInSections(sections: DocSection[]): DocSection[] {
+  let changed = false;
+
+  const nextSections = sections.map((section) => {
+    if (section.kind !== 'errors') return section;
+
+    let sectionChanged = false;
+    const nextRows = section.rows.map((row) => {
+      let nextRow = row;
+
+      if (!(row.clientResponseCode ?? '').trim()) {
+        const trimmedClientResponse = row.clientResponse.trim();
+        const looksLikeJson =
+          (trimmedClientResponse.startsWith('{') && trimmedClientResponse.endsWith('}'))
+          || (trimmedClientResponse.startsWith('[') && trimmedClientResponse.endsWith(']'));
+
+        if (looksLikeJson) {
+          nextRow = {
+            ...nextRow,
+            clientResponse: '',
+            clientResponseCode: row.clientResponse
+          };
+          sectionChanged = true;
+        }
+      }
+
+      const legacyCode = row.internalCode.trim();
+      if (legacyCode !== 'payments.transfer.validation.amount.invalid') return nextRow;
+
+      sectionChanged = true;
+      const normalizedInternalCode = '100101';
+      const preset = ERROR_CATALOG_BY_CODE.get(normalizedInternalCode);
+
+      return {
+        ...nextRow,
+        internalCode: normalizedInternalCode,
+        serverHttpStatus: preset?.httpStatus ?? nextRow.serverHttpStatus,
+        message: preset?.message ?? nextRow.message
+      };
+    });
+
+    if (!sectionChanged) return section;
+    changed = true;
+    return {
+      ...section,
+      rows: nextRows
+    };
+  });
+
+  return changed ? nextSections : sections;
 }
 
 function createInitialSections(): DocSection[] {
@@ -398,19 +555,266 @@ function validateSection(section: DocSection): string {
   return '';
 }
 
-function asProjectData(sections: DocSection[]): ProjectData {
-  return { version: 2, updatedAt: new Date().toISOString(), sections: sanitizeSections(sections) };
+function createMethodId(): string {
+  return `method-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function loadProject(): DocSection[] {
+function createMethodDocument(name = DEFAULT_METHOD_NAME, sections: DocSection[] = createInitialSections(), id = createMethodId()): MethodDocument {
+  return {
+    id,
+    name,
+    updatedAt: new Date().toISOString(),
+    sections
+  };
+}
+
+function createWorkspaceSeed(): WorkspaceProjectData {
+  const method = createMethodDocument();
+  return {
+    version: 3,
+    updatedAt: new Date().toISOString(),
+    activeMethodId: method.id,
+    methods: [method],
+    groups: []
+  };
+}
+
+function createOnboardingDemoWorkspace(): WorkspaceProjectData {
+  const demoRequestInput = [
+    "curl --request POST 'https://api.demo.local/v1/payments/transfer' ",
+    "--header 'Authorization: Bearer <token>' ",
+    "--header 'Content-Type: application/json' ",
+    "--data '{",
+    '  "senderAccount": "40817810000000000123",',
+    '  "receiverAccount": "40817810000000000999",',
+    '  "amount": 150000,',
+    '  "currency": "UZS",',
+    '  "comment": "Оплата по договору 42"',
+    "}'"
+  ].join(' ');
+
+  const demoResponseInput = JSON.stringify(
+    {
+      transferId: 'trf-20260319-0001',
+      status: 'ACCEPTED',
+      createdAt: '2026-03-19T08:15:00Z',
+      fee: {
+        amount: 2500,
+        currency: 'UZS'
+      }
+    },
+    null,
+    2
+  );
+
+  const baseSections = createInitialSections();
+  const demoSections: DocSection[] = baseSections.map((section): DocSection => {
+    if (section.kind === 'text' && section.id === 'goal') {
+      return {
+        ...section,
+        value:
+          'Документация описывает перевод между счетами внутри банка через REST endpoint.\n\nЦель: показать контракт запроса и ответа для интеграции клиентских систем.'
+      };
+    }
+
+    if (section.kind === 'text' && section.id === 'functional') {
+      return {
+        ...section,
+        value:
+          '1. Проверка авторизации и прав на списание.\n2. Валидация суммы и валюты.\n3. Создание транзакции и возврат transferId.'
+      };
+    }
+
+    if (section.kind === 'parsed' && section.sectionType === 'request') {
+      const serverRows = parseToRows('curl', demoRequestInput);
+      return {
+        ...section,
+        format: 'curl' as const,
+        lastSyncedFormat: 'curl' as const,
+        input: demoRequestInput,
+        rows: serverRows,
+        error: '',
+        requestUrl: 'https://api.demo.local/v1/payments/transfer',
+        requestMethod: 'POST' as const
+      };
+    }
+
+    if (section.kind === 'parsed' && section.sectionType === 'response') {
+      const serverRows = parseToRows('json', demoResponseInput);
+      return {
+        ...section,
+        format: 'json' as const,
+        lastSyncedFormat: 'json' as const,
+        input: demoResponseInput,
+        rows: serverRows,
+        error: ''
+      };
+    }
+
+    if (section.kind === 'diagram') {
+      return {
+        ...section,
+        diagrams: [
+          {
+            ...section.diagrams[0],
+            title: 'Основной поток перевода',
+            engine: 'mermaid',
+            code: [
+              'sequenceDiagram',
+              'participant Client',
+              'participant API',
+              'participant Core',
+              'Client->>API: POST /payments/transfer',
+              'API->>Core: Validate and reserve funds',
+              'Core-->>API: transfer created',
+              'API-->>Client: 200 ACCEPTED + transferId'
+            ].join('\n'),
+            description: 'Базовый happy-path: запрос, проверка, создание перевода, подтверждение клиенту.'
+          }
+        ]
+      };
+    }
+
+    if (section.kind === 'errors') {
+      return {
+        ...section,
+        rows: [
+          {
+            clientHttpStatus: '400',
+            clientResponse: 'Некорректная сумма перевода',
+            clientResponseCode: '{"code":"VAL_001","message":"Invalid amount"}',
+            trigger: 'Сумма <= 0 или превышен лимит клиента',
+            errorType: 'BusinessException',
+            serverHttpStatus: '400',
+            internalCode: '100101',
+            message: ERROR_CATALOG_BY_CODE.get('100101')?.message ?? 'Bad request sent to the system',
+            responseCode: '{"code":"100101","message":"Bad request sent to the system"}'
+          }
+        ],
+        validationRules: [
+          {
+            parameter: 'amount',
+            validationCase: 'max/min',
+            condition: 'amount > 0 and amount <= dailyLimit',
+            cause: 'Ограничения тарифа и антифрод политики'
+          }
+        ]
+      };
+    }
+
+    return section;
+  });
+
+  const method = createMethodDocument('Демо: Перевод между счетами', demoSections);
+  return {
+    version: 3,
+    updatedAt: new Date().toISOString(),
+    activeMethodId: method.id,
+    methods: [method],
+    groups: []
+  };
+}
+
+function normalizeWorkspaceForMode(workspace: WorkspaceProjectData): WorkspaceProjectData {
+  if (ENABLE_MULTI_METHODS) return workspace;
+
+  const resolvedMethod = workspace.methods.find((method) => method.id === workspace.activeMethodId) ?? workspace.methods[0] ?? createMethodDocument();
+  return {
+    ...workspace,
+    activeMethodId: resolvedMethod.id,
+    methods: [resolvedMethod],
+    groups: []
+  };
+}
+
+function asWorkspaceProjectData(methods: MethodDocument[], activeMethodId: string, groups: MethodGroup[] = []): WorkspaceProjectData {
+  const normalizedMethods = methods.length > 0 ? methods : [createMethodDocument()];
+  const resolvedActiveMethodId = normalizedMethods.some((method) => method.id === activeMethodId)
+    ? activeMethodId
+    : normalizedMethods[0].id;
+
+  const workspace: WorkspaceProjectData = {
+    version: 3,
+    updatedAt: new Date().toISOString(),
+    activeMethodId: resolvedActiveMethodId,
+    methods: normalizedMethods.map((method) => ({
+      ...method,
+      updatedAt: method.updatedAt || new Date().toISOString(),
+      sections: sanitizeSections(method.sections)
+    })),
+    groups
+  };
+
+  return normalizeWorkspaceForMode(workspace);
+}
+
+function slugifyMethodFileName(value: string): string {
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+  return slug || 'method';
+}
+
+function loadWorkspaceProject(): WorkspaceProjectData {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return createInitialSections();
-    const parsed = JSON.parse(raw) as ProjectData;
-    if (!parsed.sections || !Array.isArray(parsed.sections)) return createInitialSections();
-    return sanitizeSections(parsed.sections);
+    if (!raw) return createWorkspaceSeed();
+    const parsed = JSON.parse(raw) as WorkspaceProjectData | ProjectData;
+
+    if ('methods' in parsed && Array.isArray(parsed.methods)) {
+      const sanitizedMethods = parsed.methods
+        .filter((method) => method && Array.isArray(method.sections))
+        .map((method, index) => ({
+          id: method.id || createMethodId(),
+          name: method.name?.trim() || `Метод ${index + 1}`,
+          updatedAt: method.updatedAt || new Date().toISOString(),
+          sections: sanitizeSections(method.sections)
+        }));
+
+      if (sanitizedMethods.length === 0) return createWorkspaceSeed();
+
+      const groups = Array.isArray(parsed.groups)
+        ? parsed.groups.map((group) => ({
+            id: group.id || `group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            name: group.name?.trim() || 'Новая цепочка',
+            methodIds: Array.isArray(group.methodIds) ? group.methodIds.filter(Boolean) : [],
+            links: Array.isArray(group.links) ? group.links : []
+          }))
+        : [];
+
+      const activeMethodId =
+        parsed.activeMethodId && sanitizedMethods.some((method) => method.id === parsed.activeMethodId)
+          ? parsed.activeMethodId
+          : sanitizedMethods[0].id;
+
+      const workspace: WorkspaceProjectData = {
+        version: 3,
+        updatedAt: parsed.updatedAt || new Date().toISOString(),
+        activeMethodId,
+        methods: sanitizedMethods,
+        groups
+      };
+
+      return normalizeWorkspaceForMode(workspace);
+    }
+
+    if ('sections' in parsed && Array.isArray(parsed.sections)) {
+      const legacyMethod = createMethodDocument(DEFAULT_METHOD_NAME, sanitizeSections(parsed.sections));
+      return {
+        version: 3,
+        updatedAt: parsed.updatedAt || new Date().toISOString(),
+        activeMethodId: legacyMethod.id,
+        methods: [legacyMethod],
+        groups: []
+      };
+    }
+
+    return createWorkspaceSeed();
   } catch {
-    return createInitialSections();
+    return createWorkspaceSeed();
   }
 }
 
@@ -610,6 +1014,8 @@ function getDynamicTextareaRows(value: string, minRows = 1, maxRows = 8): number
 function MermaidLivePreview({ code }: { code: string }): ReactNode {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [error, setError] = useState('');
+  const [fallbackUrl, setFallbackUrl] = useState('');
+  const [fallbackLoadFailed, setFallbackLoadFailed] = useState(false);
 
   useEffect(() => {
     let isActive = true;
@@ -622,6 +1028,8 @@ function MermaidLivePreview({ code }: { code: string }): ReactNode {
       if (!source) {
         host.innerHTML = '';
         setError('');
+        setFallbackUrl('');
+        setFallbackLoadFailed(false);
         return;
       }
 
@@ -633,11 +1041,29 @@ function MermaidLivePreview({ code }: { code: string }): ReactNode {
         const { svg } = await mermaid.render(graphId, source);
         if (!isActive) return;
         host.innerHTML = svg;
+
+        const renderedSvg = host.querySelector('svg');
+        if (renderedSvg) {
+          renderedSvg.classList.add('diagram-mermaid-svg');
+          const viewBox = renderedSvg.getAttribute('viewBox')?.trim();
+          if (viewBox) {
+            const parts = viewBox.split(/\s+/).map((part) => Number(part));
+            if (parts.length === 4 && Number.isFinite(parts[2]) && Number.isFinite(parts[3]) && parts[2] > 0 && parts[3] > 0) {
+              renderedSvg.setAttribute('width', String(parts[2]));
+              renderedSvg.setAttribute('height', String(parts[3]));
+            }
+          }
+        }
+
         setError('');
+        setFallbackUrl('');
+        setFallbackLoadFailed(false);
       } catch (diagramError) {
         if (!isActive) return;
         host.innerHTML = '';
         setError(diagramError instanceof Error ? diagramError.message : 'Ошибка Mermaid рендера');
+        setFallbackUrl(getDiagramImageUrl('mermaid', source, 'svg'));
+        setFallbackLoadFailed(false);
       }
     }
 
@@ -651,6 +1077,15 @@ function MermaidLivePreview({ code }: { code: string }): ReactNode {
   return (
     <div className="diagram-preview">
       <div ref={hostRef} className="diagram-preview-canvas" />
+      {fallbackUrl && !fallbackLoadFailed && (
+        <img
+          className="diagram-preview-image"
+          src={fallbackUrl}
+          alt="Mermaid preview"
+          loading="lazy"
+          onError={() => setFallbackLoadFailed(true)}
+        />
+      )}
       {error && <div className="inline-error">{error}</div>}
     </div>
   );
@@ -659,10 +1094,19 @@ function MermaidLivePreview({ code }: { code: string }): ReactNode {
 export default function App() {
   const textSectionRef = useRef<HTMLDivElement | null>(null);
   const textSelectionRef = useRef<Range | null>(null);
+  const richEditorSelectionRef = useRef<{ editor: HTMLElement; range: Range } | null>(null);
+  const topbarRef = useRef<HTMLElement | null>(null);
   const textEditorSectionRef = useRef<string | null>(null);
   const diagramTextRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const [sections, setSections] = useState<DocSection[]>(() => loadProject());
-  const [selectedId, setSelectedId] = useState<string>(() => createInitialSections()[0].id);
+  const methodNameInputRef = useRef<HTMLInputElement | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const previousMethodIdRef = useRef<string | null>(null);
+  const initialWorkspace = useMemo(() => loadWorkspaceProject(), []);
+  const initialOnboarding = useMemo(() => loadOnboardingState(), []);
+  const [methods, setMethodsState] = useState<MethodDocument[]>(() => initialWorkspace.methods);
+  const [methodGroups, setMethodGroups] = useState<MethodGroup[]>(() => initialWorkspace.groups);
+  const [activeMethodId, setActiveMethodId] = useState<string>(() => initialWorkspace.activeMethodId ?? initialWorkspace.methods[0]?.id ?? createMethodId());
+  const [selectedId, setSelectedId] = useState<string>(() => initialWorkspace.methods[0]?.sections[0]?.id ?? createInitialSections()[0].id);
   const [tab, setTab] = useState<TabKey>('editor');
   const [theme, setTheme] = useState<ThemeName>('light');
   const [autosave, setAutosave] = useState<AutosaveInfo>({ state: 'idle' });
@@ -677,13 +1121,440 @@ export default function App() {
   const [editingTitle, setEditingTitle] = useState<EditableTitleState | null>(null);
   const [expandedDriftAlerts, setExpandedDriftAlerts] = useState<DriftAlertState>({});
   const [expanderState, setExpanderState] = useState<ExpanderState>({});
+  const [openInternalCodeKey, setOpenInternalCodeKey] = useState<string | null>(null);
+  const [highlightedInternalCodeIndex, setHighlightedInternalCodeIndex] = useState(0);
+  const [internalCodePopoverState, setInternalCodePopoverState] = useState<InternalCodePopoverState | null>(null);
   const [isAddBlockMenuOpen, setIsAddBlockMenuOpen] = useState(false);
+  const [pendingMethodNameFocus, setPendingMethodNameFocus] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [isSectionPanelPulse, setIsSectionPanelPulse] = useState(false);
+  const [onboardingState, setOnboardingState] = useState<OnboardingState>(() => initialOnboarding);
+  const [suppressOnboardingEntry, setSuppressOnboardingEntry] = useState<boolean>(() => loadOnboardingEntrySuppressed());
+  const [showOnboardingEntry, setShowOnboardingEntry] = useState<boolean>(
+    () => ONBOARDING_FEATURES.onboardingV1 && !initialOnboarding.dismissed && !loadOnboardingEntrySuppressed()
+  );
+  const [jsonImportRouting, setJsonImportRouting] = useState<JsonImportRoutingState | null>(null);
+  const [projectTextImport, setProjectTextImport] = useState<ProjectTextImportState | null>(null);
+  const [sourceTextImport, setSourceTextImport] = useState<SourceTextImportState | null>(null);
+  const [hasOnboardingExport, setHasOnboardingExport] = useState(false);
+  const [dismissedOnboardingHints, setDismissedOnboardingHints] = useState<Record<string, true>>({});
+  const [onboardingNavStep, setOnboardingNavStep] = useState<OnboardingStepId>(() => initialOnboarding.currentStep);
+  const [onboardingNavError, setOnboardingNavError] = useState('');
+  const [onboardingLiveMessage, setOnboardingLiveMessage] = useState('');
+  const internalCodeAnchorRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const internalCodePopoverRef = useRef<HTMLDivElement | null>(null);
+  const previousOnboardingStepRef = useRef(onboardingState.currentStep);
+  const onboardingNavErrorTimerRef = useRef<number | null>(null);
+  const onboardingSpotlightTimerRef = useRef<number | null>(null);
+  const onboardingSpotlightNodeRef = useRef<HTMLElement | null>(null);
+  const activeMethod = methods.find((method) => method.id === activeMethodId) ?? methods[0];
+  const sections = useMemo(() => activeMethod?.sections ?? EMPTY_SECTIONS, [activeMethod]);
+  const methodNameWarning = useMemo(() => {
+    if (!activeMethod) return '';
+    const trimmed = activeMethod.name.trim();
+    if (!trimmed) return 'Название метода не может быть пустым';
+    const normalized = trimmed.toLowerCase();
+    const hasDuplicate = methods.some((method) => method.id !== activeMethod.id && method.name.trim().toLowerCase() === normalized);
+    return hasDuplicate ? 'Метод с таким названием уже существует' : '';
+  }, [methods, activeMethod]);
+
+  const exportTitle = activeMethod ? `Экспортируется только метод "${activeMethod.name.trim() || DEFAULT_METHOD_NAME}"` : 'Выберите метод';
+
+  useEffect(() => {
+    const topbar = topbarRef.current;
+    const root = document.documentElement;
+    if (!topbar) return;
+
+    const updateStickyOffset = (): void => {
+      // Keep a small visual gap between sticky topbar and sticky onboarding panel.
+      const offset = Math.ceil(topbar.offsetHeight + 24);
+      root.style.setProperty('--sticky-topbar-offset', `${offset}px`);
+    };
+
+    updateStickyOffset();
+    window.addEventListener('resize', updateStickyOffset);
+
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(updateStickyOffset);
+      observer.observe(topbar);
+    }
+
+    return () => {
+      window.removeEventListener('resize', updateStickyOffset);
+      observer?.disconnect();
+      root.style.removeProperty('--sticky-topbar-offset');
+    };
+  }, []);
+
+  useEffect(() => {
+    setMethodsState((prev) => {
+      let changed = false;
+      const next = prev.map((method) => {
+        const normalizedSections = normalizeLegacyErrorRowsInSections(method.sections);
+        if (normalizedSections === method.sections) return method;
+        changed = true;
+        return {
+          ...method,
+          sections: normalizedSections
+        };
+      });
+
+      return changed ? next : prev;
+    });
+  }, []);
+
+  function applyWorkspaceState(workspace: WorkspaceProjectData): void {
+    const resolvedActiveMethod = workspace.methods.find((method) => method.id === workspace.activeMethodId) ?? workspace.methods[0];
+    setMethodsState(workspace.methods);
+    setMethodGroups(workspace.groups);
+    setActiveMethodId(resolvedActiveMethod?.id ?? createMethodId());
+    setSelectedId(resolvedActiveMethod?.sections[0]?.id ?? createInitialSections()[0].id);
+    setTab('editor');
+  }
+
+  function startOnboardingEntry(path: 'quick_start' | 'scratch' | 'import'): void {
+    saveOnboardingEntrySuppressed(suppressOnboardingEntry);
+    const nextState = markOnboardingStarted(path);
+    setOnboardingState(nextState);
+    setHasOnboardingExport(false);
+    setDismissedOnboardingHints({});
+    emitOnboardingEvent('onboarding_started', { source: path });
+    setShowOnboardingEntry(false);
+  }
+
+  function handleQuickStartOnboarding(): void {
+    startOnboardingEntry('quick_start');
+    const seed = createOnboardingDemoWorkspace();
+    applyWorkspaceState(seed);
+    setToastMessage('Открыт демо-проект с готовым примером request/response.');
+  }
+
+  function handleScratchOnboarding(): void {
+    startOnboardingEntry('scratch');
+    const seed = createWorkspaceSeed();
+    applyWorkspaceState(seed);
+    setToastMessage('Создан новый пустой проект.');
+  }
+
+  function handleImportOnboarding(): void {
+    startOnboardingEntry('import');
+    setProjectTextImport({ rawText: '', fromOnboarding: true });
+  }
+
+  function openProjectImportDialog(fromOnboarding = false): void {
+    setProjectTextImport({ rawText: '', fromOnboarding });
+    setImportError('');
+  }
+
+  function closeProjectImportDialog(): void {
+    setProjectTextImport(null);
+  }
+
+  function getParsedSectionIdByType(type: JsonImportSampleType): string | undefined {
+    return sections.find((section) => section.kind === 'parsed' && section.sectionType === type)?.id;
+  }
+
+  function applyRoutedJsonImport(): void {
+    if (!jsonImportRouting) return;
+
+    const targetType = jsonImportRouting.sampleType;
+    let nextSelectedId = '';
+
+    setSections((prev) => {
+      const existing = prev.find((section): section is ParsedSection => section.kind === 'parsed' && section.sectionType === targetType);
+      const targetId = existing?.id ?? `${targetType}-${Date.now()}`;
+
+      const base = existing
+        ? prev
+        : [...prev, createParsedSection(targetType, targetId)];
+
+      const next = base.map((section) => {
+        if (section.kind !== 'parsed' || section.id !== targetId) return section;
+
+        let parsedRows: ParsedRow[] = [];
+        let parseError = '';
+        try {
+          parsedRows = parseToRows('json', jsonImportRouting.rawText);
+        } catch (error) {
+          parseError = error instanceof Error ? error.message : 'Ошибка парсинга';
+        }
+
+        const nextDomainEnabled = jsonImportRouting.domainModelEnabled ? true : section.domainModelEnabled;
+        const initializedClientProps = nextDomainEnabled
+          ? {
+              clientFormat: section.clientFormat ?? 'json',
+              clientLastSyncedFormat: section.clientLastSyncedFormat ?? 'json',
+              clientInput: section.clientInput ?? '',
+              clientRows: section.clientRows ?? [],
+              clientError: section.clientError ?? '',
+              clientMappings: section.clientMappings ?? {}
+            }
+          : {
+              clientFormat: section.clientFormat,
+              clientLastSyncedFormat: section.clientLastSyncedFormat,
+              clientInput: section.clientInput,
+              clientRows: section.clientRows,
+              clientError: section.clientError,
+              clientMappings: section.clientMappings
+            };
+
+        if (jsonImportRouting.targetSide === 'client') {
+          return {
+            ...section,
+            domainModelEnabled: nextDomainEnabled,
+            ...initializedClientProps,
+            clientFormat: 'json' as const,
+            clientLastSyncedFormat: 'json' as const,
+            clientInput: jsonImportRouting.rawText,
+            clientRows: parsedRows,
+            clientError: parseError
+          };
+        }
+
+        return {
+          ...section,
+          domainModelEnabled: nextDomainEnabled,
+          ...initializedClientProps,
+          format: 'json' as const,
+          lastSyncedFormat: 'json' as const,
+          input: jsonImportRouting.rawText,
+          rows: parsedRows,
+          error: parseError
+        };
+      });
+
+      nextSelectedId = targetId;
+      return next;
+    });
+
+    if (nextSelectedId) setSelectedId(nextSelectedId);
+    setTab('editor');
+    setImportError('');
+    setJsonImportRouting(null);
+    setToastMessage(
+      `JSON импортирован и распарсен в ${jsonImportRouting.sampleType === 'request' ? 'Request' : 'Response'} (${jsonImportRouting.targetSide === 'client' ? 'Client' : 'Server'}).`
+    );
+  }
+
+  function dismissJsonImportRouting(): void {
+    setJsonImportRouting(null);
+  }
+
+  function markOnboardingExportTouched(): void {
+    if (!ONBOARDING_FEATURES.onboardingV1 || onboardingState.status !== 'active') return;
+    setHasOnboardingExport(true);
+  }
+
+  function switchMethod(method: MethodDocument): void {
+    setActiveMethodId(method.id);
+    setSelectedId(method.sections[0]?.id ?? createInitialSections()[0].id);
+  }
+
+  function setSections(next: DocSection[] | ((prev: DocSection[]) => DocSection[])): void {
+    setMethodsState((prev) => {
+      if (prev.length === 0) {
+        const baseSections = typeof next === 'function' ? next(createInitialSections()) : next;
+        const seedMethod = createMethodDocument(DEFAULT_METHOD_NAME, baseSections);
+        setActiveMethodId(seedMethod.id);
+        return [seedMethod];
+      }
+
+      const targetMethodId = activeMethodId || prev[0].id;
+      const methodIndex = prev.findIndex((method) => method.id === targetMethodId);
+      if (methodIndex === -1) return prev;
+
+      const currentMethod = prev[methodIndex];
+      const nextSections = typeof next === 'function' ? next(currentMethod.sections) : next;
+      const nextMethods = [...prev];
+      nextMethods[methodIndex] = {
+        ...currentMethod,
+        updatedAt: new Date().toISOString(),
+        sections: nextSections
+      };
+      return nextMethods;
+    });
+  }
+
+  function createMethod(): void {
+    const name = `Метод ${methods.length + 1}`;
+    const method = createMethodDocument(name, createInitialSections());
+    setMethodsState((prev) => [...prev, method]);
+    setActiveMethodId(method.id);
+    setSelectedId(method.sections[0]?.id ?? createInitialSections()[0].id);
+    setPendingMethodNameFocus(true);
+    setTab('editor');
+  }
+
+  function deleteActiveMethod(): void {
+    if (!activeMethod) return;
+    if (methods.length <= 1) {
+      alert('Нельзя удалить последний метод. Создайте еще один метод, затем удалите текущий.');
+      return;
+    }
+
+    const sectionCount = activeMethod.sections.length;
+    const confirmed = confirm(
+      `Удалить метод "${activeMethod.name}"?\nСекций: ${sectionCount}\nДействие необратимо.`
+    );
+    if (!confirmed) return;
+
+    setMethodsState((prev) => {
+      const currentIndex = prev.findIndex((method) => method.id === activeMethod.id);
+      if (currentIndex === -1) return prev;
+      const next = prev.filter((method) => method.id !== activeMethod.id);
+      const fallback = next[currentIndex] ?? next[currentIndex - 1] ?? next[0];
+      if (fallback) {
+        setActiveMethodId(fallback.id);
+        setSelectedId(fallback.sections[0]?.id ?? createInitialSections()[0].id);
+      }
+      return next;
+    });
+
+    setMethodGroups((prev) =>
+      prev.map((group) => ({
+        ...group,
+        methodIds: group.methodIds.filter((id) => id !== activeMethod.id),
+        links: group.links.filter((link) => link.fromMethodId !== activeMethod.id && link.toMethodId !== activeMethod.id)
+      }))
+    );
+
+    setToastMessage(`Метод "${activeMethod.name}" удален`);
+  }
+
+  function updateActiveMethodName(name: string): void {
+    if (!activeMethod) return;
+    setMethodsState((prev) =>
+      prev.map((method) =>
+        method.id === activeMethod.id
+          ? {
+              ...method,
+              name,
+              updatedAt: new Date().toISOString()
+            }
+          : method
+      )
+    );
+  }
+
+  function normalizeActiveMethodName(): void {
+    if (!activeMethod) return;
+    const resolved = activeMethod.name.trim() || DEFAULT_METHOD_NAME;
+    if (resolved === activeMethod.name) return;
+    updateActiveMethodName(resolved);
+  }
+
+  useEffect(() => {
+    if (!methods.find((method) => method.id === activeMethodId) && methods[0]) {
+      setActiveMethodId(methods[0].id);
+    }
+  }, [methods, activeMethodId]);
 
   useEffect(() => {
     if (!sections.find((section) => section.id === selectedId) && sections[0]) {
       setSelectedId(sections[0].id);
     }
-  }, [sections, selectedId]);
+  }, [sections, selectedId, activeMethodId]);
+
+  useEffect(() => {
+    if (!pendingMethodNameFocus || !activeMethod || activeMethod.id !== activeMethodId) return;
+    if (!methodNameInputRef.current) return;
+    methodNameInputRef.current.focus();
+    methodNameInputRef.current.select();
+    setPendingMethodNameFocus(false);
+  }, [pendingMethodNameFocus, activeMethod, activeMethodId]);
+
+  useEffect(() => {
+    if (!activeMethodId) return;
+    const previousMethodId = previousMethodIdRef.current;
+    previousMethodIdRef.current = activeMethodId;
+
+    if (!previousMethodId || previousMethodId === activeMethodId) return;
+    if (!activeMethod) return;
+
+    setIsSectionPanelPulse(true);
+    setToastMessage(`Выбран метод "${activeMethod.name.trim() || DEFAULT_METHOD_NAME}"`);
+  }, [activeMethodId, activeMethod]);
+
+  useEffect(() => {
+    if (!isSectionPanelPulse) return;
+    const timerId = window.setTimeout(() => setIsSectionPanelPulse(false), 260);
+    return () => window.clearTimeout(timerId);
+  }, [isSectionPanelPulse]);
+
+  useEffect(() => {
+    if (!openInternalCodeKey) {
+      setInternalCodePopoverState(null);
+      return;
+    }
+
+    const updatePopoverPosition = () => {
+      const anchor = internalCodeAnchorRefs.current[openInternalCodeKey];
+      if (!anchor) {
+        setInternalCodePopoverState(null);
+        return;
+      }
+
+      const rect = anchor.getBoundingClientRect();
+      const viewportPadding = 8;
+      const gap = 4;
+      const spaceBelow = window.innerHeight - rect.bottom - viewportPadding;
+      const spaceAbove = rect.top - viewportPadding;
+      const openUp = spaceBelow < 180 && spaceAbove > spaceBelow;
+      const available = openUp ? spaceAbove - gap : spaceBelow - gap;
+
+      setInternalCodePopoverState({
+        top: openUp ? rect.top + window.scrollY - gap : rect.bottom + window.scrollY + gap,
+        left: rect.left + window.scrollX,
+        width: rect.width,
+        maxHeight: Math.max(120, Math.min(260, available)),
+        openUp
+      });
+    };
+
+    const scheduleUpdate = () => {
+      window.requestAnimationFrame(updatePopoverPosition);
+    };
+
+    updatePopoverPosition();
+    window.addEventListener('resize', scheduleUpdate);
+    window.addEventListener('scroll', scheduleUpdate, true);
+
+    return () => {
+      window.removeEventListener('resize', scheduleUpdate);
+      window.removeEventListener('scroll', scheduleUpdate, true);
+    };
+  }, [openInternalCodeKey]);
+
+  useEffect(() => {
+    if (!openInternalCodeKey) return;
+
+    const handleOutsideClick = (event: MouseEvent) => {
+      const target = event.target as Node;
+      const anchor = internalCodeAnchorRefs.current[openInternalCodeKey];
+      const popover = internalCodePopoverRef.current;
+      if ((anchor && anchor.contains(target)) || (popover && popover.contains(target))) {
+        return;
+      }
+
+      setOpenInternalCodeKey(null);
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick, true);
+    return () => document.removeEventListener('mousedown', handleOutsideClick, true);
+  }, [openInternalCodeKey]);
+
+  useEffect(() => {
+    if (openInternalCodeKey) {
+      setHighlightedInternalCodeIndex(0);
+    }
+  }, [openInternalCodeKey]);
+
+  useEffect(() => {
+    if (!toastMessage) return;
+    const timerId = window.setTimeout(() => setToastMessage(''), 2200);
+    return () => window.clearTimeout(timerId);
+  }, [toastMessage]);
 
   useEffect(() => {
     setTab('editor');
@@ -709,8 +1580,314 @@ export default function App() {
       ? Boolean((selectedSection.clientRows ?? []).length > 0 && selectedSection.clientLastSyncedFormat && selectedSection.clientLastSyncedFormat !== (selectedSection.clientFormat ?? 'json'))
       : false;
 
+  const onboardingProgress = useMemo(
+    () => evaluateOnboardingProgress(sections, hasOnboardingExport),
+    [sections, hasOnboardingExport]
+  );
+  const nextOnboardingStep = useMemo(() => resolveOnboardingStep(onboardingProgress), [onboardingProgress]);
+
+  useEffect(() => {
+    if (!ONBOARDING_FEATURES.onboardingV1 || !ONBOARDING_FEATURES.onboardingGuidedMode) return;
+    if (onboardingState.status !== 'active') return;
+    if (onboardingState.currentStep === nextOnboardingStep) return;
+
+    setOnboardingState((prev) => {
+      if (prev.status !== 'active' || prev.currentStep === nextOnboardingStep) return prev;
+      const next = { ...prev, currentStep: nextOnboardingStep };
+      saveOnboardingState(next);
+      return next;
+    });
+  }, [onboardingState.status, onboardingState.currentStep, nextOnboardingStep]);
+
+  useEffect(() => {
+    if (!ONBOARDING_FEATURES.onboardingV1 || !ONBOARDING_FEATURES.onboardingGuidedMode) {
+      previousOnboardingStepRef.current = onboardingState.currentStep;
+      return;
+    }
+
+    const previous = previousOnboardingStepRef.current;
+    if (onboardingState.status !== 'active' || previous === onboardingState.currentStep) {
+      previousOnboardingStepRef.current = onboardingState.currentStep;
+      return;
+    }
+
+    emitOnboardingEvent('onboarding_step_changed', {
+      stepId: onboardingState.currentStep,
+      source: onboardingState.entryPath ?? undefined
+    });
+    previousOnboardingStepRef.current = onboardingState.currentStep;
+  }, [onboardingState.status, onboardingState.currentStep, onboardingState.entryPath]);
+
+  useEffect(() => {
+    if (!ONBOARDING_FEATURES.onboardingV1) return;
+    if (onboardingState.status !== 'active' || !hasOnboardingExport) return;
+
+    const source = onboardingState.entryPath ?? undefined;
+    emitOnboardingEvent('first_export_done', {
+      stepId: onboardingState.currentStep,
+      source
+    });
+
+    const completedState = markOnboardingCompleted();
+    setOnboardingState(completedState);
+    setHasOnboardingExport(false);
+    setShowOnboardingEntry(false);
+
+    emitOnboardingEvent('onboarding_completed', {
+      stepId: 'complete',
+      source
+    });
+    setToastMessage('Онбординг завершен: первый экспорт выполнен.');
+  }, [onboardingState.status, onboardingState.entryPath, onboardingState.currentStep, hasOnboardingExport]);
+
   const htmlPreviewOutput = useMemo(() => renderHtmlDocument(sections, theme, { interactive: false }), [sections, theme]);
   const wikiOutput = useMemo(() => renderWikiDocument(sections), [sections]);
+  const onboardingResolvedStepIndex = useMemo(
+    () => Math.max(0, ONBOARDING_STEPS.findIndex((step) => step.id === onboardingState.currentStep)),
+    [onboardingState.currentStep]
+  );
+  const onboardingNavStepIndex = useMemo(
+    () => Math.max(0, ONBOARDING_STEPS.findIndex((step) => step.id === onboardingNavStep)),
+    [onboardingNavStep]
+  );
+  const activeOnboardingStep = ONBOARDING_STEPS[onboardingNavStepIndex] ?? ONBOARDING_STEPS[0];
+  const requestSectionId = useMemo(
+    () => sections.find((section) => section.kind === 'parsed' && section.sectionType === 'request')?.id ?? sections.find((section) => section.kind === 'parsed')?.id,
+    [sections]
+  );
+  const firstTextSectionId = useMemo(() => sections.find((section) => section.kind === 'text')?.id, [sections]);
+
+  useEffect(() => {
+    if (onboardingState.status !== 'active') return;
+    setOnboardingNavStep(onboardingState.currentStep);
+  }, [onboardingState.status, onboardingState.currentStep]);
+
+  useEffect(() => {
+    return () => {
+      if (onboardingNavErrorTimerRef.current) {
+        window.clearTimeout(onboardingNavErrorTimerRef.current);
+      }
+      if (onboardingSpotlightTimerRef.current) {
+        window.clearTimeout(onboardingSpotlightTimerRef.current);
+      }
+      onboardingSpotlightNodeRef.current?.classList.remove('onboarding-spotlight-active');
+    };
+  }, []);
+
+  function setOnboardingNavErrorMessage(message: string): void {
+    setOnboardingNavError(message);
+    if (onboardingNavErrorTimerRef.current) {
+      window.clearTimeout(onboardingNavErrorTimerRef.current);
+    }
+    onboardingNavErrorTimerRef.current = window.setTimeout(() => {
+      setOnboardingNavError('');
+      onboardingNavErrorTimerRef.current = null;
+    }, 2800);
+  }
+
+  function announceOnboarding(message: string): void {
+    setOnboardingLiveMessage('');
+    window.setTimeout(() => {
+      setOnboardingLiveMessage(message);
+    }, 10);
+  }
+
+  function getOnboardingStepTarget(stepId: OnboardingStepId): OnboardingStepTarget {
+    if (stepId === 'prepare-source') {
+      return {
+        tab: 'editor',
+        sectionId: requestSectionId,
+        openExpander: 'source-server',
+        anchor: 'prepare-source'
+      };
+    }
+
+    if (stepId === 'run-parse') {
+      return {
+        tab: 'editor',
+        sectionId: requestSectionId,
+        openExpander: 'source-server',
+        anchor: 'run-parse'
+      };
+    }
+
+    if (stepId === 'refine-structure') {
+      return {
+        tab: 'editor',
+        sectionId: firstTextSectionId,
+        anchor: 'refine-structure'
+      };
+    }
+
+    if (stepId === 'export-docs') {
+      return {
+        tab: 'editor',
+        anchor: 'export-docs',
+        hintMessage: 'Используйте кнопки Экспорт HTML/Wiki в верхней панели.'
+      };
+    }
+
+    if (stepId === 'complete') {
+      return {
+        tab: 'editor',
+        anchor: 'choose-entry',
+        hintMessage: 'Онбординг пройден. Можно продолжать работу в любом режиме.'
+      };
+    }
+
+    return {
+      tab: 'editor',
+      anchor: 'choose-entry'
+    };
+  }
+
+  function canNavigateToOnboardingStep(stepId: OnboardingStepId): { allowed: boolean; reason?: string } {
+    const targetIndex = ONBOARDING_STEPS.findIndex((step) => step.id === stepId);
+    if (targetIndex < 0) return { allowed: false, reason: 'Шаг не найден.' };
+
+    // Going to current or previous steps should always be allowed.
+    if (targetIndex <= onboardingNavStepIndex) return { allowed: true };
+
+    // Forward jumps are limited by completed progress.
+    if (targetIndex <= onboardingResolvedStepIndex) return { allowed: true };
+
+    const previousStep = ONBOARDING_STEPS[Math.max(0, targetIndex - 1)];
+    return {
+      allowed: false,
+      reason: `Сначала завершите шаг: ${previousStep?.title ?? 'предыдущий шаг'}`
+    };
+  }
+
+  function spotlightOnboardingAnchor(anchor: string, stepTitle: string): void {
+    const selector = `[data-onboarding-anchor="${anchor}"]`;
+    window.setTimeout(() => {
+      const target = document.querySelector<HTMLElement>(selector);
+      if (!target) return;
+
+      if (onboardingSpotlightTimerRef.current) {
+        window.clearTimeout(onboardingSpotlightTimerRef.current);
+      }
+
+      onboardingSpotlightNodeRef.current?.classList.remove('onboarding-spotlight-active');
+      onboardingSpotlightNodeRef.current = target;
+
+      target.classList.remove('onboarding-spotlight-active');
+      void target.offsetWidth;
+      target.classList.add('onboarding-spotlight-active');
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+      const focusCandidate =
+        target.matches('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
+          ? target
+          : target.querySelector<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+
+      focusCandidate?.focus({ preventScroll: true });
+
+      onboardingSpotlightTimerRef.current = window.setTimeout(() => {
+        target.classList.remove('onboarding-spotlight-active');
+        onboardingSpotlightTimerRef.current = null;
+      }, 2100);
+    }, 90);
+
+    announceOnboarding(`Переход к шагу: ${stepTitle}`);
+  }
+
+  function goToOnboardingStep(stepId: OnboardingStepId, source: OnboardingNavSource, force = false): void {
+    const access = canNavigateToOnboardingStep(stepId);
+    if (!force && !access.allowed) {
+      setOnboardingNavErrorMessage(access.reason ?? 'Переход недоступен.');
+      emitOnboardingEvent('onboarding_step_blocked', { stepId, source });
+      announceOnboarding(access.reason ?? 'Переход к шагу недоступен.');
+      return;
+    }
+
+    setOnboardingNavError('');
+    setOnboardingNavStep(stepId);
+
+    const target = getOnboardingStepTarget(stepId);
+    if (target.sectionId) {
+      setSelectedId(target.sectionId);
+    }
+    setTab(target.tab);
+    if (target.sectionId && target.openExpander) {
+      setExpanderOpen(target.sectionId, target.openExpander, true);
+    }
+    if (target.hintMessage) {
+      setToastMessage(target.hintMessage);
+    }
+
+    spotlightOnboardingAnchor(target.anchor, ONBOARDING_STEPS.find((step) => step.id === stepId)?.title ?? stepId);
+    emitOnboardingEvent('onboarding_step_jump', { stepId, source });
+  }
+
+  function navigateOnboardingStep(direction: 'prev' | 'next'): void {
+    const nextIndex = direction === 'prev' ? onboardingNavStepIndex - 1 : onboardingNavStepIndex + 1;
+    const nextStep = ONBOARDING_STEPS[nextIndex];
+    if (!nextStep) return;
+    goToOnboardingStep(nextStep.id, direction);
+  }
+
+  function focusOnboardingCurrentStep(): void {
+    goToOnboardingStep(onboardingNavStep, 'cta', true);
+  }
+
+  function jumpToOnboardingStep(stepId: OnboardingStepId): void {
+    goToOnboardingStep(stepId, 'chip');
+  }
+
+  const activeOnboardingHint = useMemo(() => {
+    if (!ONBOARDING_FEATURES.onboardingV1 || !ONBOARDING_FEATURES.onboardingGuidedMode) return null;
+    if (onboardingState.status !== 'active') return null;
+    if (dismissedOnboardingHints[onboardingNavStep]) return null;
+
+    if (onboardingNavStep === 'prepare-source') {
+      return {
+        title: 'Добавьте источник данных',
+        description: 'Откройте request/response и вставьте JSON или cURL в Source-блок, чтобы начать парсинг.',
+        actionLabel: 'Открыть source'
+      };
+    }
+
+    if (onboardingNavStep === 'run-parse') {
+      return {
+        title: 'Запустите парсер',
+        description: 'После вставки источника нажмите Парсить, чтобы таблица параметров заполнилась автоматически.',
+        actionLabel: 'Перейти к парсеру'
+      };
+    }
+
+    if (onboardingNavStep === 'refine-structure') {
+      return {
+        title: 'Заполните смысловые блоки',
+        description: 'Добавьте описание в текст, диаграмму или раздел ошибок, чтобы структура документа была полной.',
+        actionLabel: 'Открыть текстовый блок'
+      };
+    }
+
+    if (onboardingNavStep === 'export-docs') {
+      return {
+        title: 'Экспортируйте документацию',
+        description: 'Скачайте HTML или Wiki, чтобы зафиксировать результат и завершить базовый сценарий.',
+        actionLabel: 'Открыть экспорт'
+      };
+    }
+
+    return null;
+  }, [onboardingState.status, onboardingNavStep, dismissedOnboardingHints]);
+
+  function handleActiveOnboardingHintAction(): void {
+    if (!activeOnboardingHint) return;
+
+    goToOnboardingStep(onboardingNavStep, 'hint', true);
+  }
+
+  function dismissActiveOnboardingHint(): void {
+    if (!activeOnboardingHint) return;
+    setDismissedOnboardingHints((prev) => ({
+      ...prev,
+      [onboardingNavStep]: true
+    }));
+  }
 
   useEffect(() => {
     applyThemeToRoot(theme);
@@ -719,12 +1896,12 @@ export default function App() {
   useEffect(() => {
     setAutosave({ state: 'saving' });
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(asProjectData(sections)));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(asWorkspaceProjectData(methods, activeMethodId, methodGroups)));
       setAutosave({ state: 'saved', at: formatTime(new Date()) });
     } catch {
       setAutosave({ state: 'error' });
     }
-  }, [sections]);
+  }, [methods, activeMethodId, methodGroups]);
 
   useEffect(() => {
     if (!selectedSection || selectedSection.kind !== 'text') {
@@ -735,7 +1912,7 @@ export default function App() {
     const editor = textSectionRef.current;
     if (!editor) return;
 
-    const nextHtml = richTextToHtml(selectedSection.value);
+    const nextHtml = richTextToHtml(selectedSection.value, { editable: true });
     const sameSection = textEditorSectionRef.current === selectedSection.id;
     const isFocused = document.activeElement === editor;
 
@@ -757,7 +1934,7 @@ export default function App() {
         const editor = diagramTextRefs.current[editorKey];
         if (!editor || editor === focusedElement) continue;
 
-        const nextHtml = richTextToHtml(diagram.description ?? '');
+        const nextHtml = richTextToHtml(diagram.description ?? '', { editable: true });
         if (editor.innerHTML !== nextHtml) editor.innerHTML = nextHtml;
       }
     }
@@ -923,22 +2100,26 @@ export default function App() {
       const validationErrorRow: ErrorRow = {
         clientHttpStatus: '-',
         clientResponse: '',
+        clientResponseCode: '',
         trigger: 'Ошибка валидации',
         errorType: 'BusinessException',
         serverHttpStatus: preset?.httpStatus ?? '400',
         internalCode: '100101',
-        message: preset?.message ?? 'Bad request sent to the system'
+        message: preset?.message ?? 'Bad request sent to the system',
+        responseCode: ''
       };
 
       const isSingleEmptyRow =
         section.rows.length === 1 &&
         !section.rows[0].clientHttpStatus.trim() &&
         !section.rows[0].clientResponse.trim() &&
+        !(section.rows[0].clientResponseCode ?? '').trim() &&
         !section.rows[0].trigger.trim() &&
         section.rows[0].errorType === '-' &&
         !section.rows[0].serverHttpStatus.trim() &&
         !section.rows[0].internalCode.trim() &&
-        !section.rows[0].message.trim();
+        !section.rows[0].message.trim() &&
+        !section.rows[0].responseCode.trim();
 
       return {
         ...section,
@@ -977,13 +2158,26 @@ export default function App() {
     });
   }
 
-  function insertJsonResponse(sectionId: string, rowIndex: number): void {
+  function formatClientResponseCode(sectionId: string, rowIndex: number): void {
     updateErrorRow(sectionId, rowIndex, (row) => {
-      const trimmed = row.clientResponse.trim();
-      if (!trimmed) return { ...row, clientResponse: '{\n  \n}' };
+      const trimmed = (row.clientResponseCode ?? '').trim();
+      if (!trimmed) return { ...row, clientResponseCode: '{\n  \n}' };
 
       try {
-        return { ...row, clientResponse: JSON.stringify(JSON.parse(trimmed), null, 2) };
+        return { ...row, clientResponseCode: JSON.stringify(JSON.parse(trimmed), null, 2) };
+      } catch {
+        return row;
+      }
+    });
+  }
+
+  function formatErrorResponseCode(sectionId: string, rowIndex: number): void {
+    updateErrorRow(sectionId, rowIndex, (row) => {
+      const trimmed = row.responseCode.trim();
+      if (!trimmed) return { ...row, responseCode: '{\n  \n}' };
+
+      try {
+        return { ...row, responseCode: JSON.stringify(JSON.parse(trimmed), null, 2) };
       } catch {
         return row;
       }
@@ -991,8 +2185,17 @@ export default function App() {
   }
 
   function runParser(section: ParsedSection, target: ParseTarget = 'server'): void {
-    const format = target === 'client' ? section.clientFormat ?? 'json' : section.format;
-    const input = target === 'client' ? section.clientInput ?? '' : section.input;
+    const isEditingCurrentTarget =
+      Boolean(editingSource)
+      && editingSource?.sectionId === section.id
+      && editingSource.target === target;
+
+    const persistedFormat = target === 'client' ? section.clientFormat ?? 'json' : section.format;
+    const persistedInput = target === 'client' ? section.clientInput ?? '' : section.input;
+    const draftInput = isEditingCurrentTarget ? editingSource?.draft ?? persistedInput : persistedInput;
+    const detectedDraftFormat = detectSourceFormat(draftInput);
+    const format = detectedDraftFormat ?? persistedFormat;
+    const input = draftInput;
 
     try {
       const rows = parseToRows(format, input);
@@ -1002,36 +2205,64 @@ export default function App() {
         if (target === 'client' && isDualModelSection(current)) {
           return {
             ...current,
+            clientFormat: format,
+            clientInput: input,
             clientRows: rows,
             clientError: '',
-            clientLastSyncedFormat: current.clientFormat ?? 'json',
+            clientLastSyncedFormat: format,
             externalRequestUrl: isRequestSection(current) ? curlMeta?.url ?? current.externalRequestUrl ?? '' : current.externalRequestUrl,
             externalRequestMethod: isRequestSection(current) ? curlMeta?.method ?? current.externalRequestMethod ?? 'POST' : current.externalRequestMethod
           };
         }
         return {
           ...current,
+          format,
+          input,
           rows,
           error: '',
-          lastSyncedFormat: current.format,
+          lastSyncedFormat: format,
           requestUrl: isRequestSection(current) ? curlMeta?.url ?? current.requestUrl ?? '' : current.requestUrl,
           requestMethod: isRequestSection(current) ? curlMeta?.method ?? current.requestMethod ?? 'POST' : current.requestMethod
         };
       });
+      if (isEditingCurrentTarget) {
+        setEditingSource(null);
+        setSourceEditorError('');
+      }
     } catch (error) {
       updateSection(section.id, (current) => {
         if (current.kind !== 'parsed') return current;
         const message = error instanceof Error ? error.message : 'Ошибка парсинга';
         if (target === 'client' && isDualModelSection(current)) {
-          return { ...current, clientRows: [], clientError: message };
+          return {
+            ...current,
+            clientFormat: format,
+            clientInput: input,
+            clientRows: [],
+            clientError: message
+          };
         }
-        return { ...current, rows: [], error: message };
+        return {
+          ...current,
+          format,
+          input,
+          rows: [],
+          error: message
+        };
       });
     }
   }
 
   function exportProjectJson(): void {
-    downloadText('doc-project.json', JSON.stringify(asProjectData(sections), null, 2));
+    if (!activeMethod) return;
+    const methodSlug = slugifyMethodFileName(activeMethod.name);
+    const payload: ProjectData = {
+      version: 2,
+      updatedAt: new Date().toISOString(),
+      sections: sanitizeSections(sections)
+    };
+    downloadText(`${methodSlug}.project.json`, JSON.stringify(payload, null, 2));
+    markOnboardingExportTouched();
   }
 
   function blobToDataUrl(blob: Blob): Promise<string> {
@@ -1095,18 +2326,24 @@ export default function App() {
   }
 
   async function handleExportHtml(): Promise<void> {
+    if (!activeMethod) return;
+    const methodSlug = slugifyMethodFileName(activeMethod.name);
     const diagramImageMap = await buildEmbeddedDiagramImageMap();
     const htmlForExport = renderHtmlDocument(sections, theme, {
       interactive: true,
       diagramImageSource: 'remote',
       diagramImageMap
     });
-    downloadText('documentation.html', htmlForExport);
+    downloadText(`${methodSlug}.documentation.html`, htmlForExport);
+    markOnboardingExportTouched();
   }
 
   async function handleExportWiki(): Promise<void> {
+    if (!activeMethod) return;
+    const methodSlug = slugifyMethodFileName(activeMethod.name);
     await exportDiagramJpegs();
-    downloadText('documentation.wiki', wikiOutput);
+    downloadText(`${methodSlug}.documentation.wiki`, wikiOutput);
+    markOnboardingExportTouched();
   }
 
   async function copyToClipboard(value: string): Promise<void> {
@@ -1122,30 +2359,171 @@ export default function App() {
     }
   }
 
+  function processImportedText(rawText: string, fileName: string): void {
+    try {
+      const text = rawText.trim();
+      if (!text) {
+        setImportError('Вставьте JSON или cURL.');
+        return;
+      }
+
+      const parsed = JSON.parse(text) as WorkspaceProjectData | ProjectData | Record<string, unknown>;
+
+      if ('methods' in parsed && Array.isArray(parsed.methods)) {
+        const loaded = loadWorkspaceProjectFromPayload(parsed as WorkspaceProjectData);
+        applyWorkspaceState({ ...loaded, groups: ENABLE_MULTI_METHODS ? loaded.groups : [] });
+        setImportError('');
+        setProjectTextImport(null);
+        return;
+      }
+
+      if ('sections' in parsed && Array.isArray(parsed.sections)) {
+        const sanitizedSections = sanitizeSections((parsed as ProjectData).sections);
+        setSections(sanitizedSections);
+        setSelectedId(sanitizedSections[0]?.id ?? selectedId);
+        setImportError('');
+        setProjectTextImport(null);
+        return;
+      }
+
+      const guessedType = guessJsonSampleType(parsed);
+      const linkedSectionId = getParsedSectionIdByType(guessedType);
+      const linkedSection = sections.find(
+        (section): section is ParsedSection => section.kind === 'parsed' && section.id === linkedSectionId
+      );
+
+      const domainModelEnabled = Boolean(linkedSection?.domainModelEnabled);
+      setJsonImportRouting({
+        fileName,
+        rawText: text,
+        sampleType: guessedType,
+        domainModelEnabled,
+        targetSide: domainModelEnabled ? 'client' : 'server'
+      });
+      setImportError('');
+      setProjectTextImport(null);
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : 'Ошибка импорта');
+    }
+  }
+
   function importProjectJson(file: File | undefined): void {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      try {
-        const text = String(reader.result || '');
-        const parsed = JSON.parse(text) as ProjectData;
-        if (!parsed.sections || !Array.isArray(parsed.sections)) throw new Error('Неверный формат');
-        const sanitizedSections = sanitizeSections(parsed.sections);
-        setSections(sanitizedSections);
-        setSelectedId(sanitizedSections[0]?.id ?? selectedId);
-        setImportError('');
-      } catch (error) {
-        setImportError(error instanceof Error ? error.message : 'Ошибка импорта');
-      }
+      processImportedText(String(reader.result || ''), file.name);
     };
     reader.readAsText(file);
   }
 
+  function openSourceTextImport(section: ParsedSection, target: ParseTarget): void {
+    setSourceTextImport({
+      sectionId: section.id,
+      target,
+      draft: getSourceValue(section, target)
+    });
+    setSourceEditorError('');
+  }
+
+  function applySourceTextImport(): void {
+    if (!sourceTextImport) return;
+
+    const section = sections.find((item): item is ParsedSection => item.kind === 'parsed' && item.id === sourceTextImport.sectionId);
+    if (!section) {
+      setSourceTextImport(null);
+      return;
+    }
+
+    const rawDraft = sourceTextImport.draft;
+    const currentFormat = getSourceFormat(section, sourceTextImport.target);
+    const nextFormat = applyDetectedSourceFormat(section.id, sourceTextImport.target, rawDraft, currentFormat);
+    const validationError = validateSourceDraft(nextFormat, rawDraft);
+
+    if (validationError) {
+      setSourceEditorError(validationError);
+      return;
+    }
+
+    updateSection(section.id, (current) => {
+      if (current.kind !== 'parsed') return current;
+
+      if (sourceTextImport.target === 'client' && isDualModelSection(current)) {
+        return {
+          ...current,
+          clientFormat: nextFormat,
+          clientInput: rawDraft,
+          clientError: ''
+        };
+      }
+
+      return {
+        ...current,
+        format: nextFormat,
+        input: rawDraft,
+        error: ''
+      };
+    });
+
+    setSelectedId(section.id);
+    setTab('editor');
+    setExpanderOpen(section.id, sourceTextImport.target === 'client' ? 'source-client' : 'source-server', true);
+    setEditingSource(null);
+    setSourceEditorError('');
+    setSourceTextImport(null);
+    setToastMessage(`Текст импортирован в ${sourceTextImport.target === 'client' ? 'Client source' : 'Server source'}.`);
+  }
+
+  function loadWorkspaceProjectFromPayload(payload: WorkspaceProjectData): WorkspaceProjectData {
+    const methods = payload.methods
+      .filter((method) => method && Array.isArray(method.sections))
+      .map((method, index) => ({
+        id: method.id || createMethodId(),
+        name: method.name?.trim() || `Метод ${index + 1}`,
+        updatedAt: method.updatedAt || new Date().toISOString(),
+        sections: sanitizeSections(method.sections)
+      }));
+
+    if (methods.length === 0) return createWorkspaceSeed();
+
+    const groups = Array.isArray(payload.groups)
+      ? payload.groups.map((group) => ({
+          id: group.id || `group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          name: group.name?.trim() || 'Новая цепочка',
+          methodIds: Array.isArray(group.methodIds) ? group.methodIds.filter(Boolean) : [],
+          links: Array.isArray(group.links) ? group.links : []
+        }))
+      : [];
+
+    const activeMethodId = payload.activeMethodId && methods.some((method) => method.id === payload.activeMethodId)
+      ? payload.activeMethodId
+      : methods[0].id;
+
+    const workspace: WorkspaceProjectData = {
+      version: 3,
+      updatedAt: payload.updatedAt || new Date().toISOString(),
+      methods,
+      groups,
+      activeMethodId
+    };
+
+    return normalizeWorkspaceForMode(workspace);
+  }
+
   function resetProject(): void {
-    if (!confirm('Сбросить проект? Все несохраненные данные будут потеряны.')) return;
-    const seed = createInitialSections();
-    setSections(seed);
-    setSelectedId(seed[0].id);
+    if (!confirm('Создать новый эндпоинт? Текущие несохраненные данные будут потеряны.')) return;
+
+    if (ONBOARDING_FEATURES.onboardingV1) {
+      setImportError('');
+      setJsonImportRouting(null);
+      setShowOnboardingEntry(true);
+      return;
+    }
+
+    const seed = createWorkspaceSeed();
+    setMethodsState(seed.methods);
+    setMethodGroups(seed.groups);
+    setActiveMethodId(seed.activeMethodId ?? seed.methods[0].id);
+    setSelectedId(seed.methods[0].sections[0].id);
     localStorage.removeItem(STORAGE_KEY);
   }
 
@@ -1167,26 +2545,269 @@ export default function App() {
     updateDiagram(sectionId, diagramId, (current) => ({ ...current, description: nextValue }));
   }
 
+  function findClosestInEditor(node: Node | null, selector: string, editor: HTMLElement): HTMLElement | null {
+    let current: HTMLElement | null =
+      node instanceof HTMLElement
+        ? node
+        : node instanceof Text
+          ? node.parentElement
+          : null;
+
+    while (current) {
+      if (current.matches(selector)) return current;
+      if (current === editor) break;
+      current = current.parentElement;
+    }
+
+    return null;
+  }
+
+  function getSelectionInEditor(editor: HTMLElement): Selection | null {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return null;
+    const range = selection.getRangeAt(0);
+    if (!editor.contains(range.commonAncestorContainer)) return null;
+    return selection;
+  }
+
+  function unwrapElement(element: HTMLElement): void {
+    const parent = element.parentNode;
+    if (!parent) return;
+
+    while (element.firstChild) {
+      parent.insertBefore(element.firstChild, element);
+    }
+
+    parent.removeChild(element);
+  }
+
+  function normalizeRichTextColor(value: string): string {
+    const normalized = value.trim().toLowerCase();
+    if (/^#[0-9a-f]{3,8}$/i.test(normalized)) return normalized;
+    if (/^rgba?\([0-9\s.,%+-]+\)$/i.test(normalized)) return normalized;
+    if (/^hsla?\([0-9\s.,%+-]+\)$/i.test(normalized)) return normalized;
+    if (/^[a-z][a-z-]*$/i.test(normalized)) return normalized;
+    return RICH_TEXT_HIGHLIGHT_OPTIONS[0].value;
+  }
+
+  function parseNodeColor(node: HTMLElement): string {
+    const inlineColor = node.dataset.highlight || node.style.backgroundColor || node.getAttribute('color') || '';
+    return normalizeRichTextColor(inlineColor);
+  }
+
+  function resolveCssBackgroundColor(value: string): string {
+    const probe = document.createElement('span');
+    probe.style.backgroundColor = value;
+    probe.style.position = 'absolute';
+    probe.style.left = '-9999px';
+    document.body.appendChild(probe);
+    const resolved = getComputedStyle(probe).backgroundColor || value;
+    probe.remove();
+    return resolved.toLowerCase();
+  }
+
+  function areHighlightColorsEqual(left: string, right: string): boolean {
+    return resolveCssBackgroundColor(left) === resolveCssBackgroundColor(right);
+  }
+
+  function rememberSelectionForEditor(editor: HTMLElement | null): void {
+    const selection = window.getSelection();
+    if (!editor || !selection || selection.rangeCount === 0) return;
+
+    const range = selection.getRangeAt(0);
+    if (!editor.contains(range.commonAncestorContainer)) return;
+
+    richEditorSelectionRef.current = { editor, range: range.cloneRange() };
+  }
+
+  function restoreSelectionForEditor(editor: HTMLElement | null): void {
+    const stored = richEditorSelectionRef.current;
+    const selection = window.getSelection();
+    if (!editor || !stored || !selection || stored.editor !== editor) return;
+
+    selection.removeAllRanges();
+    selection.addRange(stored.range);
+    editor.focus();
+  }
+
+  function toggleFormatBlock(editor: HTMLElement, tag: 'h3' | 'blockquote'): void {
+    const selection = getSelectionInEditor(editor);
+    if (!selection) return;
+
+    const anchorBlock = findClosestInEditor(selection.anchorNode, tag, editor);
+    const focusBlock = findClosestInEditor(selection.focusNode, tag, editor);
+    const shouldUnset = Boolean(anchorBlock && focusBlock && anchorBlock === focusBlock);
+
+    document.execCommand('formatBlock', false, shouldUnset ? 'p' : tag);
+  }
+
+  function toggleInlineCode(editor: HTMLElement): void {
+    const selection = getSelectionInEditor(editor);
+    if (!selection) return;
+
+    const anchorCode = findClosestInEditor(selection.anchorNode, 'code', editor);
+    const focusCode = findClosestInEditor(selection.focusNode, 'code', editor);
+
+    if (anchorCode && focusCode && anchorCode === focusCode) {
+      unwrapElement(anchorCode);
+      return;
+    }
+
+    const selectedText = selection.toString() || 'code';
+    document.execCommand('insertHTML', false, `<code>${escapeRichTextHtml(selectedText)}</code>`);
+  }
+
+  function wrapSelectionWithInlineElement(editor: HTMLElement, tagName: 'em'): void {
+    const selection = getSelectionInEditor(editor);
+    if (!selection || selection.rangeCount === 0) return;
+
+    const range = selection.getRangeAt(0);
+    const wrapper = document.createElement(tagName);
+
+    if (range.collapsed) {
+      const textNode = document.createTextNode('\u200b');
+      wrapper.appendChild(textNode);
+      range.insertNode(wrapper);
+
+      const nextRange = document.createRange();
+      nextRange.setStart(textNode, 1);
+      nextRange.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(nextRange);
+      return;
+    }
+
+    const content = range.extractContents();
+    wrapper.appendChild(content);
+    range.insertNode(wrapper);
+
+    const nextRange = document.createRange();
+    nextRange.selectNodeContents(wrapper);
+    selection.removeAllRanges();
+    selection.addRange(nextRange);
+  }
+
+  function toggleInlineItalic(editor: HTMLElement): void {
+    const selection = getSelectionInEditor(editor);
+    if (!selection) return;
+
+    const anchorItalic = findClosestInEditor(selection.anchorNode, 'em, i', editor);
+    const focusItalic = findClosestInEditor(selection.focusNode, 'em, i', editor);
+
+    if (anchorItalic && focusItalic && anchorItalic === focusItalic) {
+      unwrapElement(anchorItalic);
+      return;
+    }
+
+    wrapSelectionWithInlineElement(editor, 'em');
+  }
+
+  function toggleInlineHighlight(editor: HTMLElement, color: string): void {
+    const selection = getSelectionInEditor(editor);
+    if (!selection) return;
+
+    const anchorHighlight =
+      findClosestInEditor(selection.anchorNode, 'mark[data-highlight]', editor) ??
+      findClosestInEditor(selection.anchorNode, 'span[style*="background-color"]', editor);
+    const focusHighlight =
+      findClosestInEditor(selection.focusNode, 'mark[data-highlight]', editor) ??
+      findClosestInEditor(selection.focusNode, 'span[style*="background-color"]', editor);
+    const targetColor = normalizeRichTextColor(color);
+
+    if (selection.isCollapsed) {
+      if (anchorHighlight) {
+        unwrapElement(anchorHighlight);
+      }
+      return;
+    }
+
+    if (
+      anchorHighlight &&
+      focusHighlight &&
+      anchorHighlight === focusHighlight
+    ) {
+      const currentColor = parseNodeColor(anchorHighlight);
+      if (areHighlightColorsEqual(currentColor, targetColor)) {
+        unwrapElement(anchorHighlight);
+      } else {
+        anchorHighlight.dataset.highlight = targetColor;
+        anchorHighlight.style.backgroundColor = targetColor;
+      }
+      return;
+    }
+
+    document.execCommand('styleWithCSS', false, 'true');
+    document.execCommand('hiliteColor', false, targetColor);
+  }
+
+  function applyRichTextCommand(editor: HTMLElement, action: RichTextAction, options?: RichTextCommandOptions): void {
+    editor.focus();
+
+    if (action === 'bold') {
+      document.execCommand('bold');
+      return;
+    }
+
+    if (action === 'italic') {
+      toggleInlineItalic(editor);
+      return;
+    }
+
+    if (action === 'ul') {
+      document.execCommand('insertUnorderedList');
+      return;
+    }
+
+    if (action === 'ol') {
+      document.execCommand('insertOrderedList');
+      return;
+    }
+
+    if (action === 'h3') {
+      toggleFormatBlock(editor, 'h3');
+      return;
+    }
+
+    if (action === 'quote') {
+      toggleFormatBlock(editor, 'blockquote');
+      return;
+    }
+
+    if (action === 'code') {
+      toggleInlineCode(editor);
+      return;
+    }
+
+    if (action === 'highlight') {
+      toggleInlineHighlight(editor, options?.color ?? DEFAULT_RICH_TEXT_HIGHLIGHT);
+      return;
+    }
+  }
+
+  function handleRichTextHotkeys(event: ReactKeyboardEvent<HTMLElement>, onAction: (action: RichTextAction) => void): boolean {
+    if (!(event.ctrlKey || event.metaKey) || event.altKey) return false;
+
+    const key = event.key.toLowerCase();
+    if (key === 'i') {
+      event.preventDefault();
+      onAction('italic');
+      return true;
+    }
+
+    return false;
+  }
+
   function applyDiagramTextCommand(
     sectionId: string,
     diagramId: string,
-    action: 'bold' | 'italic' | 'code' | 'h3' | 'ul' | 'ol' | 'quote'
+    action: RichTextAction,
+    options?: RichTextCommandOptions
   ): void {
     const editor = diagramTextRefs.current[getDiagramEditorKey(sectionId, diagramId)];
     if (!editor) return;
 
-    editor.focus();
-
-    if (action === 'bold') document.execCommand('bold');
-    if (action === 'italic') document.execCommand('italic');
-    if (action === 'ul') document.execCommand('insertUnorderedList');
-    if (action === 'ol') document.execCommand('insertOrderedList');
-    if (action === 'h3') document.execCommand('formatBlock', false, 'h3');
-    if (action === 'quote') document.execCommand('formatBlock', false, 'blockquote');
-    if (action === 'code') {
-      const selection = window.getSelection()?.toString() || 'code';
-      document.execCommand('insertHTML', false, `<code>${escapeRichTextHtml(selection)}</code>`);
-    }
+    restoreSelectionForEditor(editor);
+    applyRichTextCommand(editor, action, options);
 
     syncDiagramDescriptionFromEditor(sectionId, diagramId);
   }
@@ -1212,22 +2833,13 @@ export default function App() {
     editor.focus();
   }
 
-  function applyTextEditorCommand(sectionId: string, action: 'bold' | 'italic' | 'code' | 'h3' | 'ul' | 'ol' | 'quote'): void {
+  function applyTextEditorCommand(sectionId: string, action: RichTextAction, options?: RichTextCommandOptions): void {
     const editor = textSectionRef.current;
     if (!editor) return;
 
     restoreTextSelection();
 
-    if (action === 'bold') document.execCommand('bold');
-    if (action === 'italic') document.execCommand('italic');
-    if (action === 'ul') document.execCommand('insertUnorderedList');
-    if (action === 'ol') document.execCommand('insertOrderedList');
-    if (action === 'h3') document.execCommand('formatBlock', false, 'h3');
-    if (action === 'quote') document.execCommand('formatBlock', false, 'blockquote');
-    if (action === 'code') {
-      const selection = window.getSelection()?.toString() || 'code';
-      document.execCommand('insertHTML', false, `<code>${escapeRichTextHtml(selection)}</code>`);
-    }
+    applyRichTextCommand(editor, action, options);
     rememberTextSelection();
     syncTextSectionFromEditor(sectionId);
   }
@@ -1237,7 +2849,7 @@ export default function App() {
       field: `newField${Date.now()}`,
       origin: 'manual',
       type: 'string',
-      required: OPTIONAL_MARK,
+      required: '+',
       description: '',
       example: '',
       source: isDualModelSection(section) ? 'body' : 'parsed'
@@ -1258,7 +2870,7 @@ export default function App() {
       origin: 'manual',
       enabled: true,
       type: 'string',
-      required: '-',
+      required: '+',
       description: '',
       example: '',
       source: 'header'
@@ -1276,7 +2888,7 @@ export default function App() {
       origin: 'manual',
       enabled: true,
       type: 'string',
-      required: '-',
+      required: '+',
       description: '',
       example: '',
       source: 'header'
@@ -1781,6 +3393,7 @@ export default function App() {
       type: row.type || '—',
       required: row.required || '—',
       description: row.description || '—',
+      maskInLogs: row.maskInLogs ? '***' : ' ',
       example: row.example || '—'
     } satisfies Record<RequestColumnKey, string>;
 
@@ -1854,6 +3467,17 @@ export default function App() {
 
     if (column === 'type' || column === 'required' || column === 'description' || column === 'example') {
       return renderEditableRequestCell(section, row, column);
+    }
+
+    if (column === 'maskInLogs') {
+      return (
+        <input
+          type="checkbox"
+          checked={Boolean(row.maskInLogs)}
+          onChange={(e) => updateServerRow(section.id, getParsedRowKey(row), (current) => ({ ...current, maskInLogs: e.target.checked }))}
+          aria-label="Маскирование в логах"
+        />
+      );
     }
 
     return cellMap[column];
@@ -1954,6 +3578,7 @@ export default function App() {
               <th>Тип</th>
               <th>Обязательность</th>
               <th>Описание</th>
+              <th>Маскирование в логах</th>
               <th>Пример</th>
             </tr>
           </thead>
@@ -1973,6 +3598,14 @@ export default function App() {
                 <td className="mono">{row.type}</td>
                 <td>{row.required}</td>
                 <td>{row.description || '—'}</td>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(row.maskInLogs)}
+                    onChange={(e) => updateServerRow(section.id, getParsedRowKey(row), (current) => ({ ...current, maskInLogs: e.target.checked }))}
+                    aria-label="Маскирование в логах"
+                  />
+                </td>
                 <td className="mono">{row.example || '—'}</td>
               </tr>
             ))}
@@ -1995,6 +3628,7 @@ export default function App() {
               <th>Header</th>
               <th>Обязательность</th>
               <th>Описание</th>
+              <th>Маскирование в логах</th>
               <th>Пример</th>
             </tr>
           </thead>
@@ -2085,6 +3719,34 @@ export default function App() {
                       />
                     )}
                   </td>
+                  <td>
+                    {isAuto || isDefault ? (
+                      <input type="checkbox" checked={Boolean(row.maskInLogs)} disabled aria-label="Маскирование в логах" />
+                    ) : (
+                      <input
+                        type="checkbox"
+                        checked={Boolean(
+                          isPersisted
+                            ? persistedRows.find((item) => getParsedRowKey(item) === rowKey)?.maskInLogs
+                            : row.maskInLogs
+                        )}
+                        onChange={(e) =>
+                          isExternal
+                            ? updateSection(section.id, (current) => {
+                                if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
+                                return {
+                                  ...current,
+                                  clientRows: (current.clientRows ?? []).map((item) =>
+                                    getParsedRowKey(item) === rowKey ? { ...item, maskInLogs: e.target.checked } : item
+                                  )
+                                };
+                              })
+                            : updateServerRow(section.id, rowKey, (current) => ({ ...current, maskInLogs: e.target.checked }))
+                        }
+                        aria-label="Маскирование в логах"
+                      />
+                    )}
+                  </td>
                   <td className="mono">
                     {isAuto || isDefault ? (
                       row.example || '—'
@@ -2146,7 +3808,8 @@ export default function App() {
     currentFormat: ParseFormat,
     onFix: () => void,
     syncedFormat?: ParseFormat,
-    message = 'Параметры отличаются от исходного источника'
+    message = 'Параметры отличаются от исходного источника',
+    fixActionLabel = 'Исправить источник'
   ): ReactNode {
     if (!visible) return null;
 
@@ -2182,7 +3845,7 @@ export default function App() {
         )}
         {canFix && (
           <button className="ghost small" type="button" onClick={onFix}>
-            Исправить источник
+            {fixActionLabel}
           </button>
         )}
       </div>
@@ -2470,6 +4133,16 @@ export default function App() {
                 <button
                   className="icon-button"
                   type="button"
+                  title="Импорт текста"
+                  aria-label="Импорт текста"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => openSourceTextImport(section, target)}
+                >
+                  ⇣
+                </button>
+                <button
+                  className="icon-button"
+                  type="button"
                   title="Редактировать"
                   aria-label="Редактировать"
                   onMouseDown={(event) => event.preventDefault()}
@@ -2518,64 +4191,77 @@ export default function App() {
           </div>
         </div>
 
-        {shouldOpenEmptyInput && (
-          <div className="source-edit-wrap">
-            <textarea
-              className="source-edit"
-              rows={12}
-              value=""
-              onChange={(e) => {
-                const nextDraft = e.target.value;
-                const nextFormat = applyDetectedSourceFormat(section.id, target, nextDraft, format);
-                setEditingSource({
-                  sectionId: section.id,
-                  target,
-                  draft: nextDraft
-                });
-                setSourceEditorError(validateSourceDraft(nextFormat, nextDraft));
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') cancelSourceEditing();
-              }}
-              placeholder="Вставьте JSON или cURL"
-              autoFocus
-            />
-          </div>
-        )}
+        <div className="source-input-area">
+          {shouldOpenEmptyInput && (
+            <div className="source-edit-wrap">
+              <textarea
+                className="source-edit"
+                rows={12}
+                value=""
+                onChange={(e) => {
+                  const nextDraft = e.target.value;
+                  const nextFormat = applyDetectedSourceFormat(section.id, target, nextDraft, format);
+                  setEditingSource({
+                    sectionId: section.id,
+                    target,
+                    draft: nextDraft
+                  });
+                  setSourceEditorError(validateSourceDraft(nextFormat, nextDraft));
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') cancelSourceEditing();
+                }}
+                placeholder="Вставьте JSON или cURL"
+                autoFocus
+              />
+            </div>
+          )}
 
-        {!isEditing && !shouldOpenEmptyInput && (
-          <div className={`source-code source-code-display language-${format}`} onDoubleClick={() => startSourceEditing(section, target)}>
-            <pre className={`source-code language-${format}`}>
-              <code dangerouslySetInnerHTML={{ __html: highlightCode(format, currentValue || '') || '&nbsp;' }} />
-            </pre>
-          </div>
-        )}
+          {!isEditing && !shouldOpenEmptyInput && (
+            <div className={`source-code source-code-display language-${format}`} onDoubleClick={() => startSourceEditing(section, target)}>
+              <pre className={`source-code language-${format}`}>
+                <code dangerouslySetInnerHTML={{ __html: highlightCode(format, currentValue || '') || '&nbsp;' }} />
+              </pre>
+            </div>
+          )}
 
-        {isEditing && (
-          <div className="source-edit-wrap">
-            <textarea
-              className="source-edit"
-              rows={12}
-              value={editingSource.draft}
-              onChange={(e) => {
-                const nextDraft = e.target.value;
-                const nextFormat = applyDetectedSourceFormat(section.id, target, nextDraft, format);
-                setEditingSource((current) => (current ? { ...current, draft: nextDraft } : current));
-                setSourceEditorError(validateSourceDraft(nextFormat, nextDraft));
-              }}
-              onBlur={() => {
-                if (format !== 'json') saveSourceEditing();
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') cancelSourceEditing();
-                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) saveSourceEditing();
-              }}
-              placeholder="Вставьте JSON или cURL"
-              autoFocus
-            />
-            {sourceEditorError && <div className="inline-error">{sourceEditorError}</div>}
-          </div>
-        )}
+          {isEditing && (
+            <div className="source-edit-wrap">
+              <textarea
+                className="source-edit"
+                rows={12}
+                value={editingSource.draft}
+                onChange={(e) => {
+                  const nextDraft = e.target.value;
+                  const nextFormat = applyDetectedSourceFormat(section.id, target, nextDraft, format);
+                  setEditingSource((current) => (current ? { ...current, draft: nextDraft } : current));
+                  setSourceEditorError(validateSourceDraft(nextFormat, nextDraft));
+                }}
+                onBlur={() => {
+                  if (format !== 'json') saveSourceEditing();
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') cancelSourceEditing();
+                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) saveSourceEditing();
+                }}
+                placeholder="Вставьте JSON или cURL"
+                autoFocus
+              />
+              {sourceEditorError && <div className="inline-error">{sourceEditorError}</div>}
+            </div>
+          )}
+
+          <button
+            className="source-parse-fab"
+            type="button"
+            data-onboarding-anchor={target === 'server' ? 'run-parse' : undefined}
+            onClick={() => runParser(section, target)}
+            disabled={!currentValue.trim()}
+            title="Запустить парсер"
+          >
+            Парсить
+          </button>
+        </div>
       </div>
     );
   }
@@ -2633,17 +4319,12 @@ export default function App() {
 
         <details
           className="expander"
+          data-onboarding-anchor="prepare-source"
           open={isExpanderOpen(section.id, 'source-server')}
           onToggle={(e) => setExpanderOpen(section.id, 'source-server', e.currentTarget.open)}
         >
           <summary className="expander-summary">{serverLabel}</summary>
           <div className="expander-body">
-            <div className="row gap">
-              <button className="primary" type="button" onClick={() => runParser(section, 'server')}>
-                Парсить
-              </button>
-            </div>
-
             {renderSourceEditor(section, 'server', `${exampleLabel} (${serverLabel})`)}
           </div>
         </details>
@@ -2667,12 +4348,6 @@ export default function App() {
             >
               <summary className="expander-summary">{clientLabel}</summary>
               <div className="expander-body">
-                <div className="row gap">
-                  <button className="primary" type="button" onClick={() => runParser(section, 'client')}>
-                    Парсить
-                  </button>
-                </div>
-
                 {renderSourceEditor(section, 'client', `${exampleLabel} (${clientLabel})`)}
               </div>
             </details>
@@ -2700,15 +4375,29 @@ export default function App() {
           const blockId = `diagram-item-${diagram.id}`;
           const title = diagram.title.trim() || `Диаграмма ${index + 1}`;
           const effectiveEngine = resolveDiagramEngine(diagram.code, diagram.engine);
+          const isOpen = isExpanderOpen(section.id, blockId);
+          const hasDiagramCode = Boolean(diagram.code.trim());
 
           return (
             <details
               key={diagram.id}
               className="expander"
-              open={isExpanderOpen(section.id, blockId)}
+              open={isOpen}
               onToggle={(e) => setExpanderOpen(section.id, blockId, e.currentTarget.open)}
             >
-              <summary className="expander-summary">{title}</summary>
+              <summary className={`expander-summary ${!isOpen && hasDiagramCode ? 'with-diagram-preview' : ''}`}>
+                <span className="expander-summary-title">{title}</span>
+                {!isOpen && hasDiagramCode && (
+                  <span className="diagram-collapsed-preview">
+                    {effectiveEngine === 'mermaid' && <MermaidLivePreview code={diagram.code} />}
+                    {effectiveEngine === 'plantuml' && (
+                      <span className="diagram-preview">
+                        <img className="diagram-preview-image" src={getPlantUmlImageUrl(diagram.code, 'svg')} alt={title} loading="lazy" />
+                      </span>
+                    )}
+                  </span>
+                )}
+              </summary>
               <div className="expander-body">
                 <div className="diagram-header-row">
                   <label className="field">
@@ -2741,9 +4430,9 @@ export default function App() {
                 </label>
 
                 <div className="label">Предпросмотр</div>
-                {!diagram.code.trim() && <div className="muted">Вставьте код диаграммы для предпросмотра</div>}
-                {diagram.code.trim() && effectiveEngine === 'mermaid' && <MermaidLivePreview code={diagram.code} />}
-                {diagram.code.trim() && effectiveEngine === 'plantuml' && (
+                {!hasDiagramCode && <div className="muted">Вставьте код диаграммы для предпросмотра</div>}
+                {hasDiagramCode && effectiveEngine === 'mermaid' && <MermaidLivePreview code={diagram.code} />}
+                {hasDiagramCode && effectiveEngine === 'plantuml' && (
                   <div className="diagram-preview">
                     <img className="diagram-preview-image" src={getPlantUmlImageUrl(diagram.code, 'svg')} alt={title} loading="lazy" />
                   </div>
@@ -2766,22 +4455,26 @@ export default function App() {
                       <button
                         className="ghost small toolbar-button"
                         type="button"
-                        title="Курсив"
-                        aria-label="Курсив"
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'italic')}
-                      >
-                        <span className="toolbar-icon toolbar-icon-italic">I</span>
-                      </button>
-                      <button
-                        className="ghost small toolbar-button"
-                        type="button"
                         title="Код"
                         aria-label="Код"
                         onMouseDown={(event) => event.preventDefault()}
                         onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'code')}
                       >
                         <span className="toolbar-icon">&lt;/&gt;</span>
+                      </button>
+                      <button
+                        className="ghost small toolbar-button"
+                        type="button"
+                        title="Выделение цветом"
+                        aria-label="Выделение цветом"
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          const editor = diagramTextRefs.current[getDiagramEditorKey(section.id, diagram.id)];
+                          rememberSelectionForEditor(editor);
+                        }}
+                        onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'highlight', { color: DEFAULT_RICH_TEXT_HIGHLIGHT })}
+                      >
+                        <span className="toolbar-icon">🖍</span>
                       </button>
                     </div>
                     <div className="toolbar-group" aria-label="Структура текста">
@@ -2841,6 +4534,19 @@ export default function App() {
                     contentEditable
                     suppressContentEditableWarning
                     onInput={() => syncDiagramDescriptionFromEditor(section.id, diagram.id)}
+                    onMouseUp={() => rememberSelectionForEditor(diagramTextRefs.current[getDiagramEditorKey(section.id, diagram.id)])}
+                    onKeyUp={() => rememberSelectionForEditor(diagramTextRefs.current[getDiagramEditorKey(section.id, diagram.id)])}
+                    onKeyDown={(event) => {
+                      const editor = diagramTextRefs.current[getDiagramEditorKey(section.id, diagram.id)];
+                      if (!editor) return;
+
+                      const handled = handleRichTextHotkeys(event, (action) => {
+                        rememberSelectionForEditor(editor);
+                        applyDiagramTextCommand(section.id, diagram.id, action);
+                      });
+
+                      if (handled) return;
+                    }}
                   />
                 </div>
 
@@ -2877,12 +4583,6 @@ export default function App() {
           <option value="-" />
         </datalist>
 
-        <datalist id="internal-code-options">
-          {ERROR_CATALOG.map((item) => (
-            <option key={item.internalCode} value={item.internalCode} label={`${item.httpStatus} - ${item.message}`} />
-          ))}
-        </datalist>
-
         <datalist id="server-request-param-options">
           {serverRequestParameterOptions.map((value) => (
             <option key={value} value={value} />
@@ -2906,9 +4606,22 @@ export default function App() {
             </thead>
             <tbody>
               {section.rows.map((row, index) => {
-                const clientResponseError = validateJsonDraft(row.clientResponse);
+                const clientResponseError = validateJsonDraft(row.clientResponseCode ?? '');
                 const normalizedCode = row.internalCode.trim();
                 const hasUnknownInternalCode = Boolean(normalizedCode) && !ERROR_CATALOG_BY_CODE.has(normalizedCode);
+                const internalCodeKey = `${section.id}-error-${index}`;
+                const isInternalCodeOpen = openInternalCodeKey === internalCodeKey;
+                const searchValue = normalizedCode.toLowerCase();
+                const internalCodeOptions = ERROR_CATALOG
+                  .filter((item) => {
+                    if (!searchValue) return true;
+                    return (
+                      item.internalCode.toLowerCase().includes(searchValue)
+                      || item.httpStatus.toLowerCase().includes(searchValue)
+                      || item.message.toLowerCase().includes(searchValue)
+                    );
+                  })
+                  .slice(0, 25);
 
                 return (
                 <tr key={`${section.id}-error-${index}`}>
@@ -2923,14 +4636,21 @@ export default function App() {
                   </td>
                   <td>
                     <div className="error-response-cell">
-                      <textarea
-                        className={clientResponseError ? 'input-warning' : ''}
-                        rows={getDynamicTextareaRows(row.clientResponse, 3, 10)}
+                      <input
+                        type="text"
                         value={row.clientResponse}
                         onChange={(e) => updateErrorRow(section.id, index, (current) => ({ ...current, clientResponse: e.target.value }))}
+                        placeholder="Описание client response"
                       />
-                      <button className="ghost small" type="button" onClick={() => insertJsonResponse(section.id, index)}>
-                        + JSON
+                      <textarea
+                        className={clientResponseError ? 'input-warning' : ''}
+                        rows={getDynamicTextareaRows(row.clientResponseCode ?? '', 3, 10)}
+                        value={row.clientResponseCode ?? ''}
+                        onChange={(e) => updateErrorRow(section.id, index, (current) => ({ ...current, clientResponseCode: e.target.value }))}
+                        placeholder="Код client response для WIKI (JSON)"
+                      />
+                      <button className="ghost small" type="button" onClick={() => formatClientResponseCode(section.id, index)}>
+                        Форматировать JSON
                       </button>
                       {clientResponseError && <div className="inline-error">{clientResponseError}</div>}
                     </div>
@@ -2962,23 +4682,143 @@ export default function App() {
                     />
                   </td>
                   <td>
-                    <input
-                      className={hasUnknownInternalCode ? 'input-warning' : ''}
-                      type="text"
-                      list="internal-code-options"
-                      value={row.internalCode}
-                      onChange={(e) => applyInternalCode(section.id, index, e.target.value)}
-                      title={hasUnknownInternalCode ? 'Код не найден в каталоге, заполните поля вручную или уточните internalCode' : ''}
-                    />
+                    <div
+                      className="internal-code-combobox"
+                      ref={(node) => {
+                        internalCodeAnchorRefs.current[internalCodeKey] = node;
+                      }}
+                    >
+                      <div className="internal-code-cell">
+                        <input
+                          className={hasUnknownInternalCode ? 'input-warning' : ''}
+                          type="text"
+                          value={row.internalCode}
+                          onFocus={() => {
+                            setOpenInternalCodeKey(internalCodeKey);
+                            setHighlightedInternalCodeIndex(0);
+                          }}
+                          onChange={(e) => {
+                            applyInternalCode(section.id, index, e.target.value);
+                            setOpenInternalCodeKey(internalCodeKey);
+                            setHighlightedInternalCodeIndex(0);
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Escape') {
+                              event.preventDefault();
+                              setOpenInternalCodeKey(null);
+                              return;
+                            }
+
+                            if (event.key === 'ArrowDown') {
+                              event.preventDefault();
+                              if (!isInternalCodeOpen) {
+                                setOpenInternalCodeKey(internalCodeKey);
+                                setHighlightedInternalCodeIndex(0);
+                                return;
+                              }
+
+                              setHighlightedInternalCodeIndex((current) =>
+                                Math.min(current + 1, Math.max(internalCodeOptions.length - 1, 0))
+                              );
+                              return;
+                            }
+
+                            if (event.key === 'ArrowUp') {
+                              event.preventDefault();
+                              if (!isInternalCodeOpen) {
+                                setOpenInternalCodeKey(internalCodeKey);
+                                setHighlightedInternalCodeIndex(0);
+                                return;
+                              }
+
+                              setHighlightedInternalCodeIndex((current) => Math.max(current - 1, 0));
+                              return;
+                            }
+
+                            if (event.key === 'Enter' && isInternalCodeOpen && internalCodeOptions.length > 0) {
+                              event.preventDefault();
+                              const picked = internalCodeOptions[Math.min(highlightedInternalCodeIndex, internalCodeOptions.length - 1)];
+                              if (picked) {
+                                applyInternalCode(section.id, index, picked.internalCode);
+                                setOpenInternalCodeKey(null);
+                              }
+                            }
+                          }}
+                          title={hasUnknownInternalCode ? 'Код не найден в каталоге, заполните поля вручную или уточните internalCode' : ''}
+                          placeholder="Введите internalCode"
+                          aria-label="internalCode"
+                          aria-expanded={isInternalCodeOpen}
+                          aria-controls={`${internalCodeKey}-options`}
+                          aria-autocomplete="list"
+                        />
+                        <button
+                          className="internal-code-toggle"
+                          type="button"
+                          aria-label="Показать варианты internalCode"
+                          onClick={() => {
+                            setOpenInternalCodeKey((current) => (current === internalCodeKey ? null : internalCodeKey));
+                            setHighlightedInternalCodeIndex(0);
+                          }}
+                        >
+                          ▾
+                        </button>
+                      </div>
+                      {isInternalCodeOpen && internalCodePopoverState && createPortal(
+                        <div
+                          id={`${internalCodeKey}-options`}
+                          ref={internalCodePopoverRef}
+                          className={`internal-code-dropdown internal-code-dropdown-portal ${internalCodePopoverState.openUp ? 'is-top' : ''}`}
+                          role="listbox"
+                          style={{
+                            top: `${internalCodePopoverState.top}px`,
+                            left: `${internalCodePopoverState.left}px`,
+                            width: `${internalCodePopoverState.width}px`,
+                            maxHeight: `${internalCodePopoverState.maxHeight}px`
+                          }}
+                        >
+                          {internalCodeOptions.length === 0 && (
+                            <div className="internal-code-empty">Ничего не найдено</div>
+                          )}
+                          {internalCodeOptions.map((item, optionIndex) => (
+                            <button
+                              key={item.internalCode}
+                              type="button"
+                              className={`internal-code-option ${optionIndex === Math.min(highlightedInternalCodeIndex, Math.max(internalCodeOptions.length - 1, 0)) ? 'active' : ''}`}
+                              onMouseDown={(event) => event.preventDefault()}
+                              onMouseEnter={() => setHighlightedInternalCodeIndex(optionIndex)}
+                              onClick={() => {
+                                applyInternalCode(section.id, index, item.internalCode);
+                                setOpenInternalCodeKey(null);
+                              }}
+                            >
+                              <span className="internal-code-option-code">{item.internalCode}</span>
+                              <span className="internal-code-option-meta">{`${item.httpStatus} - ${item.message}`}</span>
+                            </button>
+                          ))}
+                        </div>,
+                        document.body
+                      )}
+                    </div>
                     {hasUnknownInternalCode && <div className="inline-warning">Код не найден в каталоге</div>}
                   </td>
                   <td>
-                    <input
-                      type="text"
-                      disabled
-                      value={row.message}
-                      title="Поле заполняется автоматически по internalCode"
-                    />
+                    <div className="error-response-cell">
+                      <input
+                        type="text"
+                        disabled
+                        value={row.message}
+                        title="Описание заполняется автоматически по internalCode"
+                      />
+                      <textarea
+                        rows={getDynamicTextareaRows(row.responseCode, 3, 10)}
+                        value={row.responseCode}
+                        onChange={(e) => updateErrorRow(section.id, index, (current) => ({ ...current, responseCode: e.target.value }))}
+                        placeholder="Код ответа для WIKI (JSON)"
+                      />
+                      <button className="ghost small" type="button" onClick={() => formatErrorResponseCode(section.id, index)}>
+                        Форматировать JSON
+                      </button>
+                    </div>
                   </td>
                   <td>
                     <button className="icon-button danger" type="button" onClick={() => deleteErrorRow(section.id, index)} aria-label="Удалить строку">
@@ -3083,7 +4923,198 @@ export default function App() {
 
   return (
     <div className="shell">
-      <header className="topbar">
+      {ONBOARDING_FEATURES.onboardingV1 && showOnboardingEntry && (
+        <div className="onboarding-entry-backdrop" role="dialog" aria-modal="true" aria-label="Старт работы">
+          <div className="onboarding-entry-card">
+            <h2>Как начнем?</h2>
+            <p>Выберите удобный сценарий первого запуска.</p>
+            <div className="onboarding-entry-actions">
+              <button type="button" onClick={handleQuickStartOnboarding}>Быстрый старт (демо)</button>
+              <button type="button" className="ghost" onClick={handleScratchOnboarding}>Создать с нуля</button>
+              <button type="button" className="ghost" onClick={handleImportOnboarding}>Импорт JSON</button>
+            </div>
+            <label className="onboarding-entry-pref">
+              <input
+                type="checkbox"
+                checked={suppressOnboardingEntry}
+                onChange={(event) => setSuppressOnboardingEntry(event.target.checked)}
+              />
+              <span>Больше не показывать это окно</span>
+            </label>
+          </div>
+        </div>
+      )}
+
+      {jsonImportRouting && (
+        <div className="import-routing-backdrop" role="dialog" aria-modal="true" aria-label="Маршрутизация JSON импорта">
+          <div className="import-routing-card">
+            <h2>Куда импортировать JSON?</h2>
+            <p className="import-routing-file">Файл: {jsonImportRouting.fileName}</p>
+
+            <label className="field">
+              <div className="label">Тип примера</div>
+              <select
+                value={jsonImportRouting.sampleType}
+                onChange={(event) => {
+                  const nextType = event.target.value as JsonImportSampleType;
+                  const linkedId = getParsedSectionIdByType(nextType);
+                  const linkedSection = sections.find(
+                    (section): section is ParsedSection => section.kind === 'parsed' && section.id === linkedId
+                  );
+                  const domainModelEnabled = Boolean(linkedSection?.domainModelEnabled);
+                  setJsonImportRouting((current) =>
+                    current
+                      ? {
+                          ...current,
+                          sampleType: nextType,
+                          domainModelEnabled,
+                          targetSide: domainModelEnabled ? current.targetSide : 'server'
+                        }
+                      : current
+                  );
+                }}
+              >
+                <option value="request">Пример запроса</option>
+                <option value="response">Пример ответа</option>
+              </select>
+            </label>
+
+            <label className="switch import-routing-switch">
+              <input
+                type="checkbox"
+                checked={jsonImportRouting.domainModelEnabled}
+                onChange={(event) =>
+                  setJsonImportRouting((current) =>
+                    current
+                      ? {
+                          ...current,
+                          domainModelEnabled: event.target.checked,
+                          targetSide: event.target.checked ? current.targetSide : 'server'
+                        }
+                      : current
+                  )
+                }
+              />
+              <span>Доменная модель</span>
+            </label>
+
+            {jsonImportRouting.domainModelEnabled && (
+              <label className="field">
+                <div className="label">Целевая сторона</div>
+                <select
+                  value={jsonImportRouting.targetSide}
+                  onChange={(event) =>
+                    setJsonImportRouting((current) =>
+                      current
+                        ? {
+                            ...current,
+                            targetSide: event.target.value as JsonImportTargetSide
+                          }
+                        : current
+                    )
+                  }
+                >
+                  <option value="server">Server {jsonImportRouting.sampleType === 'request' ? 'request' : 'response'}</option>
+                  <option value="client">Client {jsonImportRouting.sampleType === 'request' ? 'request' : 'response'}</option>
+                </select>
+              </label>
+            )}
+
+            <div className="import-routing-actions">
+              <button type="button" className="ghost" onClick={dismissJsonImportRouting}>Отмена</button>
+              <button type="button" onClick={applyRoutedJsonImport}>Импортировать</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {projectTextImport && (
+        <div className="import-routing-backdrop" role="dialog" aria-modal="true" aria-label="Импорт проекта из текста">
+          <div className="import-routing-card">
+            <h2>Импорт JSON</h2>
+            <p className="import-routing-file">Вставьте JSON или cURL</p>
+
+            <div className="row gap import-routing-actions-start">
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => importInputRef.current?.click()}
+              >
+                Выбрать файл
+              </button>
+            </div>
+
+            <label className="field">
+              <div className="label">Текст для импорта</div>
+              <textarea
+                className="source-edit"
+                rows={10}
+                value={projectTextImport.rawText}
+                onChange={(event) =>
+                  setProjectTextImport((current) =>
+                    current
+                      ? {
+                          ...current,
+                          rawText: event.target.value
+                        }
+                      : current
+                  )
+                }
+                placeholder="Вставьте JSON или cURL"
+              />
+            </label>
+
+            <div className="import-routing-actions">
+              <button type="button" className="ghost" onClick={closeProjectImportDialog}>Отмена</button>
+              <button
+                type="button"
+                onClick={() => processImportedText(projectTextImport.rawText, 'Вставленный JSON')}
+                disabled={!projectTextImport.rawText.trim()}
+              >
+                Импортировать текст
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {sourceTextImport && (
+        <div className="import-routing-backdrop" role="dialog" aria-modal="true" aria-label="Импорт source текста">
+          <div className="import-routing-card">
+            <h2>Импорт в Source</h2>
+            <p className="import-routing-file">Поддерживается JSON и cURL</p>
+
+            <label className="field">
+              <div className="label">Текст source</div>
+              <textarea
+                className="source-edit"
+                rows={10}
+                value={sourceTextImport.draft}
+                onChange={(event) =>
+                  setSourceTextImport((current) =>
+                    current
+                      ? {
+                          ...current,
+                          draft: event.target.value
+                        }
+                      : current
+                  )
+                }
+                placeholder="Вставьте JSON или cURL"
+              />
+            </label>
+
+            <div className="import-routing-actions">
+              <button type="button" className="ghost" onClick={() => setSourceTextImport(null)}>Отмена</button>
+              <button type="button" onClick={applySourceTextImport} disabled={!sourceTextImport.draft.trim()}>
+                Импортировать текст
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <header ref={topbarRef} className="topbar">
         <div className="brand">
           <span className="logo" aria-hidden>
             API
@@ -3095,17 +5126,15 @@ export default function App() {
         <div className="actions">
           <div className="actions-main">
           <button className="ghost" onClick={resetProject}>
-            Новый
+            Новый эндпоинт
           </button>
-          <label className="ghost file-input" aria-label="Импортировать проект JSON">
-            Импорт
-            <input type="file" accept="application/json" onChange={(e) => importProjectJson(e.target.files?.[0])} />
-          </label>
-          <button className="ghost" onClick={exportProjectJson}>
+          <button className="ghost" type="button" onClick={() => openProjectImportDialog(false)}>Импорт</button>
+          <input ref={importInputRef} className="hidden-file-input" type="file" accept="application/json" onChange={(e) => importProjectJson(e.target.files?.[0])} />
+          <button className="ghost" onClick={exportProjectJson} disabled={!activeMethod} title={exportTitle}>
             Экспорт JSON
           </button>
-          <button onClick={() => void handleExportHtml()}>Экспорт HTML</button>
-          <button onClick={() => void handleExportWiki()}>Экспорт Wiki</button>
+          <button data-onboarding-anchor="export-docs" onClick={() => void handleExportHtml()} disabled={!activeMethod} title={exportTitle}>Экспорт HTML</button>
+          <button onClick={() => void handleExportWiki()} disabled={!activeMethod} title={exportTitle}>Экспорт Wiki</button>
           </div>
           <div className="actions-side">
           <button
@@ -3118,9 +5147,14 @@ export default function App() {
             <span className="theme-mermaid-orb" aria-hidden />
             <span className="theme-mermaid-icon" aria-hidden>{theme === 'dark' ? '☾' : '☀'}</span>
           </button>
-          <div className={`badge ${autosave.state}`} aria-live="polite">
+          <div className={`badge autosave-badge ${autosave.state}`} aria-live="polite" title={autosave.state === 'saved' ? 'Автосохранение выполнено' : undefined}>
             {autosave.state === 'saving' && 'Сохранение...'}
-            {autosave.state === 'saved' && `Сохранено в ${autosave.at ?? ''}`}
+            {autosave.state === 'saved' && (
+              <>
+                <span className="status-icon" aria-hidden />
+                <span className="status-time">{autosave.at ?? '--:--'}</span>
+              </>
+            )}
             {autosave.state === 'error' && 'Ошибка сохранения'}
             {autosave.state === 'idle' && 'Готово'}
           </div>
@@ -3129,6 +5163,67 @@ export default function App() {
       </header>
 
       {importError && <div className="alert error">Ошибка импорта: {importError}</div>}
+      {toastMessage && <div className="toast-info">{toastMessage}</div>}
+      <div className="visually-hidden" aria-live="polite" aria-atomic="true">{onboardingLiveMessage}</div>
+
+      {ONBOARDING_FEATURES.onboardingV1 &&
+        ONBOARDING_FEATURES.onboardingGuidedMode &&
+        onboardingState.status === 'active' &&
+        !showOnboardingEntry && (
+          <section className="onboarding-stepbar" data-onboarding-anchor="choose-entry" aria-live="polite" aria-label="Пошаговый онбординг">
+            <div className="onboarding-stepbar-head">
+              <span className="onboarding-stepbar-kicker">Онбординг</span>
+              <strong>
+                Шаг {Math.min(onboardingNavStepIndex + 1, ONBOARDING_STEPS.length)} из {ONBOARDING_STEPS.length}: {activeOnboardingStep.title}
+              </strong>
+            </div>
+            <p>{activeOnboardingStep.description}</p>
+            <div className="onboarding-stepbar-track" role="list" aria-label="Прогресс шагов">
+              {ONBOARDING_STEPS.map((step, index) => {
+                const isDone = index < onboardingResolvedStepIndex;
+                const isCurrent = step.id === activeOnboardingStep.id;
+                const access = canNavigateToOnboardingStep(step.id);
+                return (
+                  <button
+                    key={step.id}
+                    type="button"
+                    role="listitem"
+                    className={`onboarding-step-chip ${isDone ? 'done' : ''} ${isCurrent ? 'current' : ''} ${access.allowed ? 'available' : 'blocked'}`}
+                    aria-current={isCurrent ? 'step' : undefined}
+                    aria-disabled={!access.allowed}
+                    disabled={!access.allowed}
+                    title={access.allowed ? step.description : access.reason}
+                    onClick={() => jumpToOnboardingStep(step.id)}
+                  >
+                    {step.title}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="onboarding-stepbar-actions">
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => navigateOnboardingStep('prev')}
+                disabled={onboardingNavStepIndex <= 0}
+              >
+                Назад
+              </button>
+              <button type="button" className="ghost" onClick={focusOnboardingCurrentStep}>
+                Перейти к шагу
+              </button>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => navigateOnboardingStep('next')}
+                disabled={onboardingNavStepIndex >= ONBOARDING_STEPS.length - 1}
+              >
+                Далее
+              </button>
+            </div>
+            {onboardingNavError && <div className="onboarding-nav-error">{onboardingNavError}</div>}
+          </section>
+        )}
 
       <div className="sync-alert-stack">
         {selectedSection?.kind === 'parsed' &&
@@ -3141,7 +5236,9 @@ export default function App() {
             selectedServerFormatDrift,
             selectedSection.format,
             () => syncInputFromRows(selectedSection, 'server'),
-            selectedSection.lastSyncedFormat
+            selectedSection.lastSyncedFormat,
+            'Параметры отличаются от исходного источника',
+            selectedSection.sectionType === 'response' ? 'Исправить json ответа' : 'Исправить json запроса'
           )}
         {selectedSection?.kind === 'parsed' &&
           isDualModelSection(selectedSection) &&
@@ -3155,73 +5252,131 @@ export default function App() {
             selectedSection.clientFormat ?? 'json',
             () => syncInputFromRows(selectedSection, 'client'),
             selectedSection.clientLastSyncedFormat,
-            `${getSectionSideLabel(selectedSection, 'client')} отличается от источника`
+            `${getSectionSideLabel(selectedSection, 'client')} отличается от источника`,
+            selectedSection.sectionType === 'response' ? 'Исправить json ответа' : 'Исправить json запроса'
           )}
       </div>
 
       <div className="layout">
-        <aside className="sidebar" role="listbox" aria-label="Секции">
-          <div className="sidebar-head">
-            <div className="muted">Секции</div>
-          </div>
-          <div className="section-list">
-            {sections.map((section) => {
-              const error = validationMap.get(section.id);
-              return (
-                <button
-                  key={section.id}
-                  role="option"
-                  aria-selected={selectedSection?.id === section.id}
-                  className={`section-item ${selectedSection?.id === section.id ? 'active' : ''} ${error ? 'warn' : ''} ${!section.enabled ? 'disabled' : ''}`}
-                  draggable
-                  onDragStart={() => setDraggingId(section.id)}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={() => {
-                    if (draggingId) setSections((prev) => reorderSections(prev, draggingId, section.id));
-                    setDraggingId(null);
-                  }}
-                  onClick={() => setSelectedId(section.id)}
-                >
-                  <div className="section-title">{resolveSectionTitle(section.title)}</div>
-                  <div className="chips">
-                    {section.kind === 'parsed' && (
-                      <span className="chip">
-                        {section.sectionType === 'request'
-                          ? 'REQUEST'
-                          : section.sectionType === 'response'
-                            ? 'RESPONSE'
-                            : section.format.toUpperCase()}
-                      </span>
-                    )}
-                    {section.kind === 'diagram' && <span className="chip">DIAGRAM</span>}
-                    {section.kind === 'errors' && <span className="chip">ERRORS</span>}
-                    {!section.enabled && <span className="chip muted">off</span>}
-                    {error && <span className="chip danger">err</span>}
-                  </div>
+        <aside className="sidebar" role="region" aria-label={ENABLE_MULTI_METHODS ? 'Методы и секции' : 'Секции'}>
+          {ENABLE_MULTI_METHODS && (
+            <div className="sidebar-panel method-panel">
+              <div className="sidebar-panel-head">
+                <div className="muted">Методы</div>
+              </div>
+              <div className="method-list" role="listbox" aria-label="Список методов">
+                {methods.map((method) => (
+                  <button
+                    key={method.id}
+                    type="button"
+                    className={`section-item method-item ${activeMethod?.id === method.id ? 'active' : ''}`}
+                    onClick={() => switchMethod(method)}
+                  >
+                    <div className="section-title">{method.name}</div>
+                    <div className="chips">
+                      <span className="chip">{method.sections.length} секц.</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+              <div className="method-actions">
+                <button className="ghost small" type="button" onClick={createMethod}>
+                  + Метод
                 </button>
-              );
-            })}
-          </div>
-          <div className="sidebar-footer">
-            <div className="add-block-menu">
-              <button className="ghost small" type="button" onClick={() => setIsAddBlockMenuOpen((current) => !current)}>
-                + Добавить секцию
-              </button>
-              {isAddBlockMenuOpen && (
-                <div className="add-block-popover" role="menu" aria-label="Тип нового блока">
-                  {ADDABLE_BLOCK_TYPES.map((item) => (
-                    <button
-                      key={item.type}
-                      className="add-block-option"
-                      type="button"
-                      role="menuitem"
-                      onClick={() => addSectionByType(item.type)}
-                    >
-                      <span className="add-block-option-title">{item.label}</span>
-                    </button>
-                  ))}
+                <button className="ghost small" type="button" onClick={deleteActiveMethod} disabled={methods.length <= 1 || !activeMethod}>
+                  Удалить метод
+                </button>
+              </div>
+              {activeMethod && (
+                <input
+                  ref={methodNameInputRef}
+                  className="inline-input"
+                  type="text"
+                  value={activeMethod.name}
+                  onChange={(event) => updateActiveMethodName(event.target.value)}
+                  onBlur={normalizeActiveMethodName}
+                  placeholder="Название метода"
+                  aria-label="Название активного метода"
+                />
+              )}
+              {methodNameWarning && <div className="method-warning">{methodNameWarning}</div>}
+            </div>
+          )}
+
+          <div className={`sidebar-panel section-panel ${isSectionPanelPulse ? 'section-panel-pulse' : ''}`}>
+            <div className="section-list-head">
+              <div className="muted">Секции</div>
+              <div className="context-pill context-pill-transition" aria-live="polite">
+                {activeMethod ? activeMethod.name : 'Метод не выбран'}
+              </div>
+            </div>
+            <div className="section-list">
+              {sections.map((section) => {
+                const error = validationMap.get(section.id);
+                return (
+                  <button
+                    key={section.id}
+                    role="option"
+                    aria-selected={selectedSection?.id === section.id}
+                    className={`section-item ${selectedSection?.id === section.id ? 'active' : ''} ${error ? 'warn' : ''} ${!section.enabled ? 'disabled' : ''}`}
+                    draggable
+                    onDragStart={() => setDraggingId(section.id)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => {
+                      if (draggingId) setSections((prev) => reorderSections(prev, draggingId, section.id));
+                      setDraggingId(null);
+                    }}
+                    onClick={() => setSelectedId(section.id)}
+                  >
+                    <div className="section-title">{resolveSectionTitle(section.title)}</div>
+                    <div className="chips">
+                      {section.kind === 'parsed' && (
+                        <span className="chip">
+                          {section.sectionType === 'request'
+                            ? 'REQUEST'
+                            : section.sectionType === 'response'
+                              ? 'RESPONSE'
+                              : section.format.toUpperCase()}
+                        </span>
+                      )}
+                      {section.kind === 'diagram' && <span className="chip">DIAGRAM</span>}
+                      {section.kind === 'errors' && <span className="chip">ERRORS</span>}
+                      {!section.enabled && <span className="chip muted">off</span>}
+                      {error && <span className="chip danger">err</span>}
+                    </div>
+                  </button>
+                );
+              })}
+              {sections.length === 0 && (
+                <div className="empty-state">
+                  <div>У выбранного метода пока нет секций.</div>
+                  <button className="ghost small" type="button" onClick={() => addSectionByType('text')}>
+                    + Добавить первую секцию
+                  </button>
                 </div>
               )}
+            </div>
+            <div className="sidebar-footer">
+              <div className="add-block-menu">
+                <button className="ghost small" type="button" onClick={() => setIsAddBlockMenuOpen((current) => !current)}>
+                  + Добавить секцию
+                </button>
+                {isAddBlockMenuOpen && (
+                  <div className="add-block-popover" role="menu" aria-label="Тип нового блока">
+                    {ADDABLE_BLOCK_TYPES.map((item) => (
+                      <button
+                        key={item.type}
+                        className="add-block-option"
+                        type="button"
+                        role="menuitem"
+                        onClick={() => addSectionByType(item.type)}
+                      >
+                        <span className="add-block-option-title">{item.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </aside>
@@ -3242,6 +5397,23 @@ export default function App() {
               </button>
             ))}
           </div>
+
+          {activeOnboardingHint && (
+            <section className="onboarding-context-hint" aria-live="polite">
+              <div className="onboarding-context-hint-copy">
+                <strong>{activeOnboardingHint.title}</strong>
+                <p>{activeOnboardingHint.description}</p>
+              </div>
+              <div className="onboarding-context-hint-actions">
+                <button type="button" className="ghost small" onClick={dismissActiveOnboardingHint}>
+                  Скрыть
+                </button>
+                <button type="button" className="small" onClick={handleActiveOnboardingHintAction}>
+                  {activeOnboardingHint.actionLabel}
+                </button>
+              </div>
+            </section>
+          )}
 
           {selectedSection ? (
             <div className="panes">
@@ -3270,7 +5442,7 @@ export default function App() {
 
                   {selectedSection.kind === 'text' && (
                     <div className="stack">
-                      <div className="editor-toolbar-shell">
+                      <div className="editor-toolbar-shell" data-onboarding-anchor="refine-structure">
                         <div className="editor-toolbar-head">
                           <div className="editor-toolbar-title">Редактор текста</div>
                           <div className="editor-toolbar-note">Выделите текст и примените форматирование</div>
@@ -3293,19 +5465,6 @@ export default function App() {
                             <button
                               className="ghost small toolbar-button"
                               type="button"
-                              title="Курсив"
-                              aria-label="Курсив"
-                              onMouseDown={(event) => {
-                                event.preventDefault();
-                                rememberTextSelection();
-                              }}
-                              onClick={() => applyTextEditorCommand(selectedSection.id, 'italic')}
-                            >
-                              <span className="toolbar-icon toolbar-icon-italic">I</span>
-                            </button>
-                            <button
-                              className="ghost small toolbar-button"
-                              type="button"
                               title="Код"
                               aria-label="Код"
                               onMouseDown={(event) => {
@@ -3315,6 +5474,19 @@ export default function App() {
                               onClick={() => applyTextEditorCommand(selectedSection.id, 'code')}
                             >
                               <span className="toolbar-icon">&lt;/&gt;</span>
+                            </button>
+                            <button
+                              className="ghost small toolbar-button"
+                              type="button"
+                              title="Выделение цветом"
+                              aria-label="Выделение цветом"
+                              onMouseDown={(event) => {
+                                event.preventDefault();
+                                rememberTextSelection();
+                              }}
+                              onClick={() => applyTextEditorCommand(selectedSection.id, 'highlight', { color: DEFAULT_RICH_TEXT_HIGHLIGHT })}
+                            >
+                              <span className="toolbar-icon">🖍</span>
                             </button>
                           </div>
                           <div className="toolbar-group" aria-label="Структура текста">
@@ -3393,6 +5565,9 @@ export default function App() {
                           onMouseUp={rememberTextSelection}
                           onKeyUp={rememberTextSelection}
                           onKeyDown={(event) => {
+                            const handled = handleRichTextHotkeys(event, (action) => applyTextEditorCommand(selectedSection.id, action));
+                            if (handled) return;
+
                             if (event.key !== 'Tab') return;
 
                             const selection = window.getSelection();
@@ -3421,12 +5596,6 @@ export default function App() {
                         renderRequestEditor(selectedSection)
                       ) : (
                         <div className="stack">
-                          <div className="row gap">
-                            <button className="primary" type="button" onClick={() => runParser(selectedSection)}>
-                              Парсить
-                            </button>
-                          </div>
-
                           {renderSourceEditor(selectedSection, 'server')}
                           <div className="row gap">
                             <button className="ghost small" type="button" onClick={() => addManualRow(selectedSection)}>

@@ -1,5 +1,5 @@
 export type ParseFormat = 'json' | 'curl';
-export type RequestColumnKey = 'field' | 'type' | 'required' | 'clientField' | 'description' | 'example';
+export type RequestColumnKey = 'field' | 'type' | 'required' | 'clientField' | 'description' | 'maskInLogs' | 'example';
 export type RequestAuthType = 'none' | 'bearer' | 'basic' | 'api-key';
 export type RequestMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 export type RequestProtocol = 'REST';
@@ -28,6 +28,7 @@ export interface ParsedRow {
   type: string;
   required: string;
   description: string;
+  maskInLogs?: boolean;
   example: string;
   source?: 'header' | 'body' | 'url' | 'parsed';
 }
@@ -88,11 +89,13 @@ export interface DiagramSection extends BaseSection {
 export interface ErrorRow {
   clientHttpStatus: string;
   clientResponse: string;
+  clientResponseCode: string;
   trigger: string;
   errorType: ErrorType;
   serverHttpStatus: string;
   internalCode: string;
   message: string;
+  responseCode: string;
 }
 
 export interface ValidationRuleRow {
@@ -109,6 +112,35 @@ export interface ErrorsSection extends BaseSection {
 }
 
 export type DocSection = TextSection | ParsedSection | DiagramSection | ErrorsSection;
+
+export interface MethodDocument {
+  id: string;
+  name: string;
+  updatedAt: string;
+  sections: DocSection[];
+}
+
+export interface MethodGroupLink {
+  fromMethodId: string;
+  toMethodId: string;
+  relationType?: 'request-response' | 'event' | 'sync' | 'async' | 'custom';
+  note?: string;
+}
+
+export interface MethodGroup {
+  id: string;
+  name: string;
+  methodIds: string[];
+  links: MethodGroupLink[];
+}
+
+export interface WorkspaceProjectData {
+  version: number;
+  updatedAt: string;
+  activeMethodId?: string;
+  methods: MethodDocument[];
+  groups: MethodGroup[];
+}
 
 export interface ProjectData {
   version: number;

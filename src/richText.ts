@@ -1,3 +1,5 @@
+import hljs from 'highlight.js/lib/common';
+
 export function escapeRichTextHtml(value: string): string {
   return value
     .replaceAll('&', '&amp;')
@@ -21,6 +23,98 @@ export type RichTextAnchor = {
 };
 
 const ANCHOR_RE = /\{anchor:([^|}]+)(?:\|([^}]+))?\}/g;
+const COLOR_RE = /\{color:([^}]+)\}([\s\S]*?)\{color\}/g;
+const HIGHLIGHT_RE = /\{highlight:([^}]+)\}([\s\S]*?)\{highlight\}/g;
+const CODE_BLOCK_OPEN_RE = /^\{code(?::([^}\s]+))?\}$/i;
+const CODE_BLOCK_CLOSE_RE = /^\{code\}$/i;
+
+type RichTextRenderOptions = {
+  editable?: boolean;
+};
+
+function sanitizeCssColor(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return '#fef08a';
+
+  if (/^#[0-9a-f]{3,8}$/i.test(normalized)) return normalized;
+  if (/^rgba?\([0-9\s.,%+-]+\)$/i.test(normalized)) return normalized;
+  if (/^hsla?\([0-9\s.,%+-]+\)$/i.test(normalized)) return normalized;
+  if (/^[a-z][a-z-]*$/i.test(normalized)) return normalized;
+
+  return '#fef08a';
+}
+
+function normalizeCodeLanguage(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized || normalized === 'auto') return 'auto';
+
+  if (!/^[a-z0-9+#-]+$/i.test(normalized)) return 'auto';
+  if (!hljs.getLanguage(normalized)) return 'auto';
+
+  return normalized;
+}
+
+function renderInlineRichTextWithMacros(value: string): string {
+  const escaped = escapeRichTextHtml(value);
+  const withAnchors = escaped.replace(ANCHOR_RE, (_, rawId: string, rawLabel?: string) => {
+    const id = sanitizeAnchorId((rawId || '').trim());
+    const label = (rawLabel || '').trim();
+    const title = label || id;
+    if (!id) return '';
+    return `<span class="doc-anchor-marker" data-anchor-id="${id}" id="${id}" contenteditable="false" title="Anchor: ${escapeRichTextHtml(title)}" aria-label="Anchor ${escapeRichTextHtml(title)}"></span>`;
+  });
+
+  const withColor = withAnchors.replace(COLOR_RE, (_, rawColor: string, body: string) => {
+    const color = sanitizeCssColor(rawColor);
+    return `<span class="doc-color" data-color="${escapeRichTextHtml(color)}" style="color:${escapeRichTextHtml(color)}">${renderInlineRichTextWithMacros(body)}</span>`;
+  });
+
+  const withHighlight = withColor.replace(HIGHLIGHT_RE, (_, rawColor: string, body: string) => {
+    const color = sanitizeCssColor(rawColor);
+    return `<mark class="doc-highlight" data-highlight="${escapeRichTextHtml(color)}" style="background-color:${escapeRichTextHtml(color)}">${renderInlineRichTextWithMacros(body)}</mark>`;
+  });
+
+  return withHighlight
+    .replace(/\{\{([^}]+)\}\}/g, '<code>$1</code>')
+    .replace(/\[([^\]|]+)\|([^\]]+)\]/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>')
+    .replace(/\*([^*\n]+)\*/g, '<strong>$1</strong>')
+    .replace(/_([^_\n]+)_/g, '<em>$1</em>');
+}
+
+function renderRichCodeBlock(code: string, languageHint: string, options?: RichTextRenderOptions): string {
+  const normalizedLanguage = normalizeCodeLanguage(languageHint);
+  const editable = Boolean(options?.editable);
+
+  if (editable) {
+    const languageAttr = ` data-code-language="${escapeRichTextHtml(normalizedLanguage)}"`;
+    return [
+      `<pre class="rich-code-block" data-rich-code-block="1"${languageAttr}>`,
+      `<code>${escapeRichTextHtml(code)}</code>`,
+      '</pre>'
+    ].join('');
+  }
+
+  if (normalizedLanguage !== 'auto') {
+    const highlighted = hljs.highlight(code, { language: normalizedLanguage, ignoreIllegals: true });
+    return [
+      `<pre class="rich-code-block" data-rich-code-block="1" data-code-language="${escapeRichTextHtml(normalizedLanguage)}">`,
+      `<div class="rich-code-block-head"><span>code</span><span class="rich-code-block-lang">${escapeRichTextHtml(normalizedLanguage)}</span></div>`,
+      `<code class="hljs language-${escapeRichTextHtml(normalizedLanguage)}">${highlighted.value}</code>`,
+      '</pre>'
+    ].join('');
+  }
+
+  const autoHighlighted = hljs.highlightAuto(code);
+  const detectedLanguage = normalizeCodeLanguage(autoHighlighted.language ?? 'auto');
+  const languageLabel = detectedLanguage === 'auto' ? 'auto' : `auto (${detectedLanguage})`;
+
+  return [
+    '<pre class="rich-code-block" data-rich-code-block="1" data-code-language="auto">',
+    `<div class="rich-code-block-head"><span>code</span><span class="rich-code-block-lang">${escapeRichTextHtml(languageLabel)}</span></div>`,
+    `<code class="hljs language-${escapeRichTextHtml(detectedLanguage)}">${autoHighlighted.value}</code>`,
+    '</pre>'
+  ].join('');
+}
 
 export function extractAnchorsFromText(value: string): RichTextAnchor[] {
   const anchors: RichTextAnchor[] = [];
@@ -36,18 +130,7 @@ export function extractAnchorsFromText(value: string): RichTextAnchor[] {
 }
 
 export function renderInlineRichText(value: string): string {
-  return escapeRichTextHtml(value)
-    .replace(ANCHOR_RE, (_, rawId: string, rawLabel?: string) => {
-      const id = sanitizeAnchorId((rawId || '').trim());
-      const label = (rawLabel || '').trim();
-      const title = label || id;
-      if (!id) return '';
-      return `<span class="doc-anchor-marker" data-anchor-id="${id}" id="${id}" contenteditable="false" title="Anchor: ${escapeRichTextHtml(title)}" aria-label="Anchor ${escapeRichTextHtml(title)}"></span>`;
-    })
-    .replace(/\{\{([^}]+)\}\}/g, '<code>$1</code>')
-    .replace(/\[([^\]|]+)\|([^\]]+)\]/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>')
-    .replace(/\*([^*\n]+)\*/g, '<strong>$1</strong>')
-    .replace(/_([^_\n]+)_/g, '<em>$1</em>');
+  return renderInlineRichTextWithMacros(value);
 }
 
 type ListKind = 'ul' | 'ol';
@@ -128,7 +211,7 @@ function renderListBlock(lines: string[]): string {
   return renderListTokens(tokens, 0, minDepth)[0];
 }
 
-export function richTextToHtml(value: string): string {
+export function richTextToHtml(value: string, options?: RichTextRenderOptions): string {
   const trimmed = value.trim();
   if (!trimmed) return '<p></p>';
 
@@ -148,6 +231,22 @@ export function richTextToHtml(value: string): string {
 
     if (!line) {
       flushParagraph();
+      continue;
+    }
+
+    const codeBlockOpen = line.match(CODE_BLOCK_OPEN_RE);
+    if (codeBlockOpen) {
+      flushParagraph();
+      const blockLines: string[] = [];
+      const languageHint = codeBlockOpen[1] ?? 'auto';
+
+      index += 1;
+      while (index < lines.length && !CODE_BLOCK_CLOSE_RE.test(lines[index].trim())) {
+        blockLines.push(lines[index]);
+        index += 1;
+      }
+
+      blocks.push(renderRichCodeBlock(blockLines.join('\n'), languageHint, options));
       continue;
     }
 
@@ -199,18 +298,49 @@ function serializeInlineNode(node: Node, context: 'root' | 'inline' = 'root'): s
 
   const tag = node.tagName.toLowerCase();
   const childText = () => Array.from(node.childNodes).map((child) => serializeInlineNode(child, 'inline')).join('');
+  const childrenText = () => Array.from(node.childNodes).map((child) => serializeInlineNode(child, context)).join('');
+
+  if (tag === 'pre' && node.dataset.richCodeBlock === '1') {
+    const codeElement = node.querySelector('code');
+    const codeText = (codeElement?.textContent ?? node.textContent ?? '').replace(/\u00a0/g, '');
+    const rawLanguage = node.dataset.codeLanguage || codeElement?.getAttribute('data-code-language') || '';
+    const language = normalizeCodeLanguage(rawLanguage);
+
+    const header = language === 'auto' ? '{code}' : `{code:${language}}`;
+    return `${header}\n${codeText}\n{code}`;
+  }
 
   if (tag === 'br') return '\n';
   if (tag === 'strong' || tag === 'b') return `*${childText()}*`;
   if (tag === 'em' || tag === 'i') return `_${childText()}_`;
   if (tag === 'code') return `{{${childText()}}}`;
+  if (tag === 'mark' && node.dataset.highlight) {
+    const color = sanitizeCssColor(node.dataset.highlight);
+    return `{highlight:${color}}${childText()}{highlight}`;
+  }
+  if (tag === 'span' && node.dataset.color) {
+    const color = sanitizeCssColor(node.dataset.color);
+    return `{color:${color}}${childText()}{color}`;
+  }
+  if (tag === 'font' && node.getAttribute('color')) {
+    const color = sanitizeCssColor(node.getAttribute('color') ?? '');
+    return `{color:${color}}${childText()}{color}`;
+  }
+  if (tag === 'span' && node.style.backgroundColor) {
+    const color = sanitizeCssColor(node.style.backgroundColor);
+    return `{highlight:${color}}${childText()}{highlight}`;
+  }
+  if (tag === 'span' && node.style.color) {
+    const color = sanitizeCssColor(node.style.color);
+    return `{color:${color}}${childText()}{color}`;
+  }
   if (tag === 'a') return `[${childText() || 'ссылка'}|${node.getAttribute('href') || 'https://example.com'}]`;
   if (tag === 'span' && node.dataset.anchorId) return `{anchor:${sanitizeAnchorId(node.dataset.anchorId)}}`;
   if (tag === 'h2' || tag === 'h3' || tag === 'h4' || tag === 'h5' || tag === 'h6') return `${tag}. ${childText().trim()}`;
   if (tag === 'blockquote') return `bq. ${childText().trim()}`;
   if (tag === 'p' || tag === 'div') return Array.from(node.childNodes).map((child) => serializeInlineNode(child, 'inline')).join('').trim();
 
-  const rendered = Array.from(node.childNodes).map((child) => serializeInlineNode(child, context)).join('');
+  const rendered = childrenText();
   return context === 'inline' ? rendered : rendered.trim();
 }
 

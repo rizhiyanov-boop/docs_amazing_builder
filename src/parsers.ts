@@ -1,4 +1,3 @@
-import { OPTIONAL_MARK } from './requestHeaders';
 import type { ParseFormat, ParsedRow, RequestMethod } from './types';
 
 export type ParsedCurlMeta = {
@@ -58,7 +57,7 @@ function flattenJson(value: unknown, basePath = ''): ParsedRow[] {
         createParsedRow({
           field: basePath || '$',
           type: 'array',
-          required: OPTIONAL_MARK,
+          required: '+',
           description: '',
           example: STRUCTURED_EXAMPLE_PLACEHOLDER
         })
@@ -71,7 +70,7 @@ function flattenJson(value: unknown, basePath = ''): ParsedRow[] {
       createParsedRow({
         field: basePath || '$',
         type: isArrayOfObjects ? 'array_object' : 'array',
-        required: OPTIONAL_MARK,
+        required: '+',
         description: '',
         example: STRUCTURED_EXAMPLE_PLACEHOLDER
       })
@@ -93,7 +92,7 @@ function flattenJson(value: unknown, basePath = ''): ParsedRow[] {
           createParsedRow({
             field: nextPath,
             type: inferType(nested),
-            required: OPTIONAL_MARK,
+            required: '+',
             description: '',
             example: nested === undefined ? '' : JSON.stringify(nested).slice(0, 120)
           })
@@ -107,7 +106,7 @@ function flattenJson(value: unknown, basePath = ''): ParsedRow[] {
     createParsedRow({
       field: basePath || '$',
       type: inferType(value),
-      required: OPTIONAL_MARK,
+      required: '+',
       description: '',
       example: String(value)
     })
@@ -144,7 +143,7 @@ function parseCurl(input: string): ParsedRow[] {
         createParsedRow({
           field: 'body',
           type: 'string',
-          required: OPTIONAL_MARK,
+          required: '+',
           description: 'Тело запроса из cURL (не JSON)',
           example: bodyPayload.slice(0, 120),
           source: 'body'
@@ -197,7 +196,7 @@ function parseCurl(input: string): ParsedRow[] {
             createParsedRow({
               field: name,
               type: 'boolean',
-              required: '-',
+              required: '+',
               description: `Заголовок ${name}`,
               example: lowerValue,
               source: 'header'
@@ -213,7 +212,7 @@ function parseCurl(input: string): ParsedRow[] {
               createParsedRow({
                 field: name,
                 type: bigIntValue >= min && bigIntValue <= max ? 'int' : 'long',
-                required: '-',
+                required: '+',
                 description: `Заголовок ${name}`,
                 example: value,
                 source: 'header'
@@ -225,7 +224,7 @@ function parseCurl(input: string): ParsedRow[] {
               createParsedRow({
                 field: name,
                 type: 'long',
-                required: '-',
+                required: '+',
                 description: `Заголовок ${name}`,
                 example: value,
                 source: 'header'
@@ -238,7 +237,7 @@ function parseCurl(input: string): ParsedRow[] {
             createParsedRow({
               field: name,
               type: 'number',
-              required: '-',
+              required: '+',
               description: `Заголовок ${name}`,
               example: value,
               source: 'header'
@@ -254,7 +253,7 @@ function parseCurl(input: string): ParsedRow[] {
         createParsedRow({
           field: name,
           type: 'string',
-          required: '-',
+          required: '+',
           description: `Заголовок ${name}`,
           example: value,
           source: 'header'

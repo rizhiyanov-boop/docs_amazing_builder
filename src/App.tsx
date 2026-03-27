@@ -1,6 +1,11 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { EditorContent, useEditor } from '@tiptap/react';
+import { Extension } from '@tiptap/core';
+import StarterKit from '@tiptap/starter-kit';
+import Highlight from '@tiptap/extension-highlight';
+import { liftListItem, sinkListItem } from '@tiptap/pm/schema-list';
 import './tokens.css';
 import './App.css';
 import { parseCurlMeta, parseToRows } from './parsers';
@@ -26,7 +31,7 @@ import {
   OPTIONAL_MARK
 } from './requestHeaders';
 import { renderHtmlDocument } from './renderHtml';
-import { editorElementToWikiText, escapeRichTextHtml, richTextToHtml } from './richText';
+import { editorElementToWikiText, editorHtmlToWikiText, escapeRichTextHtml, richTextToHtml } from './richText';
 import { renderWikiDocument } from './renderWiki';
 import { DEFAULT_SECTION_TITLE, resolveSectionTitle, sanitizeSections } from './sectionTitles';
 import { buildInputFromRows } from './sourceSync';
@@ -63,6 +68,37 @@ const DEFAULT_METHOD_NAME = 'Метод 1';
 const EMPTY_SECTIONS: DocSection[] = [];
 const ENABLE_MULTI_METHODS = false;
 const DEFAULT_RICH_TEXT_HIGHLIGHT = '#fef08a';
+const TAB_INDENT_EXTENSION = Extension.create({
+  name: 'tab-indent',
+  addKeyboardShortcuts() {
+    const runTabCommand = (shift: boolean): boolean => {
+      const byName = shift
+        ? this.editor.commands.liftListItem('listItem')
+        : this.editor.commands.sinkListItem('listItem');
+      if (byName) return true;
+
+      const fallbackBySnakeCase = shift
+        ? this.editor.commands.liftListItem('list_item' as never)
+        : this.editor.commands.sinkListItem('list_item' as never);
+      if (fallbackBySnakeCase) return true;
+
+      const state = this.editor.state;
+      const view = this.editor.view;
+      const listItemType = (state.schema.nodes as Record<string, unknown>).listItem || (state.schema.nodes as Record<string, unknown>).list_item;
+      if (!view || !listItemType) return false;
+
+      const command = shift
+        ? liftListItem(listItemType as never)
+        : sinkListItem(listItemType as never);
+      return command(state, view.dispatch);
+    };
+
+    return {
+      Tab: () => runTabCommand(false),
+      'Shift-Tab': () => runTabCommand(true)
+    };
+  }
+});
 
 function loadOnboardingEntrySuppressed(): boolean {
   try {
@@ -1092,11 +1128,10 @@ function MermaidLivePreview({ code }: { code: string }): ReactNode {
 }
 
 export default function App() {
-  const textSectionRef = useRef<HTMLDivElement | null>(null);
-  const textSelectionRef = useRef<Range | null>(null);
+  const activeTextSectionIdRef = useRef<string | null>(null);
   const richEditorSelectionRef = useRef<{ editor: HTMLElement; range: Range } | null>(null);
   const topbarRef = useRef<HTMLElement | null>(null);
-  const textEditorSectionRef = useRef<string | null>(null);
+  const textEditorWikiSnapshotRef = useRef<string>('');
   const diagramTextRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const methodNameInputRef = useRef<HTMLInputElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -1567,6 +1602,54 @@ export default function App() {
   }, [sections]);
 
   const selectedSection = sections.find((section) => section.id === selectedId) ?? sections[0];
+  const activeTextSection = selectedSection?.kind === 'text' ? selectedSection : null;
+  const textEditor = useEditor({
+    extensions: [
+      StarterKit.configure({
+        heading: { levels: [3] },
+        codeBlock: false
+      }),
+      Highlight.configure({ multicolor: true }),
+      TAB_INDENT_EXTENSION
+    ],
+    content: activeTextSection ? richTextToHtml(activeTextSection.value, { editable: true }) : '<p></p>',
+    editorProps: {
+      attributes: {
+        class: 'rich-text-editor'
+      }
+    },
+    onUpdate: ({ editor }) => {
+      const sectionId = activeTextSectionIdRef.current;
+      if (!sectionId) return;
+
+      const nextValue = editorHtmlToWikiText(editor.getHTML());
+      textEditorWikiSnapshotRef.current = nextValue;
+      updateSection(sectionId, (current) => (current.kind === 'text' && current.value !== nextValue ? { ...current, value: nextValue } : current));
+    }
+  });
+
+  useEffect(() => {
+    activeTextSectionIdRef.current = activeTextSection?.id ?? null;
+  }, [activeTextSection?.id]);
+
+  useEffect(() => {
+    if (!textEditor) return;
+
+    if (!activeTextSection) {
+      textEditor.commands.setContent('<p></p>', { emitUpdate: false });
+      textEditorWikiSnapshotRef.current = '';
+      return;
+    }
+
+    if (textEditor.isFocused && textEditorWikiSnapshotRef.current === activeTextSection.value) {
+      return;
+    }
+
+    const nextHtml = richTextToHtml(activeTextSection.value, { editable: true });
+    textEditor.commands.setContent(nextHtml, { emitUpdate: false });
+    textEditorWikiSnapshotRef.current = activeTextSection.value;
+  }, [textEditor, activeTextSection?.id, activeTextSection?.value]);
+
   const selectedServerDriftRows = selectedSection?.kind === 'parsed' ? getInputDriftRows(selectedSection.rows) : [];
   const selectedClientDriftRows =
     selectedSection?.kind === 'parsed' && isDualModelSection(selectedSection) ? getInputDriftRows(selectedSection.clientRows ?? []) : [];
@@ -1902,26 +1985,6 @@ export default function App() {
       setAutosave({ state: 'error' });
     }
   }, [methods, activeMethodId, methodGroups]);
-
-  useEffect(() => {
-    if (!selectedSection || selectedSection.kind !== 'text') {
-      textEditorSectionRef.current = null;
-      return;
-    }
-
-    const editor = textSectionRef.current;
-    if (!editor) return;
-
-    const nextHtml = richTextToHtml(selectedSection.value, { editable: true });
-    const sameSection = textEditorSectionRef.current === selectedSection.id;
-    const isFocused = document.activeElement === editor;
-
-    if (!sameSection || !isFocused) {
-      if (editor.innerHTML !== nextHtml) editor.innerHTML = nextHtml;
-    }
-
-    textEditorSectionRef.current = selectedSection.id;
-  }, [selectedSection]);
 
   useEffect(() => {
     const focusedElement = document.activeElement;
@@ -2528,9 +2591,9 @@ export default function App() {
   }
 
   function syncTextSectionFromEditor(sectionId: string): void {
-    const editor = textSectionRef.current;
-    if (!editor) return;
-    const nextValue = editorElementToWikiText(editor);
+    if (!textEditor) return;
+    const nextValue = editorHtmlToWikiText(textEditor.getHTML());
+    textEditorWikiSnapshotRef.current = nextValue;
     updateSection(sectionId, (current) => (current.kind === 'text' && current.value !== nextValue ? { ...current, value: nextValue } : current));
   }
 
@@ -2813,34 +2876,22 @@ export default function App() {
   }
 
   function rememberTextSelection(): void {
-    const editor = textSectionRef.current;
-    const selection = window.getSelection();
-    if (!editor || !selection || selection.rangeCount === 0) return;
-
-    const range = selection.getRangeAt(0);
-    if (!editor.contains(range.commonAncestorContainer)) return;
-    textSelectionRef.current = range.cloneRange();
-  }
-
-  function restoreTextSelection(): void {
-    const selection = window.getSelection();
-    const range = textSelectionRef.current;
-    const editor = textSectionRef.current;
-    if (!selection || !range || !editor) return;
-
-    selection.removeAllRanges();
-    selection.addRange(range);
-    editor.focus();
+    // Tiptap keeps selection state internally.
   }
 
   function applyTextEditorCommand(sectionId: string, action: RichTextAction, options?: RichTextCommandOptions): void {
-    const editor = textSectionRef.current;
-    if (!editor) return;
+    if (!textEditor) return;
 
-    restoreTextSelection();
+    const chain = textEditor.chain().focus();
+    if (action === 'bold') chain.toggleBold().run();
+    else if (action === 'italic') chain.toggleItalic().run();
+    else if (action === 'code') chain.toggleCode().run();
+    else if (action === 'h3') chain.toggleHeading({ level: 3 }).run();
+    else if (action === 'ul') chain.toggleBulletList().run();
+    else if (action === 'ol') chain.toggleOrderedList().run();
+    else if (action === 'quote') chain.toggleBlockquote().run();
+    else if (action === 'highlight') chain.toggleHighlight({ color: options?.color ?? DEFAULT_RICH_TEXT_HIGHLIGHT }).run();
 
-    applyRichTextCommand(editor, action, options);
-    rememberTextSelection();
     syncTextSectionFromEditor(sectionId);
   }
 
@@ -5553,37 +5604,11 @@ export default function App() {
                       <div className="panel-sub">Поддерживаются подзаголовки, цитаты, код и вложенные списки с Tab.</div>
                       <label className="field">
                         <div className="label">Содержимое</div>
-                        <div
-                          ref={textSectionRef}
-                          className="rich-text-editor"
-                          contentEditable
-                          suppressContentEditableWarning
-                          onInput={() => {
-                            rememberTextSelection();
-                            syncTextSectionFromEditor(selectedSection.id);
-                          }}
-                          onMouseUp={rememberTextSelection}
-                          onKeyUp={rememberTextSelection}
+                        <EditorContent
+                          editor={textEditor}
                           onKeyDown={(event) => {
                             const handled = handleRichTextHotkeys(event, (action) => applyTextEditorCommand(selectedSection.id, action));
                             if (handled) return;
-
-                            if (event.key !== 'Tab') return;
-
-                            const selection = window.getSelection();
-                            const anchorNode = selection?.anchorNode;
-                            const anchorElement =
-                              anchorNode instanceof Element ? anchorNode : anchorNode?.parentElement;
-                            const listItem = anchorElement?.closest('li');
-
-                            if (!listItem || !textSectionRef.current?.contains(listItem)) return;
-
-                            event.preventDefault();
-                            rememberTextSelection();
-                            restoreTextSelection();
-                            document.execCommand(event.shiftKey ? 'outdent' : 'indent');
-                            rememberTextSelection();
-                            syncTextSectionFromEditor(selectedSection.id);
                           }}
                         />
                       </label>

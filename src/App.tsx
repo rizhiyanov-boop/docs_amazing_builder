@@ -2,7 +2,6 @@
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { EditorContent, useEditor } from '@tiptap/react';
-import { Extension } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Highlight from '@tiptap/extension-highlight';
 import { liftListItem, sinkListItem } from '@tiptap/pm/schema-list';
@@ -68,53 +67,6 @@ const DEFAULT_METHOD_NAME = 'Метод 1';
 const EMPTY_SECTIONS: DocSection[] = [];
 const ENABLE_MULTI_METHODS = false;
 const DEFAULT_RICH_TEXT_HIGHLIGHT = '#fef08a';
-const TAB_INDENT_EXTENSION = Extension.create({
-  name: 'tab-indent',
-  addKeyboardShortcuts() {
-    const isInsideListItem = (): boolean => {
-      const selection = this.editor.state.selection;
-      const from = selection.$from;
-      for (let depth = from.depth; depth > 0; depth -= 1) {
-        const nodeName = from.node(depth).type.name;
-        if (nodeName === 'listItem' || nodeName === 'list_item') return true;
-      }
-      return false;
-    };
-
-    const runTabCommand = (shift: boolean): boolean => {
-      if (!isInsideListItem()) return false;
-
-      const byName = shift
-        ? this.editor.commands.liftListItem('listItem')
-        : this.editor.commands.sinkListItem('listItem');
-      if (byName) return true;
-
-      const fallbackBySnakeCase = shift
-        ? this.editor.commands.liftListItem('list_item' as never)
-        : this.editor.commands.sinkListItem('list_item' as never);
-      if (fallbackBySnakeCase) return true;
-
-      const state = this.editor.state;
-      const view = this.editor.view;
-      const listItemType = (state.schema.nodes as Record<string, unknown>).listItem || (state.schema.nodes as Record<string, unknown>).list_item;
-      if (!view || !listItemType) return false;
-
-      const command = shift
-        ? liftListItem(listItemType as never)
-        : sinkListItem(listItemType as never);
-      const pmHandled = command(state, view.dispatch);
-      if (pmHandled) return true;
-
-      // Prevent browser focus-navigation on Tab while cursor is in list item.
-      return true;
-    };
-
-    return {
-      Tab: () => runTabCommand(false),
-      'Shift-Tab': () => runTabCommand(true)
-    };
-  }
-});
 
 function loadOnboardingEntrySuppressed(): boolean {
   try {
@@ -1625,13 +1577,35 @@ export default function App() {
         heading: { levels: [3] },
         codeBlock: false
       }),
-      Highlight.configure({ multicolor: true }),
-      TAB_INDENT_EXTENSION
+      Highlight.configure({ multicolor: true })
     ],
     content: activeTextSection ? richTextToHtml(activeTextSection.value, { editable: true }) : '<p></p>',
     editorProps: {
       attributes: {
         class: 'rich-text-editor'
+      },
+      handleDOMEvents: {
+        keydown: (view, event) => {
+          if (event.key !== 'Tab') return false;
+
+          const target = event.target;
+          const element = target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
+          if (!element || !element.closest('li')) return false;
+
+          const listItemType = (view.state.schema.nodes as Record<string, unknown>).listItem || (view.state.schema.nodes as Record<string, unknown>).list_item;
+          if (!listItemType) {
+            event.preventDefault();
+            return true;
+          }
+
+          const command = event.shiftKey ? liftListItem(listItemType as never) : sinkListItem(listItemType as never);
+          const handled = command(view.state, view.dispatch);
+
+          // Always keep Tab inside editor when cursor is in a list item.
+          event.preventDefault();
+          if (!handled) view.focus();
+          return true;
+        }
       }
     },
     onUpdate: ({ editor }) => {
@@ -5625,6 +5599,20 @@ export default function App() {
                           onKeyDown={(event) => {
                             const handled = handleRichTextHotkeys(event, (action) => applyTextEditorCommand(selectedSection.id, action));
                             if (handled) return;
+
+                            if (event.key !== 'Tab' || !textEditor) return;
+
+                            const target = event.target;
+                            const element = target instanceof Element ? target : null;
+                            if (!element || !element.closest('li')) return;
+
+                            event.preventDefault();
+                            if (event.shiftKey) {
+                              textEditor.chain().focus().liftListItem('listItem').run();
+                            } else {
+                              textEditor.chain().focus().sinkListItem('listItem').run();
+                            }
+                            syncTextSectionFromEditor(selectedSection.id);
                           }}
                         />
                       </label>

@@ -64,6 +64,9 @@ import type {
 const STORAGE_KEY = 'doc-builder-project-v2';
 const ONBOARDING_ENTRY_SUPPRESS_KEY = 'doc-builder-onboarding-entry-suppressed-v1';
 const DEFAULT_METHOD_NAME = 'Метод 1';
+const DELETE_UNDO_WINDOW_MS = 8000;
+const HISTORY_LIMIT = 50;
+const HISTORY_COALESCE_MS = 700;
 const EMPTY_SECTIONS: DocSection[] = [];
 const ENABLE_MULTI_METHODS = false;
 const DEFAULT_RICH_TEXT_HIGHLIGHT = '#fef08a';
@@ -100,12 +103,15 @@ type EditableFieldState = {
   sectionId: string;
   rowKey: string;
   draft: string;
+  target: ParseTarget;
+  column: 'field' | 'clientField';
 };
 type EditableRequestCellState = {
   sectionId: string;
   rowKey: string;
   column: 'type' | 'required' | 'description' | 'example';
   draft: string;
+  target: ParseTarget;
 };
 type EditableSourceState = {
   sectionId: string;
@@ -128,6 +134,18 @@ type InternalCodePopoverState = {
 type EditableFieldOptions = {
   allowEdit?: boolean;
   onDelete?: () => void;
+};
+type DeletedRowUndoState = {
+  sectionId: string;
+  target: ParseTarget;
+  row: ParsedRow;
+  index: number;
+};
+type WorkspaceSnapshot = {
+  methods: MethodDocument[];
+  methodGroups: MethodGroup[];
+  activeMethodId: string;
+  selectedId: string;
 };
 
 type JsonImportRoutingState = {
@@ -1131,12 +1149,16 @@ export default function App() {
   const [isAddBlockMenuOpen, setIsAddBlockMenuOpen] = useState(false);
   const [pendingMethodNameFocus, setPendingMethodNameFocus] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+  const [deletedRowUndo, setDeletedRowUndo] = useState<DeletedRowUndoState | null>(null);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
   const [isSectionPanelPulse, setIsSectionPanelPulse] = useState(false);
   const [onboardingState, setOnboardingState] = useState<OnboardingState>(() => initialOnboarding);
   const [suppressOnboardingEntry, setSuppressOnboardingEntry] = useState<boolean>(() => loadOnboardingEntrySuppressed());
   const [showOnboardingEntry, setShowOnboardingEntry] = useState<boolean>(
     () => ONBOARDING_FEATURES.onboardingV1 && !initialOnboarding.dismissed && !loadOnboardingEntrySuppressed()
   );
+  const [showResetEndpointDialog, setShowResetEndpointDialog] = useState(false);
   const [jsonImportRouting, setJsonImportRouting] = useState<JsonImportRoutingState | null>(null);
   const [projectTextImport, setProjectTextImport] = useState<ProjectTextImportState | null>(null);
   const [sourceTextImport, setSourceTextImport] = useState<SourceTextImportState | null>(null);
@@ -1144,13 +1166,19 @@ export default function App() {
   const [dismissedOnboardingHints, setDismissedOnboardingHints] = useState<Record<string, true>>({});
   const [onboardingNavStep, setOnboardingNavStep] = useState<OnboardingStepId>(() => initialOnboarding.currentStep);
   const [onboardingStepHint, setOnboardingStepHint] = useState('');
-  const [onboardingLiveMessage, setOnboardingLiveMessage] = useState('');
   const internalCodeAnchorRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const internalCodePopoverRef = useRef<HTMLDivElement | null>(null);
   const previousOnboardingStepRef = useRef(onboardingState.currentStep);
   const onboardingStepHintTimerRef = useRef<number | null>(null);
   const onboardingSpotlightTimerRef = useRef<number | null>(null);
   const onboardingSpotlightNodeRef = useRef<HTMLElement | null>(null);
+  const deletedRowUndoTimerRef = useRef<number | null>(null);
+  const undoStackRef = useRef<WorkspaceSnapshot[]>([]);
+  const redoStackRef = useRef<WorkspaceSnapshot[]>([]);
+  const historySuspendRef = useRef(false);
+  const historyLastSnapshotRef = useRef<WorkspaceSnapshot | null>(null);
+  const historyLastHashRef = useRef('');
+  const historyLastPushAtRef = useRef(0);
   const activeMethod = methods.find((method) => method.id === activeMethodId) ?? methods[0];
   const sections = useMemo(() => activeMethod?.sections ?? EMPTY_SECTIONS, [activeMethod]);
   const methodNameWarning = useMemo(() => {
@@ -1164,15 +1192,77 @@ export default function App() {
 
   const exportTitle = activeMethod ? `Экспортируется только метод "${activeMethod.name.trim() || DEFAULT_METHOD_NAME}"` : 'Выберите метод';
 
+  function cloneSnapshot(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
+    return {
+      methods: JSON.parse(JSON.stringify(snapshot.methods)) as MethodDocument[],
+      methodGroups: JSON.parse(JSON.stringify(snapshot.methodGroups)) as MethodGroup[],
+      activeMethodId: snapshot.activeMethodId,
+      selectedId: snapshot.selectedId
+    };
+  }
+
+  function getWorkspaceSnapshot(): WorkspaceSnapshot {
+    return {
+      methods,
+      methodGroups,
+      activeMethodId,
+      selectedId
+    };
+  }
+
+  function applyWorkspaceSnapshot(snapshot: WorkspaceSnapshot): void {
+    historySuspendRef.current = true;
+    setMethodsState(snapshot.methods);
+    setMethodGroups(snapshot.methodGroups);
+    setActiveMethodId(snapshot.activeMethodId);
+    setSelectedId(snapshot.selectedId);
+    window.setTimeout(() => {
+      historySuspendRef.current = false;
+    }, 0);
+  }
+
+  function canUndoWorkspace(): boolean {
+    return undoStackRef.current.length > 0;
+  }
+
+  function canRedoWorkspace(): boolean {
+    return redoStackRef.current.length > 0;
+  }
+
+  function undoWorkspace(): void {
+    if (!canUndoWorkspace()) return;
+    const current = cloneSnapshot(getWorkspaceSnapshot());
+    const previous = undoStackRef.current.pop();
+    if (!previous) return;
+    redoStackRef.current.push(current);
+    applyWorkspaceSnapshot(cloneSnapshot(previous));
+    setCanUndo(undoStackRef.current.length > 0);
+    setCanRedo(redoStackRef.current.length > 0);
+  }
+
+  function redoWorkspace(): void {
+    if (!canRedoWorkspace()) return;
+    const current = cloneSnapshot(getWorkspaceSnapshot());
+    const next = redoStackRef.current.pop();
+    if (!next) return;
+    undoStackRef.current.push(current);
+    applyWorkspaceSnapshot(cloneSnapshot(next));
+    setCanUndo(undoStackRef.current.length > 0);
+    setCanRedo(redoStackRef.current.length > 0);
+  }
+
   useEffect(() => {
     const topbar = topbarRef.current;
     const root = document.documentElement;
     if (!topbar) return;
 
     const updateStickyOffset = (): void => {
-      // Keep a small visual gap between sticky topbar and sticky onboarding panel.
-      const offset = Math.ceil(topbar.offsetHeight + 24);
-      root.style.setProperty('--sticky-topbar-offset', `${offset}px`);
+      const topInset = 12;
+      const panelGap = 3;
+      const topbarHeight = topbar.offsetHeight;
+      const topbarOffset = Math.ceil(topbarHeight + topInset + panelGap);
+      root.style.setProperty('--sticky-topbar-offset', `${topbarOffset}px`);
+      root.style.setProperty('--sticky-sidebar-offset', `${topbarOffset}px`);
     };
 
     updateStickyOffset();
@@ -1188,8 +1278,47 @@ export default function App() {
       window.removeEventListener('resize', updateStickyOffset);
       observer?.disconnect();
       root.style.removeProperty('--sticky-topbar-offset');
+      root.style.removeProperty('--sticky-sidebar-offset');
     };
-  }, []);
+  }, [showOnboardingEntry, onboardingState.status]);
+
+  useEffect(() => {
+    const snapshot = getWorkspaceSnapshot();
+    const hash = JSON.stringify(snapshot);
+
+    if (!historyLastSnapshotRef.current) {
+      historyLastSnapshotRef.current = cloneSnapshot(snapshot);
+      historyLastHashRef.current = hash;
+      setCanUndo(undoStackRef.current.length > 0);
+      setCanRedo(redoStackRef.current.length > 0);
+      return;
+    }
+
+    if (hash === historyLastHashRef.current) {
+      return;
+    }
+
+    const previousSnapshot = historyLastSnapshotRef.current;
+    historyLastSnapshotRef.current = cloneSnapshot(snapshot);
+    historyLastHashRef.current = hash;
+
+    if (historySuspendRef.current) {
+      return;
+    }
+
+    const now = Date.now();
+    const shouldPush = now - historyLastPushAtRef.current > HISTORY_COALESCE_MS;
+    if (shouldPush) {
+      undoStackRef.current.push(cloneSnapshot(previousSnapshot));
+      if (undoStackRef.current.length > HISTORY_LIMIT) {
+        undoStackRef.current.shift();
+      }
+      redoStackRef.current = [];
+      historyLastPushAtRef.current = now;
+      setCanUndo(undoStackRef.current.length > 0);
+      setCanRedo(redoStackRef.current.length > 0);
+    }
+  }, [methods, methodGroups, activeMethodId, selectedId]);
 
   useEffect(() => {
     setMethodsState((prev) => {
@@ -1566,6 +1695,47 @@ export default function App() {
   }, [toastMessage]);
 
   useEffect(() => {
+    return () => {
+      if (deletedRowUndoTimerRef.current) {
+        window.clearTimeout(deletedRowUndoTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleHistoryHotkeys = (event: KeyboardEvent): void => {
+      const code = event.code;
+      const isMod = event.ctrlKey || event.metaKey;
+      if (!isMod) return;
+
+      // Use physical key codes so shortcuts work in any keyboard layout (RU/EN/etc).
+      const isUndoCombo = code === 'KeyZ' && !event.shiftKey;
+      const isRedoCombo = (code === 'KeyZ' && event.shiftKey) || code === 'KeyY';
+      if (!isUndoCombo && !isRedoCombo) return;
+
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      const isEditable = tag === 'input' || tag === 'textarea' || tag === 'select' || Boolean(target?.isContentEditable);
+      if (isEditable) return;
+
+      event.preventDefault();
+      if (isUndoCombo) {
+        if (deletedRowUndo) {
+          undoDeletedRow();
+          return;
+        }
+        undoWorkspace();
+        return;
+      }
+
+      redoWorkspace();
+    };
+
+    window.addEventListener('keydown', handleHistoryHotkeys);
+    return () => window.removeEventListener('keydown', handleHistoryHotkeys);
+  }, [deletedRowUndo, methods, methodGroups, activeMethodId, selectedId]);
+
+  useEffect(() => {
     setTab('editor');
   }, [selectedId]);
 
@@ -1782,13 +1952,6 @@ export default function App() {
     }, 3600);
   }
 
-  function announceOnboarding(message: string): void {
-    setOnboardingLiveMessage('');
-    window.setTimeout(() => {
-      setOnboardingLiveMessage(message);
-    }, 10);
-  }
-
   function getOnboardingStepTarget(stepId: OnboardingStepId): OnboardingStepTarget {
     if (stepId === 'prepare-source') {
       return {
@@ -1894,7 +2057,6 @@ export default function App() {
     if (!force && !access.allowed) {
       setOnboardingStepHintMessage(access.reason ?? 'Переход недоступен.');
       emitOnboardingEvent('onboarding_step_blocked', { stepId, source });
-      announceOnboarding(access.reason ?? 'Переход к шагу недоступен.');
       return;
     }
 
@@ -1982,6 +2144,32 @@ export default function App() {
     if (!activeOnboardingHint) return;
 
     goToOnboardingStep(onboardingNavStep, 'hint', true);
+  }
+
+  function renderOnboardingEntryIcon(path: OnboardingEntryPath): ReactNode {
+    if (path === 'quick_start') {
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M12 3l2.6 5.2L20 11l-5.4 2.8L12 19l-2.6-5.2L4 11l5.4-2.8L12 3Z" />
+        </svg>
+      );
+    }
+
+    if (path === 'scratch') {
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <rect x="5" y="4" width="14" height="16" rx="2" />
+          <path d="M9 9h6M9 13h6M12 7v12" />
+        </svg>
+      );
+    }
+
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M12 4v10m0 0l-3-3m3 3l3-3" />
+        <rect x="4" y="14" width="16" height="6" rx="2" />
+      </svg>
+    );
   }
 
   const onboardingEntryOptions: Array<{
@@ -2441,14 +2629,6 @@ export default function App() {
     markOnboardingExportTouched();
   }
 
-  async function handleExportWiki(): Promise<void> {
-    if (!activeMethod) return;
-    const methodSlug = slugifyMethodFileName(activeMethod.name);
-    await exportDiagramJpegs();
-    downloadText(`${methodSlug}.documentation.wiki`, wikiOutput);
-    markOnboardingExportTouched();
-  }
-
   function openHtmlPreview(): void {
     if (!activeMethod) return;
     setTab('html');
@@ -2623,9 +2803,7 @@ export default function App() {
     return normalizeWorkspaceForMode(workspace);
   }
 
-  function resetProject(): void {
-    if (!confirm('Создать новый эндпоинт? Текущие несохраненные данные будут потеряны.')) return;
-
+  function executeResetProject(): void {
     if (ONBOARDING_FEATURES.onboardingV1) {
       setImportError('');
       setJsonImportRouting(null);
@@ -2639,6 +2817,15 @@ export default function App() {
     setActiveMethodId(seed.activeMethodId ?? seed.methods[0].id);
     setSelectedId(seed.methods[0].sections[0].id);
     localStorage.removeItem(STORAGE_KEY);
+  }
+
+  function resetProject(): void {
+    setShowResetEndpointDialog(true);
+  }
+
+  function confirmResetProject(): void {
+    setShowResetEndpointDialog(false);
+    executeResetProject();
   }
 
   function syncTextSectionFromEditor(sectionId: string): void {
@@ -2946,6 +3133,46 @@ export default function App() {
     syncTextSectionFromEditor(sectionId);
   }
 
+  function queueDeletedRowUndo(payload: DeletedRowUndoState): void {
+    if (deletedRowUndoTimerRef.current) {
+      window.clearTimeout(deletedRowUndoTimerRef.current);
+      deletedRowUndoTimerRef.current = null;
+    }
+    setDeletedRowUndo(payload);
+    deletedRowUndoTimerRef.current = window.setTimeout(() => {
+      setDeletedRowUndo(null);
+      deletedRowUndoTimerRef.current = null;
+    }, DELETE_UNDO_WINDOW_MS);
+  }
+
+  function undoDeletedRow(): void {
+    if (!deletedRowUndo) return;
+    const restorePayload = deletedRowUndo;
+
+    if (deletedRowUndoTimerRef.current) {
+      window.clearTimeout(deletedRowUndoTimerRef.current);
+      deletedRowUndoTimerRef.current = null;
+    }
+    setDeletedRowUndo(null);
+
+    updateSection(restorePayload.sectionId, (current) => {
+      if (current.kind !== 'parsed') return current;
+
+      if (restorePayload.target === 'client') {
+        if (!isDualModelSection(current)) return current;
+        const clientRows = [...(current.clientRows ?? [])];
+        const safeIndex = Math.max(0, Math.min(restorePayload.index, clientRows.length));
+        clientRows.splice(safeIndex, 0, restorePayload.row);
+        return { ...current, clientRows };
+      }
+
+      const rows = [...current.rows];
+      const safeIndex = Math.max(0, Math.min(restorePayload.index, rows.length));
+      rows.splice(safeIndex, 0, restorePayload.row);
+      return { ...current, rows };
+    });
+  }
+
   function addManualRow(section: ParsedSection, target: ParseTarget = 'server'): void {
     const manualRow: ParsedRow = {
       field: `newField${Date.now()}`,
@@ -3019,30 +3246,91 @@ export default function App() {
     });
   }
 
+  function updateClientRow(sectionId: string, rowKey: string, updater: (row: ParsedRow) => ParsedRow): void {
+    updateSection(sectionId, (current) => {
+      if (current.kind !== 'parsed' || !isDualModelSection(current)) return current;
+
+      let updated = false;
+      const clientRows = (current.clientRows ?? []).map((row) => {
+        if (!updated && getParsedRowKey(row) === rowKey) {
+          updated = true;
+          return updater(row);
+        }
+        return row;
+      });
+
+      return updated ? { ...current, clientRows } : current;
+    });
+  }
+
   function deleteRequestHeader(sectionId: string, rowKey: string): void {
+    let deletedRow: ParsedRow | null = null;
+    let deletedIndex = -1;
     updateSection(sectionId, (current) => {
       if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
+      deletedIndex = current.rows.findIndex((row) => getParsedRowKey(row) === rowKey);
+      if (deletedIndex < 0) return current;
+      deletedRow = current.rows[deletedIndex];
       return { ...current, rows: current.rows.filter((row) => getParsedRowKey(row) !== rowKey) };
     });
+    if (deletedRow && deletedIndex > -1) {
+      queueDeletedRowUndo({
+        sectionId,
+        target: 'server',
+        row: { ...deletedRow },
+        index: deletedIndex
+      });
+    }
   }
 
   function deleteExternalRequestHeader(sectionId: string, rowKey: string): void {
+    let deletedRow: ParsedRow | null = null;
+    let deletedIndex = -1;
     updateSection(sectionId, (current) => {
       if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
-      return { ...current, clientRows: (current.clientRows ?? []).filter((row) => getParsedRowKey(row) !== rowKey) };
+      const sourceRows = current.clientRows ?? [];
+      deletedIndex = sourceRows.findIndex((row) => getParsedRowKey(row) === rowKey);
+      if (deletedIndex < 0) return current;
+      deletedRow = sourceRows[deletedIndex];
+      return { ...current, clientRows: sourceRows.filter((row) => getParsedRowKey(row) !== rowKey) };
     });
+    if (deletedRow && deletedIndex > -1) {
+      queueDeletedRowUndo({
+        sectionId,
+        target: 'client',
+        row: { ...deletedRow },
+        index: deletedIndex
+      });
+    }
   }
 
   function deleteParsedRow(sectionId: string, rowKey: string, target: ParseTarget = 'server'): void {
+    let deletedRow: ParsedRow | null = null;
+    let deletedIndex = -1;
     updateSection(sectionId, (current) => {
       if (current.kind !== 'parsed') return current;
 
       if (target === 'client' && isDualModelSection(current)) {
-        return { ...current, clientRows: (current.clientRows ?? []).filter((row) => getParsedRowKey(row) !== rowKey) };
+        const sourceRows = current.clientRows ?? [];
+        deletedIndex = sourceRows.findIndex((row) => getParsedRowKey(row) === rowKey);
+        if (deletedIndex < 0) return current;
+        deletedRow = sourceRows[deletedIndex];
+        return { ...current, clientRows: sourceRows.filter((row) => getParsedRowKey(row) !== rowKey) };
       }
 
+      deletedIndex = current.rows.findIndex((row) => getParsedRowKey(row) === rowKey);
+      if (deletedIndex < 0) return current;
+      deletedRow = current.rows[deletedIndex];
       return { ...current, rows: current.rows.filter((row) => getParsedRowKey(row) !== rowKey) };
     });
+    if (deletedRow && deletedIndex > -1) {
+      queueDeletedRowUndo({
+        sectionId,
+        target,
+        row: { ...deletedRow },
+        index: deletedIndex
+      });
+    }
   }
 
   function syncInputFromRows(section: ParsedSection, target: ParseTarget = 'server'): void {
@@ -3212,7 +3500,20 @@ export default function App() {
     setEditingField({
       sectionId: section.id,
       rowKey: getParsedRowKey(row),
-      draft: row.field
+      draft: row.field,
+      target: 'server',
+      column: 'field'
+    });
+  }
+
+  function startClientFieldEditing(section: ParsedSection, row: ParsedRow): void {
+    if (!row.clientField?.trim()) return;
+    setEditingField({
+      sectionId: section.id,
+      rowKey: getParsedRowKey(row),
+      draft: row.clientField,
+      target: 'client',
+      column: 'clientField'
     });
   }
 
@@ -3220,14 +3521,26 @@ export default function App() {
     setEditingField(null);
   }
 
+  function getRequestCellEditTarget(section: ParsedSection, row: ParsedRow): ParseTarget | null {
+    if (!isDualModelSection(section)) {
+      return row.field.trim() ? 'server' : null;
+    }
+
+    if (row.field.trim()) return 'server';
+    if (row.clientField?.trim()) return 'client';
+    return null;
+  }
+
   function startRequestCellEditing(section: ParsedSection, row: ParsedRow, column: 'type' | 'required' | 'description' | 'example'): void {
-    if (!row.field.trim()) return;
+    const target = getRequestCellEditTarget(section, row);
+    if (!target) return;
     setRequestCellError('');
     setEditingRequestCell({
       sectionId: section.id,
       rowKey: getParsedRowKey(row),
       column,
-      draft: row[column] || ''
+      draft: row[column] || '',
+      target
     });
   }
 
@@ -3240,11 +3553,17 @@ export default function App() {
     sectionId: string,
     rowKey: string,
     column: 'type' | 'required' | 'description' | 'example',
-    draft: string
+    draft: string,
+    target: ParseTarget
   ): boolean {
     if (column === 'example') {
       const section = sections.find((item) => item.id === sectionId);
-      const row = section?.kind === 'parsed' ? section.rows.find((item) => getParsedRowKey(item) === rowKey) : undefined;
+      const row =
+        section?.kind === 'parsed'
+          ? target === 'client' && isDualModelSection(section)
+            ? (section.clientRows ?? []).find((item) => getParsedRowKey(item) === rowKey)
+            : section.rows.find((item) => getParsedRowKey(item) === rowKey)
+          : undefined;
       const message = validateExampleValue(draft, row?.type ?? 'string');
       if (message) {
         setRequestCellError(message);
@@ -3252,7 +3571,8 @@ export default function App() {
       }
     }
 
-    updateServerRow(sectionId, rowKey, (current) => {
+    const updateRow = target === 'client' ? updateClientRow : updateServerRow;
+    updateRow(sectionId, rowKey, (current) => {
       if (column === 'type') {
         const nextType = draft;
         const nextExample = usesStructuredPlaceholder(nextType) && !current.example.trim() ? STRUCTURED_EXAMPLE_PLACEHOLDER : current.example;
@@ -3275,8 +3595,8 @@ export default function App() {
   function saveRequestCellEditing(): void {
     if (!editingRequestCell) return;
 
-    const { sectionId, rowKey, column, draft } = editingRequestCell;
-    const saved = applyRequestCellValue(sectionId, rowKey, column, draft);
+    const { sectionId, rowKey, column, draft, target } = editingRequestCell;
+    const saved = applyRequestCellValue(sectionId, rowKey, column, draft, target);
     if (!saved) return;
     setEditingRequestCell(null);
   }
@@ -3290,22 +3610,39 @@ export default function App() {
       return;
     }
 
-    updateSection(editingField.sectionId, (current) => {
-      if (current.kind !== 'parsed') return current;
+    if (editingField.target === 'client') {
+      updateSection(editingField.sectionId, (current) => {
+        if (current.kind !== 'parsed' || !isDualModelSection(current)) return current;
 
-      let updated = false;
-      const rows = current.rows.map((row) => {
-        if (!updated && getParsedRowKey(row) === editingField.rowKey) {
-          updated = true;
-          return { ...row, field: nextField };
-        }
-        return row;
+        let updated = false;
+        const clientRows = (current.clientRows ?? []).map((row) => {
+          if (!updated && getParsedRowKey(row) === editingField.rowKey) {
+            updated = true;
+            return { ...row, field: nextField };
+          }
+          return row;
+        });
+
+        return updated ? { ...current, clientRows } : current;
       });
+    } else {
+      updateSection(editingField.sectionId, (current) => {
+        if (current.kind !== 'parsed') return current;
 
-      if (!updated) return current;
+        let updated = false;
+        const rows = current.rows.map((row) => {
+          if (!updated && getParsedRowKey(row) === editingField.rowKey) {
+            updated = true;
+            return { ...row, field: nextField };
+          }
+          return row;
+        });
 
-      return { ...current, rows };
-    });
+        if (!updated) return current;
+
+        return { ...current, rows };
+      });
+    }
 
     setEditingField(null);
   }
@@ -3316,7 +3653,9 @@ export default function App() {
 
     const isEditing =
       editingField?.sectionId === section.id &&
-      editingField.rowKey === getParsedRowKey(row);
+      editingField.rowKey === getParsedRowKey(row) &&
+      editingField.target === 'server' &&
+      editingField.column === 'field';
 
     if (isEditing) {
       return (
@@ -3355,6 +3694,54 @@ export default function App() {
     );
   }
 
+  function renderEditableClientFieldCell(section: ParsedSection, row: ParsedRow): ReactNode {
+    const value = row.clientField?.trim();
+    if (!value) return '—';
+
+    const isEditing =
+      editingField?.sectionId === section.id &&
+      editingField.rowKey === getParsedRowKey(row) &&
+      editingField.target === 'client' &&
+      editingField.column === 'clientField';
+
+    if (isEditing) {
+      return (
+        <div className="field-edit">
+          <input
+            type="text"
+            autoFocus
+            value={editingField.draft}
+            onChange={(e) => setEditingField((current) => (current ? { ...current, draft: e.target.value } : current))}
+            onBlur={saveFieldEditing}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') saveFieldEditing();
+              if (e.key === 'Escape') cancelFieldEditing();
+            }}
+          />
+        </div>
+      );
+    }
+
+    return (
+      <div className="field-display" onDoubleClick={() => startClientFieldEditing(section, row)}>
+        <span>{row.clientField}</span>
+        <span className="field-actions">
+          <button className="icon-button" type="button" onClick={() => startClientFieldEditing(section, row)} aria-label="Редактировать client поле">
+            ✎
+          </button>
+          <button
+            className="icon-button danger"
+            type="button"
+            onClick={() => deleteParsedRow(section.id, getParsedRowKey(row), 'client')}
+            aria-label="Удалить client поле"
+          >
+            ×
+          </button>
+        </span>
+      </div>
+    );
+  }
+
   function renderEditableRequestCell(
     section: ParsedSection,
     row: ParsedRow,
@@ -3375,7 +3762,7 @@ export default function App() {
               onChange={(e) => {
                 const nextValue = e.target.value;
                 setEditingRequestCell((current) => (current ? { ...current, draft: nextValue } : current));
-                if (applyRequestCellValue(section.id, getParsedRowKey(row), 'type', nextValue)) {
+                if (applyRequestCellValue(section.id, getParsedRowKey(row), 'type', nextValue, editingRequestCell.target)) {
                   setEditingRequestCell(null);
                 }
               }}
@@ -3409,7 +3796,7 @@ export default function App() {
               onChange={(e) => {
                 const nextValue = e.target.value;
                 setEditingRequestCell((current) => (current ? { ...current, draft: nextValue } : current));
-                if (applyRequestCellValue(section.id, getParsedRowKey(row), 'required', nextValue)) {
+                if (applyRequestCellValue(section.id, getParsedRowKey(row), 'required', nextValue, editingRequestCell.target)) {
                   setEditingRequestCell(null);
                 }
               }}
@@ -3443,13 +3830,13 @@ export default function App() {
     }
 
     const value = row[column] || '—';
-    const canEdit = Boolean(row.field.trim());
+    const canEdit = Boolean(getRequestCellEditTarget(section, row));
 
     return (
       <div className="field-display" onDoubleClick={() => canEdit && startRequestCellEditing(section, row, column)}>
         <span>{value}</span>
         <span className="field-actions">
-          <button className="icon-button" type="button" onClick={() => startRequestCellEditing(section, row, column)} aria-label="Редактировать ячейку">
+          <button className="icon-button" type="button" onClick={() => canEdit && startRequestCellEditing(section, row, column)} aria-label="Редактировать ячейку">
             ✎
           </button>
         </span>
@@ -3560,6 +3947,10 @@ export default function App() {
           )}
         </div>
       );
+    }
+
+    if (column === 'clientField' && section.domainModelEnabled && !row.field.trim() && row.clientField?.trim()) {
+      return renderEditableClientFieldCell(section, row);
     }
 
     if (column === 'field') {
@@ -3963,19 +4354,12 @@ export default function App() {
     const password = isExternal ? section.externalAuthPassword ?? '' : section.authPassword ?? '';
     const headerName = isExternal ? section.externalAuthHeaderName ?? DEFAULT_API_KEY_HEADER : section.authHeaderName ?? DEFAULT_API_KEY_HEADER;
     const apiKeyExample = isExternal ? section.externalAuthApiKeyExample ?? '' : section.authApiKeyExample ?? '';
-    const title = isExternal ? 'Авторизация внешнего запроса' : 'Авторизация';
-    const blockId = isExternal ? 'auth-client' : 'auth-server';
 
     return (
-      <details
-        className="expander"
-        open={isExpanderOpen(section.id, blockId)}
-        onToggle={(e) => setExpanderOpen(section.id, blockId, e.currentTarget.open)}
-      >
-        <summary className="expander-summary">{title}</summary>
+      <section className="expander expander-static">
         <div className="expander-body">
           <label className="field">
-            <div className="label">Способ</div>
+            <div className="label input-label-strong">Способ</div>
             <select
               value={authType}
               onChange={(e) =>
@@ -4014,7 +4398,7 @@ export default function App() {
 
           {authType === 'bearer' && (
             <label className="field">
-              <div className="label">Пример токена</div>
+              <div className="label input-label-strong">Пример токена</div>
               <input
                 type="text"
                 value={tokenExample}
@@ -4033,7 +4417,7 @@ export default function App() {
           {authType === 'basic' && (
             <div className="row gap auth-grid">
               <label className="field">
-                <div className="label">Логин</div>
+                <div className="label input-label-strong">Логин</div>
                 <input
                   type="text"
                   value={username}
@@ -4048,7 +4432,7 @@ export default function App() {
                 />
               </label>
               <label className="field">
-                <div className="label">Пароль</div>
+                <div className="label input-label-strong">Пароль</div>
                 <input
                   type="text"
                   value={password}
@@ -4068,7 +4452,7 @@ export default function App() {
           {authType === 'api-key' && (
             <div className="row gap auth-grid">
               <label className="field">
-                <div className="label">Имя header</div>
+                <div className="label input-label-strong">Имя header</div>
                 <input
                   type="text"
                   value={headerName}
@@ -4083,7 +4467,7 @@ export default function App() {
                 />
               </label>
               <label className="field">
-                <div className="label">Пример API key</div>
+                <div className="label input-label-strong">Пример API key</div>
                 <input
                   type="text"
                   value={apiKeyExample}
@@ -4099,19 +4483,15 @@ export default function App() {
               </label>
             </div>
           )}
-
-          <div className="muted">Настройка автоматически попадет в headers и в итоговую документацию.</div>
         </div>
-      </details>
+      </section>
     );
   }
 
   function renderRequestMetaEditor(section: ParsedSection, target: ParseTarget = 'server'): ReactNode {
     if (!isRequestSection(section)) return null;
     const isExternal = target === 'client';
-    const title = isExternal ? 'Внешний вызов' : 'Общее описание метода';
     const urlLabel = isExternal ? 'Внешний URL' : 'URL метода';
-    const blockId = isExternal ? 'meta-client' : 'meta-server';
 
     const applyRequestMeta = (patch: Partial<Pick<ParsedSection, 'requestUrl' | 'requestMethod' | 'externalRequestUrl' | 'externalRequestMethod'>>) => {
       updateSection(section.id, (current) => {
@@ -4147,16 +4527,11 @@ export default function App() {
     };
 
     return (
-      <details
-        className="expander"
-        open={isExpanderOpen(section.id, blockId)}
-        onToggle={(e) => setExpanderOpen(section.id, blockId, e.currentTarget.open)}
-      >
-        <summary className="expander-summary">{title}</summary>
+      <section className="expander expander-static">
         <div className="expander-body">
           <div className="row gap auth-grid">
             <label className="field">
-              <div className="label">{urlLabel}</div>
+              <div className="label input-label-strong">{urlLabel}</div>
               <input
                 type="text"
                 value={isExternal ? section.externalRequestUrl ?? '' : section.requestUrl ?? ''}
@@ -4165,7 +4540,7 @@ export default function App() {
               />
             </label>
             <label className="field">
-              <div className="label">Тип метода</div>
+              <div className="label input-label-strong">Тип метода</div>
               <select
                 value={isExternal ? section.externalRequestMethod ?? 'POST' : section.requestMethod ?? 'POST'}
                 onChange={(e) => applyRequestMeta(isExternal ? { externalRequestMethod: e.target.value as RequestMethod } : { requestMethod: e.target.value as RequestMethod })}
@@ -4178,13 +4553,12 @@ export default function App() {
               </select>
             </label>
             <label className="field">
-              <div className="label">Протокол</div>
+              <div className="label input-label-strong">Протокол</div>
               <input type="text" value="REST" readOnly />
             </label>
           </div>
-          <div className="muted">Для MVP протокол фиксирован как REST. URL и HTTP-метод автоматически используются при генерации cURL.</div>
         </div>
-      </details>
+      </section>
     );
   }
 
@@ -5039,17 +5413,19 @@ export default function App() {
         >
           <div className="onboarding-entry-card">
             <h2>Как хотите начать работу?</h2>
-            <p>Выберите удобный сценарий первого запуска.</p>
             <div className="onboarding-entry-options">
-              {onboardingEntryOptions.map((option, index) => (
+              {onboardingEntryOptions.map((option) => (
                 <button
                   key={option.id}
                   type="button"
-                  className={`onboarding-entry-option ${index === 0 ? 'primary' : ''}`}
+                  className="onboarding-entry-option"
                   onClick={option.action}
                 >
-                  <span className="onboarding-entry-option-title">{option.title}</span>
-                  <span className="onboarding-entry-option-description">{option.description}</span>
+                  <span className="onboarding-entry-option-icon">{renderOnboardingEntryIcon(option.id)}</span>
+                  <span className="onboarding-entry-option-copy">
+                    <span className="onboarding-entry-option-title">{option.title}</span>
+                    <span className="onboarding-entry-option-description">{option.description}</span>
+                  </span>
                 </button>
               ))}
             </div>
@@ -5072,6 +5448,33 @@ export default function App() {
               >
                 Пропустить
               </a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showResetEndpointDialog && (
+        <div
+          className="import-routing-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Подтверждение создания нового эндпоинта"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setShowResetEndpointDialog(false);
+            }
+          }}
+        >
+          <div className="import-routing-card">
+            <h2>Создать новый эндпоинт?</h2>
+            <p className="import-routing-file">Текущие несохраненные данные будут потеряны.</p>
+            <div className="import-routing-actions">
+              <button type="button" className="ghost" onClick={() => setShowResetEndpointDialog(false)}>
+                Отмена
+              </button>
+              <button type="button" onClick={confirmResetProject}>
+                Создать новый эндпоинт
+              </button>
             </div>
           </div>
         </div>
@@ -5269,6 +5672,15 @@ export default function App() {
           <button onClick={openWikiPreview} disabled={!activeMethod} title={exportTitle}>Экспорт Wiki</button>
           </div>
           <div className="actions-side">
+          <div className="history-controls" role="group" aria-label="История изменений">
+            <button type="button" className="ghost history-btn" onClick={undoWorkspace} disabled={!canUndo} title="Отменить (Ctrl+Z)">
+              ↶
+            </button>
+            <button type="button" className="ghost history-btn" onClick={redoWorkspace} disabled={!canRedo} title="Повторить (Ctrl+Shift+Z / Ctrl+Y)">
+              ↷
+            </button>
+          </div>
+          <div className="actions-side-divider" aria-hidden />
           <button
             type="button"
             className="theme-mermaid-toggle"
@@ -5296,57 +5708,6 @@ export default function App() {
 
       {importError && <div className="alert error">Ошибка импорта: {importError}</div>}
       {toastMessage && <div className="toast-info">{toastMessage}</div>}
-      <div className="visually-hidden" aria-live="polite" aria-atomic="true">{onboardingLiveMessage}</div>
-
-      {ONBOARDING_FEATURES.onboardingV1 &&
-        ONBOARDING_FEATURES.onboardingGuidedMode &&
-        onboardingState.status === 'active' &&
-        !showOnboardingEntry && (
-          <section
-            className="onboarding-stepbar collapsed"
-            data-onboarding-anchor="choose-entry"
-            aria-live="polite"
-            aria-label="Пошаговый онбординг"
-          >
-            <div className="onboarding-stepbar-track" role="list" aria-label="Прогресс шагов">
-              {ONBOARDING_STEPS.map((step, index) => {
-                const isDone = index < onboardingResolvedStepIndex;
-                const isCurrent = step.id === activeOnboardingStep.id;
-                const access = canNavigateToOnboardingStep(step.id);
-                return (
-                  <button
-                    key={step.id}
-                    type="button"
-                    role="listitem"
-                    className={`onboarding-step-chip ${isDone ? 'done' : ''} ${isCurrent ? 'current' : ''} ${access.allowed ? 'available' : 'blocked'}`}
-                    aria-current={isCurrent ? 'step' : undefined}
-                    aria-disabled={!access.allowed}
-                    disabled={!access.allowed}
-                    title={access.allowed ? step.description : access.reason}
-                    onClick={() => jumpToOnboardingStep(step.id)}
-                  >
-                    {step.title}
-                  </button>
-                );
-              })}
-            </div>
-            {onboardingStepHint && <div className="onboarding-stepbar-tip">{onboardingStepHint}</div>}
-            <div className="onboarding-stepbar-actions">
-              <button
-                type="button"
-                className="small onboarding-stepbar-icon-btn primary"
-                aria-label={onboardingPrimaryActionLabel}
-                title={onboardingPrimaryActionLabel}
-                onClick={activeOnboardingHint ? handleActiveOnboardingHintAction : focusOnboardingCurrentStep}
-              >
-                <svg className="onboarding-eye-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                  <path d="M2 12c2.4-4 5.8-6 10-6s7.6 2 10 6c-2.4 4-5.8 6-10 6s-7.6-2-10-6Z" />
-                  <circle cx="12" cy="12" r="3.2" />
-                </svg>
-              </button>
-            </div>
-          </section>
-        )}
 
       <div className="sync-alert-stack">
         {selectedSection?.kind === 'parsed' &&
@@ -5505,6 +5866,55 @@ export default function App() {
         </aside>
 
         <main className="workspace" role="main">
+          {ONBOARDING_FEATURES.onboardingV1 &&
+            ONBOARDING_FEATURES.onboardingGuidedMode &&
+            onboardingState.status === 'active' &&
+            !showOnboardingEntry && (
+              <section
+                className="onboarding-stepbar collapsed"
+                data-onboarding-anchor="choose-entry"
+                aria-live="polite"
+                aria-label="Пошаговый онбординг"
+              >
+                <div className="onboarding-stepbar-track" role="list" aria-label="Прогресс шагов">
+                  {ONBOARDING_STEPS.map((step, index) => {
+                    const isDone = index < onboardingResolvedStepIndex;
+                    const isCurrent = step.id === activeOnboardingStep.id;
+                    const access = canNavigateToOnboardingStep(step.id);
+                    return (
+                      <button
+                        key={step.id}
+                        type="button"
+                        role="listitem"
+                        className={`onboarding-step-chip ${isDone ? 'done' : ''} ${isCurrent ? 'current' : ''} ${access.allowed ? 'available' : 'blocked'}`}
+                        aria-current={isCurrent ? 'step' : undefined}
+                        aria-disabled={!access.allowed}
+                        disabled={!access.allowed}
+                        title={access.allowed ? step.description : access.reason}
+                        onClick={() => jumpToOnboardingStep(step.id)}
+                      >
+                        {step.title}
+                      </button>
+                    );
+                  })}
+                </div>
+                {onboardingStepHint && <div className="onboarding-stepbar-tip">{onboardingStepHint}</div>}
+                <div className="onboarding-stepbar-actions">
+                  <button
+                    type="button"
+                    className="small onboarding-stepbar-icon-btn primary"
+                    aria-label={onboardingPrimaryActionLabel}
+                    title={onboardingPrimaryActionLabel}
+                    onClick={activeOnboardingHint ? handleActiveOnboardingHintAction : focusOnboardingCurrentStep}
+                  >
+                    <svg className="onboarding-eye-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path d="M2 12c2.4-4 5.8-6 10-6s7.6 2 10 6c-2.4 4-5.8 6-10 6s-7.6-2-10-6Z" />
+                      <circle cx="12" cy="12" r="3.2" />
+                    </svg>
+                  </button>
+                </div>
+              </section>
+            )}
           {selectedSection ? (
             <div className="panes">
               {tab === 'editor' && (

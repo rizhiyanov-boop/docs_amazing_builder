@@ -522,3 +522,9 @@ export function editorElementToWikiText(root: HTMLElement): string {
 
   return blocks.join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
 }
+
+export function editorHtmlToWikiText(html: string): string {
+  const root = document.createElement('div');
+  root.innerHTML = html;
+  return editorElementToWikiText(root);
+}

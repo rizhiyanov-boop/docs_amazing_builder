@@ -5,6 +5,7 @@ import { EditorContent, useEditor } from '@tiptap/react';
 import { Extension } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Highlight from '@tiptap/extension-highlight';
+import { liftListItem, sinkListItem } from '@tiptap/pm/schema-list';
 import './tokens.css';
 import './App.css';
 import { parseCurlMeta, parseToRows } from './parsers';
@@ -1593,6 +1594,19 @@ export default function App() {
     editorProps: {
       attributes: {
         class: 'rich-text-editor'
+      },
+      handleKeyDown(view, event) {
+        if (event.key !== 'Tab') return false;
+
+        const listItemType = view.state.schema.nodes.listItem;
+        if (!listItemType) return false;
+
+        const command = event.shiftKey ? liftListItem(listItemType) : sinkListItem(listItemType);
+        const handled = command(view.state, view.dispatch);
+        if (!handled) return false;
+
+        event.preventDefault();
+        return true;
       }
     },
     onUpdate: ({ editor }) => {
@@ -5586,16 +5600,6 @@ export default function App() {
                           onKeyDown={(event) => {
                             const handled = handleRichTextHotkeys(event, (action) => applyTextEditorCommand(selectedSection.id, action));
                             if (handled) return;
-
-                            if (event.key === 'Tab') {
-                              const moved = event.shiftKey
-                                ? textEditor?.chain().focus().liftListItem('listItem').run()
-                                : textEditor?.chain().focus().sinkListItem('listItem').run();
-                              if (moved) {
-                                event.preventDefault();
-                                syncTextSectionFromEditor(selectedSection.id);
-                              }
-                            }
                           }}
                         />
                       </label>

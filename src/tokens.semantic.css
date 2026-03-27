@@ -30,6 +30,26 @@
 
 :root[data-theme='light'] {
   color-scheme: light;
+  --bg: #fdfeff;
+  --panel: #ffffff;
+  --card: #ffffff;
+  --text: #16304d;
+  --muted: #7690ac;
+  --accent: linear-gradient(135deg, #cde9ff, #f2fbff);
+  --accent-solid: #a9d4fb;
+  --border: #e7eff8;
+  --shadow: 0 10px 24px rgba(76, 140, 204, 0.07);
+  --input-bg: #ffffff;
+  --input-text: #16304d;
+  --scrollbar-track: #f8fbff;
+  --scrollbar-thumb: #bfd3e8;
+  --scrollbar-thumb-hover: #a5c0da;
+  --button-bg: linear-gradient(135deg, #d6ecff, #f5fcff);
+  --button-text: #234c72;
+  --button-shadow: 0 8px 18px rgba(76, 140, 204, 0.13);
+  --button-shadow-hover: 0 12px 22px rgba(76, 140, 204, 0.19);
+  --active-bg: #ebf6ff;
+  --active-text: #234c72;
 }
 
 :root[data-theme='dark'] {

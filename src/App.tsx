@@ -155,6 +155,7 @@ type RichTextCommandOptions = {
   language?: string;
 };
 
+type OnboardingEntryPath = 'quick_start' | 'scratch' | 'import';
 type OnboardingNavSource = 'prev' | 'next' | 'chip' | 'cta' | 'hint';
 type OnboardingStepTarget = {
   tab: TabKey;
@@ -1142,12 +1143,12 @@ export default function App() {
   const [hasOnboardingExport, setHasOnboardingExport] = useState(false);
   const [dismissedOnboardingHints, setDismissedOnboardingHints] = useState<Record<string, true>>({});
   const [onboardingNavStep, setOnboardingNavStep] = useState<OnboardingStepId>(() => initialOnboarding.currentStep);
-  const [onboardingNavError, setOnboardingNavError] = useState('');
+  const [onboardingStepHint, setOnboardingStepHint] = useState('');
   const [onboardingLiveMessage, setOnboardingLiveMessage] = useState('');
   const internalCodeAnchorRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const internalCodePopoverRef = useRef<HTMLDivElement | null>(null);
   const previousOnboardingStepRef = useRef(onboardingState.currentStep);
-  const onboardingNavErrorTimerRef = useRef<number | null>(null);
+  const onboardingStepHintTimerRef = useRef<number | null>(null);
   const onboardingSpotlightTimerRef = useRef<number | null>(null);
   const onboardingSpotlightNodeRef = useRef<HTMLElement | null>(null);
   const activeMethod = methods.find((method) => method.id === activeMethodId) ?? methods[0];
@@ -1216,7 +1217,7 @@ export default function App() {
     setTab('editor');
   }
 
-  function startOnboardingEntry(path: 'quick_start' | 'scratch' | 'import'): void {
+  function startOnboardingEntry(path: OnboardingEntryPath): void {
     saveOnboardingEntrySuppressed(suppressOnboardingEntry);
     const nextState = markOnboardingStarted(path);
     setOnboardingState(nextState);
@@ -1243,6 +1244,11 @@ export default function App() {
   function handleImportOnboarding(): void {
     startOnboardingEntry('import');
     setProjectTextImport({ rawText: '', fromOnboarding: true });
+  }
+
+  function closeOnboardingEntry(): void {
+    saveOnboardingEntrySuppressed(suppressOnboardingEntry);
+    setShowOnboardingEntry(false);
   }
 
   function openProjectImportDialog(fromOnboarding = false): void {
@@ -1571,6 +1577,17 @@ export default function App() {
 
   const selectedSection = sections.find((section) => section.id === selectedId) ?? sections[0];
   const activeTextSection = selectedSection?.kind === 'text' ? selectedSection : null;
+
+  function isSelectionInsideListItem(): boolean {
+    if (!textEditor) return false;
+    const from = textEditor.state.selection.$from;
+    for (let depth = from.depth; depth > 0; depth -= 1) {
+      const nodeName = from.node(depth).type.name;
+      if (nodeName === 'listItem' || nodeName === 'list_item') return true;
+    }
+    return false;
+  }
+
   const textEditor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -1588,9 +1605,16 @@ export default function App() {
         keydown: (view, event) => {
           if (event.key !== 'Tab') return false;
 
-          const target = event.target;
-          const element = target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
-          if (!element || !element.closest('li')) return false;
+          const from = view.state.selection.$from;
+          let insideListItem = false;
+          for (let depth = from.depth; depth > 0; depth -= 1) {
+            const nodeName = from.node(depth).type.name;
+            if (nodeName === 'listItem' || nodeName === 'list_item') {
+              insideListItem = true;
+              break;
+            }
+          }
+          if (!insideListItem) return false;
 
           const listItemType = (view.state.schema.nodes as Record<string, unknown>).listItem || (view.state.schema.nodes as Record<string, unknown>).list_item;
           if (!listItemType) {
@@ -1737,8 +1761,8 @@ export default function App() {
 
   useEffect(() => {
     return () => {
-      if (onboardingNavErrorTimerRef.current) {
-        window.clearTimeout(onboardingNavErrorTimerRef.current);
+      if (onboardingStepHintTimerRef.current) {
+        window.clearTimeout(onboardingStepHintTimerRef.current);
       }
       if (onboardingSpotlightTimerRef.current) {
         window.clearTimeout(onboardingSpotlightTimerRef.current);
@@ -1747,15 +1771,15 @@ export default function App() {
     };
   }, []);
 
-  function setOnboardingNavErrorMessage(message: string): void {
-    setOnboardingNavError(message);
-    if (onboardingNavErrorTimerRef.current) {
-      window.clearTimeout(onboardingNavErrorTimerRef.current);
+  function setOnboardingStepHintMessage(message: string): void {
+    setOnboardingStepHint(message);
+    if (onboardingStepHintTimerRef.current) {
+      window.clearTimeout(onboardingStepHintTimerRef.current);
     }
-    onboardingNavErrorTimerRef.current = window.setTimeout(() => {
-      setOnboardingNavError('');
-      onboardingNavErrorTimerRef.current = null;
-    }, 2800);
+    onboardingStepHintTimerRef.current = window.setTimeout(() => {
+      setOnboardingStepHint('');
+      onboardingStepHintTimerRef.current = null;
+    }, 3600);
   }
 
   function announceOnboarding(message: string): void {
@@ -1862,19 +1886,18 @@ export default function App() {
       }, 2100);
     }, 90);
 
-    announceOnboarding(`Переход к шагу: ${stepTitle}`);
+    void stepTitle;
   }
 
   function goToOnboardingStep(stepId: OnboardingStepId, source: OnboardingNavSource, force = false): void {
     const access = canNavigateToOnboardingStep(stepId);
     if (!force && !access.allowed) {
-      setOnboardingNavErrorMessage(access.reason ?? 'Переход недоступен.');
+      setOnboardingStepHintMessage(access.reason ?? 'Переход недоступен.');
       emitOnboardingEvent('onboarding_step_blocked', { stepId, source });
       announceOnboarding(access.reason ?? 'Переход к шагу недоступен.');
       return;
     }
 
-    setOnboardingNavError('');
     setOnboardingNavStep(stepId);
 
     const target = getOnboardingStepTarget(stepId);
@@ -1893,18 +1916,25 @@ export default function App() {
     emitOnboardingEvent('onboarding_step_jump', { stepId, source });
   }
 
-  function navigateOnboardingStep(direction: 'prev' | 'next'): void {
-    const nextIndex = direction === 'prev' ? onboardingNavStepIndex - 1 : onboardingNavStepIndex + 1;
-    const nextStep = ONBOARDING_STEPS[nextIndex];
-    if (!nextStep) return;
-    goToOnboardingStep(nextStep.id, direction);
-  }
-
   function focusOnboardingCurrentStep(): void {
     goToOnboardingStep(onboardingNavStep, 'cta', true);
   }
 
   function jumpToOnboardingStep(stepId: OnboardingStepId): void {
+    const selectedStep = ONBOARDING_STEPS.find((step) => step.id === stepId);
+    const access = canNavigateToOnboardingStep(stepId);
+    const hint = access.allowed ? selectedStep?.description : access.reason;
+    if (hint) {
+      setOnboardingStepHintMessage(hint);
+    }
+
+    setDismissedOnboardingHints((prev) => {
+      if (!prev[stepId]) return prev;
+      const next = { ...prev };
+      delete next[stepId];
+      return next;
+    });
+
     goToOnboardingStep(stepId, 'chip');
   }
 
@@ -1954,13 +1984,33 @@ export default function App() {
     goToOnboardingStep(onboardingNavStep, 'hint', true);
   }
 
-  function dismissActiveOnboardingHint(): void {
-    if (!activeOnboardingHint) return;
-    setDismissedOnboardingHints((prev) => ({
-      ...prev,
-      [onboardingNavStep]: true
-    }));
-  }
+  const onboardingEntryOptions: Array<{
+    id: OnboardingEntryPath;
+    title: string;
+    description: string;
+    action: () => void;
+  }> = [
+    {
+      id: 'quick_start',
+      title: 'Быстрый старт',
+      description: 'Откроем демо с готовым примером request/response.',
+      action: handleQuickStartOnboarding
+    },
+    {
+      id: 'scratch',
+      title: 'Пустой проект',
+      description: 'Создадим новый проект с чистого листа.',
+      action: handleScratchOnboarding
+    },
+    {
+      id: 'import',
+      title: 'Импорт JSON',
+      description: 'Загрузим JSON в нужный раздел.',
+      action: handleImportOnboarding
+    }
+  ];
+
+  const onboardingPrimaryActionLabel = activeOnboardingHint?.actionLabel ?? 'Перейти к шагу';
 
   useEffect(() => {
     applyThemeToRoot(theme);
@@ -2397,6 +2447,17 @@ export default function App() {
     await exportDiagramJpegs();
     downloadText(`${methodSlug}.documentation.wiki`, wikiOutput);
     markOnboardingExportTouched();
+  }
+
+  function openHtmlPreview(): void {
+    if (!activeMethod) return;
+    setTab('html');
+  }
+
+  function openWikiPreview(): void {
+    if (!activeMethod) return;
+    void copyToClipboard(wikiOutput);
+    setToastMessage('Wiki текст скопирован в буфер обмена.');
   }
 
   async function copyToClipboard(value: string): Promise<void> {
@@ -4965,23 +5026,53 @@ export default function App() {
   return (
     <div className="shell">
       {ONBOARDING_FEATURES.onboardingV1 && showOnboardingEntry && (
-        <div className="onboarding-entry-backdrop" role="dialog" aria-modal="true" aria-label="Старт работы">
+        <div
+          className="onboarding-entry-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Старт работы"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeOnboardingEntry();
+            }
+          }}
+        >
           <div className="onboarding-entry-card">
-            <h2>Как начнем?</h2>
+            <h2>Как хотите начать работу?</h2>
             <p>Выберите удобный сценарий первого запуска.</p>
-            <div className="onboarding-entry-actions">
-              <button type="button" onClick={handleQuickStartOnboarding}>Быстрый старт (демо)</button>
-              <button type="button" className="ghost" onClick={handleScratchOnboarding}>Создать с нуля</button>
-              <button type="button" className="ghost" onClick={handleImportOnboarding}>Импорт JSON</button>
+            <div className="onboarding-entry-options">
+              {onboardingEntryOptions.map((option, index) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={`onboarding-entry-option ${index === 0 ? 'primary' : ''}`}
+                  onClick={option.action}
+                >
+                  <span className="onboarding-entry-option-title">{option.title}</span>
+                  <span className="onboarding-entry-option-description">{option.description}</span>
+                </button>
+              ))}
             </div>
-            <label className="onboarding-entry-pref">
-              <input
-                type="checkbox"
-                checked={suppressOnboardingEntry}
-                onChange={(event) => setSuppressOnboardingEntry(event.target.checked)}
-              />
-              <span>Больше не показывать это окно</span>
-            </label>
+            <div className="onboarding-entry-footer">
+              <label className="onboarding-entry-pref">
+                <input
+                  type="checkbox"
+                  checked={suppressOnboardingEntry}
+                  onChange={(event) => setSuppressOnboardingEntry(event.target.checked)}
+                />
+                <span>Больше не показывать это окно</span>
+              </label>
+              <a
+                href="#"
+                className="onboarding-entry-skip"
+                onClick={(event) => {
+                  event.preventDefault();
+                  closeOnboardingEntry();
+                }}
+              >
+                Пропустить
+              </a>
+            </div>
           </div>
         </div>
       )}
@@ -5174,8 +5265,8 @@ export default function App() {
           <button className="ghost" onClick={exportProjectJson} disabled={!activeMethod} title={exportTitle}>
             Экспорт JSON
           </button>
-          <button data-onboarding-anchor="export-docs" onClick={() => void handleExportHtml()} disabled={!activeMethod} title={exportTitle}>Экспорт HTML</button>
-          <button onClick={() => void handleExportWiki()} disabled={!activeMethod} title={exportTitle}>Экспорт Wiki</button>
+          <button data-onboarding-anchor="export-docs" onClick={openHtmlPreview} disabled={!activeMethod} title={exportTitle}>Экспорт HTML</button>
+          <button onClick={openWikiPreview} disabled={!activeMethod} title={exportTitle}>Экспорт Wiki</button>
           </div>
           <div className="actions-side">
           <button
@@ -5211,14 +5302,12 @@ export default function App() {
         ONBOARDING_FEATURES.onboardingGuidedMode &&
         onboardingState.status === 'active' &&
         !showOnboardingEntry && (
-          <section className="onboarding-stepbar" data-onboarding-anchor="choose-entry" aria-live="polite" aria-label="Пошаговый онбординг">
-            <div className="onboarding-stepbar-head">
-              <span className="onboarding-stepbar-kicker">Онбординг</span>
-              <strong>
-                Шаг {Math.min(onboardingNavStepIndex + 1, ONBOARDING_STEPS.length)} из {ONBOARDING_STEPS.length}: {activeOnboardingStep.title}
-              </strong>
-            </div>
-            <p>{activeOnboardingStep.description}</p>
+          <section
+            className="onboarding-stepbar collapsed"
+            data-onboarding-anchor="choose-entry"
+            aria-live="polite"
+            aria-label="Пошаговый онбординг"
+          >
             <div className="onboarding-stepbar-track" role="list" aria-label="Прогресс шагов">
               {ONBOARDING_STEPS.map((step, index) => {
                 const isDone = index < onboardingResolvedStepIndex;
@@ -5241,28 +5330,21 @@ export default function App() {
                 );
               })}
             </div>
+            {onboardingStepHint && <div className="onboarding-stepbar-tip">{onboardingStepHint}</div>}
             <div className="onboarding-stepbar-actions">
               <button
                 type="button"
-                className="ghost"
-                onClick={() => navigateOnboardingStep('prev')}
-                disabled={onboardingNavStepIndex <= 0}
+                className="small onboarding-stepbar-icon-btn primary"
+                aria-label={onboardingPrimaryActionLabel}
+                title={onboardingPrimaryActionLabel}
+                onClick={activeOnboardingHint ? handleActiveOnboardingHintAction : focusOnboardingCurrentStep}
               >
-                Назад
-              </button>
-              <button type="button" className="ghost" onClick={focusOnboardingCurrentStep}>
-                Перейти к шагу
-              </button>
-              <button
-                type="button"
-                className="ghost"
-                onClick={() => navigateOnboardingStep('next')}
-                disabled={onboardingNavStepIndex >= ONBOARDING_STEPS.length - 1}
-              >
-                Далее
+                <svg className="onboarding-eye-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M2 12c2.4-4 5.8-6 10-6s7.6 2 10 6c-2.4 4-5.8 6-10 6s-7.6-2-10-6Z" />
+                  <circle cx="12" cy="12" r="3.2" />
+                </svg>
               </button>
             </div>
-            {onboardingNavError && <div className="onboarding-nav-error">{onboardingNavError}</div>}
           </section>
         )}
 
@@ -5423,39 +5505,6 @@ export default function App() {
         </aside>
 
         <main className="workspace" role="main">
-          <div className="tabs" role="tablist" aria-label="Просмотр">
-            {['editor', 'html', 'wiki'].map((key) => (
-              <button
-                key={key}
-                role="tab"
-                aria-selected={tab === key}
-                className={tab === key ? 'tab active' : 'tab'}
-                onClick={() => setTab(key as TabKey)}
-              >
-                {key === 'editor' && 'Редактор'}
-                {key === 'html' && 'HTML'}
-                {key === 'wiki' && 'Wiki'}
-              </button>
-            ))}
-          </div>
-
-          {activeOnboardingHint && (
-            <section className="onboarding-context-hint" aria-live="polite">
-              <div className="onboarding-context-hint-copy">
-                <strong>{activeOnboardingHint.title}</strong>
-                <p>{activeOnboardingHint.description}</p>
-              </div>
-              <div className="onboarding-context-hint-actions">
-                <button type="button" className="ghost small" onClick={dismissActiveOnboardingHint}>
-                  Скрыть
-                </button>
-                <button type="button" className="small" onClick={handleActiveOnboardingHintAction}>
-                  {activeOnboardingHint.actionLabel}
-                </button>
-              </div>
-            </section>
-          )}
-
           {selectedSection ? (
             <div className="panes">
               {tab === 'editor' && (
@@ -5601,16 +5650,16 @@ export default function App() {
                             if (handled) return;
 
                             if (event.key !== 'Tab' || !textEditor) return;
-
-                            const target = event.target;
-                            const element = target instanceof Element ? target : null;
-                            if (!element || !element.closest('li')) return;
+                            if (!isSelectionInsideListItem()) return;
 
                             event.preventDefault();
                             if (event.shiftKey) {
                               textEditor.chain().focus().liftListItem('listItem').run();
                             } else {
-                              textEditor.chain().focus().sinkListItem('listItem').run();
+                              const sunk = textEditor.chain().focus().sinkListItem('listItem').run();
+                              if (!sunk) {
+                                textEditor.chain().focus().splitListItem('listItem').sinkListItem('listItem').run();
+                              }
                             }
                             syncTextSectionFromEditor(selectedSection.id);
                           }}
@@ -5664,11 +5713,25 @@ export default function App() {
                 <section className="panel">
                   <div className="panel-head">
                     <div className="panel-title">Предпросмотр Wiki</div>
-                    <button className="ghost small" onClick={() => void handleExportWiki()}>
-                      Скачать
-                    </button>
                   </div>
-                  <textarea className="code" readOnly value={wikiOutput} rows={24} />
+                  <div className="wiki-preview-wrap">
+                    <button
+                      type="button"
+                      className="icon-button wiki-copy-btn"
+                      aria-label="Скопировать Wiki"
+                      title="Скопировать Wiki"
+                      onClick={() => {
+                        void copyToClipboard(wikiOutput);
+                        setToastMessage('Wiki текст скопирован в буфер обмена.');
+                      }}
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <rect x="9" y="9" width="10" height="10" rx="2" />
+                        <rect x="5" y="5" width="10" height="10" rx="2" />
+                      </svg>
+                    </button>
+                    <textarea className="code wiki-preview-code" readOnly value={wikiOutput} rows={24} />
+                  </div>
                 </section>
               )}
             </div>

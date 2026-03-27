@@ -71,9 +71,31 @@ const DEFAULT_RICH_TEXT_HIGHLIGHT = '#fef08a';
 const TAB_INDENT_EXTENSION = Extension.create({
   name: 'tab-indent',
   addKeyboardShortcuts() {
+    const runTabCommand = (shift: boolean): boolean => {
+      const byName = shift
+        ? this.editor.commands.liftListItem('listItem')
+        : this.editor.commands.sinkListItem('listItem');
+      if (byName) return true;
+
+      const fallbackBySnakeCase = shift
+        ? this.editor.commands.liftListItem('list_item' as never)
+        : this.editor.commands.sinkListItem('list_item' as never);
+      if (fallbackBySnakeCase) return true;
+
+      const state = this.editor.state;
+      const view = this.editor.view;
+      const listItemType = (state.schema.nodes as Record<string, unknown>).listItem || (state.schema.nodes as Record<string, unknown>).list_item;
+      if (!view || !listItemType) return false;
+
+      const command = shift
+        ? liftListItem(listItemType as never)
+        : sinkListItem(listItemType as never);
+      return command(state, view.dispatch);
+    };
+
     return {
-      Tab: () => this.editor.commands.sinkListItem('listItem'),
-      'Shift-Tab': () => this.editor.commands.liftListItem('listItem')
+      Tab: () => runTabCommand(false),
+      'Shift-Tab': () => runTabCommand(true)
     };
   }
 });
@@ -1594,19 +1616,6 @@ export default function App() {
     editorProps: {
       attributes: {
         class: 'rich-text-editor'
-      },
-      handleKeyDown(view, event) {
-        if (event.key !== 'Tab') return false;
-
-        const listItemType = view.state.schema.nodes.listItem;
-        if (!listItemType) return false;
-
-        const command = event.shiftKey ? liftListItem(listItemType) : sinkListItem(listItemType);
-        const handled = command(view.state, view.dispatch);
-        if (!handled) return false;
-
-        event.preventDefault();
-        return true;
       }
     },
     onUpdate: ({ editor }) => {

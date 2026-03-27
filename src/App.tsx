@@ -71,7 +71,19 @@ const DEFAULT_RICH_TEXT_HIGHLIGHT = '#fef08a';
 const TAB_INDENT_EXTENSION = Extension.create({
   name: 'tab-indent',
   addKeyboardShortcuts() {
+    const isInsideListItem = (): boolean => {
+      const selection = this.editor.state.selection;
+      const from = selection.$from;
+      for (let depth = from.depth; depth > 0; depth -= 1) {
+        const nodeName = from.node(depth).type.name;
+        if (nodeName === 'listItem' || nodeName === 'list_item') return true;
+      }
+      return false;
+    };
+
     const runTabCommand = (shift: boolean): boolean => {
+      if (!isInsideListItem()) return false;
+
       const byName = shift
         ? this.editor.commands.liftListItem('listItem')
         : this.editor.commands.sinkListItem('listItem');
@@ -90,7 +102,11 @@ const TAB_INDENT_EXTENSION = Extension.create({
       const command = shift
         ? liftListItem(listItemType as never)
         : sinkListItem(listItemType as never);
-      return command(state, view.dispatch);
+      const pmHandled = command(state, view.dispatch);
+      if (pmHandled) return true;
+
+      // Prevent browser focus-navigation on Tab while cursor is in list item.
+      return true;
     };
 
     return {

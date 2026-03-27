@@ -1084,6 +1084,10 @@ button.primary {
 }
 
 .rich-text-editor ol ol ol {
+  list-style-type: lower-roman;
+}
+
+.rich-text-editor ol ol ol ol {
   list-style-type: decimal;
 }
 

@@ -2590,32 +2590,6 @@ export default function App() {
     return imageMap;
   }
 
-  async function exportDiagramJpegs(): Promise<Set<string>> {
-    const diagramSections = sections.filter((section): section is DiagramSection => section.kind === 'diagram');
-    const downloadedFiles = new Set<string>();
-
-    for (const section of diagramSections) {
-      const diagrams = section.diagrams.filter((diagram) => diagram.code.trim());
-
-      for (let index = 0; index < diagrams.length; index += 1) {
-        const diagram = diagrams[index];
-        try {
-          const imageUrl = getDiagramImageUrl(resolveDiagramEngine(diagram.code, diagram.engine), diagram.code, 'jpeg');
-          const response = await fetch(imageUrl);
-          if (!response.ok) continue;
-          const blob = await response.blob();
-          const fileName = getDiagramExportFileName(resolveSectionTitle(section.title), section.id, diagram.title, index, 'jpeg');
-          downloadBlob(fileName, blob);
-          downloadedFiles.add(fileName);
-        } catch {
-          // Skip broken diagram export and continue for remaining diagrams.
-        }
-      }
-    }
-
-    return downloadedFiles;
-  }
-
   async function handleExportHtml(): Promise<void> {
     if (!activeMethod) return;
     const methodSlug = slugifyMethodFileName(activeMethod.name);
@@ -3274,10 +3248,11 @@ export default function App() {
       return { ...current, rows: current.rows.filter((row) => getParsedRowKey(row) !== rowKey) };
     });
     if (deletedRow && deletedIndex > -1) {
+      const row = deletedRow;
       queueDeletedRowUndo({
         sectionId,
         target: 'server',
-        row: { ...deletedRow },
+        row,
         index: deletedIndex
       });
     }
@@ -3295,10 +3270,11 @@ export default function App() {
       return { ...current, clientRows: sourceRows.filter((row) => getParsedRowKey(row) !== rowKey) };
     });
     if (deletedRow && deletedIndex > -1) {
+      const row = deletedRow;
       queueDeletedRowUndo({
         sectionId,
         target: 'client',
-        row: { ...deletedRow },
+        row,
         index: deletedIndex
       });
     }
@@ -3324,10 +3300,11 @@ export default function App() {
       return { ...current, rows: current.rows.filter((row) => getParsedRowKey(row) !== rowKey) };
     });
     if (deletedRow && deletedIndex > -1) {
+      const row = deletedRow;
       queueDeletedRowUndo({
         sectionId,
         target,
-        row: { ...deletedRow },
+        row,
         index: deletedIndex
       });
     }

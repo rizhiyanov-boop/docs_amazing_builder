@@ -28,3 +28,4 @@ node*.zip
 *.njsproj
 *.sln
 *.sw?
+.vercel

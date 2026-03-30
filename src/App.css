@@ -260,6 +260,21 @@ body {
   padding: 4px 8px;
 }
 
+.onboarding-stepbar.in-topbar {
+  position: static;
+  top: auto;
+  z-index: auto;
+  width: 100%;
+  max-width: 100%;
+  margin: var(--space-2) 0 0;
+  order: 3;
+  flex-basis: 100%;
+}
+
+.onboarding-stepbar.in-topbar .onboarding-step-chip {
+  min-width: 120px;
+}
+
 .onboarding-stepbar-head {
   display: flex;
   align-items: baseline;
@@ -445,6 +460,18 @@ body {
   border-color: color-mix(in srgb, var(--accent-solid) 26%, var(--border));
 }
 
+:root[data-theme='dark'] .onboarding-nav-toggle {
+  background: color-mix(in srgb, #0b1021 84%, transparent);
+  border-color: color-mix(in srgb, var(--accent-solid) 20%, var(--border));
+  color: color-mix(in srgb, #dbe7ff 72%, var(--muted));
+}
+
+:root[data-theme='dark'] .onboarding-nav-toggle.active {
+  background: color-mix(in srgb, var(--accent-solid) 20%, #0b1021);
+  border-color: color-mix(in srgb, var(--accent-solid) 38%, var(--border));
+  color: #e6f4ff;
+}
+
 :root[data-theme='light'] .topbar {
   background: rgba(255, 255, 255, 0.32);
   border-color: #e6eef8;
@@ -494,7 +521,8 @@ body {
 .topbar {
   --topbar-control-height: 36px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: var(--space-6);
   background: rgba(255, 255, 255, 0.32);
@@ -553,6 +581,60 @@ body {
   flex-direction: row;
   align-items: center;
   gap: var(--space-2);
+}
+
+.onboarding-nav-toggle {
+  width: var(--topbar-control-height);
+  min-width: var(--topbar-control-height);
+  height: var(--topbar-control-height);
+  border-radius: var(--radius-pill);
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  color: color-mix(in srgb, var(--muted) 70%, var(--text) 30%);
+  box-shadow: none;
+}
+
+.onboarding-nav-toggle:hover {
+  border-color: color-mix(in srgb, var(--accent-solid) 30%, var(--border));
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent-solid) 10%, var(--panel));
+  transform: translateY(-1px);
+}
+
+.onboarding-nav-toggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-solid) 26%, transparent);
+}
+
+.onboarding-nav-toggle.active {
+  border-color: color-mix(in srgb, var(--accent-solid) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent-solid) 14%, var(--panel));
+  color: color-mix(in srgb, var(--text) 92%, var(--accent-solid));
+}
+
+.onboarding-nav-icon {
+  width: 28px;
+  height: 16px;
+}
+
+.onboarding-nav-icon .step {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+}
+
+.onboarding-nav-icon .step-label {
+  fill: currentColor;
+  font-size: 8px;
+  font-weight: 700;
+  dominant-baseline: middle;
+}
+
+.onboarding-nav-toggle.active .onboarding-nav-icon .step-1,
+.onboarding-nav-toggle.active .onboarding-nav-icon .step-2 {
+  fill: color-mix(in srgb, var(--accent-solid) 72%, transparent);
+  stroke: color-mix(in srgb, var(--accent-solid) 72%, transparent);
 }
 
 .history-controls {
@@ -1467,6 +1549,35 @@ select {
   color: var(--success);
 }
 
+.alert.ai-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: fit-content;
+  color: var(--muted);
+}
+
+.alert.ai-status.success {
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.ai-loader {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent-solid) 28%, var(--border));
+  border-top-color: var(--accent-solid);
+  animation: ai-loader-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes ai-loader-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .table-wrap {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -1476,6 +1587,7 @@ select {
 
 .table-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
   justify-content: flex-end;
   padding: var(--space-3);
@@ -1624,6 +1736,15 @@ th {
 
 .icon-button.danger:hover {
   background: rgba(239, 68, 68, 0.08);
+}
+
+.icon-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.icon-button:disabled:hover {
+  background: transparent;
 }
 
 .source-panel {
@@ -2686,6 +2807,14 @@ tr:nth-child(odd) td {
 
   .onboarding-stepbar.collapsed {
     padding: 2px 6px;
+  }
+
+  .onboarding-stepbar.in-topbar {
+    margin-top: 0;
+  }
+
+  .onboarding-nav-toggle {
+    margin-left: 0;
   }
 
   .onboarding-stepbar-actions {

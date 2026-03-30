@@ -38,6 +38,7 @@ import { ONBOARDING_FEATURES } from './onboarding/featureFlags';
 import { ONBOARDING_STEPS, evaluateOnboardingProgress, resolveOnboardingStep, type OnboardingStepId } from './onboarding/steps';
 import { loadOnboardingState, markOnboardingCompleted, markOnboardingStarted, saveOnboardingState } from './onboarding/storage';
 import { emitOnboardingEvent } from './onboarding/telemetry';
+import { fillDescriptionsWithAi, repairJsonWithAi, suggestMappingsWithAi } from './openrouterClient';
 import type { OnboardingState } from './onboarding/types';
 import { applyThemeToRoot } from './theme';
 import type { ThemeName } from './theme';
@@ -171,6 +172,12 @@ type RichTextAction = 'bold' | 'italic' | 'code' | 'h3' | 'ul' | 'ol' | 'quote' 
 type RichTextCommandOptions = {
   color?: string;
   language?: string;
+};
+
+type AiRequestStatusState = 'loading' | 'success';
+type AiRequestStatus = {
+  state: AiRequestStatusState;
+  message: string;
 };
 
 type OnboardingEntryPath = 'quick_start' | 'scratch' | 'import';
@@ -1110,6 +1117,7 @@ export default function App() {
   const activeTextSectionIdRef = useRef<string | null>(null);
   const richEditorSelectionRef = useRef<{ editor: HTMLElement; range: Range } | null>(null);
   const topbarRef = useRef<HTMLElement | null>(null);
+  const aiStatusResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textEditorWikiSnapshotRef = useRef<string>('');
   const diagramTextRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const methodNameInputRef = useRef<HTMLInputElement | null>(null);
@@ -1132,6 +1140,9 @@ export default function App() {
   const [editingSource, setEditingSource] = useState<EditableSourceState | null>(null);
   const [sourceEditorError, setSourceEditorError] = useState('');
   const [requestCellError, setRequestCellError] = useState('');
+  const [aiErrorMessage, setAiErrorMessage] = useState('');
+  const [aiRequestStatus, setAiRequestStatus] = useState<AiRequestStatus | null>(null);
+  const [aiBusyKey, setAiBusyKey] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState<EditableTitleState | null>(null);
   const [expandedDriftAlerts, setExpandedDriftAlerts] = useState<DriftAlertState>({});
   const [expanderState, setExpanderState] = useState<ExpanderState>({});
@@ -1139,6 +1150,7 @@ export default function App() {
   const [highlightedInternalCodeIndex, setHighlightedInternalCodeIndex] = useState(0);
   const [internalCodePopoverState, setInternalCodePopoverState] = useState<InternalCodePopoverState | null>(null);
   const [isAddBlockMenuOpen, setIsAddBlockMenuOpen] = useState(false);
+  const [isOnboardingNavVisible, setIsOnboardingNavVisible] = useState(true);
   const [pendingMethodNameFocus, setPendingMethodNameFocus] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [deletedRowUndo, setDeletedRowUndo] = useState<DeletedRowUndoState | null>(null);
@@ -1159,6 +1171,35 @@ export default function App() {
   const [onboardingNavStep, setOnboardingNavStep] = useState<OnboardingStepId>(() => initialOnboarding.currentStep);
   const [onboardingStepHint, setOnboardingStepHint] = useState('');
   const internalCodeAnchorRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  useEffect(() => {
+    return () => {
+      if (aiStatusResetTimeoutRef.current) {
+        clearTimeout(aiStatusResetTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  function clearAiStatusResetTimeout(): void {
+    if (aiStatusResetTimeoutRef.current) {
+      clearTimeout(aiStatusResetTimeoutRef.current);
+      aiStatusResetTimeoutRef.current = null;
+    }
+  }
+
+  function startAiRequestStatus(message: string): void {
+    clearAiStatusResetTimeout();
+    setAiRequestStatus({ state: 'loading', message });
+  }
+
+  function completeAiRequestStatus(message: string): void {
+    clearAiStatusResetTimeout();
+    setAiRequestStatus({ state: 'success', message });
+    aiStatusResetTimeoutRef.current = setTimeout(() => {
+      setAiRequestStatus((current) => (current?.state === 'success' ? null : current));
+      aiStatusResetTimeoutRef.current = null;
+    }, 3500);
+  }
   const internalCodePopoverRef = useRef<HTMLDivElement | null>(null);
   const previousOnboardingStepRef = useRef(onboardingState.currentStep);
   const onboardingStepHintTimerRef = useRef<number | null>(null);
@@ -2533,6 +2574,206 @@ export default function App() {
           error: message
         };
       });
+    }
+  }
+
+  function getLiveSourceDraft(section: ParsedSection, target: ParseTarget): string {
+    const persisted = target === 'client' ? section.clientInput ?? '' : section.input;
+    const isEditingCurrentTarget =
+      Boolean(editingSource)
+      && editingSource?.sectionId === section.id
+      && editingSource.target === target;
+
+    return isEditingCurrentTarget ? editingSource?.draft ?? persisted : persisted;
+  }
+
+  async function fixJsonSyntaxWithAi(section: ParsedSection, target: ParseTarget = 'server'): Promise<void> {
+    const busyKey = `fix-json:${section.id}:${target}`;
+    if (aiBusyKey) return;
+
+    const draft = getLiveSourceDraft(section, target);
+    const format = detectSourceFormat(draft) ?? getSourceFormat(section, target);
+
+    if (format !== 'json') {
+      setAiRequestStatus(null);
+      setAiErrorMessage('AI исправление доступно только для JSON источника');
+      return;
+    }
+
+    const syntaxError = validateSourceDraft('json', draft);
+    if (!syntaxError) {
+      setAiRequestStatus(null);
+      setAiErrorMessage('JSON уже валиден, исправление не требуется');
+      return;
+    }
+
+    setAiErrorMessage('');
+    startAiRequestStatus('AI: исправляю JSON...');
+    setAiBusyKey(busyKey);
+
+    try {
+      const fixed = await repairJsonWithAi(draft);
+      const normalized = JSON.stringify(JSON.parse(fixed), null, 2);
+      const rows = parseToRows('json', normalized);
+
+      if (editingSource?.sectionId === section.id && editingSource.target === target) {
+        setEditingSource((current) => (current ? { ...current, draft: normalized } : current));
+      }
+
+      updateSection(section.id, (current) => {
+        if (current.kind !== 'parsed') return current;
+        if (target === 'client' && isDualModelSection(current)) {
+          return {
+            ...current,
+            clientFormat: 'json',
+            clientInput: normalized,
+            clientRows: rows,
+            clientError: '',
+            clientLastSyncedFormat: 'json'
+          };
+        }
+        return {
+          ...current,
+          format: 'json',
+          input: normalized,
+          rows,
+          error: '',
+          lastSyncedFormat: 'json'
+        };
+      });
+
+      setSourceEditorError('');
+      setToastMessage('AI исправил JSON и обновил таблицу');
+      completeAiRequestStatus('AI: JSON исправлен');
+    } catch (error) {
+      setAiRequestStatus(null);
+      setAiErrorMessage(error instanceof Error ? error.message : 'Не удалось исправить JSON через AI');
+    } finally {
+      setAiBusyKey(null);
+    }
+  }
+
+  async function fillFieldDescriptionsWithAi(section: ParsedSection): Promise<void> {
+    const busyKey = `fill-descriptions:${section.id}`;
+    if (aiBusyKey) return;
+
+    const targetRows = section.rows.filter((row) => row.field.trim() && row.source !== 'header' && row.source !== 'url');
+    if (targetRows.length === 0) {
+      setAiRequestStatus(null);
+      setAiErrorMessage('Нет полей для автозаполнения описаний');
+      return;
+    }
+
+    setAiErrorMessage('');
+    startAiRequestStatus('AI: заполняю описания полей...');
+    setAiBusyKey(busyKey);
+
+    try {
+      const suggestions = await fillDescriptionsWithAi({
+        sectionType: section.sectionType ?? 'generic',
+        rows: targetRows.map((row) => ({
+          field: row.field,
+          type: row.type,
+          required: row.required,
+          example: row.example,
+          source: row.source
+        }))
+      });
+
+      const descriptionByField = new Map(
+        suggestions
+          .map((item) => [item.field.trim().toLowerCase(), item.description.trim()] as const)
+          .filter((item) => item[0] && item[1])
+      );
+
+      updateSection(section.id, (current) => {
+        if (current.kind !== 'parsed') return current;
+
+        const rows = current.rows.map((row) => {
+          const suggested = descriptionByField.get(row.field.trim().toLowerCase());
+          if (!suggested || row.description.trim()) return row;
+          return { ...row, description: suggested };
+        });
+
+        return { ...current, rows };
+      });
+
+      setToastMessage('AI заполнил описания полей');
+      completeAiRequestStatus('AI: описания заполнены');
+    } catch (error) {
+      setAiRequestStatus(null);
+      setAiErrorMessage(error instanceof Error ? error.message : 'Не удалось заполнить описания через AI');
+    } finally {
+      setAiBusyKey(null);
+    }
+  }
+
+  async function suggestParameterMappingsWithAi(section: ParsedSection): Promise<void> {
+    const busyKey = `suggest-mappings:${section.id}`;
+    if (aiBusyKey) return;
+
+    if (!isDualModelSection(section) || !section.domainModelEnabled) {
+      setAiRequestStatus(null);
+      setAiErrorMessage('AI маппинг доступен только в режиме доменной модели');
+      return;
+    }
+
+    const serverRows = section.rows.filter((row) => isRequestMappingRow(row) && row.field.trim());
+    const clientRows = (section.clientRows ?? []).filter((row) => row.field.trim());
+
+    if (serverRows.length === 0 || clientRows.length === 0) {
+      setAiRequestStatus(null);
+      setAiErrorMessage('Недостаточно данных для AI маппинга параметров');
+      return;
+    }
+
+    setAiErrorMessage('');
+    startAiRequestStatus('AI: подбираю маппинг параметров...');
+    setAiBusyKey(busyKey);
+
+    try {
+      const suggestions = await suggestMappingsWithAi({
+        serverFields: serverRows.map((row) => row.field),
+        clientFields: clientRows.map((row) => row.field)
+      });
+
+      updateSection(section.id, (current) => {
+        if (current.kind !== 'parsed' || !isDualModelSection(current)) return current;
+
+        const nextMappings = { ...(current.clientMappings ?? {}) };
+        const nextClientRows = current.clientRows ?? [];
+
+        const serverByField = new Map(
+          current.rows
+            .filter((row) => isRequestMappingRow(row) && row.field.trim())
+            .map((row) => [row.field.trim().toLowerCase(), getParsedRowKey(row)] as const)
+        );
+
+        const clientByField = new Map(
+          nextClientRows
+            .filter((row) => row.field.trim())
+            .map((row) => [row.field.trim().toLowerCase(), getParsedRowKey(row)] as const)
+        );
+
+        for (const suggestion of suggestions) {
+          const serverKey = serverByField.get(suggestion.serverField.trim().toLowerCase());
+          const clientKey = clientByField.get(suggestion.clientField.trim().toLowerCase());
+          if (!serverKey || !clientKey) continue;
+          if (!nextMappings[serverKey]) {
+            nextMappings[serverKey] = clientKey;
+          }
+        }
+
+        return { ...current, clientMappings: nextMappings };
+      });
+
+      setToastMessage('AI предложил маппинг параметров');
+      completeAiRequestStatus('AI: маппинг подобран');
+    } catch (error) {
+      setAiRequestStatus(null);
+      setAiErrorMessage(error instanceof Error ? error.message : 'Не удалось подобрать маппинг через AI');
+    } finally {
+      setAiBusyKey(null);
     }
   }
 
@@ -3966,6 +4207,24 @@ export default function App() {
                   + Client параметр
                 </button>
               )}
+              <button
+                className="ghost small"
+                type="button"
+                onClick={() => void fillFieldDescriptionsWithAi(section)}
+                disabled={Boolean(aiBusyKey)}
+              >
+                {aiBusyKey === `fill-descriptions:${section.id}` ? 'AI: заполняю...' : 'AI: описания'}
+              </button>
+              {section.domainModelEnabled && (
+                <button
+                  className="ghost small"
+                  type="button"
+                  onClick={() => void suggestParameterMappingsWithAi(section)}
+                  disabled={Boolean(aiBusyKey)}
+                >
+                  {aiBusyKey === `suggest-mappings:${section.id}` ? 'AI: подбираю...' : 'AI: маппинг'}
+                </button>
+              )}
             </div>
           </div>
         );
@@ -4024,6 +4283,24 @@ export default function App() {
                 + Client параметр
               </button>
             )}
+            <button
+              className="ghost small"
+              type="button"
+              onClick={() => void fillFieldDescriptionsWithAi(section)}
+              disabled={Boolean(aiBusyKey)}
+            >
+              {aiBusyKey === `fill-descriptions:${section.id}` ? 'AI: заполняю...' : 'AI: описания'}
+            </button>
+            {section.domainModelEnabled && (
+              <button
+                className="ghost small"
+                type="button"
+                onClick={() => void suggestParameterMappingsWithAi(section)}
+                disabled={Boolean(aiBusyKey)}
+              >
+                {aiBusyKey === `suggest-mappings:${section.id}` ? 'AI: подбираю...' : 'AI: маппинг'}
+              </button>
+            )}
           </div>
         </div>
       );
@@ -4073,6 +4350,16 @@ export default function App() {
             ))}
           </tbody>
         </table>
+        <div className="table-actions">
+          <button
+            className="ghost small"
+            type="button"
+            onClick={() => void fillFieldDescriptionsWithAi(section)}
+            disabled={Boolean(aiBusyKey)}
+          >
+            {aiBusyKey === `fill-descriptions:${section.id}` ? 'AI: заполняю...' : 'AI: описания'}
+          </button>
+        </div>
       </div>
     );
   }
@@ -4575,6 +4862,19 @@ export default function App() {
                     ✨
                   </button>
                 )}
+                {format === 'json' && (
+                  <button
+                    className="icon-button"
+                    type="button"
+                    title="AI: исправить JSON"
+                    aria-label="AI: исправить JSON"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => void fixJsonSyntaxWithAi(section, target)}
+                    disabled={!currentValue.trim() || Boolean(aiBusyKey)}
+                  >
+                    AI
+                  </button>
+                )}
                 <button
                   className="icon-button"
                   type="button"
@@ -4609,6 +4909,19 @@ export default function App() {
                     onClick={beautifySourceEditing}
                   >
                     ✨
+                  </button>
+                )}
+                {format === 'json' && (
+                  <button
+                    className="icon-button"
+                    type="button"
+                    title="AI: исправить JSON"
+                    aria-label="AI: исправить JSON"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => void fixJsonSyntaxWithAi(section, target)}
+                    disabled={!currentValue.trim() || Boolean(aiBusyKey)}
+                  >
+                    AI
                   </button>
                 )}
                 <button
@@ -4801,6 +5114,13 @@ export default function App() {
 
         {section.error && <div className="alert error">{serverLabel}: {section.error}</div>}
         {section.clientError && <div className="alert error">{clientLabel}: {section.clientError}</div>}
+        {aiRequestStatus && (
+          <div className={`alert ai-status ${aiRequestStatus.state}`}>
+            {aiRequestStatus.state === 'loading' && <span className="ai-loader" aria-hidden="true" />}
+            <span>{aiRequestStatus.message}</span>
+          </div>
+        )}
+        {aiErrorMessage && <div className="alert error">AI: {aiErrorMessage}</div>}
         {requestCellError && <div className="alert error">{requestCellError}</div>}
         {renderParsedTable(section)}
       </div>
@@ -5366,6 +5686,15 @@ export default function App() {
     setTheme((current) => (current === 'dark' ? 'light' : 'dark'));
   };
 
+  const isOnboardingHeaderAvailable =
+    ONBOARDING_FEATURES.onboardingV1
+    && ONBOARDING_FEATURES.onboardingGuidedMode
+    && !showOnboardingEntry;
+
+  const toggleOnboardingHeaderNavigation = () => {
+    setIsOnboardingNavVisible((current) => !current);
+  };
+
   return (
     <div className="shell">
       {ONBOARDING_FEATURES.onboardingV1 && showOnboardingEntry && (
@@ -5650,6 +5979,25 @@ export default function App() {
             </button>
           </div>
           <div className="actions-side-divider" aria-hidden />
+          {isOnboardingHeaderAvailable && (
+            <button
+              type="button"
+              className={`onboarding-nav-toggle ${isOnboardingNavVisible ? 'active' : ''}`}
+              onClick={toggleOnboardingHeaderNavigation}
+              aria-label={isOnboardingNavVisible ? 'Скрыть онбординг-навигацию' : 'Показать онбординг-навигацию'}
+              title={isOnboardingNavVisible ? 'Скрыть навигацию шагов' : 'Показать навигацию шагов'}
+            >
+              <svg className="onboarding-nav-icon" viewBox="0 0 72 24" aria-hidden="true" focusable="false">
+                <circle cx="12" cy="12" r="9" className="step step-1" />
+                <circle cx="36" cy="12" r="9" className="step step-2" />
+                <circle cx="60" cy="12" r="9" className="step step-3" />
+                <text x="12" y="15" textAnchor="middle" className="step-label">1</text>
+                <text x="36" y="15" textAnchor="middle" className="step-label">2</text>
+                <text x="60" y="15" textAnchor="middle" className="step-label">3</text>
+              </svg>
+            </button>
+          )}
+          <div className="actions-side-divider" aria-hidden />
           <button
             type="button"
             className="theme-mermaid-toggle"
@@ -5673,6 +6021,54 @@ export default function App() {
           </div>
           </div>
         </div>
+
+        {isOnboardingHeaderAvailable && (
+          <section
+            className="onboarding-stepbar collapsed in-topbar"
+            data-onboarding-anchor="choose-entry"
+            aria-live="polite"
+            aria-label="Пошаговый онбординг"
+            hidden={!isOnboardingNavVisible}
+          >
+            <div className="onboarding-stepbar-track" role="list" aria-label="Прогресс шагов">
+              {ONBOARDING_STEPS.map((step, index) => {
+                const isDone = index < onboardingResolvedStepIndex;
+                const isCurrent = step.id === activeOnboardingStep.id;
+                const access = canNavigateToOnboardingStep(step.id);
+                return (
+                  <button
+                    key={step.id}
+                    type="button"
+                    role="listitem"
+                    className={`onboarding-step-chip ${isDone ? 'done' : ''} ${isCurrent ? 'current' : ''} ${access.allowed ? 'available' : 'blocked'}`}
+                    aria-current={isCurrent ? 'step' : undefined}
+                    aria-disabled={!access.allowed}
+                    disabled={!access.allowed}
+                    title={access.allowed ? step.description : access.reason}
+                    onClick={() => jumpToOnboardingStep(step.id)}
+                  >
+                    {step.title}
+                  </button>
+                );
+              })}
+            </div>
+            {onboardingStepHint && <div className="onboarding-stepbar-tip">{onboardingStepHint}</div>}
+            <div className="onboarding-stepbar-actions">
+              <button
+                type="button"
+                className="small onboarding-stepbar-icon-btn primary"
+                aria-label={onboardingPrimaryActionLabel}
+                title={onboardingPrimaryActionLabel}
+                onClick={activeOnboardingHint ? handleActiveOnboardingHintAction : focusOnboardingCurrentStep}
+              >
+                <svg className="onboarding-eye-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M2 12c2.4-4 5.8-6 10-6s7.6 2 10 6c-2.4 4-5.8 6-10 6s-7.6-2-10-6Z" />
+                  <circle cx="12" cy="12" r="3.2" />
+                </svg>
+              </button>
+            </div>
+          </section>
+        )}
       </header>
 
       {importError && <div className="alert error">Ошибка импорта: {importError}</div>}
@@ -5835,55 +6231,6 @@ export default function App() {
         </aside>
 
         <main className="workspace" role="main">
-          {ONBOARDING_FEATURES.onboardingV1 &&
-            ONBOARDING_FEATURES.onboardingGuidedMode &&
-            onboardingState.status === 'active' &&
-            !showOnboardingEntry && (
-              <section
-                className="onboarding-stepbar collapsed"
-                data-onboarding-anchor="choose-entry"
-                aria-live="polite"
-                aria-label="Пошаговый онбординг"
-              >
-                <div className="onboarding-stepbar-track" role="list" aria-label="Прогресс шагов">
-                  {ONBOARDING_STEPS.map((step, index) => {
-                    const isDone = index < onboardingResolvedStepIndex;
-                    const isCurrent = step.id === activeOnboardingStep.id;
-                    const access = canNavigateToOnboardingStep(step.id);
-                    return (
-                      <button
-                        key={step.id}
-                        type="button"
-                        role="listitem"
-                        className={`onboarding-step-chip ${isDone ? 'done' : ''} ${isCurrent ? 'current' : ''} ${access.allowed ? 'available' : 'blocked'}`}
-                        aria-current={isCurrent ? 'step' : undefined}
-                        aria-disabled={!access.allowed}
-                        disabled={!access.allowed}
-                        title={access.allowed ? step.description : access.reason}
-                        onClick={() => jumpToOnboardingStep(step.id)}
-                      >
-                        {step.title}
-                      </button>
-                    );
-                  })}
-                </div>
-                {onboardingStepHint && <div className="onboarding-stepbar-tip">{onboardingStepHint}</div>}
-                <div className="onboarding-stepbar-actions">
-                  <button
-                    type="button"
-                    className="small onboarding-stepbar-icon-btn primary"
-                    aria-label={onboardingPrimaryActionLabel}
-                    title={onboardingPrimaryActionLabel}
-                    onClick={activeOnboardingHint ? handleActiveOnboardingHintAction : focusOnboardingCurrentStep}
-                  >
-                    <svg className="onboarding-eye-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                      <path d="M2 12c2.4-4 5.8-6 10-6s7.6 2 10 6c-2.4 4-5.8 6-10 6s-7.6-2-10-6Z" />
-                      <circle cx="12" cy="12" r="3.2" />
-                    </svg>
-                  </button>
-                </div>
-              </section>
-            )}
           {selectedSection ? (
             <div className="panes">
               {tab === 'editor' && (

@@ -850,14 +850,6 @@ function downloadText(filename: string, content: string): void {
   URL.revokeObjectURL(link.href);
 }
 
-function downloadBlob(filename: string, blob: Blob): void {
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(link.href);
-}
-
 function reorderSections(list: DocSection[], fromId: string, toId: string): DocSection[] {
   if (fromId === toId) return list;
   const next = [...list];

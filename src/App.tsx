@@ -39,6 +39,19 @@ import { ONBOARDING_STEPS, evaluateOnboardingProgress, resolveOnboardingStep, ty
 import { loadOnboardingState, markOnboardingCompleted, markOnboardingStarted, saveOnboardingState } from './onboarding/storage';
 import { emitOnboardingEvent } from './onboarding/telemetry';
 import { fillDescriptionsWithAi, repairJsonWithAi, suggestMappingsWithAi } from './openrouterClient';
+import {
+  fetchCurrentUser,
+  loginWithPassword,
+  listServerProjects,
+  loadServerProject,
+  deleteServerProject,
+  logoutFromServer,
+  registerWithPassword,
+  saveServerProject,
+  type AuthUser as ServerAuthUser,
+  type PersistedHistoryState,
+  type ProjectListItem
+} from './serverSyncClient';
 import type { OnboardingState } from './onboarding/types';
 import { applyThemeToRoot } from './theme';
 import type { ThemeName } from './theme';
@@ -63,13 +76,16 @@ import type {
 } from './types';
 
 const STORAGE_KEY = 'doc-builder-project-v2';
+const STORAGE_SERVER_PROJECT_ID_KEY = 'doc-builder-server-project-id-v1';
 const ONBOARDING_ENTRY_SUPPRESS_KEY = 'doc-builder-onboarding-entry-suppressed-v1';
 const DEFAULT_METHOD_NAME = 'Метод 1';
 const DELETE_UNDO_WINDOW_MS = 8000;
 const HISTORY_LIMIT = 50;
 const HISTORY_COALESCE_MS = 700;
+const REMOTE_SAVE_CHANGE_THRESHOLD = 10;
+const REMOTE_SAVE_IDLE_MS = 20000;
 const EMPTY_SECTIONS: DocSection[] = [];
-const ENABLE_MULTI_METHODS = false;
+const ENABLE_MULTI_METHODS = true;
 const DEFAULT_RICH_TEXT_HIGHLIGHT = '#fef08a';
 
 function loadOnboardingEntrySuppressed(): boolean {
@@ -92,11 +108,20 @@ function saveOnboardingEntrySuppressed(value: boolean): void {
   }
 }
 
+function loadPersistedServerProjectId(): string | null {
+  try {
+    return localStorage.getItem(STORAGE_SERVER_PROJECT_ID_KEY);
+  } catch {
+    return null;
+  }
+}
+
 type TabKey = 'editor' | 'html' | 'wiki';
 type AutosaveState = 'idle' | 'saving' | 'saved' | 'error';
 type ParseTarget = 'server' | 'client';
 type JsonImportSampleType = 'request' | 'response';
 type JsonImportTargetSide = 'server' | 'client';
+type AuthDialogMode = 'login' | 'register';
 
 type AutosaveInfo = { state: AutosaveState; at?: string };
 type TableValidation = Map<string, string>;
@@ -149,6 +174,14 @@ type WorkspaceSnapshot = {
   selectedId: string;
 };
 
+type ServerProjectPayload = {
+  id: string;
+  name: string;
+  workspace: WorkspaceProjectData;
+  history: PersistedHistoryState | null;
+  updatedAt: string;
+};
+
 type JsonImportRoutingState = {
   fileName: string;
   rawText: string;
@@ -166,6 +199,18 @@ type SourceTextImportState = {
   sectionId: string;
   target: ParseTarget;
   draft: string;
+};
+type AuthDialogState = {
+  mode: AuthDialogMode;
+  login: string;
+  password: string;
+  isSubmitting: boolean;
+  error: string;
+};
+type PendingMethodDeleteState = {
+  methodId: string;
+  methodName: string;
+  sectionCount: number;
 };
 
 type RichTextAction = 'bold' | 'italic' | 'code' | 'h3' | 'ul' | 'ol' | 'quote' | 'highlight';
@@ -1162,7 +1207,10 @@ export default function App() {
   const [showOnboardingEntry, setShowOnboardingEntry] = useState<boolean>(
     () => ONBOARDING_FEATURES.onboardingV1 && !initialOnboarding.dismissed && !loadOnboardingEntrySuppressed()
   );
-  const [showResetEndpointDialog, setShowResetEndpointDialog] = useState(false);
+  const [showDeleteProjectDialog, setShowDeleteProjectDialog] = useState(false);
+  const [pendingDeleteProjectId, setPendingDeleteProjectId] = useState<string | null>(null);
+  const [authDialog, setAuthDialog] = useState<AuthDialogState | null>(null);
+  const [pendingMethodDelete, setPendingMethodDelete] = useState<PendingMethodDeleteState | null>(null);
   const [jsonImportRouting, setJsonImportRouting] = useState<JsonImportRoutingState | null>(null);
   const [projectTextImport, setProjectTextImport] = useState<ProjectTextImportState | null>(null);
   const [sourceTextImport, setSourceTextImport] = useState<SourceTextImportState | null>(null);
@@ -1170,6 +1218,11 @@ export default function App() {
   const [dismissedOnboardingHints, setDismissedOnboardingHints] = useState<Record<string, true>>({});
   const [onboardingNavStep, setOnboardingNavStep] = useState<OnboardingStepId>(() => initialOnboarding.currentStep);
   const [onboardingStepHint, setOnboardingStepHint] = useState('');
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authUser, setAuthUser] = useState<ServerAuthUser | null>(null);
+  const [serverProjectId, setServerProjectId] = useState<string | null>(() => loadPersistedServerProjectId());
+  const [serverProjects, setServerProjects] = useState<ProjectListItem[]>([]);
+  const [serverSyncError, setServerSyncError] = useState('');
   const internalCodeAnchorRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   useEffect(() => {
@@ -1208,10 +1261,18 @@ export default function App() {
   const deletedRowUndoTimerRef = useRef<number | null>(null);
   const undoStackRef = useRef<WorkspaceSnapshot[]>([]);
   const redoStackRef = useRef<WorkspaceSnapshot[]>([]);
+  const deleteProjectCancelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const deleteProjectDialogRef = useRef<HTMLDivElement | null>(null);
   const historySuspendRef = useRef(false);
   const historyLastSnapshotRef = useRef<WorkspaceSnapshot | null>(null);
   const historyLastHashRef = useRef('');
   const historyLastPushAtRef = useRef(0);
+  const remoteHydratedRef = useRef(false);
+  const remoteSaveTimerRef = useRef<number | null>(null);
+  const remoteSaveInFlightRef = useRef(false);
+  const remotePendingChangesRef = useRef(0);
+  const remoteLastObservedHashRef = useRef('');
+  const remoteLastSavedHashRef = useRef('');
   const activeMethod = methods.find((method) => method.id === activeMethodId) ?? methods[0];
   const sections = useMemo(() => activeMethod?.sections ?? EMPTY_SECTIONS, [activeMethod]);
   const methodNameWarning = useMemo(() => {
@@ -1284,6 +1345,119 @@ export default function App() {
     setCanRedo(redoStackRef.current.length > 0);
   }
 
+  function toPersistedHistorySnapshot(snapshot: WorkspaceSnapshot): PersistedHistoryState['undoStack'][number] {
+    return {
+      methods: JSON.parse(JSON.stringify(snapshot.methods)) as unknown[],
+      methodGroups: JSON.parse(JSON.stringify(snapshot.methodGroups)) as unknown[],
+      activeMethodId: snapshot.activeMethodId,
+      selectedId: snapshot.selectedId
+    };
+  }
+
+  function fromPersistedHistorySnapshot(snapshot: PersistedHistoryState['undoStack'][number]): WorkspaceSnapshot {
+    return {
+      methods: JSON.parse(JSON.stringify(snapshot.methods)) as MethodDocument[],
+      methodGroups: JSON.parse(JSON.stringify(snapshot.methodGroups)) as MethodGroup[],
+      activeMethodId: snapshot.activeMethodId,
+      selectedId: snapshot.selectedId
+    };
+  }
+
+  function getPersistedHistoryState(): PersistedHistoryState {
+    return {
+      undoStack: undoStackRef.current.map((item) => toPersistedHistorySnapshot(item)),
+      redoStack: redoStackRef.current.map((item) => toPersistedHistorySnapshot(item)),
+      lastSnapshot: historyLastSnapshotRef.current ? toPersistedHistorySnapshot(historyLastSnapshotRef.current) : null,
+      lastHash: historyLastHashRef.current,
+      lastPushAt: historyLastPushAtRef.current
+    };
+  }
+
+  function applyPersistedHistoryState(history: PersistedHistoryState | null): void {
+    if (!history) {
+      undoStackRef.current = [];
+      redoStackRef.current = [];
+      historyLastSnapshotRef.current = null;
+      historyLastHashRef.current = '';
+      historyLastPushAtRef.current = 0;
+      setCanUndo(false);
+      setCanRedo(false);
+      return;
+    }
+
+    undoStackRef.current = history.undoStack.map((item) => fromPersistedHistorySnapshot(item));
+    redoStackRef.current = history.redoStack.map((item) => fromPersistedHistorySnapshot(item));
+    historyLastSnapshotRef.current = history.lastSnapshot ? fromPersistedHistorySnapshot(history.lastSnapshot) : null;
+    historyLastHashRef.current = history.lastHash;
+    historyLastPushAtRef.current = history.lastPushAt;
+    setCanUndo(undoStackRef.current.length > 0);
+    setCanRedo(redoStackRef.current.length > 0);
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function hydrateFromServer(): Promise<void> {
+      try {
+        setAuthLoading(true);
+        const user = await fetchCurrentUser();
+        if (cancelled) return;
+
+        setAuthUser(user);
+        setServerSyncError('');
+
+        if (!user) {
+          setServerProjects([]);
+          remoteHydratedRef.current = true;
+          return;
+        }
+
+        const projects = await listServerProjects();
+        if (cancelled) return;
+        setServerProjects(projects);
+        if (projects.length === 0) {
+          setServerProjectId(null);
+          remoteHydratedRef.current = true;
+          return;
+        }
+
+        setServerProjectId((current) => {
+          if (current && projects.some((project) => project.id === current)) {
+            return current;
+          }
+          return null;
+        });
+      } catch (error) {
+        if (!cancelled) {
+          setServerSyncError(error instanceof Error ? error.message : 'Ошибка синхронизации с сервером');
+        }
+      } finally {
+        if (!cancelled) {
+          remoteHydratedRef.current = true;
+          setAuthLoading(false);
+        }
+      }
+    }
+
+    void hydrateFromServer();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    try {
+      if (serverProjectId) {
+        localStorage.setItem(STORAGE_SERVER_PROJECT_ID_KEY, serverProjectId);
+      } else {
+        localStorage.removeItem(STORAGE_SERVER_PROJECT_ID_KEY);
+      }
+    } catch {
+      // Ignore persistence errors for optional sync key.
+    }
+  }, [serverProjectId]);
+
   useEffect(() => {
     const topbar = topbarRef.current;
     const root = document.documentElement;
@@ -1314,6 +1488,53 @@ export default function App() {
       root.style.removeProperty('--sticky-sidebar-offset');
     };
   }, [showOnboardingEntry, onboardingState.status]);
+
+  useEffect(() => {
+    if (!showDeleteProjectDialog) return;
+    deleteProjectCancelButtonRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        cancelDeleteServerProject();
+        return;
+      }
+
+      if (event.key !== 'Tab') {
+        return;
+      }
+
+      const container = deleteProjectDialogRef.current;
+      if (!container) return;
+
+      const focusable = Array.from(
+        container.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((node) => !node.hasAttribute('disabled') && !node.getAttribute('aria-hidden'));
+
+      if (focusable.length === 0) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+
+      if (event.shiftKey) {
+        if (!active || active === first) {
+          event.preventDefault();
+          last.focus();
+        }
+      } else if (!active || active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showDeleteProjectDialog]);
 
   useEffect(() => {
     const snapshot = getWorkspaceSnapshot();
@@ -1420,6 +1641,179 @@ export default function App() {
 
   function closeProjectImportDialog(): void {
     setProjectTextImport(null);
+  }
+
+  function openAuthDialog(mode: AuthDialogMode): void {
+    setAuthDialog({
+      mode,
+      login: '',
+      password: '',
+      isSubmitting: false,
+      error: ''
+    });
+  }
+
+  function closeAuthDialog(): void {
+    setAuthDialog(null);
+  }
+
+  function updateAuthDialogField(field: 'login' | 'password', value: string): void {
+    setAuthDialog((current) => (current ? { ...current, [field]: value, error: '' } : current));
+  }
+
+  async function submitAuthDialog(): Promise<void> {
+    const current = authDialog;
+    if (!current || current.isSubmitting) return;
+
+    const login = current.login.trim();
+    const password = current.password;
+    if (!login || !password) {
+      setAuthDialog((prev) => (prev ? { ...prev, error: 'Логин и пароль обязательны' } : prev));
+      return;
+    }
+
+    setAuthDialog((prev) => (prev ? { ...prev, isSubmitting: true, error: '' } : prev));
+    remoteHydratedRef.current = false;
+
+    try {
+      const user = current.mode === 'login'
+        ? await loginWithPassword({ login, password })
+        : await registerWithPassword({ login, password });
+
+      setAuthUser(user);
+      setServerSyncError('');
+      const projects = await listServerProjects();
+      setServerProjects(projects);
+      if (projects.length > 0) {
+        await loadServerProjectIntoWorkspace(projects[0].id);
+      } else {
+        setServerProjectId(null);
+      }
+      setToastMessage(current.mode === 'login' ? 'Вы вошли в аккаунт' : 'Регистрация выполнена');
+      setAuthDialog(null);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : current.mode === 'login'
+            ? 'Не удалось войти'
+            : 'Не удалось зарегистрироваться';
+      setAuthDialog((prev) => (prev ? { ...prev, isSubmitting: false, error: message } : prev));
+      setServerSyncError(message);
+    } finally {
+      remoteHydratedRef.current = true;
+    }
+  }
+
+  function upsertServerProjectListEntry(entry: ProjectListItem): void {
+    setServerProjects((current) => {
+      const next = [entry, ...current.filter((item) => item.id !== entry.id)];
+      next.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+      return next;
+    });
+  }
+
+  function resolveServerProjectName(projectId: string | null): string {
+    if (!projectId) return 'проект';
+    const found = serverProjects.find((project) => project.id === projectId);
+    return found?.name?.trim() || 'проект';
+  }
+
+  async function loadServerProjectIntoWorkspace(projectId: string): Promise<void> {
+    const payload = (await loadServerProject(projectId)) as ServerProjectPayload;
+    applyWorkspaceState(payload.workspace);
+    applyPersistedHistoryState(payload.history);
+    setServerProjectId(payload.id);
+    const loadedHash = JSON.stringify(payload.workspace);
+    remoteLastObservedHashRef.current = loadedHash;
+    remoteLastSavedHashRef.current = loadedHash;
+    remotePendingChangesRef.current = 0;
+  }
+
+  async function handleServerProjectSelect(nextId: string): Promise<void> {
+    if (!nextId) {
+      setServerProjectId(null);
+      setServerSyncError('');
+      setToastMessage('Выбран новый проект');
+      return;
+    }
+
+    try {
+      remoteHydratedRef.current = false;
+      await loadServerProjectIntoWorkspace(nextId);
+      setServerSyncError('');
+      setToastMessage('Проект загружен с сервера');
+    } catch (error) {
+      setServerSyncError(error instanceof Error ? error.message : 'Ошибка синхронизации с сервером');
+    } finally {
+      remoteHydratedRef.current = true;
+    }
+  }
+
+  function handleDeleteServerProject(): void {
+    if (!serverProjectId) return;
+    setPendingDeleteProjectId(serverProjectId);
+    setShowDeleteProjectDialog(true);
+  }
+
+  function cancelDeleteServerProject(): void {
+    setShowDeleteProjectDialog(false);
+    setPendingDeleteProjectId(null);
+  }
+
+  async function confirmDeleteServerProject(): Promise<void> {
+    const projectId = pendingDeleteProjectId;
+    if (!projectId) return;
+    setShowDeleteProjectDialog(false);
+    setPendingDeleteProjectId(null);
+    try {
+      await deleteServerProject(projectId);
+      const nextProjects = serverProjects.filter((project) => project.id !== projectId);
+      setServerProjects(nextProjects);
+      if (nextProjects.length > 0) {
+        await handleServerProjectSelect(nextProjects[0].id);
+      } else {
+        setServerProjectId(null);
+        setServerSyncError('');
+        setToastMessage('Проект удален');
+      }
+    } catch (error) {
+      setServerSyncError(error instanceof Error ? error.message : 'Ошибка удаления проекта');
+    }
+  }
+
+  async function handleLogout(): Promise<void> {
+    let serverLogoutFailed = false;
+    try {
+      await logoutFromServer();
+    } catch (error) {
+      serverLogoutFailed = true;
+      setServerSyncError(error instanceof Error ? error.message : 'Не удалось выйти из аккаунта');
+    } finally {
+      try {
+        localStorage.clear();
+      } catch {
+        // Ignore storage cleanup errors.
+      }
+
+      setAuthUser(null);
+      setServerProjectId(null);
+      setServerProjects([]);
+      setServerSyncError((current) => (serverLogoutFailed ? current : ''));
+      applyPersistedHistoryState(null);
+      remotePendingChangesRef.current = 0;
+      remoteLastObservedHashRef.current = '';
+      remoteLastSavedHashRef.current = '';
+      if (remoteSaveTimerRef.current) {
+        window.clearTimeout(remoteSaveTimerRef.current);
+        remoteSaveTimerRef.current = null;
+      }
+      setToastMessage(
+        serverLogoutFailed
+          ? 'Локальные данные очищены. Не удалось завершить серверную сессию.'
+          : 'Вы вышли из аккаунта'
+      );
+    }
   }
 
   function getParsedSectionIdByType(type: JsonImportSampleType): string | undefined {
@@ -1560,37 +1954,15 @@ export default function App() {
   function deleteActiveMethod(): void {
     if (!activeMethod) return;
     if (methods.length <= 1) {
-      alert('Нельзя удалить последний метод. Создайте еще один метод, затем удалите текущий.');
+      setToastMessage('Нельзя удалить последний метод. Сначала создайте еще один метод.');
       return;
     }
 
-    const sectionCount = activeMethod.sections.length;
-    const confirmed = confirm(
-      `Удалить метод "${activeMethod.name}"?\nСекций: ${sectionCount}\nДействие необратимо.`
-    );
-    if (!confirmed) return;
-
-    setMethodsState((prev) => {
-      const currentIndex = prev.findIndex((method) => method.id === activeMethod.id);
-      if (currentIndex === -1) return prev;
-      const next = prev.filter((method) => method.id !== activeMethod.id);
-      const fallback = next[currentIndex] ?? next[currentIndex - 1] ?? next[0];
-      if (fallback) {
-        setActiveMethodId(fallback.id);
-        setSelectedId(fallback.sections[0]?.id ?? createInitialSections()[0].id);
-      }
-      return next;
+    setPendingMethodDelete({
+      methodId: activeMethod.id,
+      methodName: activeMethod.name,
+      sectionCount: activeMethod.sections.length
     });
-
-    setMethodGroups((prev) =>
-      prev.map((group) => ({
-        ...group,
-        methodIds: group.methodIds.filter((id) => id !== activeMethod.id),
-        links: group.links.filter((link) => link.fromMethodId !== activeMethod.id && link.toMethodId !== activeMethod.id)
-      }))
-    );
-
-    setToastMessage(`Метод "${activeMethod.name}" удален`);
   }
 
   function updateActiveMethodName(name: string): void {
@@ -1611,20 +1983,46 @@ export default function App() {
   function normalizeActiveMethodName(): void {
     if (!activeMethod) return;
     const resolved = activeMethod.name.trim() || DEFAULT_METHOD_NAME;
-    if (resolved === activeMethod.name) return;
     updateActiveMethodName(resolved);
   }
 
-  useEffect(() => {
-    if (!methods.find((method) => method.id === activeMethodId) && methods[0]) {
-      setActiveMethodId(methods[0].id);
-    }
-  }, [methods, activeMethodId]);
+  function cancelDeleteMethod(): void {
+    setPendingMethodDelete(null);
+  }
+
+  function confirmDeleteMethod(): void {
+    if (!pendingMethodDelete) return;
+    const deletingMethodId = pendingMethodDelete.methodId;
+    const deletingMethodName = pendingMethodDelete.methodName;
+    setPendingMethodDelete(null);
+
+    setMethodsState((prev) => {
+      const currentIndex = prev.findIndex((method) => method.id === deletingMethodId);
+      if (currentIndex === -1) return prev;
+      const next = prev.filter((method) => method.id !== deletingMethodId);
+      const fallback = next[currentIndex] ?? next[currentIndex - 1] ?? next[0];
+      if (fallback) {
+        setActiveMethodId(fallback.id);
+        setSelectedId(fallback.sections[0]?.id ?? createInitialSections()[0].id);
+      }
+      return next;
+    });
+
+    setMethodGroups((prev) =>
+      prev.map((group) => ({
+        ...group,
+        methodIds: group.methodIds.filter((id) => id !== deletingMethodId),
+        links: group.links.filter((link) => link.fromMethodId !== deletingMethodId && link.toMethodId !== deletingMethodId)
+      }))
+    );
+
+    setToastMessage(`Метод "${deletingMethodName}" удален`);
+  }
 
   useEffect(() => {
-    if (!sections.find((section) => section.id === selectedId) && sections[0]) {
-      setSelectedId(sections[0].id);
-    }
+    if (!sections.length) return;
+    if (sections.some((section) => section.id === selectedId)) return;
+    setSelectedId(sections[0].id);
   }, [sections, selectedId, activeMethodId]);
 
   useEffect(() => {
@@ -1934,7 +2332,7 @@ export default function App() {
     setShowOnboardingEntry(false);
 
     emitOnboardingEvent('onboarding_completed', {
-      stepId: 'complete',
+      stepId: 'export-docs',
       source
     });
     setToastMessage('Онбординг завершен: первый экспорт выполнен.');
@@ -2017,14 +2415,6 @@ export default function App() {
         tab: 'editor',
         anchor: 'export-docs',
         hintMessage: 'Используйте кнопки Экспорт HTML/Wiki в верхней панели.'
-      };
-    }
-
-    if (stepId === 'complete') {
-      return {
-        tab: 'editor',
-        anchor: 'choose-entry',
-        hintMessage: 'Онбординг пройден. Можно продолжать работу в любом режиме.'
       };
     }
 
@@ -2246,6 +2636,74 @@ export default function App() {
       setAutosave({ state: 'error' });
     }
   }, [methods, activeMethodId, methodGroups]);
+
+  useEffect(() => {
+    if (!authUser || !remoteHydratedRef.current) return;
+
+    const workspace = asWorkspaceProjectData(methods, activeMethodId, methodGroups);
+    const currentHash = JSON.stringify(workspace);
+
+    if (currentHash === remoteLastObservedHashRef.current) {
+      return;
+    }
+
+    remoteLastObservedHashRef.current = currentHash;
+    remotePendingChangesRef.current += 1;
+
+    const flushRemoteSave = async (): Promise<void> => {
+      if (!authUser || !remoteHydratedRef.current) return;
+      if (remoteSaveInFlightRef.current) return;
+      if (remotePendingChangesRef.current <= 0) return;
+
+      remoteSaveInFlightRef.current = true;
+      if (remoteSaveTimerRef.current) {
+        window.clearTimeout(remoteSaveTimerRef.current);
+        remoteSaveTimerRef.current = null;
+      }
+
+      const latestWorkspace = asWorkspaceProjectData(methods, activeMethodId, methodGroups);
+      const latestHistory = getPersistedHistoryState();
+      const projectName = activeMethod?.name?.trim() || 'Документ API';
+      const latestHash = JSON.stringify(latestWorkspace);
+
+      try {
+        const saved = await saveServerProject({
+          projectId: serverProjectId ?? undefined,
+          name: projectName,
+          workspace: latestWorkspace,
+          history: latestHistory
+        });
+        setServerProjectId(saved.id);
+        setServerSyncError('');
+        upsertServerProjectListEntry({ id: saved.id, name: projectName, updatedAt: saved.updatedAt });
+        remoteLastSavedHashRef.current = latestHash;
+        remotePendingChangesRef.current = 0;
+      } catch (error) {
+        setServerSyncError(error instanceof Error ? error.message : 'Ошибка сохранения на сервер');
+      } finally {
+        remoteSaveInFlightRef.current = false;
+      }
+    };
+
+    if (!serverProjectId || remotePendingChangesRef.current >= REMOTE_SAVE_CHANGE_THRESHOLD) {
+      void flushRemoteSave();
+      return;
+    }
+
+    if (remoteSaveTimerRef.current) {
+      window.clearTimeout(remoteSaveTimerRef.current);
+    }
+    remoteSaveTimerRef.current = window.setTimeout(() => {
+      void flushRemoteSave();
+    }, REMOTE_SAVE_IDLE_MS);
+
+    return () => {
+      if (remoteSaveTimerRef.current) {
+        window.clearTimeout(remoteSaveTimerRef.current);
+        remoteSaveTimerRef.current = null;
+      }
+    };
+  }, [authUser, methods, activeMethodId, methodGroups, serverProjectId, activeMethod]);
 
   useEffect(() => {
     const focusedElement = document.activeElement;
@@ -3008,31 +3466,6 @@ export default function App() {
     };
 
     return normalizeWorkspaceForMode(workspace);
-  }
-
-  function executeResetProject(): void {
-    if (ONBOARDING_FEATURES.onboardingV1) {
-      setImportError('');
-      setJsonImportRouting(null);
-      setShowOnboardingEntry(true);
-      return;
-    }
-
-    const seed = createWorkspaceSeed();
-    setMethodsState(seed.methods);
-    setMethodGroups(seed.groups);
-    setActiveMethodId(seed.activeMethodId ?? seed.methods[0].id);
-    setSelectedId(seed.methods[0].sections[0].id);
-    localStorage.removeItem(STORAGE_KEY);
-  }
-
-  function resetProject(): void {
-    setShowResetEndpointDialog(true);
-  }
-
-  function confirmResetProject(): void {
-    setShowResetEndpointDialog(false);
-    executeResetProject();
   }
 
   function syncTextSectionFromEditor(sectionId: string): void {
@@ -5751,27 +6184,115 @@ export default function App() {
         </div>
       )}
 
-      {showResetEndpointDialog && (
+      {showDeleteProjectDialog && (
         <div
           className="import-routing-backdrop"
           role="dialog"
           aria-modal="true"
-          aria-label="Подтверждение создания нового эндпоинта"
+          aria-label="Подтверждение удаления проекта"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) {
-              setShowResetEndpointDialog(false);
+              cancelDeleteServerProject();
+            }
+          }}
+        >
+          <div className="import-routing-card" ref={deleteProjectDialogRef}>
+            <h2>Удалить проект?</h2>
+            <p className="import-routing-file">
+              Проект «{resolveServerProjectName(pendingDeleteProjectId)}» будет удален без возможности восстановления.
+            </p>
+            <div className="import-routing-actions">
+              <button
+                ref={deleteProjectCancelButtonRef}
+                type="button"
+                className="ghost"
+                onClick={cancelDeleteServerProject}
+              >
+                Отмена
+              </button>
+              <button type="button" onClick={() => void confirmDeleteServerProject()}>
+                Удалить проект
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingMethodDelete && (
+        <div
+          className="import-routing-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Подтверждение удаления метода"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              cancelDeleteMethod();
             }
           }}
         >
           <div className="import-routing-card">
-            <h2>Создать новый эндпоинт?</h2>
-            <p className="import-routing-file">Текущие несохраненные данные будут потеряны.</p>
+            <h2>Удалить метод?</h2>
+            <p className="import-routing-file">
+              «{pendingMethodDelete.methodName}», секций: {pendingMethodDelete.sectionCount}. Действие необратимо.
+            </p>
             <div className="import-routing-actions">
-              <button type="button" className="ghost" onClick={() => setShowResetEndpointDialog(false)}>
+              <button type="button" className="ghost" onClick={cancelDeleteMethod}>
                 Отмена
               </button>
-              <button type="button" onClick={confirmResetProject}>
-                Создать новый эндпоинт
+              <button type="button" onClick={confirmDeleteMethod}>
+                Удалить метод
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {authDialog && (
+        <div
+          className="import-routing-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label={authDialog.mode === 'login' ? 'Вход в аккаунт' : 'Регистрация'}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !authDialog.isSubmitting) {
+              closeAuthDialog();
+            }
+          }}
+        >
+          <div className="import-routing-card">
+            <h2>{authDialog.mode === 'login' ? 'Вход' : 'Регистрация'}</h2>
+            <label className="field">
+              <div className="label">Логин</div>
+              <input
+                type="text"
+                value={authDialog.login}
+                onChange={(event) => updateAuthDialogField('login', event.target.value)}
+                placeholder="Введите логин"
+                autoFocus
+              />
+            </label>
+            <label className="field">
+              <div className="label">Пароль</div>
+              <input
+                type="password"
+                value={authDialog.password}
+                onChange={(event) => updateAuthDialogField('password', event.target.value)}
+                placeholder="Введите пароль"
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    void submitAuthDialog();
+                  }
+                }}
+              />
+            </label>
+            {authDialog.error && <div className="alert error">{authDialog.error}</div>}
+            <div className="import-routing-actions">
+              <button type="button" className="ghost" onClick={closeAuthDialog} disabled={authDialog.isSubmitting}>
+                Отмена
+              </button>
+              <button type="button" onClick={() => void submitAuthDialog()} disabled={authDialog.isSubmitting}>
+                {authDialog.isSubmitting ? 'Проверка...' : authDialog.mode === 'login' ? 'Войти' : 'Зарегистрироваться'}
               </button>
             </div>
           </div>
@@ -5958,9 +6479,6 @@ export default function App() {
         </div>
         <div className="actions">
           <div className="actions-main">
-          <button className="ghost" onClick={resetProject}>
-            Новый эндпоинт
-          </button>
           <button className="ghost" type="button" onClick={() => openProjectImportDialog(false)}>Импорт</button>
           <input ref={importInputRef} className="hidden-file-input" type="file" accept="application/json" onChange={(e) => importProjectJson(e.target.files?.[0])} />
           <button className="ghost" onClick={exportProjectJson} disabled={!activeMethod} title={exportTitle}>
@@ -5978,6 +6496,49 @@ export default function App() {
               ↷
             </button>
           </div>
+          <div className="actions-side-divider" aria-hidden />
+          {authLoading ? (
+            <span className="badge autosave-badge idle">Проверка входа...</span>
+          ) : authUser ? (
+            <>
+              <div className="server-project-select">
+                <select
+                  value={serverProjectId ?? ''}
+                  onChange={(event) => void handleServerProjectSelect(event.target.value)}
+                  aria-label="Проект на сервере"
+                >
+                  <option value="">Новый проект</option>
+                  {serverProjects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.name || 'Документ API'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                type="button"
+                className="ghost small"
+                onClick={handleDeleteServerProject}
+                disabled={!serverProjectId}
+                title={serverProjectId ? 'Удалить выбранный проект' : 'Выберите проект'}
+              >
+                Удалить проект
+              </button>
+              <span className="badge autosave-badge saved" title={authUser.login}>{authUser.login}</span>
+              <button type="button" className="ghost small" onClick={() => void handleLogout()}>
+                Выйти
+              </button>
+            </>
+          ) : (
+            <>
+              <button type="button" className="ghost small" onClick={() => openAuthDialog('login')}>
+                Войти
+              </button>
+              <button type="button" className="ghost small" onClick={() => openAuthDialog('register')}>
+                Регистрация
+              </button>
+            </>
+          )}
           <div className="actions-side-divider" aria-hidden />
           {isOnboardingHeaderAvailable && (
             <button
@@ -6072,6 +6633,7 @@ export default function App() {
       </header>
 
       {importError && <div className="alert error">Ошибка импорта: {importError}</div>}
+      {serverSyncError && <div className="alert error">Ошибка синхронизации: {serverSyncError}</div>}
       {toastMessage && <div className="toast-info">{toastMessage}</div>}
 
       <div className="sync-alert-stack">

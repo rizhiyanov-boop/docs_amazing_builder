@@ -1,6 +1,6 @@
 import type { DocSection, ErrorsSection, ParsedSection } from '../types';
 
-export type OnboardingStepId = 'choose-entry' | 'prepare-source' | 'run-parse' | 'refine-structure' | 'export-docs' | 'complete';
+export type OnboardingStepId = 'choose-entry' | 'prepare-source' | 'run-parse' | 'refine-structure' | 'export-docs';
 
 export interface OnboardingStepDefinition {
   id: OnboardingStepId;
@@ -40,11 +40,6 @@ export const ONBOARDING_STEPS: readonly OnboardingStepDefinition[] = [
     id: 'export-docs',
     title: 'Сделайте экспорт',
     description: 'Скачайте документацию в нужном формате.'
-  },
-  {
-    id: 'complete',
-    title: 'Онбординг завершен',
-    description: 'Базовый сценарий создания документации пройден.'
   }
 ] as const;
 
@@ -102,8 +97,7 @@ export function resolveOnboardingStep(context: OnboardingProgressContext): Onboa
   if (!context.hasSourceInput) return 'prepare-source';
   if (!context.hasParsedRows) return 'run-parse';
   if (!context.hasStructuredContent) return 'refine-structure';
-  if (!context.hasExportedDocs) return 'export-docs';
-  return 'complete';
+  return 'export-docs';
 }
 
 export function isOnboardingStepId(value: string): value is OnboardingStepId {

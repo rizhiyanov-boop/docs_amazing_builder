@@ -687,7 +687,8 @@ body {
 .actions-side > .history-controls,
 .history-controls > button,
 .actions-side > .theme-mermaid-toggle,
-.actions-side > .autosave-badge {
+.actions-side > .autosave-badge,
+.actions-side > .server-project-select {
   height: var(--topbar-control-height);
 }
 
@@ -695,6 +696,18 @@ body {
 .actions-side > button,
 .actions-main > .file-input {
   padding: 0 var(--space-4);
+}
+
+.server-project-select {
+  display: flex;
+  align-items: center;
+}
+
+.server-project-select select {
+  height: var(--topbar-control-height);
+  padding: 0 var(--space-4);
+  font-size: var(--font-size-sm);
+  min-width: 180px;
 }
 
 button {

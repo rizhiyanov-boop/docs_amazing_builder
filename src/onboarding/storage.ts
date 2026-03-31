@@ -71,7 +71,7 @@ export function markOnboardingCompleted(): OnboardingState {
   const next: OnboardingState = {
     ...current,
     status: 'completed',
-    currentStep: 'complete',
+    currentStep: 'export-docs',
     completedAt: new Date().toISOString(),
     dismissed: true
   };

@@ -1,130 +1,220 @@
 # ARCHITECTURE
 
 ## Назначение
-Документ описывает актуальную архитектуру `doc-builder`: модель данных, ключевые потоки, границы MVP и оценку необходимости рефакторинга.
 
-## Технический контур
-- Frontend-only SPA на React + TypeScript + Vite.
-- Точка входа: [src/main.tsx](src/main.tsx).
-- Оркестрация UI, состояния и действий сосредоточена в [src/App.tsx](src/App.tsx).
-- Серверная часть в рантайме не используется: `server/` сейчас является заготовкой.
+Этот документ описывает фактическую архитектуру `doc-builder` на текущем этапе. Приложение эволюционировало из frontend-only MVP в SPA с serverless backend на Vercel Functions, серверным хранением проектов и AI-интеграцией.
 
-## Внутренний формат проекта
-Состояние проекта хранится и экспортируется как `ProjectData` (см. [src/types.ts](src/types.ts)):
+## Контекст системы
 
-```json
-{
-  "version": 2,
-  "updatedAt": "2026-03-17T10:00:00.000Z",
-  "sections": [
-    {
-      "id": "goal",
-      "title": "Цель",
-      "enabled": true,
-      "kind": "text",
-      "value": "Описание цели"
-    },
-    {
-      "id": "request",
-      "title": "Request",
-      "enabled": true,
-      "kind": "parsed",
-      "sectionType": "request",
-      "format": "curl",
-      "input": "curl -X POST ...",
-      "rows": [],
-      "error": "",
-      "domainModelEnabled": true,
-      "clientFormat": "json",
-      "clientInput": "{\"id\":123}",
-      "clientRows": [],
-      "clientError": "",
-      "clientMappings": {},
-      "requestMethod": "POST",
-      "requestUrl": "https://api.example.com/method",
-      "authType": "none"
-    }
-  ]
+### Frontend
+
+- React 19 + TypeScript + Vite
+- единая точка входа: `src/main.tsx`
+- основной orchestration-слой: `src/App.tsx`
+- клиент хранит локальное workspace-состояние, onboarding и часть пользовательских предпочтений в `localStorage`
+
+### Backend
+
+- serverless API в папке `api/`
+- деплой-модель ориентирована на Vercel Functions
+- хранение данных: Neon/Postgres
+- сервер отвечает за auth, cookie-session, CRUD проектов и AI-прокси к OpenAI
+
+### Внешние зависимости
+
+- OpenAI Chat Completions API для AI-задач
+- Neon/Postgres для пользователей, сессий и проектов
+- Mermaid для визуализации диаграмм
+
+## Основные bounded contexts
+
+### 1. Редактор документации
+
+Содержит:
+
+- методы (`methods`)
+- группы методов (`groups`)
+- секции типов `text`, `parsed`, `diagram`, `errors`
+
+Каждый метод является отдельным документом внутри общего workspace. Экспорт выполняется для активного метода.
+
+### 2. Parsed-секции и dual-model
+
+Для `Request` и `Response` приложение поддерживает:
+
+- server-side source
+- client-side source
+- parsed rows для обеих сторон
+- маппинг `serverField -> clientField`
+- request metadata и auth metadata
+- drift detection и обратную синхронизацию `rows -> input`
+
+Ключевые модули:
+
+- `src/parsers.ts`
+- `src/requestHeaders.ts`
+- `src/sourceSync.ts`
+- `src/requestColumns.ts`
+
+### 3. Onboarding
+
+В приложении встроен управляемый onboarding:
+
+- entry path: `quick_start`, `scratch`, `import`
+- шаги: `choose-entry`, `prepare-source`, `run-parse`, `refine-structure`, `export-docs`
+- состояние хранится в `localStorage`
+
+Ключевые модули:
+
+- `src/onboarding/featureFlags.ts`
+- `src/onboarding/steps.ts`
+- `src/onboarding/storage.ts`
+- `src/onboarding/telemetry.ts`
+
+### 4. Серверная синхронизация
+
+При авторизованном пользователе клиент:
+
+- получает текущего пользователя через `/api/auth/me`
+- загружает список проектов через `/api/projects`
+- сохраняет workspace и persisted history на сервер
+- хранит `serverProjectId` локально для повторной привязки
+
+Ключевой клиентский модуль:
+
+- `src/serverSyncClient.ts`
+
+## Формат данных
+
+### Актуальный рабочий формат
+
+Основное состояние приложения:
+
+```ts
+interface WorkspaceProjectData {
+  version: number;      // сейчас фактически 3
+  updatedAt: string;
+  activeMethodId?: string;
+  methods: MethodDocument[];
+  groups: MethodGroup[];
 }
 ```
 
-Ключевые сущности:
-- `DocSection` — секция документа (`text` или `parsed`).
-- `ParsedSection` — секция с источником для парсинга и табличными строками.
-- `ParsedRow` — строка таблицы (`field`, `type`, `required`, `description`, `example`) с метаданными происхождения (`origin`, `source`, `sourceField`).
+`MethodDocument` содержит набор `DocSection[]` и является единицей редактирования/экспорта.
 
-## Форматы источников
-Поддерживаемые форматы парсинга (см. [src/types.ts](src/types.ts), [src/parsers.ts](src/parsers.ts)):
-- `json`
-- `curl`
+### Наследие предыдущего формата
 
-XML в текущей версии не поддерживается.
+В кодовой базе всё ещё присутствует более старый `ProjectData` с `sections[]` и `version: 2`. Он нужен для совместимости части старых сценариев и тестов, но не соответствует главной runtime-модели приложения.
 
-## Основные потоки
+## Серверный контур
 
-### 1) Инициализация и нормализация
-- Приложение загружает проект из `localStorage` (`doc-builder-project-v2`) в [src/App.tsx](src/App.tsx).
-- Данные проходят через `sanitizeSections` в [src/sectionTitles.ts](src/sectionTitles.ts):
-  - нормализуются названия,
-  - заполняются значения по умолчанию,
-  - выполняется совместимость со старыми секциями (`body` -> `response`).
+### Auth
 
-### 2) Парсинг источника в rows
-- Парсинг запускается из `runParser` в [src/App.tsx](src/App.tsx).
-- `parseToRows` в [src/parsers.ts](src/parsers.ts):
-  - JSON: flatten структуры в пути вида `a.b[0].c`;
-  - cURL: извлечение body (`--data*`), headers (`-H/--header`), URL и метода.
+Таблицы:
 
-### 3) Табличное редактирование и синхронизация
-- В dual-model секциях (`request`, `response`) применяется логика маппинга и объединения server/client строк из [src/requestHeaders.ts](src/requestHeaders.ts).
-- Обратная синхронизация `rows -> input` выполняется в [src/sourceSync.ts](src/sourceSync.ts) через `buildInputFromRows`.
-- Контроль drift и дубликатов реализован в [src/App.tsx](src/App.tsx) + утилитах `getInputDriftRows`.
+- `users`
+- `sessions`
 
-### 4) Экспорт
-- HTML документ строится через `renderHtmlDocument` в [src/renderHtml.ts](src/renderHtml.ts).
-- Wiki Markup строится через `renderWikiDocument` в [src/renderWiki.ts](src/renderWiki.ts).
-- Экспорт проекта в JSON выполняется из [src/App.tsx](src/App.tsx) (`asProjectData`).
+Сессия хранится в cookie `doc_builder_session`:
 
-## Слои и ответственность модулей
-- `App.tsx`: orchestration layer (state, UI actions, parse/export/import/autosave).
-- `types.ts`: доменные типы и контракт состояния.
-- `parsers.ts`: преобразование входа в `ParsedRow[]`.
-- `requestHeaders.ts` / `requestColumns.ts`: прикладная логика request/response представления.
-- `sourceSync.ts`: генерация JSON/cURL из таблицы.
-- `renderHtml.ts` / `renderWiki.ts`: форматные адаптеры документа.
-- `theme.ts`: управление токенами темы.
-- `richText.ts`: преобразование rich text <-> wiki-подобный текст.
+- `HttpOnly`
+- `SameSite=Lax`
+- `Secure` только в `production`
+- TTL 30 дней
 
-## Ограничения MVP
-- Нет серверной синхронизации, хранилище только localStorage + JSON import/export.
-- Покрытие автотестами внедрено на MVP-уровне (unit + integration), но требует дальнейшего расширения при росте функционала.
-- `App.tsx` содержит очень большой объем UI и бизнес-логики в одном файле.
-- Эвристики парсинга cURL и определения типов покрывают типовые кейсы, но не являются строгим парсером спецификаций.
+Текущая реализация использует password hash на основе одиночного `SHA-256(salt:password)`, что является техническим долгом и должно быть заменено на password-specific KDF.
 
-## Оценка рефакторинга на текущем этапе
+### Projects
 
-### Нужен ли рефакторинг сейчас
-Да, но поэтапный, без полной переработки архитектуры.
+Таблица `projects` хранит:
 
-Причины:
-- Высокая концентрация ответственности в [src/App.tsx](src/App.tsx) усложняет сопровождение и регрессионное тестирование.
-- Дублирование похожих веток для server/client сценариев повышает риск расхождений поведения.
-- Логика бизнес-правил и UI-рендеринг тесно связаны.
+- имя проекта
+- `workspace` в `JSONB`
+- `history` в `JSONB`
+- `payload_hash` для дедупликации
 
-### Приоритет рефакторинга
-1. Высокий: декомпозиция `App.tsx` на hooks + feature-компоненты.
-2. Высокий: выделение use-case функций работы с `ParsedSection` (parse/sync/map/validate).
-3. Средний: добавление минимального тестового покрытия для `parsers`, `sourceSync`, `requestHeaders`.
-4. Средний: упростить и централизовать правила server/client ветвлений.
+Сервер поддерживает:
 
-### Что можно отложить
-- Полный переход на state machine/library для всего экрана.
-- Перенос в отдельный backend до появления требований совместной работы пользователей.
+- список проектов пользователя
+- загрузку одного проекта
+- сохранение проекта
+- удаление проекта
 
-## Рекомендуемый план без остановки разработки
-1. Выделить `useProjectState` (load/save/import/export/reset + sanitize).
-2. Выделить `useParsedSections` (parse, sync, drift, mapping, auth/meta).
-3. Разделить UI на компоненты: `SectionSidebar`, `TextSectionEditor`, `RequestSectionEditor`, `PreviewTabs`.
-4. Добавить тесты на чистые функции: `parseToRows`, `buildInputFromRows`, `getRequestRows`.
+### AI
 
-Такой подход снижает риск регрессий и не блокирует поставку новых функций.
+`/api/ai` и `/api/openrouter` выполняют три задачи:
+
+- исправление JSON
+- генерация описаний полей
+- подсказка маппинга
+
+Сервер вызывает OpenAI напрямую и возвращает нормализованный JSON-ответ клиенту.
+
+## Потоки данных
+
+### Загрузка приложения
+
+1. Клиент поднимает workspace из `localStorage`
+2. Загружает onboarding state
+3. Пытается получить текущего пользователя
+4. При наличии сессии подтягивает серверные проекты
+
+### Локальное автосохранение
+
+1. Изменения workspace сериализуются в `WorkspaceProjectData`
+2. Состояние пишется в `localStorage`
+3. При включенной серверной синхронизации клиент дополнительно вызывает `saveServerProject`
+
+### Парсинг source -> rows
+
+1. Пользователь вставляет `JSON` или `cURL`
+2. `parseToRows` преобразует источник в `ParsedRow[]`
+3. Таблица редактируется вручную
+4. При необходимости `buildInputFromRows` восстанавливает source
+
+### Экспорт
+
+- `renderHtmlDocument` строит standalone HTML
+- `renderWikiDocument` строит Confluence Wiki Markup с `{toc}` и шаблонными вводными секциями
+
+## Тестовый контур
+
+### Что реально покрыто
+
+- `parsers`
+- `sourceSync`
+- `requestHeaders`
+- `renderHtml`
+- `renderWiki`
+- часть интеграционных сценариев `App`
+
+### Текущее состояние
+
+`npm run test:ci` сейчас не является зеленым gate. Основные причины:
+
+- интеграционные тесты не синхронизированы с onboarding-потоком;
+- часть тестов ожидает старый workspace/data contract;
+- wiki renderer изменился, а тестовые ожидания остались от предыдущего шаблона.
+
+## Архитектурные ограничения
+
+- `src/App.tsx` перегружен UI-, state- и use-case логикой;
+- часть документации в репозитории исторически отстает от кода;
+- серверный контур не закрыт с точки зрения security hardening;
+- отдельные тесты проверяют уже несуществующее поведение и создают ложный сигнал о качестве.
+
+## Основные технические риски
+
+- секреты могут утекать при неправильной работе с `.env`, если не соблюдать правила хранения;
+- auth-сервис не имеет защиты от brute-force;
+- AI endpoint может расходовать лимиты без rate limiting и access control;
+- парольное хранилище не соответствует production-grade требованиям;
+- release confidence снижен из-за красного `test:ci`.
+
+## Рекомендуемый порядок стабилизации
+
+1. Привести security hygiene в порядок: `.env`, auth hardening, AI rate limit.
+2. Починить `test:ci` и синхронизировать тесты с текущим UX.
+3. Декомпозировать `src/App.tsx` на hooks и feature-модули.
+4. Разделить локальный и серверный lifecycle проекта более явно.
+5. Добавить отдельный runbook для Vercel/Neon/OpenAI deployment.

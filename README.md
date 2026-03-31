@@ -1,154 +1,150 @@
-# Конструктор документации API (MVP)
+# Конструктор API-документации
 
-**Текущая версия:** 1.1.0
+`doc-builder` это React/Vite-приложение для подготовки API-документации с экспортом в HTML и Confluence Wiki Markup. Текущая версия проекта уже не является frontend-only MVP: в репозитории есть serverless API для авторизации, серверного хранения проектов в Postgres/Neon и AI-помощников на базе OpenAI.
 
-Приложение собирает документацию из фиксированных секций, парсит JSON/cURL в таблицы и генерирует 2 независимых формата:
+## Что умеет проект сейчас
 
-- HTML
-- Confluence Wiki Markup (Server/Data Center)
+- вести рабочее пространство версии `3` с несколькими методами и группами методов;
+- собирать документацию из текстовых, parsed-, diagram- и error-секций;
+- парсить `JSON` и `cURL` в табличную структуру;
+- поддерживать dual-model режим для `Request` и `Response` (Server/Client);
+- редактировать request headers, auth, внешний вызов, ошибки и правила валидации;
+- экспортировать выбранный метод в HTML и Confluence Wiki;
+- сохранять локальное состояние в `localStorage`;
+- показывать onboarding-поток с быстрым стартом, пустым проектом и импортом JSON;
+- выполнять серверную синхронизацию проекта и undo/redo history для авторизованного пользователя;
+- использовать AI-хелперы для исправления JSON, генерации описаний и подсказки маппинга.
 
-Актуально для текущей версии:
-- парсинг поддерживает `JSON` и `cURL (REST)`;
-- для секций `Request` и `Response` доступен dual-model режим (Server/Client), маппинг полей, настройка headers и авторизации.
+## Технологический стек
 
-## Что умеет MVP
+- Frontend: React 19, TypeScript, Vite 7
+- Editor/UI: TipTap, Mermaid, highlight.js
+- Testing: Vitest, Testing Library
+- Serverless backend: Vercel Functions в папке `api/`
+- Data store: Neon/Postgres через `@neondatabase/serverless`
+- AI integration: OpenAI Chat Completions API
 
-- Включать/отключать секции (при отключении в экспорте выводится "Не используется")
-- Мягкая валидация формы
-- Блокировка parsed-секции при ошибке парсинга
-- Автосохранение проекта в localStorage
-- Экспорт/импорт проекта в JSON
-- Экспорт документа в HTML и Wiki
+## Структура репозитория
 
-## Запуск
+- `src/` - основное SPA, редактор, экспорт, onboarding, синхронизация
+- `api/` - Vercel Functions для auth, projects и AI
+- `docs/` - вспомогательная продуктовая и техническая документация
+- `scripts/` - служебные проверки и smoke-test
+- `output/` - примеры экспортируемых артефактов
 
-### Вариант 1: если `node` и `npm` доступны глобально
+## Переменные окружения
 
-1. Откройте терминал в папке проекта:
+Скопируйте [.env.example](.env.example) в локальный `.env` и заполните значения.
 
-   `cd doc-builder`
+- `DATABASE_URL` или `POSTGRES_URL` - обязательны для `/api/auth/*` и `/api/projects`
+- `OPENAI_API_KEY` - обязателен для `/api/ai`
+- `OPENAI_MODEL` - опционален, по умолчанию используется `gpt-4.1-nano`
 
-2. Установите зависимости:
+Важно: настоящий `.env` не должен попадать в Git.
 
-   `npm install`
+## Локальный запуск
 
-3. Запустите dev-сервер:
+### Только frontend
 
-   `npm run dev`
+Подходит для работы с локальным `localStorage`, экспортом, рендерингом и большей частью UI:
 
-4. Откройте адрес из терминала (обычно `http://localhost:5173`).
+```powershell
+npm install
+npm run dev
+```
 
-### Вариант 2: portable Node (без админ‑прав)
+Vite поднимет интерфейс на локальном URL вида `http://localhost:5173`.
 
-1. Перейдите в проект:
+### Полный стек через Vercel Dev
 
-   `cd doc-builder`
+Нужен для авторизации, серверного сохранения и AI-эндпоинтов:
 
-2. Скачайте и распакуйте portable Node 22 в `.tools` (один раз):
+```powershell
+npm install
+npx vercel dev
+```
 
-   ```powershell
-   curl -o node22.zip https://nodejs.org/dist/v22.14.0/node-v22.14.0-win-x64.zip
-   Expand-Archive -Path .\node22.zip -DestinationPath .\.tools\node22 -Force
-   ```
+Для server-side сценариев одного `vite dev` недостаточно, потому что клиент ожидает живые `/api/*`-эндпоинты.
 
-3. Установите зависимости через portable npm (без симлинков):
+## Основные API-эндпоинты
 
-   `..\.tools\node22\node-v22.14.0-win-x64\npm.cmd install --no-bin-links`
+### Auth
 
-4. Запуск dev-сервера:
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `GET /api/auth/me`
+- `POST /api/auth/logout`
 
-   `..\.tools\node22\node-v22.14.0-win-x64\npm.cmd run dev`
+### Projects
 
-5. Сборка production:
+- `GET /api/projects`
+- `GET /api/projects?id=...`
+- `POST /api/projects`
+- `DELETE /api/projects?id=...`
 
-   `..\.tools\node22\node-v22.14.0-win-x64\npm.cmd run build`
+### AI
 
-## Как пользоваться
+- `POST /api/ai`
+- `POST /api/openrouter`
 
-1. Заполните текстовые секции (`Цель`, `Ошибки`, `Нефункциональные требования` и т.д.).
-2. Для секций с парсингом:
-   - выберите формат (`JSON`, `cURL (REST)`),
-   - вставьте исходник,
-   - нажмите `Парсить в таблицу`.
-3. Если в секции ошибка парсинга — секция блокируется до исправления.
-4. В любой момент можно:
-   - `Экспорт HTML`,
-   - `Экспорт Wiki`,
-   - `Экспорт проекта JSON`,
-   - `Импорт проекта JSON`.
+Поддерживаемые задачи:
 
-## Быстрый smoke-тест генерации
+- `repair-json`
+- `fill-descriptions`
+- `suggest-mappings`
 
-- Команда (portable Node, без админ‑прав):
+## Формат данных
 
-   `..\.tools\node22\node-v22.14.0-win-x64\node.exe scripts\smoke-test.mjs`
+Текущее локальное рабочее пространство хранится как `WorkspaceProjectData`:
 
-- Результат:
-   - [output/smoke-test.html](output/smoke-test.html)
-   - [output/smoke-test.wiki](output/smoke-test.wiki)
+```json
+{
+  "version": 3,
+  "updatedAt": "2026-03-31T18:17:07.331Z",
+  "activeMethodId": "method-1",
+  "methods": [],
+  "groups": []
+}
+```
 
-## AI интеграция (OpenAI API)
+Исторический `ProjectData` с `version: 2` всё ещё упоминается в части старых тестов и документации, но фактическая рабочая модель приложения уже перешла на workspace-структуру.
 
-В проект добавлен серверный endpoint: `api/ai.ts`.
+## Качество и тесты
 
-Что умеет AI:
-- исправление JSON синтаксиса прямо в Source-блоке (`AI` кнопка рядом с `Beautify`);
-- автозаполнение описаний полей (`AI: описания` в таблице parsed секции);
-- подбор маппинга параметров (`AI: маппинг`, только при включенной доменной модели).
+Базовые команды:
 
-Важно:
-- API ключ OpenAI хранится только на сервере (Vercel env vars), во фронтенд не попадает.
-- Рекомендуемая модель по умолчанию: `gpt-4.1-nano`.
+```powershell
+npm run lint
+npm run test
+npm run test:coverage
+npm run build
+npm run test:ci
+```
 
-Настройка на Vercel (free plan):
-1. Добавьте переменные окружения из файла `.env.example`.
-2. Задайте `OPENAI_API_KEY`.
-3. Опционально задайте `OPENAI_MODEL` (если не задано, используется `gpt-4.1-nano`).
+Текущее состояние на `2026-03-31`:
 
-## Авторизация и серверное сохранение
+- `npm run test:ci` не проходит на чистом клоне;
+- интеграционные тесты ожидают устаревший UI-контракт до onboarding-потока;
+- часть тестов всё ещё проверяет старый формат данных `version: 2`;
+- тест рендера wiki ожидает старую шапку документа, а текущий рендер формирует `{toc}` и шаблонные секции.
 
-Добавлены:
-- простая регистрация/вход по логину и паролю;
-- серверное сохранение активного проекта;
-- серверное сохранение истории изменений (undo/redo) вместе с проектом.
+Подробности и статус набора тестов вынесены в [docs/TEST_PLAN_MVP.md](docs/TEST_PLAN_MVP.md).
 
-Без регистрации можно работать только локально (localStorage).
+## Известные ограничения и риски
 
-Новые endpoint'ы:
-- `POST /api/auth/register` — регистрация;
-- `POST /api/auth/login` — вход;
-- `GET /api/auth/me` — текущий пользователь;
-- `POST /api/auth/logout` — выход;
-- `GET /api/projects` — список проектов пользователя;
-- `GET /api/projects?id=...` — загрузка проекта с историей;
-- `POST /api/projects` — сохранение проекта + истории.
+- пароли пока хэшируются одинарным `SHA-256`, без password-specific KDF;
+- auth API не содержит brute-force защиты;
+- `/api/ai` не защищен rate limiting и может тратить серверный AI-бюджет;
+- в ветке есть расхождение между реальным кодом и частью старых тестов;
+- архитектура сосредоточена вокруг большого `src/App.tsx`, что повышает стоимость изменений.
 
-Примечание:
-Подключение Neon (Postgres):
-- в проекте на Vercel создайте Postgres (Storage) и привяжите к проекту;
-- Vercel/Neon добавит переменные окружения `DATABASE_URL` и связанные с ней;
-- serverless API будет писать данные в Postgres без отдельного сервера.
+## Полезные файлы
 
-## Автотесты MVP
-
-- Локальный запуск:
-   - `npm run test`
-   - `npm run test:coverage`
-- Для CI и локального полного quality-check:
-   - `npm run test:ci`
-- План покрытия и quality gates:
-   - [docs/TEST_PLAN_MVP.md](docs/TEST_PLAN_MVP.md)
-
-## Основные файлы
-
-- Интерфейс: [src/App.tsx](src/App.tsx)
-- Парсеры: [src/parsers.ts](src/parsers.ts)
-- Логика request/response (headers, auth, маппинг): [src/requestHeaders.ts](src/requestHeaders.ts)
-- Рендер HTML: [src/renderHtml.ts](src/renderHtml.ts)
-- Рендер Wiki: [src/renderWiki.ts](src/renderWiki.ts)
-- Модели данных: [src/types.ts](src/types.ts)
-
-## Важные примечания
-
-- Текущая версия формата проекта: `version: 2` (см. `asProjectData` в [src/App.tsx](src/App.tsx)).
-- Runtime в MVP полностью фронтендовый (React + localStorage). Папка `server/` пока является заготовкой и не участвует в работе приложения.
+- [src/App.tsx](src/App.tsx) - основная orchestration-логика UI и состояния
+- [src/types.ts](src/types.ts) - доменные типы и формат workspace
+- [src/renderHtml.ts](src/renderHtml.ts) - экспорт HTML
+- [src/renderWiki.ts](src/renderWiki.ts) - экспорт Confluence Wiki
+- [src/serverSyncClient.ts](src/serverSyncClient.ts) - клиент серверной синхронизации
+- [api/_lib/db.ts](api/_lib/db.ts) - схема, auth и хранение проектов
+- [api/projects.ts](api/projects.ts) - server-side CRUD для проектов
+- [api/ai.ts](api/ai.ts) - AI helper endpoint

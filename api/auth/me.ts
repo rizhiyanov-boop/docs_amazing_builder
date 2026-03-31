@@ -1,5 +1,5 @@
-import { getUserBySessionToken } from '../_lib/db';
-import { getSessionToken } from '../_lib/http';
+import { getUserBySessionToken } from '../_lib/db.js';
+import { getSessionToken } from '../_lib/http.js';
 
 type VercelRequest = {
   method?: string;

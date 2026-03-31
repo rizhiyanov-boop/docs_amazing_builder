@@ -1,5 +1,5 @@
-import { deleteProject, getProjectById, getProjectsByUser, getUserBySessionToken, saveProject } from './_lib/db';
-import { getSessionToken, readQueryString } from './_lib/http';
+import { deleteProject, getProjectById, getProjectsByUser, getUserBySessionToken, saveProject } from './_lib/db.js';
+import { getSessionToken, readQueryString } from './_lib/http.js';
 
 type VercelRequest = {
   method?: string;

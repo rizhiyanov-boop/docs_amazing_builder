@@ -1,5 +1,5 @@
-import { revokeSession } from '../_lib/db';
-import { clearSessionCookie, getSessionToken } from '../_lib/http';
+import { revokeSession } from '../_lib/db.js';
+import { clearSessionCookie, getSessionToken } from '../_lib/http.js';
 
 type VercelRequest = {
   method?: string;

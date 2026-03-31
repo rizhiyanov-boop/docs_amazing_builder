@@ -1,5 +1,5 @@
-import { createSession, registerUser } from '../_lib/db';
-import { setSessionCookie } from '../_lib/http';
+import { createSession, registerUser } from '../_lib/db.js';
+import { setSessionCookie } from '../_lib/http.js';
 
 type VercelRequest = {
   method?: string;

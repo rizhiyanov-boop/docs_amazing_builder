@@ -27,19 +27,6 @@ function inferType(value: unknown): string {
   }
 
   if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (/^-?\d+$/.test(trimmed)) {
-      try {
-        const bigIntValue = BigInt(trimmed);
-        const min = BigInt(-2147483648);
-        const max = BigInt(2147483647);
-        return bigIntValue >= min && bigIntValue <= max ? 'int' : 'long';
-      } catch {
-        return 'long';
-      }
-    }
-    if (!Number.isNaN(Number(trimmed)) && /[.eE]/.test(trimmed)) return 'number';
-    if (/^(true|false)$/i.test(trimmed)) return 'boolean';
     return 'string';
   }
 

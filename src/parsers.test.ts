@@ -11,6 +11,13 @@ describe('parsers', () => {
     expect(rows.some((row) => row.field === 'items[0].active' && row.type === 'boolean')).toBe(true);
   });
 
+  it('keeps quoted numbers as string in json payload', () => {
+    const rows = parseToRows('json', '{"externalId":"123","amount":123}');
+
+    expect(rows.some((row) => row.field === 'externalId' && row.type === 'string')).toBe(true);
+    expect(rows.some((row) => row.field === 'amount' && row.type === 'int')).toBe(true);
+  });
+
   it('parses curl payload, headers and url', () => {
     const curl =
       "curl -X POST \"https://api.example.com/method\" -H \"X-Trace-Id: 123\" -H \"Content-Type: application/json\" --data-raw '{\"id\":123,\"ok\":true}'";
@@ -21,6 +28,16 @@ describe('parsers', () => {
     expect(rows.some((row) => row.source === 'header' && row.field === 'X-Trace-Id')).toBe(true);
     expect(rows.some((row) => row.source === 'body' && row.field === 'id' && row.type === 'int')).toBe(true);
     expect(rows.some((row) => row.source === 'body' && row.field === 'ok' && row.type === 'boolean')).toBe(true);
+  });
+
+  it('keeps quoted numbers as string in curl json body', () => {
+    const curl =
+      "curl -X POST \"https://api.example.com/method\" --data-raw '{\"externalId\":\"123\",\"amount\":123}'";
+
+    const rows = parseToRows('curl', curl);
+
+    expect(rows.some((row) => row.source === 'body' && row.field === 'externalId' && row.type === 'string')).toBe(true);
+    expect(rows.some((row) => row.source === 'body' && row.field === 'amount' && row.type === 'int')).toBe(true);
   });
 
   it('extracts curl metadata (method and url)', () => {

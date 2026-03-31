@@ -50,6 +50,8 @@ function buildTaskPrompt(task: RequestTask, payload: Record<string, unknown>): s
     return [
       'Ты генерируешь короткие описания API-полей на русском языке.',
       'Максимум 120 символов на описание.',
+      'Пиши описание только про бизнес-смысл поля.',
+      'Не упоминай тип данных, обязательность, формат и технические пометки.',
       'Не выдумывай поле, если оно не передано.',
       'Ответь строго JSON-объектом вида {"descriptions":[{"field":"...","description":"..."}]}',
       `SECTION_TYPE: ${String(payload.sectionType ?? 'generic')}`,

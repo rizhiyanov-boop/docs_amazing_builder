@@ -135,7 +135,7 @@ export async function saveServerProject(params: {
   projectId?: string;
   name: string;
   workspace: WorkspaceProjectData;
-  history: PersistedHistoryState;
+  history?: PersistedHistoryState;
 }): Promise<{ id: string; updatedAt: string }> {
   const response = await fetch('/api/projects', {
     method: 'POST',

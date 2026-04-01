@@ -38,7 +38,7 @@ import { ONBOARDING_FEATURES } from './onboarding/featureFlags';
 import { ONBOARDING_STEPS, evaluateOnboardingProgress, resolveOnboardingStep, type OnboardingStepId } from './onboarding/steps';
 import { loadOnboardingState, markOnboardingCompleted, markOnboardingStarted, saveOnboardingState } from './onboarding/storage';
 import { emitOnboardingEvent } from './onboarding/telemetry';
-import { fillDescriptionsWithAi, repairJsonWithAi, suggestMappingsWithAi } from './openrouterClient';
+import { fillDescriptionsWithAi, repairJsonWithAi, suggestMappingsWithAi, suggestMaskFieldsWithAi } from './openrouterClient';
 import {
   fetchCurrentUser,
   loginWithPassword,
@@ -139,6 +139,17 @@ type EditableRequestCellState = {
   draft: string;
   target: ParseTarget;
 };
+type EditableHeaderCellState = {
+  sectionId: string;
+  rowKey: string;
+  column: 'description' | 'example';
+  target: ParseTarget;
+  draft: string;
+};
+type EditableMappingCellState = {
+  sectionId: string;
+  rowKey: string;
+};
 type EditableSourceState = {
   sectionId: string;
   target: ParseTarget;
@@ -160,6 +171,7 @@ type InternalCodePopoverState = {
 type EditableFieldOptions = {
   allowEdit?: boolean;
   onDelete?: () => void;
+  editTarget?: ParseTarget;
 };
 type DeletedRowUndoState = {
   sectionId: string;
@@ -598,6 +610,25 @@ function getExternalSourceRows(section: ParsedSection): ParsedRow[] {
   }
 
   return nextRows;
+}
+
+function normalizeParsedRowsForSection(section: ParsedSection, rows: ParsedRow[]): ParsedRow[] {
+  if (isDualModelSection(section)) {
+    return rows.map((row) => ({
+      ...row,
+      source: row.source ?? 'body'
+    }));
+  }
+
+  return rows.map((row) => ({
+    ...row,
+    source: row.source ?? 'parsed'
+  }));
+}
+
+function getRowsRelevantToSourceFormat(rows: ParsedRow[], format: ParseFormat): ParsedRow[] {
+  if (format !== 'json') return rows;
+  return rows.filter((row) => row.source !== 'header' && row.source !== 'url');
 }
 
 function validateSection(section: DocSection): string {
@@ -1182,6 +1213,8 @@ export default function App() {
   const [draggedColumn, setDraggedColumn] = useState<RequestColumnKey | null>(null);
   const [editingField, setEditingField] = useState<EditableFieldState | null>(null);
   const [editingRequestCell, setEditingRequestCell] = useState<EditableRequestCellState | null>(null);
+  const [editingHeaderCell, setEditingHeaderCell] = useState<EditableHeaderCellState | null>(null);
+  const [editingMappingCell, setEditingMappingCell] = useState<EditableMappingCellState | null>(null);
   const [editingSource, setEditingSource] = useState<EditableSourceState | null>(null);
   const [sourceEditorError, setSourceEditorError] = useState('');
   const [requestCellError, setRequestCellError] = useState('');
@@ -1195,7 +1228,7 @@ export default function App() {
   const [highlightedInternalCodeIndex, setHighlightedInternalCodeIndex] = useState(0);
   const [internalCodePopoverState, setInternalCodePopoverState] = useState<InternalCodePopoverState | null>(null);
   const [isAddBlockMenuOpen, setIsAddBlockMenuOpen] = useState(false);
-  const [isOnboardingNavVisible, setIsOnboardingNavVisible] = useState(true);
+  const [isOnboardingNavVisible, setIsOnboardingNavVisible] = useState(false);
   const [pendingMethodNameFocus, setPendingMethodNameFocus] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [deletedRowUndo, setDeletedRowUndo] = useState<DeletedRowUndoState | null>(null);
@@ -1719,6 +1752,27 @@ export default function App() {
     return found?.name?.trim() || 'проект';
   }
 
+  async function saveServerProjectWithFallback(params: {
+    projectId?: string;
+    name: string;
+    workspace: WorkspaceProjectData;
+    history?: PersistedHistoryState;
+  }): Promise<{ id: string; updatedAt: string }> {
+    try {
+      return await saveServerProject(params);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      if (params.history !== undefined && message.includes('Слишком большой объем данных')) {
+        return saveServerProject({
+          projectId: params.projectId,
+          name: params.name,
+          workspace: params.workspace
+        });
+      }
+      throw error;
+    }
+  }
+
   async function loadServerProjectIntoWorkspace(projectId: string): Promise<void> {
     const payload = (await loadServerProject(projectId)) as ServerProjectPayload;
     applyWorkspaceState(payload.workspace);
@@ -1791,7 +1845,7 @@ export default function App() {
       setServerSyncError(error instanceof Error ? error.message : 'Не удалось выйти из аккаунта');
     } finally {
       try {
-        localStorage.clear();
+        localStorage.removeItem(STORAGE_SERVER_PROJECT_ID_KEY);
       } catch {
         // Ignore storage cleanup errors.
       }
@@ -1810,7 +1864,7 @@ export default function App() {
       }
       setToastMessage(
         serverLogoutFailed
-          ? 'Локальные данные очищены. Не удалось завершить серверную сессию.'
+          ? 'Серверная сессия не завершена. Локальные данные сохранены.'
           : 'Вы вышли из аккаунта'
       );
     }
@@ -1840,7 +1894,7 @@ export default function App() {
         let parsedRows: ParsedRow[] = [];
         let parseError = '';
         try {
-          parsedRows = parseToRows('json', jsonImportRouting.rawText);
+          parsedRows = normalizeParsedRowsForSection(section, parseToRows('json', jsonImportRouting.rawText));
         } catch (error) {
           parseError = error instanceof Error ? error.message : 'Ошибка парсинга';
         }
@@ -2265,17 +2319,26 @@ export default function App() {
     textEditorWikiSnapshotRef.current = activeTextSection.value;
   }, [textEditor, activeTextSection?.id, activeTextSection?.value]);
 
-  const selectedServerDriftRows = selectedSection?.kind === 'parsed' ? getInputDriftRows(selectedSection.rows) : [];
-  const selectedClientDriftRows =
-    selectedSection?.kind === 'parsed' && isDualModelSection(selectedSection) ? getInputDriftRows(selectedSection.clientRows ?? []) : [];
-  const selectedServerDuplicateValues = selectedSection?.kind === 'parsed' ? Array.from(getDuplicateValueSet(selectedSection.rows)) : [];
-  const selectedClientDuplicateValues =
-    selectedSection?.kind === 'parsed' && isDualModelSection(selectedSection) ? Array.from(getDuplicateValueSet(selectedSection.clientRows ?? [])) : [];
+  const selectedServerSourceRows =
+    selectedSection?.kind === 'parsed' ? getRowsRelevantToSourceFormat(selectedSection.rows, selectedSection.format) : [];
+  const selectedClientSourceRows =
+    selectedSection?.kind === 'parsed' && isDualModelSection(selectedSection)
+      ? getRowsRelevantToSourceFormat(selectedSection.clientRows ?? [], selectedSection.clientFormat ?? 'json')
+      : [];
+  const hasSelectedServerSourceInput = selectedSection?.kind === 'parsed' ? Boolean(selectedSection.input.trim()) : false;
+  const hasSelectedClientSourceInput =
+    selectedSection?.kind === 'parsed' && isDualModelSection(selectedSection) ? Boolean((selectedSection.clientInput ?? '').trim()) : false;
+  const selectedServerDriftRows = hasSelectedServerSourceInput ? getInputDriftRows(selectedServerSourceRows) : [];
+  const selectedClientDriftRows = hasSelectedClientSourceInput ? getInputDriftRows(selectedClientSourceRows) : [];
+  const selectedServerDuplicateValues = hasSelectedServerSourceInput ? Array.from(getDuplicateValueSet(selectedServerSourceRows)) : [];
+  const selectedClientDuplicateValues = hasSelectedClientSourceInput ? Array.from(getDuplicateValueSet(selectedClientSourceRows)) : [];
   const selectedServerFormatDrift =
-    selectedSection?.kind === 'parsed' ? Boolean(selectedSection.rows.length > 0 && selectedSection.lastSyncedFormat && selectedSection.lastSyncedFormat !== selectedSection.format) : false;
+    selectedSection?.kind === 'parsed'
+      ? Boolean(hasSelectedServerSourceInput && selectedServerSourceRows.length > 0 && selectedSection.lastSyncedFormat && selectedSection.lastSyncedFormat !== selectedSection.format)
+      : false;
   const selectedClientFormatDrift =
     selectedSection?.kind === 'parsed' && isDualModelSection(selectedSection)
-      ? Boolean((selectedSection.clientRows ?? []).length > 0 && selectedSection.clientLastSyncedFormat && selectedSection.clientLastSyncedFormat !== (selectedSection.clientFormat ?? 'json'))
+      ? Boolean(hasSelectedClientSourceInput && selectedClientSourceRows.length > 0 && selectedSection.clientLastSyncedFormat && selectedSection.clientLastSyncedFormat !== (selectedSection.clientFormat ?? 'json'))
       : false;
 
   const onboardingProgress = useMemo(
@@ -2335,7 +2398,7 @@ export default function App() {
       stepId: 'export-docs',
       source
     });
-    setToastMessage('Онбординг завершен: первый экспорт выполнен.');
+    setToastMessage('Навигация завершена: первый экспорт выполнен.');
   }, [onboardingState.status, onboardingState.entryPath, onboardingState.currentStep, hasOnboardingExport]);
 
   const htmlPreviewOutput = useMemo(() => renderHtmlDocument(sections, theme, { interactive: false }), [sections, theme]);
@@ -2595,6 +2658,32 @@ export default function App() {
     );
   }
 
+  function renderUiIcon(name: string): ReactNode {
+    if (name === 'import') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 4v10" /><path d="M8 8l4-4 4 4" /><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" /></svg>;
+    if (name === 'download') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 4v10" /><path d="m9 11 3 3 3-3" /></svg>;
+    if (name === 'export') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 20V10" /><path d="M8 16l4 4 4-4" /><path d="M4 9V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v4" /></svg>;
+    if (name === 'undo') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 7 5 11l4 4" /><path d="M6 11h8a5 5 0 0 1 0 10h-2" /></svg>;
+    if (name === 'redo') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15 7l4 4-4 4" /><path d="M18 11h-8a5 5 0 0 0 0 10h2" /></svg>;
+    if (name === 'save') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 4h10l4 4v12H5z" /><path d="M8 4v4h6V4" /><path d="M8 20v-5h8v5" /></svg>;
+    if (name === 'onboarding_nav') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5" cy="12" r="3" /><circle cx="12" cy="12" r="3" /><circle cx="19" cy="12" r="3" /><path d="M4.4 12h1.2" /><path d="M12 11v2" /><path d="M11.2 11h1.6" /><path d="M18.2 11h1.6" /><path d="M18.2 13h1.6" /><path d="M8 12h1" /><path d="M15 12h1" /></svg>;
+    if (name === 'theme_moon') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 1 0 9.8 9.8Z" /></svg>;
+    if (name === 'theme_sun') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4" /><path d="M12 2v3" /><path d="M12 19v3" /><path d="M2 12h3" /><path d="M19 12h3" /><path d="m4.9 4.9 2.1 2.1" /><path d="m17 17 2.1 2.1" /><path d="m19.1 4.9-2.1 2.1" /><path d="m7 17-2.1 2.1" /></svg>;
+    if (name === 'add_row') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 7v10M7 12h10" /></svg>;
+    if (name === 'format_json') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 5c-2 0-3 1.4-3 3.2V10c0 1.2-.6 2-2 2 1.4 0 2 .8 2 2v1.8C5 17.6 6 19 8 19" /><path d="M16 5c2 0 3 1.4 3 3.2V10c0 1.2.6 2 2 2-1.4 0-2 .8-2 2v1.8c0 1.8-1 3.2-3 3.2" /></svg>;
+    if (name === 'ai_describe') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="4" y="4" width="16" height="12" rx="3" /><path d="M8 9h8" /><path d="M12 16v4" /><path d="M8 20h8" /></svg>;
+    if (name === 'ai_map') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="6" cy="12" r="2" /><circle cx="18" cy="7" r="2" /><circle cx="18" cy="17" r="2" /><path d="M8 12h4" /><path d="M12 12l4-5" /><path d="M12 12l4 5" /></svg>;
+    if (name === 'ai_mask') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3 5 6v5c0 4.2 2.6 8.2 7 10 4.4-1.8 7-5.8 7-10V6l-7-3Z" /><path d="M9 12h6" /><path d="M10 9h4" /></svg>;
+    if (name === 'add_method') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 6v12M6 12h12" /></svg>;
+    if (name === 'delete_method') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 12h10" /></svg>;
+    if (name === 'add_section') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="4" y="4" width="16" height="16" rx="3" /><path d="M12 8v8M8 12h8" /></svg>;
+    if (name === 'skip') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 6l8 6-8 6V6Z" /><path d="M14 6l8 6-8 6V6Z" /></svg>;
+    if (name === 'search') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="6" /><path d="M20 20l-4.2-4.2" /></svg>;
+    if (name === 'settings') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3" /><path d="M19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a7 7 0 0 0-1.7-1L14.5 3h-5l-.4 2a7 7 0 0 0-1.7 1L5 5l-2 3.4 2 1.6a7 7 0 0 0 0 2L3 13.6 5 17l2.4-1a7 7 0 0 0 1.7 1l.4 2h5l.4-2a7 7 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6c.1-.3.1-.7.1-1Z" /></svg>;
+    if (name === 'user') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="8" r="4" /><path d="M4 20a8 8 0 0 1 16 0" /></svg>;
+
+    return null;
+  }
+
   const onboardingEntryOptions: Array<{
     id: OnboardingEntryPath;
     title: string;
@@ -2662,16 +2751,14 @@ export default function App() {
       }
 
       const latestWorkspace = asWorkspaceProjectData(methods, activeMethodId, methodGroups);
-      const latestHistory = getPersistedHistoryState();
       const projectName = activeMethod?.name?.trim() || 'Документ API';
       const latestHash = JSON.stringify(latestWorkspace);
 
       try {
-        const saved = await saveServerProject({
+        const saved = await saveServerProjectWithFallback({
           projectId: serverProjectId ?? undefined,
           name: projectName,
-          workspace: latestWorkspace,
-          history: latestHistory
+          workspace: latestWorkspace
         });
         setServerProjectId(saved.id);
         setServerSyncError('');
@@ -2980,7 +3067,8 @@ export default function App() {
     const input = draftInput;
 
     try {
-      const rows = parseToRows(format, input);
+      const parsedRows = parseToRows(format, input);
+      const rows = normalizeParsedRowsForSection(section, parsedRows);
       const curlMeta = isRequestSection(section) && format === 'curl' ? parseCurlMeta(input) : null;
       updateSection(section.id, (current) => {
         if (current.kind !== 'parsed') return current;
@@ -3072,7 +3160,8 @@ export default function App() {
     try {
       const fixed = await repairJsonWithAi(draft);
       const normalized = JSON.stringify(JSON.parse(fixed), null, 2);
-      const rows = parseToRows('json', normalized);
+      const parsedRows = parseToRows('json', normalized);
+      const rows = normalizeParsedRowsForSection(section, parsedRows);
 
       if (editingSource?.sectionId === section.id && editingSource.target === target) {
         setEditingSource((current) => (current ? { ...current, draft: normalized } : current));
@@ -3230,6 +3319,103 @@ export default function App() {
     } catch (error) {
       setAiRequestStatus(null);
       setAiErrorMessage(error instanceof Error ? error.message : 'Не удалось подобрать маппинг через AI');
+    } finally {
+      setAiBusyKey(null);
+    }
+  }
+
+  async function requestAiMaskFieldSet(section: ParsedSection, rows: ParsedRow[]): Promise<Set<string>> {
+    const suggestions = await suggestMaskFieldsWithAi({
+      sectionType: section.sectionType ?? 'generic',
+      rows: rows.map((row) => ({
+        field: row.field,
+        type: row.type,
+        description: row.description,
+        example: row.example,
+        source: row.source
+      }))
+    });
+
+    return new Set(
+      suggestions
+        .map((item) => item.field.trim().toLowerCase())
+        .filter(Boolean)
+    );
+  }
+
+  async function maskSensitiveFieldsWithAi(section: ParsedSection, target: ParseTarget, scope: 'body' | 'headers'): Promise<number> {
+    const sourceRows = target === 'client' && isDualModelSection(section) ? section.clientRows ?? [] : section.rows;
+    const candidateRows = sourceRows.filter((row) => {
+      if (!row.field.trim()) return false;
+      if (scope === 'headers') return row.source === 'header';
+      return row.source !== 'header' && row.source !== 'url';
+    });
+
+    if (candidateRows.length === 0) return 0;
+
+    const maskFieldSet = await requestAiMaskFieldSet(section, candidateRows);
+    if (maskFieldSet.size === 0) return 0;
+
+    let updatedCount = 0;
+
+    updateSection(section.id, (current) => {
+      if (current.kind !== 'parsed') return current;
+
+      if (target === 'client' && isDualModelSection(current)) {
+        const clientRows = (current.clientRows ?? []).map((row) => {
+          const inScope = scope === 'headers' ? row.source === 'header' : row.source !== 'header' && row.source !== 'url';
+          const shouldMask = inScope && maskFieldSet.has(row.field.trim().toLowerCase());
+          if (!shouldMask || row.maskInLogs) return row;
+          updatedCount += 1;
+          return { ...row, maskInLogs: true };
+        });
+
+        return { ...current, clientRows };
+      }
+
+      const rows = current.rows.map((row) => {
+        const inScope = scope === 'headers' ? row.source === 'header' : row.source !== 'header' && row.source !== 'url';
+        const shouldMask = inScope && maskFieldSet.has(row.field.trim().toLowerCase());
+        if (!shouldMask || row.maskInLogs) return row;
+        updatedCount += 1;
+        return { ...row, maskInLogs: true };
+      });
+
+      return { ...current, rows };
+    });
+
+    return updatedCount;
+  }
+
+  async function runAiMasking(section: ParsedSection, options: { target: ParseTarget | 'both'; scope: 'body' | 'headers' }): Promise<void> {
+    const busyKey = `mask-fields:${section.id}:${options.target}:${options.scope}`;
+    if (aiBusyKey) return;
+
+    setAiErrorMessage('');
+    startAiRequestStatus('AI: определяю поля для маскирования...');
+    setAiBusyKey(busyKey);
+
+    try {
+      const targets: ParseTarget[] = options.target === 'both'
+        ? (isDualModelSection(section) ? ['server', 'client'] : ['server'])
+        : [options.target];
+
+      let totalUpdated = 0;
+      for (const target of targets) {
+        totalUpdated += await maskSensitiveFieldsWithAi(section, target, options.scope);
+      }
+
+      if (totalUpdated === 0) {
+        setToastMessage('AI не нашел новых чувствительных полей для маскирования');
+        completeAiRequestStatus('AI: маскирование не требуется');
+        return;
+      }
+
+      setToastMessage(`AI включил маскирование для ${totalUpdated} полей`);
+      completeAiRequestStatus('AI: маскирование применено');
+    } catch (error) {
+      setAiRequestStatus(null);
+      setAiErrorMessage(error instanceof Error ? error.message : 'Не удалось определить маскируемые поля через AI');
     } finally {
       setAiBusyKey(null);
     }
@@ -4034,14 +4220,9 @@ export default function App() {
 
     if (/^curl(?:\s|$)/i.test(trimmed)) return 'curl';
 
-    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-      try {
-        JSON.parse(trimmed);
-        return 'json';
-      } catch {
-        return null;
-      }
-    }
+    // Treat JSON-like input as JSON even if draft is not yet valid,
+    // so Request source does not fall back to persisted cURL format.
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) return 'json';
 
     return null;
   }
@@ -4138,13 +4319,13 @@ export default function App() {
     }
   }
 
-  function startFieldEditing(section: ParsedSection, row: ParsedRow): void {
+  function startFieldEditing(section: ParsedSection, row: ParsedRow, target: ParseTarget = 'server'): void {
     if (!row.field.trim()) return;
     setEditingField({
       sectionId: section.id,
       rowKey: getParsedRowKey(row),
       draft: row.field,
-      target: 'server',
+      target,
       column: 'field'
     });
   }
@@ -4157,6 +4338,21 @@ export default function App() {
       draft: row.clientField,
       target: 'client',
       column: 'clientField'
+    });
+  }
+
+  function startMappedClientFieldEditing(section: ParsedSection, mappedClientKey: string): void {
+    if (!isDualModelSection(section)) return;
+
+    const clientRow = (section.clientRows ?? []).find((item) => getParsedRowKey(item) === mappedClientKey);
+    if (!clientRow || !clientRow.field.trim()) return;
+
+    setEditingField({
+      sectionId: section.id,
+      rowKey: mappedClientKey,
+      draft: clientRow.field,
+      target: 'client',
+      column: 'field'
     });
   }
 
@@ -4190,6 +4386,47 @@ export default function App() {
   function cancelRequestCellEditing(): void {
     setEditingRequestCell(null);
     setRequestCellError('');
+  }
+
+  function startHeaderCellEditing(
+    section: ParsedSection,
+    row: ParsedRow,
+    target: ParseTarget,
+    column: 'description' | 'example',
+    value: string
+  ): void {
+    setEditingHeaderCell({
+      sectionId: section.id,
+      rowKey: getParsedRowKey(row),
+      column,
+      target,
+      draft: value
+    });
+  }
+
+  function cancelHeaderCellEditing(): void {
+    setEditingHeaderCell(null);
+  }
+
+  function saveHeaderCellEditing(): void {
+    if (!editingHeaderCell) return;
+
+    const { sectionId, rowKey, column, target, draft } = editingHeaderCell;
+    if (target === 'client') {
+      updateSection(sectionId, (current) => {
+        if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
+        return {
+          ...current,
+          clientRows: (current.clientRows ?? []).map((item) =>
+            getParsedRowKey(item) === rowKey ? { ...item, [column]: draft } : item
+          )
+        };
+      });
+    } else {
+      updateServerRow(sectionId, rowKey, (current) => ({ ...current, [column]: draft }));
+    }
+
+    setEditingHeaderCell(null);
   }
 
   function applyRequestCellValue(
@@ -4292,12 +4529,13 @@ export default function App() {
 
   function renderEditableFieldCell(section: ParsedSection, row: ParsedRow, options: EditableFieldOptions = {}): ReactNode {
     const allowEdit = options.allowEdit ?? true;
+    const editTarget = options.editTarget ?? 'server';
     if (!row.field.trim()) return '—';
 
     const isEditing =
       editingField?.sectionId === section.id &&
       editingField.rowKey === getParsedRowKey(row) &&
-      editingField.target === 'server' &&
+      editingField.target === editTarget &&
       editingField.column === 'field';
 
     if (isEditing) {
@@ -4319,11 +4557,11 @@ export default function App() {
     }
 
     return (
-      <div className="field-display" onDoubleClick={() => allowEdit && startFieldEditing(section, row)}>
+      <div className="field-display" onDoubleClick={() => allowEdit && startFieldEditing(section, row, editTarget)}>
         <span>{row.field}</span>
         <span className="field-actions">
           {allowEdit && (
-            <button className="icon-button" type="button" onClick={() => startFieldEditing(section, row)} aria-label="Редактировать поле">
+            <button className="icon-button" type="button" onClick={() => startFieldEditing(section, row, editTarget)} aria-label="Редактировать поле">
               ✎
             </button>
           )}
@@ -4535,6 +4773,77 @@ export default function App() {
       const primaryOptions = options.filter((option) => !previouslyUsedKeys.has(getParsedRowKey(option)));
       const previouslyUsedOptions = options.filter((option) => previouslyUsedKeys.has(getParsedRowKey(option)));
       const mappedValue = getMappedClientField(section, row);
+      const rowKey = getParsedRowKey(row);
+      const isEditingMappedValue =
+        Boolean(mappedValue) &&
+        editingField?.sectionId === section.id &&
+        editingField.rowKey === mappedValue &&
+        editingField.target === 'client' &&
+        editingField.column === 'field';
+      const isMappingEditActive = editingMappingCell?.sectionId === section.id && editingMappingCell.rowKey === rowKey;
+
+      if (isEditingMappedValue && editingField) {
+        return (
+          <div className="field-edit">
+            <input
+              type="text"
+              autoFocus
+              value={editingField.draft}
+              onChange={(e) => setEditingField((current) => (current ? { ...current, draft: e.target.value } : current))}
+              onBlur={saveFieldEditing}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') saveFieldEditing();
+                if (e.key === 'Escape') cancelFieldEditing();
+              }}
+            />
+          </div>
+        );
+      }
+
+      if (!isMappingEditActive) {
+        return (
+          <div className="field-display" onDoubleClick={() => mappedValue && startMappedClientFieldEditing(section, mappedValue)}>
+            <span>{mappedValue ? options.find((option) => getParsedRowKey(option) === mappedValue)?.field ?? '—' : '—'}</span>
+            <span className="field-actions">
+              <button
+                className="icon-button"
+                type="button"
+                onClick={() => setEditingMappingCell({ sectionId: section.id, rowKey })}
+                aria-label="Редактировать маппинг"
+              >
+                ↔
+              </button>
+              {mappedValue && (
+                <button
+                  className="icon-button"
+                  type="button"
+                  onClick={() => startMappedClientFieldEditing(section, mappedValue)}
+                  aria-label="Редактировать client поле"
+                >
+                  ✎
+                </button>
+              )}
+              {mappedValue && (
+                <button
+                  className="icon-button danger"
+                  type="button"
+                  aria-label="Сбросить маппинг"
+                  onClick={() =>
+                    updateSection(section.id, (current) => {
+                      if (current.kind !== 'parsed' || !isDualModelSection(current)) return current;
+                      const nextMappings = { ...(current.clientMappings ?? {}) };
+                      delete nextMappings[rowKey];
+                      return { ...current, clientMappings: nextMappings };
+                    })
+                  }
+                >
+                  ×
+                </button>
+              )}
+            </span>
+          </div>
+        );
+      }
 
       return (
         <div className="mapping-cell">
@@ -4554,6 +4863,7 @@ export default function App() {
                 return { ...current, clientMappings: nextMappings };
               })
             }
+            onBlur={() => setEditingMappingCell((current) => (current && current.sectionId === section.id && current.rowKey === rowKey ? null : current))}
           >
             <option value="">—</option>
             {primaryOptions.map((option) => (
@@ -4580,7 +4890,7 @@ export default function App() {
                 updateSection(section.id, (current) => {
                   if (current.kind !== 'parsed' || !isDualModelSection(current)) return current;
                   const nextMappings = { ...(current.clientMappings ?? {}) };
-                  delete nextMappings[getParsedRowKey(row)];
+                  delete nextMappings[rowKey];
                   return { ...current, clientMappings: nextMappings };
                 })
               }
@@ -4588,6 +4898,14 @@ export default function App() {
               ×
             </button>
           )}
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="Завершить редактирование маппинга"
+            onClick={() => setEditingMappingCell(null)}
+          >
+            ✓
+          </button>
         </div>
       );
     }
@@ -4632,30 +4950,45 @@ export default function App() {
           <div className="table-wrap table-wrap-empty">
             <div className="muted">Таблица пока пустая</div>
             <div className="table-actions">
-              <button className="ghost small" type="button" onClick={() => addManualRow(section, 'server')}>
-                + Параметр
+              <button className="ghost small table-action-icon" type="button" onClick={() => addManualRow(section, 'server')} aria-label="Добавить параметр" title="Добавить параметр">
+                <span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>
               </button>
               {section.domainModelEnabled && (
-                <button className="ghost small" type="button" onClick={() => addManualRow(section, 'client')}>
-                  + Client параметр
+                <button className="ghost small table-action-icon" type="button" onClick={() => addManualRow(section, 'client')} aria-label="Добавить client параметр" title="Добавить client параметр">
+                  <span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>
                 </button>
               )}
+              <div className="table-actions-divider" aria-hidden />
               <button
-                className="ghost small"
+                className="ghost small table-action-icon"
                 type="button"
                 onClick={() => void fillFieldDescriptionsWithAi(section)}
                 disabled={Boolean(aiBusyKey)}
+                aria-label="AI: заполнить описания"
+                title="AI: заполнить описания"
               >
-                {aiBusyKey === `fill-descriptions:${section.id}` ? 'AI: заполняю...' : 'AI: описания'}
+                <span className="ui-icon" aria-hidden>{renderUiIcon('ai_describe')}</span>
+              </button>
+              <button
+                className="ghost small table-action-icon"
+                type="button"
+                onClick={() => void runAiMasking(section, { target: 'both', scope: 'body' })}
+                disabled={Boolean(aiBusyKey)}
+                aria-label="AI: маскирование полей"
+                title="AI: маскирование полей"
+              >
+                <span className="ui-icon" aria-hidden>{renderUiIcon('ai_mask')}</span>
               </button>
               {section.domainModelEnabled && (
                 <button
-                  className="ghost small"
+                  className="ghost small table-action-icon"
                   type="button"
                   onClick={() => void suggestParameterMappingsWithAi(section)}
                   disabled={Boolean(aiBusyKey)}
+                  aria-label="AI: подобрать маппинг"
+                  title="AI: подобрать маппинг"
                 >
-                  {aiBusyKey === `suggest-mappings:${section.id}` ? 'AI: подбираю...' : 'AI: маппинг'}
+                  <span className="ui-icon" aria-hidden>{renderUiIcon('ai_map')}</span>
                 </button>
               )}
             </div>
@@ -4708,30 +5041,45 @@ export default function App() {
             </tbody>
           </table>
           <div className="table-actions">
-            <button className="ghost small" type="button" onClick={() => addManualRow(section, 'server')}>
-              + Параметр
+            <button className="ghost small table-action-icon" type="button" onClick={() => addManualRow(section, 'server')} aria-label="Добавить параметр" title="Добавить параметр">
+              <span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>
             </button>
             {section.domainModelEnabled && (
-              <button className="ghost small" type="button" onClick={() => addManualRow(section, 'client')}>
-                + Client параметр
+              <button className="ghost small table-action-icon" type="button" onClick={() => addManualRow(section, 'client')} aria-label="Добавить client параметр" title="Добавить client параметр">
+                <span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>
               </button>
             )}
+            <div className="table-actions-divider" aria-hidden />
             <button
-              className="ghost small"
+              className="ghost small table-action-icon"
               type="button"
               onClick={() => void fillFieldDescriptionsWithAi(section)}
               disabled={Boolean(aiBusyKey)}
+              aria-label="AI: заполнить описания"
+              title="AI: заполнить описания"
             >
-              {aiBusyKey === `fill-descriptions:${section.id}` ? 'AI: заполняю...' : 'AI: описания'}
+              <span className="ui-icon" aria-hidden>{renderUiIcon('ai_describe')}</span>
+            </button>
+            <button
+              className="ghost small table-action-icon"
+              type="button"
+              onClick={() => void runAiMasking(section, { target: 'both', scope: 'body' })}
+              disabled={Boolean(aiBusyKey)}
+              aria-label="AI: маскирование полей"
+              title="AI: маскирование полей"
+            >
+              <span className="ui-icon" aria-hidden>{renderUiIcon('ai_mask')}</span>
             </button>
             {section.domainModelEnabled && (
               <button
-                className="ghost small"
+                className="ghost small table-action-icon"
                 type="button"
                 onClick={() => void suggestParameterMappingsWithAi(section)}
                 disabled={Boolean(aiBusyKey)}
+                aria-label="AI: подобрать маппинг"
+                title="AI: подобрать маппинг"
               >
-                {aiBusyKey === `suggest-mappings:${section.id}` ? 'AI: подбираю...' : 'AI: маппинг'}
+                <span className="ui-icon" aria-hidden>{renderUiIcon('ai_map')}</span>
               </button>
             )}
           </div>
@@ -4785,12 +5133,24 @@ export default function App() {
         </table>
         <div className="table-actions">
           <button
-            className="ghost small"
+            className="ghost small table-action-icon"
             type="button"
             onClick={() => void fillFieldDescriptionsWithAi(section)}
             disabled={Boolean(aiBusyKey)}
+            aria-label="AI: заполнить описания"
+            title="AI: заполнить описания"
           >
-            {aiBusyKey === `fill-descriptions:${section.id}` ? 'AI: заполняю...' : 'AI: описания'}
+            <span className="ui-icon" aria-hidden>{renderUiIcon('ai_describe')}</span>
+          </button>
+          <button
+            className="ghost small table-action-icon"
+            type="button"
+            onClick={() => void runAiMasking(section, { target: 'server', scope: 'body' })}
+            disabled={Boolean(aiBusyKey)}
+            aria-label="AI: маскирование полей"
+            title="AI: маскирование полей"
+          >
+            <span className="ui-icon" aria-hidden>{renderUiIcon('ai_mask')}</span>
           </button>
         </div>
       </div>
@@ -4871,8 +5231,9 @@ export default function App() {
                       section,
                       row,
                       isAuto || isDefault
-                        ? { allowEdit: false }
+                        ? { allowEdit: false, editTarget: isExternal ? 'client' : 'server' }
                         : {
+                            editTarget: isExternal ? 'client' : 'server',
                             onDelete: () => (isExternal ? deleteExternalRequestHeader(section.id, rowKey) : deleteRequestHeader(section.id, rowKey))
                           }
                     )}
@@ -4882,23 +5243,49 @@ export default function App() {
                     {isAuto || isDefault ? (
                       row.description || '—'
                     ) : (
-                      <input
-                        type="text"
-                        value={isPersisted ? persistedRows.find((item) => getParsedRowKey(item) === rowKey)?.description ?? row.description : row.description}
-                        onChange={(e) =>
-                          isExternal
-                            ? updateSection(section.id, (current) => {
-                                if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
-                                return {
-                                  ...current,
-                                  clientRows: (current.clientRows ?? []).map((item) =>
-                                    getParsedRowKey(item) === rowKey ? { ...item, description: e.target.value } : item
-                                  )
-                                };
-                              })
-                            : updateServerRow(section.id, rowKey, (current) => ({ ...current, description: e.target.value }))
+                      (() => {
+                        const target = isExternal ? 'client' as const : 'server' as const;
+                        const value = isPersisted ? persistedRows.find((item) => getParsedRowKey(item) === rowKey)?.description ?? row.description : row.description;
+                        const isEditing =
+                          editingHeaderCell?.sectionId === section.id &&
+                          editingHeaderCell.rowKey === rowKey &&
+                          editingHeaderCell.target === target &&
+                          editingHeaderCell.column === 'description';
+
+                        if (isEditing && editingHeaderCell) {
+                          return (
+                            <div className="field-edit">
+                              <input
+                                type="text"
+                                autoFocus
+                                value={editingHeaderCell.draft}
+                                onChange={(e) => setEditingHeaderCell((current) => (current ? { ...current, draft: e.target.value } : current))}
+                                onBlur={saveHeaderCellEditing}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') saveHeaderCellEditing();
+                                  if (e.key === 'Escape') cancelHeaderCellEditing();
+                                }}
+                              />
+                            </div>
+                          );
                         }
-                      />
+
+                        return (
+                          <div className="field-display" onDoubleClick={() => startHeaderCellEditing(section, row, target, 'description', value)}>
+                            <span>{value || '—'}</span>
+                            <span className="field-actions">
+                              <button
+                                className="icon-button"
+                                type="button"
+                                onClick={() => startHeaderCellEditing(section, row, target, 'description', value)}
+                                aria-label="Редактировать описание"
+                              >
+                                ✎
+                              </button>
+                            </span>
+                          </div>
+                        );
+                      })()
                     )}
                   </td>
                   <td>
@@ -4933,23 +5320,49 @@ export default function App() {
                     {isAuto || isDefault ? (
                       row.example || '—'
                     ) : (
-                      <input
-                        type="text"
-                        value={isPersisted ? persistedRows.find((item) => getParsedRowKey(item) === rowKey)?.example ?? row.example : row.example}
-                        onChange={(e) =>
-                          isExternal
-                            ? updateSection(section.id, (current) => {
-                                if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
-                                return {
-                                  ...current,
-                                  clientRows: (current.clientRows ?? []).map((item) =>
-                                    getParsedRowKey(item) === rowKey ? { ...item, example: e.target.value } : item
-                                  )
-                                };
-                              })
-                            : updateServerRow(section.id, rowKey, (current) => ({ ...current, example: e.target.value }))
+                      (() => {
+                        const target = isExternal ? 'client' as const : 'server' as const;
+                        const value = isPersisted ? persistedRows.find((item) => getParsedRowKey(item) === rowKey)?.example ?? row.example : row.example;
+                        const isEditing =
+                          editingHeaderCell?.sectionId === section.id &&
+                          editingHeaderCell.rowKey === rowKey &&
+                          editingHeaderCell.target === target &&
+                          editingHeaderCell.column === 'example';
+
+                        if (isEditing && editingHeaderCell) {
+                          return (
+                            <div className="field-edit">
+                              <input
+                                type="text"
+                                autoFocus
+                                value={editingHeaderCell.draft}
+                                onChange={(e) => setEditingHeaderCell((current) => (current ? { ...current, draft: e.target.value } : current))}
+                                onBlur={saveHeaderCellEditing}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') saveHeaderCellEditing();
+                                  if (e.key === 'Escape') cancelHeaderCellEditing();
+                                }}
+                              />
+                            </div>
+                          );
                         }
-                      />
+
+                        return (
+                          <div className="field-display" onDoubleClick={() => startHeaderCellEditing(section, row, target, 'example', value)}>
+                            <span>{value || '—'}</span>
+                            <span className="field-actions">
+                              <button
+                                className="icon-button"
+                                type="button"
+                                onClick={() => startHeaderCellEditing(section, row, target, 'example', value)}
+                                aria-label="Редактировать пример"
+                              >
+                                ✎
+                              </button>
+                            </span>
+                          </div>
+                        );
+                      })()
                     )}
                   </td>
                 </tr>
@@ -4958,8 +5371,18 @@ export default function App() {
           </tbody>
         </table>
         <div className="table-actions">
-          <button className="ghost small" type="button" onClick={() => (isExternal ? addExternalRequestHeader(section) : addRequestHeader(section))}>
-            + Header
+          <button className="ghost small table-action-icon" type="button" onClick={() => (isExternal ? addExternalRequestHeader(section) : addRequestHeader(section))} aria-label="Добавить header" title="Добавить header">
+            <span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>
+          </button>
+          <button
+            className="ghost small table-action-icon"
+            type="button"
+            onClick={() => void runAiMasking(section, { target: isExternal ? 'client' : 'server', scope: 'headers' })}
+            disabled={Boolean(aiBusyKey)}
+            aria-label="AI: маскирование полей"
+            title="AI: маскирование полей"
+          >
+            <span className="ui-icon" aria-hidden>{renderUiIcon('ai_mask')}</span>
           </button>
         </div>
       </div>
@@ -6013,8 +6436,8 @@ export default function App() {
                         onChange={(e) => updateErrorRow(section.id, index, (current) => ({ ...current, responseCode: e.target.value }))}
                         placeholder="Код ответа для WIKI (JSON)"
                       />
-                      <button className="ghost small" type="button" onClick={() => formatErrorResponseCode(section.id, index)}>
-                        Форматировать JSON
+                      <button className="ghost small table-action-icon" type="button" onClick={() => formatErrorResponseCode(section.id, index)} aria-label="Форматировать JSON" title="Форматировать JSON">
+                        <span className="ui-icon" aria-hidden>{renderUiIcon('format_json')}</span>
                       </button>
                     </div>
                   </td>
@@ -6029,8 +6452,8 @@ export default function App() {
             </tbody>
           </table>
           <div className="table-actions">
-            <button className="ghost small" type="button" onClick={() => addErrorRow(section.id)}>
-              + Строка ошибки
+            <button className="ghost small table-action-icon" type="button" onClick={() => addErrorRow(section.id)} aria-label="Добавить строку ошибки" title="Добавить строку ошибки">
+              <span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>
             </button>
           </div>
         </div>
@@ -6106,8 +6529,8 @@ export default function App() {
             </tbody>
           </table>
           <div className="table-actions">
-            <button className="ghost small" type="button" onClick={() => addValidationRuleRow(section.id)}>
-              + Правило валидации
+            <button className="ghost small table-action-icon" type="button" onClick={() => addValidationRuleRow(section.id)} aria-label="Добавить правило валидации" title="Добавить правило валидации">
+              <span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>
             </button>
           </div>
         </div>
@@ -6117,6 +6540,55 @@ export default function App() {
 
   const toggleTheme = () => {
     setTheme((current) => (current === 'dark' ? 'light' : 'dark'));
+  };
+
+  const handleManualSave = async () => {
+    setAutosave({ state: 'saving' });
+
+    const workspace = asWorkspaceProjectData(methods, activeMethodId, methodGroups);
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(workspace));
+    } catch {
+      setAutosave({ state: 'error' });
+      return;
+    }
+
+    if (authUser && remoteHydratedRef.current) {
+      if (remoteSaveTimerRef.current) {
+        window.clearTimeout(remoteSaveTimerRef.current);
+        remoteSaveTimerRef.current = null;
+      }
+
+      if (!remoteSaveInFlightRef.current) {
+        remoteSaveInFlightRef.current = true;
+        const projectName = activeMethod?.name?.trim() || 'Документ API';
+        const history = getPersistedHistoryState();
+        const workspaceHash = JSON.stringify(workspace);
+
+        try {
+          const saved = await saveServerProjectWithFallback({
+            projectId: serverProjectId ?? undefined,
+            name: projectName,
+            workspace,
+            history
+          });
+          setServerProjectId(saved.id);
+          upsertServerProjectListEntry({ id: saved.id, name: projectName, updatedAt: saved.updatedAt });
+          setServerSyncError('');
+          remoteLastSavedHashRef.current = workspaceHash;
+          remoteLastObservedHashRef.current = workspaceHash;
+          remotePendingChangesRef.current = 0;
+        } catch (error) {
+          setServerSyncError(error instanceof Error ? error.message : 'Ошибка сохранения на сервер');
+          setAutosave({ state: 'error' });
+          return;
+        } finally {
+          remoteSaveInFlightRef.current = false;
+        }
+      }
+    }
+
+    setAutosave({ state: 'saved', at: formatTime(new Date()) });
   };
 
   const isOnboardingHeaderAvailable =
@@ -6479,21 +6951,46 @@ export default function App() {
         </div>
         <div className="actions">
           <div className="actions-main">
-          <button className="ghost" type="button" onClick={() => openProjectImportDialog(false)}>Импорт</button>
-          <input ref={importInputRef} className="hidden-file-input" type="file" accept="application/json" onChange={(e) => importProjectJson(e.target.files?.[0])} />
-          <button className="ghost" onClick={exportProjectJson} disabled={!activeMethod} title={exportTitle}>
-            Экспорт JSON
+          <button className="ghost topbar-action" type="button" onClick={() => openProjectImportDialog(false)} aria-label="Импорт" title="Импорт">
+            <span className="ui-icon" aria-hidden>{renderUiIcon('import')}</span>
           </button>
-          <button data-onboarding-anchor="export-docs" onClick={openHtmlPreview} disabled={!activeMethod} title={exportTitle}>Экспорт HTML</button>
-          <button onClick={openWikiPreview} disabled={!activeMethod} title={exportTitle}>Экспорт Wiki</button>
+          <input ref={importInputRef} className="hidden-file-input" type="file" accept="application/json" onChange={(e) => importProjectJson(e.target.files?.[0])} />
+          <button
+            className="ghost topbar-action topbar-format-btn"
+            onClick={exportProjectJson}
+            disabled={!activeMethod}
+            title={activeMethod ? `Скачать JSON. ${exportTitle}` : exportTitle}
+            aria-label="Скачать JSON"
+          >
+            <span className="ui-icon export-format-icon" data-format="JSON" aria-hidden>{renderUiIcon('download')}</span>
+          </button>
+          <button
+            className="primary topbar-action topbar-format-btn"
+            data-onboarding-anchor="export-docs"
+            onClick={openHtmlPreview}
+            disabled={!activeMethod}
+            title={activeMethod ? `Скачать HTML. ${exportTitle}` : exportTitle}
+            aria-label="Скачать HTML"
+          >
+            <span className="ui-icon export-format-icon" data-format="HTML" aria-hidden>{renderUiIcon('download')}</span>
+          </button>
+          <button
+            className="topbar-action topbar-format-btn"
+            onClick={openWikiPreview}
+            disabled={!activeMethod}
+            title={activeMethod ? `Скачать WIKI. ${exportTitle}` : exportTitle}
+            aria-label="Скачать WIKI"
+          >
+            <span className="ui-icon export-format-icon" data-format="WIKI" aria-hidden>{renderUiIcon('download')}</span>
+          </button>
           </div>
           <div className="actions-side">
           <div className="history-controls" role="group" aria-label="История изменений">
             <button type="button" className="ghost history-btn" onClick={undoWorkspace} disabled={!canUndo} title="Отменить (Ctrl+Z)">
-              ↶
+              <span className="ui-icon" aria-hidden>{renderUiIcon('undo')}</span>
             </button>
             <button type="button" className="ghost history-btn" onClick={redoWorkspace} disabled={!canRedo} title="Повторить (Ctrl+Shift+Z / Ctrl+Y)">
-              ↷
+              <span className="ui-icon" aria-hidden>{renderUiIcon('redo')}</span>
             </button>
           </div>
           <div className="actions-side-divider" aria-hidden />
@@ -6545,17 +7042,10 @@ export default function App() {
               type="button"
               className={`onboarding-nav-toggle ${isOnboardingNavVisible ? 'active' : ''}`}
               onClick={toggleOnboardingHeaderNavigation}
-              aria-label={isOnboardingNavVisible ? 'Скрыть онбординг-навигацию' : 'Показать онбординг-навигацию'}
-              title={isOnboardingNavVisible ? 'Скрыть навигацию шагов' : 'Показать навигацию шагов'}
+              aria-label={isOnboardingNavVisible ? 'Скрыть панель навигации' : 'Показать панель навигации'}
+              title={isOnboardingNavVisible ? 'Скрыть панель навигации' : 'Показать панель навигации'}
             >
-              <svg className="onboarding-nav-icon" viewBox="0 0 72 24" aria-hidden="true" focusable="false">
-                <circle cx="12" cy="12" r="9" className="step step-1" />
-                <circle cx="36" cy="12" r="9" className="step step-2" />
-                <circle cx="60" cy="12" r="9" className="step step-3" />
-                <text x="12" y="15" textAnchor="middle" className="step-label">1</text>
-                <text x="36" y="15" textAnchor="middle" className="step-label">2</text>
-                <text x="60" y="15" textAnchor="middle" className="step-label">3</text>
-              </svg>
+              <span className="ui-icon onboarding-nav-icon" aria-hidden>{renderUiIcon('onboarding_nav')}</span>
             </button>
           )}
           <div className="actions-side-divider" aria-hidden />
@@ -6564,32 +7054,36 @@ export default function App() {
             className="theme-mermaid-toggle"
             onClick={toggleTheme}
             aria-label={theme === 'dark' ? 'Включить светлую тему' : 'Включить ночную тему'}
-            title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+            title={theme === 'dark' ? 'Включить светлую тему' : 'Включить ночную тему'}
           >
-            <span className="theme-mermaid-orb" aria-hidden />
-            <span className="theme-mermaid-icon" aria-hidden>{theme === 'dark' ? '☾' : '☀'}</span>
+            <span className="ui-icon" aria-hidden>{renderUiIcon(theme === 'dark' ? 'theme_sun' : 'theme_moon')}</span>
           </button>
-          <div className={`badge autosave-badge ${autosave.state}`} aria-live="polite" title={autosave.state === 'saved' ? 'Автосохранение выполнено' : undefined}>
+          <button
+            type="button"
+            className={`badge autosave-badge manual-save ${autosave.state}`}
+            onClick={() => void handleManualSave()}
+            aria-live="polite"
+            title="Сохранить сейчас"
+          >
+            <span className="ui-icon autosave-icon" aria-hidden>{renderUiIcon('save')}</span>
             {autosave.state === 'saving' && 'Сохранение...'}
             {autosave.state === 'saved' && (
               <>
-                <span className="status-icon" aria-hidden />
                 <span className="status-time">{autosave.at ?? '--:--'}</span>
               </>
             )}
             {autosave.state === 'error' && 'Ошибка сохранения'}
             {autosave.state === 'idle' && 'Готово'}
-          </div>
+          </button>
           </div>
         </div>
 
-        {isOnboardingHeaderAvailable && (
+        {isOnboardingHeaderAvailable && isOnboardingNavVisible && (
           <section
             className="onboarding-stepbar collapsed in-topbar"
             data-onboarding-anchor="choose-entry"
             aria-live="polite"
-            aria-label="Пошаговый онбординг"
-            hidden={!isOnboardingNavVisible}
+            aria-label="Пошаговая навигация"
           >
             <div className="onboarding-stepbar-track" role="list" aria-label="Прогресс шагов">
               {ONBOARDING_STEPS.map((step, index) => {
@@ -6641,7 +7135,7 @@ export default function App() {
           renderSourceAlert(
             `${selectedSection.id}-server`,
             selectedServerDriftRows.length > 0 || selectedServerFormatDrift || selectedServerDuplicateValues.length > 0,
-            selectedSection.rows,
+            selectedServerSourceRows,
             selectedServerDuplicateValues,
             'Дубликат поля',
             selectedServerFormatDrift,
@@ -6656,7 +7150,7 @@ export default function App() {
           renderSourceAlert(
             `${selectedSection.id}-client`,
             selectedClientDriftRows.length > 0 || selectedClientFormatDrift || selectedClientDuplicateValues.length > 0,
-            selectedSection.clientRows ?? [],
+            selectedClientSourceRows,
             selectedClientDuplicateValues,
             `Дубликат ${getSectionSideLabel(selectedSection, 'client').toLowerCase()}`,
             selectedClientFormatDrift,
@@ -6691,11 +7185,11 @@ export default function App() {
                 ))}
               </div>
               <div className="method-actions">
-                <button className="ghost small" type="button" onClick={createMethod}>
-                  + Метод
+                <button className="ghost small topbar-action method-icon-btn" type="button" onClick={createMethod} aria-label="Добавить метод" title="Добавить метод">
+                  <span className="ui-icon" aria-hidden>{renderUiIcon('add_method')}</span>
                 </button>
-                <button className="ghost small" type="button" onClick={deleteActiveMethod} disabled={methods.length <= 1 || !activeMethod}>
-                  Удалить метод
+                <button className="ghost small topbar-action method-icon-btn" type="button" onClick={deleteActiveMethod} disabled={methods.length <= 1 || !activeMethod} aria-label="Удалить метод" title="Удалить метод">
+                  <span className="ui-icon" aria-hidden>{renderUiIcon('delete_method')}</span>
                 </button>
               </div>
               {activeMethod && (
@@ -6761,16 +7255,16 @@ export default function App() {
               {sections.length === 0 && (
                 <div className="empty-state">
                   <div>У выбранного метода пока нет секций.</div>
-                  <button className="ghost small" type="button" onClick={() => addSectionByType('text')}>
-                    + Добавить первую секцию
+                  <button className="ghost small" type="button" onClick={() => addSectionByType('text')} aria-label="Добавить первую секцию" title="Добавить первую секцию">
+                    <span className="ui-icon" aria-hidden>{renderUiIcon('add_section')}</span>
                   </button>
                 </div>
               )}
             </div>
             <div className="sidebar-footer">
               <div className="add-block-menu">
-                <button className="ghost small" type="button" onClick={() => setIsAddBlockMenuOpen((current) => !current)}>
-                  + Добавить секцию
+                <button className="ghost small topbar-action" type="button" onClick={() => setIsAddBlockMenuOpen((current) => !current)} aria-label="Добавить секцию" title="Добавить секцию">
+                  <span className="ui-icon" aria-hidden>{renderUiIcon('add_section')}</span>
                 </button>
                 {isAddBlockMenuOpen && (
                   <div className="add-block-popover" role="menu" aria-label="Тип нового блока">

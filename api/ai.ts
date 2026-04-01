@@ -13,7 +13,7 @@ type VercelResponse = {
   setHeader: (name: string, value: string) => void;
 };
 
-type RequestTask = 'repair-json' | 'fill-descriptions' | 'suggest-mappings';
+type RequestTask = 'repair-json' | 'fill-descriptions' | 'suggest-mappings' | 'mask-fields';
 
 type RequestBody = {
   task?: RequestTask;
@@ -54,6 +54,18 @@ function buildTaskPrompt(task: RequestTask, payload: Record<string, unknown>): s
       'Не упоминай тип данных, обязательность, формат и технические пометки.',
       'Не выдумывай поле, если оно не передано.',
       'Ответь строго JSON-объектом вида {"descriptions":[{"field":"...","description":"..."}]}',
+      `SECTION_TYPE: ${String(payload.sectionType ?? 'generic')}`,
+      `ROWS: ${JSON.stringify(payload.rows ?? [])}`
+    ].join('\n');
+  }
+
+  if (task === 'mask-fields') {
+    return [
+      'Ты находишь поля, которые нужно маскировать в логах.',
+      'Маскируй персональные данные, секреты, учетные данные и токены.',
+      'Примеры: password, token, secret, api key, pinfl, inn, phone, email, паспорт, карта.',
+      'Если поле не чувствительное — не включай его.',
+      'Ответь строго JSON-объектом вида {"fields":[{"field":"...","reason":"..."}]}.',
       `SECTION_TYPE: ${String(payload.sectionType ?? 'generic')}`,
       `ROWS: ${JSON.stringify(payload.rows ?? [])}`
     ].join('\n');
@@ -151,6 +163,20 @@ function normalizeMappingsResult(raw: unknown): { mappings: Array<{ serverField:
   return { mappings };
 }
 
+function normalizeMaskFieldsResult(raw: unknown): { fields: Array<{ field: string; reason?: string }> } {
+  const value = raw as { fields?: Array<{ field?: unknown; reason?: unknown }> };
+  const fields = Array.isArray(value.fields)
+    ? value.fields
+      .filter((row) => typeof row?.field === 'string')
+      .map((row) => ({
+        field: String(row.field).trim(),
+        reason: typeof row.reason === 'string' ? String(row.reason).trim() : undefined
+      }))
+      .filter((row) => row.field)
+    : [];
+  return { fields };
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   res.setHeader('Cache-Control', 'no-store');
 
@@ -161,7 +187,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       provider: 'openai',
       model: process.env.OPENAI_MODEL?.trim() || 'gpt-4.1-nano',
       message: 'Use POST with JSON body: { task, payload }',
-      tasks: ['repair-json', 'fill-descriptions', 'suggest-mappings']
+      tasks: ['repair-json', 'fill-descriptions', 'suggest-mappings', 'mask-fields']
     });
     return;
   }
@@ -176,7 +202,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const task = body.task;
     const payload = body.payload ?? {};
 
-    if (!task || !['repair-json', 'fill-descriptions', 'suggest-mappings'].includes(task)) {
+    if (!task || !['repair-json', 'fill-descriptions', 'suggest-mappings', 'mask-fields'].includes(task)) {
       res.status(400).json({ error: 'Некорректный task' });
       return;
     }
@@ -191,6 +217,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
     if (task === 'fill-descriptions') {
       res.status(200).json({ data: normalizeDescriptionsResult(raw) });
+      return;
+    }
+
+    if (task === 'mask-fields') {
+      res.status(200).json({ data: normalizeMaskFieldsResult(raw) });
       return;
     }
 

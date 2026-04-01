@@ -21,7 +21,16 @@ type SuggestMappingsResponse = {
   mappings: MappingSuggestion[];
 };
 
-type ApiTask = 'repair-json' | 'fill-descriptions' | 'suggest-mappings';
+type MaskFieldSuggestion = {
+  field: string;
+  reason?: string;
+};
+
+type MaskFieldsResponse = {
+  fields: MaskFieldSuggestion[];
+};
+
+type ApiTask = 'repair-json' | 'fill-descriptions' | 'suggest-mappings' | 'mask-fields';
 
 type ApiRequestBody = {
   task: ApiTask;
@@ -138,4 +147,18 @@ export async function suggestMappingsWithAi(payload: {
 }): Promise<MappingSuggestion[]> {
   const result = await callAiApi<SuggestMappingsResponse>('suggest-mappings', payload);
   return result.mappings;
+}
+
+export async function suggestMaskFieldsWithAi(payload: {
+  sectionType: 'request' | 'response' | 'generic';
+  rows: Array<{
+    field: string;
+    type: string;
+    description: string;
+    example: string;
+    source?: string;
+  }>;
+}): Promise<MaskFieldSuggestion[]> {
+  const result = await callAiApi<MaskFieldsResponse>('mask-fields', payload);
+  return result.fields;
 }

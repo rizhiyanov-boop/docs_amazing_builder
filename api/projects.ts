@@ -83,7 +83,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       return;
     }
 
-    const payloadSize = getJsonSizeBytes({ workspace: body.workspace, history: body.history ?? null });
+    const includeHistory = body.history !== undefined;
+    const payloadSize = getJsonSizeBytes(
+      includeHistory
+        ? { workspace: body.workspace, history: body.history ?? null }
+        : { workspace: body.workspace }
+    );
     if (payloadSize > MAX_SAVE_PAYLOAD_BYTES) {
       res.status(413).json({ error: 'Слишком большой объем данных для сохранения' });
       return;
@@ -94,7 +99,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       projectId: body.projectId,
       name: resolvedName,
       workspace: body.workspace,
-      history: body.history ?? null
+      history: includeHistory ? body.history ?? null : undefined,
+      includeHistory
     });
 
     res.status(200).json({ data: saved });

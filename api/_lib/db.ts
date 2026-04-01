@@ -189,7 +189,8 @@ export async function saveProject(payload: {
   projectId?: string;
   name: string;
   workspace: unknown;
-  history: unknown;
+  history?: unknown;
+  includeHistory?: boolean;
 }): Promise<{ id: string; updatedAt: string }> {
   await ensureSchema();
   await cleanupExpiredSessions();
@@ -202,16 +203,26 @@ export async function saveProject(payload: {
 
   const projectId = payload.projectId?.trim();
   if (projectId) {
-    const updated = await sql`
-      UPDATE projects
-      SET name = ${payload.name},
-          workspace = ${JSON.stringify(payload.workspace)}::jsonb,
-          history = ${payload.history ? JSON.stringify(payload.history) : null}::jsonb,
-          payload_hash = ${payloadHash},
-          updated_at = now()
-      WHERE id = ${projectId} AND user_id = ${payload.userId}
-      RETURNING id, updated_at
-    `;
+    const updated = payload.includeHistory === false
+      ? await sql`
+          UPDATE projects
+          SET name = ${payload.name},
+              workspace = ${JSON.stringify(payload.workspace)}::jsonb,
+              payload_hash = ${payloadHash},
+              updated_at = now()
+          WHERE id = ${projectId} AND user_id = ${payload.userId}
+          RETURNING id, updated_at
+        `
+      : await sql`
+          UPDATE projects
+          SET name = ${payload.name},
+              workspace = ${JSON.stringify(payload.workspace)}::jsonb,
+              history = ${payload.history ? JSON.stringify(payload.history) : null}::jsonb,
+              payload_hash = ${payloadHash},
+              updated_at = now()
+          WHERE id = ${projectId} AND user_id = ${payload.userId}
+          RETURNING id, updated_at
+        `;
     const updatedRow = updated[0] as { id: string; updated_at: string } | undefined;
     if (updatedRow) {
       return { id: updatedRow.id, updatedAt: updatedRow.updated_at };

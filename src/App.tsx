@@ -1,6 +1,5 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react';
-import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
-import { createPortal } from 'react-dom';
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Highlight from '@tiptap/extension-highlight';
@@ -8,8 +7,8 @@ import { liftListItem, sinkListItem } from '@tiptap/pm/schema-list';
 import './tokens.css';
 import './App.css';
 import { parseCurlMeta, parseToRows } from './parsers';
-import { getDiagramExportFileName, getDiagramImageUrl, getPlantUmlImageUrl, resolveDiagramEngine } from './diagramUtils';
-import { ERROR_CATALOG, ERROR_CATALOG_BY_CODE, POPULAR_HTTP_STATUS_CODES } from './errorCatalog';
+import { getDiagramExportFileName, getDiagramImageUrl, resolveDiagramEngine } from './diagramUtils';
+import { ERROR_CATALOG_BY_CODE } from './errorCatalog';
 import { getRequestColumnLabel, getRequestColumnOrder, moveRequestColumn } from './requestColumns';
 import {
   DEFAULT_API_KEY_EXAMPLE,
@@ -39,6 +38,12 @@ import { ONBOARDING_STEPS, evaluateOnboardingProgress, resolveOnboardingStep, ty
 import { loadOnboardingState, markOnboardingCompleted, markOnboardingStarted, saveOnboardingState } from './onboarding/storage';
 import { emitOnboardingEvent } from './onboarding/telemetry';
 import { fillDescriptionsWithAi, repairJsonWithAi, suggestMappingsWithAi, suggestMaskFieldsWithAi } from './openrouterClient';
+import { AppTopbar } from './components/AppTopbar';
+import { DiagramSectionEditor } from './components/DiagramSectionEditor';
+import { ErrorsSectionEditor } from './components/ErrorsSectionEditor';
+import { MethodSectionSidebar, type AddableBlockType } from './components/MethodSectionSidebar';
+import { ParsedSectionEditor } from './components/ParsedSectionEditor';
+import { WorkspaceTabs } from './components/WorkspaceTabs';
 import {
   fetchCurrentUser,
   loginWithPassword,
@@ -78,15 +83,47 @@ import type {
 const STORAGE_KEY = 'doc-builder-project-v2';
 const STORAGE_SERVER_PROJECT_ID_KEY = 'doc-builder-server-project-id-v1';
 const ONBOARDING_ENTRY_SUPPRESS_KEY = 'doc-builder-onboarding-entry-suppressed-v1';
+const TABLE_FIELD_COLUMN_WIDTH_KEY = 'doc-builder-table-field-column-width-v1';
+const SIDEBAR_WIDTH_KEY = 'doc-builder-sidebar-width-v1';
+const SIDEBAR_HIDDEN_KEY = 'doc-builder-sidebar-hidden-v1';
 const DEFAULT_METHOD_NAME = 'Метод 1';
+const DEFAULT_PROJECT_NAME = 'Новый проект';
 const DELETE_UNDO_WINDOW_MS = 8000;
 const HISTORY_LIMIT = 50;
 const HISTORY_COALESCE_MS = 700;
 const REMOTE_SAVE_CHANGE_THRESHOLD = 10;
 const REMOTE_SAVE_IDLE_MS = 20000;
+const DEFAULT_TABLE_FIELD_COLUMN_WIDTH = 320;
+const MIN_TABLE_FIELD_COLUMN_WIDTH = 220;
+const MAX_TABLE_FIELD_COLUMN_WIDTH = 640;
+const DEFAULT_SIDEBAR_WIDTH = 280;
+const MIN_SIDEBAR_WIDTH = 240;
+const MAX_SIDEBAR_WIDTH = 520;
+const COMPACT_LAYOUT_MEDIA_QUERY = '(max-width: 64rem)';
 const EMPTY_SECTIONS: DocSection[] = [];
 const ENABLE_MULTI_METHODS = true;
 const DEFAULT_RICH_TEXT_HIGHLIGHT = '#fef08a';
+
+function clampTableFieldColumnWidth(value: number): number {
+  return Math.min(MAX_TABLE_FIELD_COLUMN_WIDTH, Math.max(MIN_TABLE_FIELD_COLUMN_WIDTH, Math.round(value)));
+}
+
+function clampSidebarWidth(value: number): number {
+  return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, Math.round(value)));
+}
+
+function normalizeProjectName(value: string | null | undefined): string {
+  const trimmed = value?.trim();
+  return trimmed || DEFAULT_PROJECT_NAME;
+}
+
+function deepClone<T>(value: T): T {
+  if (typeof globalThis.structuredClone === 'function') {
+    return globalThis.structuredClone(value);
+  }
+
+  return JSON.parse(JSON.stringify(value)) as T;
+}
 
 function loadOnboardingEntrySuppressed(): boolean {
   try {
@@ -114,6 +151,41 @@ function loadPersistedServerProjectId(): string | null {
   } catch {
     return null;
   }
+}
+
+function loadPersistedTableFieldColumnWidth(): number {
+  try {
+    const raw = localStorage.getItem(TABLE_FIELD_COLUMN_WIDTH_KEY);
+    if (!raw) return DEFAULT_TABLE_FIELD_COLUMN_WIDTH;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? clampTableFieldColumnWidth(parsed) : DEFAULT_TABLE_FIELD_COLUMN_WIDTH;
+  } catch {
+    return DEFAULT_TABLE_FIELD_COLUMN_WIDTH;
+  }
+}
+
+function loadPersistedSidebarWidth(): number {
+  try {
+    const raw = localStorage.getItem(SIDEBAR_WIDTH_KEY);
+    if (!raw) return DEFAULT_SIDEBAR_WIDTH;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? clampSidebarWidth(parsed) : DEFAULT_SIDEBAR_WIDTH;
+  } catch {
+    return DEFAULT_SIDEBAR_WIDTH;
+  }
+}
+
+function loadPersistedSidebarHidden(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_HIDDEN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function isCompactLayoutViewport(): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
+  return window.matchMedia(COMPACT_LAYOUT_MEDIA_QUERY).matches;
 }
 
 type TabKey = 'editor' | 'html' | 'wiki';
@@ -179,7 +251,12 @@ type DeletedRowUndoState = {
   row: ParsedRow;
   index: number;
 };
+type SectionClipboardState = {
+  type: 'section';
+  section: DocSection;
+};
 type WorkspaceSnapshot = {
+  projectName: string;
   methods: MethodDocument[];
   methodGroups: MethodGroup[];
   activeMethodId: string;
@@ -200,6 +277,11 @@ type JsonImportRoutingState = {
   sampleType: JsonImportSampleType;
   domainModelEnabled: boolean;
   targetSide: JsonImportTargetSide;
+};
+
+type WorkspaceMethodsImportRoutingState = {
+  fileName: string;
+  workspace: WorkspaceProjectData;
 };
 
 type ProjectTextImportState = {
@@ -225,6 +307,11 @@ type PendingMethodDeleteState = {
   sectionCount: number;
 };
 
+type PendingSectionDeleteState = {
+  sectionId: string;
+  sectionTitle: string;
+};
+
 type RichTextAction = 'bold' | 'italic' | 'code' | 'h3' | 'ul' | 'ol' | 'quote' | 'highlight';
 type RichTextCommandOptions = {
   color?: string;
@@ -234,6 +321,11 @@ type RichTextCommandOptions = {
 type AiRequestStatusState = 'loading' | 'success';
 type AiRequestStatus = {
   state: AiRequestStatusState;
+  message: string;
+};
+type AuthRequestStatusState = 'loading' | 'success';
+type AuthRequestStatus = {
+  state: AuthRequestStatusState;
   message: string;
 };
 
@@ -312,8 +404,6 @@ const RICH_TEXT_HIGHLIGHT_OPTIONS = [
   { value: '#fecdd3', label: 'Розовый' },
   { value: '#bfdbfe', label: 'Синий' }
 ] as const;
-
-type AddableBlockType = 'text' | 'request' | 'response' | 'error-logic' | 'diagram';
 
 const ADDABLE_BLOCK_TYPES: Array<{ type: AddableBlockType; label: string }> = [
   { type: 'text', label: 'Текстовый блок' },
@@ -446,6 +536,31 @@ function createErrorsSection(id = 'errors', title = 'Ошибки'): ErrorsSecti
     kind: 'errors',
     rows: [createErrorRow()],
     validationRules: [createValidationRuleRow()]
+  };
+}
+
+function createSectionId(prefix = 'section'): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function cloneSectionForPaste(section: DocSection): DocSection {
+  const cloned = deepClone(section);
+  const nextSectionId = createSectionId(cloned.kind);
+
+  if (cloned.kind === 'diagram') {
+    return {
+      ...cloned,
+      id: nextSectionId,
+      diagrams: cloned.diagrams.map((diagram) => ({
+        ...diagram,
+        id: createSectionId('diagram-item')
+      }))
+    };
+  }
+
+  return {
+    ...cloned,
+    id: nextSectionId
   };
 }
 
@@ -678,6 +793,7 @@ function createWorkspaceSeed(): WorkspaceProjectData {
   const method = createMethodDocument();
   return {
     version: 3,
+    projectName: DEFAULT_PROJECT_NAME,
     updatedAt: new Date().toISOString(),
     activeMethodId: method.id,
     methods: [method],
@@ -814,6 +930,7 @@ function createOnboardingDemoWorkspace(): WorkspaceProjectData {
   const method = createMethodDocument('Демо: Перевод между счетами', demoSections);
   return {
     version: 3,
+    projectName: 'Демо проект',
     updatedAt: new Date().toISOString(),
     activeMethodId: method.id,
     methods: [method],
@@ -827,13 +944,14 @@ function normalizeWorkspaceForMode(workspace: WorkspaceProjectData): WorkspacePr
   const resolvedMethod = workspace.methods.find((method) => method.id === workspace.activeMethodId) ?? workspace.methods[0] ?? createMethodDocument();
   return {
     ...workspace,
+    projectName: normalizeProjectName(workspace.projectName),
     activeMethodId: resolvedMethod.id,
     methods: [resolvedMethod],
     groups: []
   };
 }
 
-function asWorkspaceProjectData(methods: MethodDocument[], activeMethodId: string, groups: MethodGroup[] = []): WorkspaceProjectData {
+function asWorkspaceProjectData(projectName: string, methods: MethodDocument[], activeMethodId: string, groups: MethodGroup[] = []): WorkspaceProjectData {
   const normalizedMethods = methods.length > 0 ? methods : [createMethodDocument()];
   const resolvedActiveMethodId = normalizedMethods.some((method) => method.id === activeMethodId)
     ? activeMethodId
@@ -841,6 +959,7 @@ function asWorkspaceProjectData(methods: MethodDocument[], activeMethodId: strin
 
   const workspace: WorkspaceProjectData = {
     version: 3,
+    projectName: normalizeProjectName(projectName),
     updatedAt: new Date().toISOString(),
     activeMethodId: resolvedActiveMethodId,
     methods: normalizedMethods.map((method) => ({
@@ -898,6 +1017,7 @@ function loadWorkspaceProject(): WorkspaceProjectData {
 
       const workspace: WorkspaceProjectData = {
         version: 3,
+        projectName: normalizeProjectName(parsed.projectName),
         updatedAt: parsed.updatedAt || new Date().toISOString(),
         activeMethodId,
         methods: sanitizedMethods,
@@ -911,6 +1031,7 @@ function loadWorkspaceProject(): WorkspaceProjectData {
       const legacyMethod = createMethodDocument(DEFAULT_METHOD_NAME, sanitizeSections(parsed.sections));
       return {
         version: 3,
+        projectName: DEFAULT_PROJECT_NAME,
         updatedAt: parsed.updatedAt || new Date().toISOString(),
         activeMethodId: legacyMethod.id,
         methods: [legacyMethod],
@@ -1026,10 +1147,6 @@ function highlightCode(format: ParseFormat, value: string): string {
   return highlightCurlCode(value);
 }
 
-function isCustomSection(section: DocSection): boolean {
-  return section.id.startsWith('custom-');
-}
-
 function getDuplicateValueSet(rows: ParsedRow[]): Set<string> {
   const counts = new Map<string, number>();
 
@@ -1109,98 +1226,21 @@ function getDynamicTextareaRows(value: string, minRows = 1, maxRows = 8): number
   return Math.max(minRows, Math.min(maxRows, wrappedLineEstimate));
 }
 
-function MermaidLivePreview({ code }: { code: string }): ReactNode {
-  const hostRef = useRef<HTMLDivElement | null>(null);
-  const [error, setError] = useState('');
-  const [fallbackUrl, setFallbackUrl] = useState('');
-  const [fallbackLoadFailed, setFallbackLoadFailed] = useState(false);
-
-  useEffect(() => {
-    let isActive = true;
-
-    async function renderDiagram(): Promise<void> {
-      const host = hostRef.current;
-      if (!host) return;
-
-      const source = code.trim();
-      if (!source) {
-        host.innerHTML = '';
-        setError('');
-        setFallbackUrl('');
-        setFallbackLoadFailed(false);
-        return;
-      }
-
-      try {
-        const mermaidModule = await import('mermaid');
-        const mermaid = mermaidModule.default;
-        mermaid.initialize({ startOnLoad: false, securityLevel: 'loose' });
-        const graphId = `mermaid-${Math.random().toString(36).slice(2, 10)}`;
-        const { svg } = await mermaid.render(graphId, source);
-        if (!isActive) return;
-        host.innerHTML = svg;
-
-        const renderedSvg = host.querySelector('svg');
-        if (renderedSvg) {
-          renderedSvg.classList.add('diagram-mermaid-svg');
-          const viewBox = renderedSvg.getAttribute('viewBox')?.trim();
-          if (viewBox) {
-            const parts = viewBox.split(/\s+/).map((part) => Number(part));
-            if (parts.length === 4 && Number.isFinite(parts[2]) && Number.isFinite(parts[3]) && parts[2] > 0 && parts[3] > 0) {
-              renderedSvg.setAttribute('width', String(parts[2]));
-              renderedSvg.setAttribute('height', String(parts[3]));
-            }
-          }
-        }
-
-        setError('');
-        setFallbackUrl('');
-        setFallbackLoadFailed(false);
-      } catch (diagramError) {
-        if (!isActive) return;
-        host.innerHTML = '';
-        setError(diagramError instanceof Error ? diagramError.message : 'Ошибка Mermaid рендера');
-        setFallbackUrl(getDiagramImageUrl('mermaid', source, 'svg'));
-        setFallbackLoadFailed(false);
-      }
-    }
-
-    void renderDiagram();
-
-    return () => {
-      isActive = false;
-    };
-  }, [code]);
-
-  return (
-    <div className="diagram-preview">
-      <div ref={hostRef} className="diagram-preview-canvas" />
-      {fallbackUrl && !fallbackLoadFailed && (
-        <img
-          className="diagram-preview-image"
-          src={fallbackUrl}
-          alt="Mermaid preview"
-          loading="lazy"
-          onError={() => setFallbackLoadFailed(true)}
-        />
-      )}
-      {error && <div className="inline-error">{error}</div>}
-    </div>
-  );
-}
-
 export default function App() {
   const activeTextSectionIdRef = useRef<string | null>(null);
   const richEditorSelectionRef = useRef<{ editor: HTMLElement; range: Range } | null>(null);
   const topbarRef = useRef<HTMLElement | null>(null);
   const aiStatusResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const authStatusResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textEditorWikiSnapshotRef = useRef<string>('');
   const diagramTextRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const methodNameInputRef = useRef<HTMLInputElement | null>(null);
+  const projectNameInputRef = useRef<HTMLInputElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const previousMethodIdRef = useRef<string | null>(null);
   const initialWorkspace = useMemo(() => loadWorkspaceProject(), []);
   const initialOnboarding = useMemo(() => loadOnboardingState(), []);
+  const [projectName, setProjectName] = useState<string>(() => normalizeProjectName(initialWorkspace.projectName));
   const [methods, setMethodsState] = useState<MethodDocument[]>(() => initialWorkspace.methods);
   const [methodGroups, setMethodGroups] = useState<MethodGroup[]>(() => initialWorkspace.groups);
   const [activeMethodId, setActiveMethodId] = useState<string>(() => initialWorkspace.activeMethodId ?? initialWorkspace.methods[0]?.id ?? createMethodId());
@@ -1211,16 +1251,26 @@ export default function App() {
   const [importError, setImportError] = useState('');
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [draggedColumn, setDraggedColumn] = useState<RequestColumnKey | null>(null);
+  const [parsedFieldColumnWidth, setParsedFieldColumnWidth] = useState<number>(() => loadPersistedTableFieldColumnWidth());
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => loadPersistedSidebarWidth());
+  const [isSidebarHidden, setIsSidebarHidden] = useState<boolean>(() => loadPersistedSidebarHidden());
+  const [isCompactLayout, setIsCompactLayout] = useState<boolean>(() => isCompactLayoutViewport());
   const [editingField, setEditingField] = useState<EditableFieldState | null>(null);
   const [editingRequestCell, setEditingRequestCell] = useState<EditableRequestCellState | null>(null);
   const [editingHeaderCell, setEditingHeaderCell] = useState<EditableHeaderCellState | null>(null);
   const [editingMappingCell, setEditingMappingCell] = useState<EditableMappingCellState | null>(null);
+  const [editingMethodId, setEditingMethodId] = useState<string | null>(null);
+  const [editingMethodNameDraft, setEditingMethodNameDraft] = useState('');
+  const [editingProjectName, setEditingProjectName] = useState(false);
+  const [editingProjectNameDraft, setEditingProjectNameDraft] = useState('');
   const [editingSource, setEditingSource] = useState<EditableSourceState | null>(null);
   const [sourceEditorError, setSourceEditorError] = useState('');
   const [requestCellError, setRequestCellError] = useState('');
   const [aiErrorMessage, setAiErrorMessage] = useState('');
   const [aiRequestStatus, setAiRequestStatus] = useState<AiRequestStatus | null>(null);
   const [aiBusyKey, setAiBusyKey] = useState<string | null>(null);
+  const [authRequestStatus, setAuthRequestStatus] = useState<AuthRequestStatus | null>(null);
+  const [authBusyKey, setAuthBusyKey] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState<EditableTitleState | null>(null);
   const [expandedDriftAlerts, setExpandedDriftAlerts] = useState<DriftAlertState>({});
   const [expanderState, setExpanderState] = useState<ExpanderState>({});
@@ -1230,8 +1280,11 @@ export default function App() {
   const [isAddBlockMenuOpen, setIsAddBlockMenuOpen] = useState(false);
   const [isOnboardingNavVisible, setIsOnboardingNavVisible] = useState(false);
   const [pendingMethodNameFocus, setPendingMethodNameFocus] = useState(false);
+  const [pendingProjectNameFocus, setPendingProjectNameFocus] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [deletedRowUndo, setDeletedRowUndo] = useState<DeletedRowUndoState | null>(null);
+  const [sectionClipboard, setSectionClipboard] = useState<SectionClipboardState | null>(null);
+  const [isProjectFolderExpanded, setIsProjectFolderExpanded] = useState(true);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [isSectionPanelPulse, setIsSectionPanelPulse] = useState(false);
@@ -1244,7 +1297,9 @@ export default function App() {
   const [pendingDeleteProjectId, setPendingDeleteProjectId] = useState<string | null>(null);
   const [authDialog, setAuthDialog] = useState<AuthDialogState | null>(null);
   const [pendingMethodDelete, setPendingMethodDelete] = useState<PendingMethodDeleteState | null>(null);
+  const [pendingSectionDelete, setPendingSectionDelete] = useState<PendingSectionDeleteState | null>(null);
   const [jsonImportRouting, setJsonImportRouting] = useState<JsonImportRoutingState | null>(null);
+  const [workspaceMethodsImportRouting, setWorkspaceMethodsImportRouting] = useState<WorkspaceMethodsImportRoutingState | null>(null);
   const [projectTextImport, setProjectTextImport] = useState<ProjectTextImportState | null>(null);
   const [sourceTextImport, setSourceTextImport] = useState<SourceTextImportState | null>(null);
   const [hasOnboardingExport, setHasOnboardingExport] = useState(false);
@@ -1263,8 +1318,50 @@ export default function App() {
       if (aiStatusResetTimeoutRef.current) {
         clearTimeout(aiStatusResetTimeoutRef.current);
       }
+      if (authStatusResetTimeoutRef.current) {
+        clearTimeout(authStatusResetTimeoutRef.current);
+      }
     };
   }, []);
+
+  function persistParsedFieldColumnWidth(width: number): void {
+    try {
+      localStorage.setItem(TABLE_FIELD_COLUMN_WIDTH_KEY, String(width));
+    } catch {
+      // Ignore persistence errors for local preference.
+    }
+  }
+
+  function persistSidebarWidth(width: number): void {
+    try {
+      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(width));
+    } catch {
+      // Ignore persistence errors for local preference.
+    }
+  }
+
+  function startSidebarResize(event: ReactMouseEvent<HTMLButtonElement>): void {
+    if (isSidebarHidden) return;
+    event.preventDefault();
+
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+    let nextWidth = startWidth;
+
+    const onMouseMove = (moveEvent: MouseEvent): void => {
+      nextWidth = clampSidebarWidth(startWidth + moveEvent.clientX - startX);
+      setSidebarWidth(nextWidth);
+    };
+
+    const onMouseUp = (): void => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+      persistSidebarWidth(nextWidth);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  }
 
   function clearAiStatusResetTimeout(): void {
     if (aiStatusResetTimeoutRef.current) {
@@ -1284,6 +1381,27 @@ export default function App() {
     aiStatusResetTimeoutRef.current = setTimeout(() => {
       setAiRequestStatus((current) => (current?.state === 'success' ? null : current));
       aiStatusResetTimeoutRef.current = null;
+    }, 3500);
+  }
+
+  function clearAuthStatusResetTimeout(): void {
+    if (authStatusResetTimeoutRef.current) {
+      clearTimeout(authStatusResetTimeoutRef.current);
+      authStatusResetTimeoutRef.current = null;
+    }
+  }
+
+  function startAuthRequestStatus(message: string): void {
+    clearAuthStatusResetTimeout();
+    setAuthRequestStatus({ state: 'loading', message });
+  }
+
+  function completeAuthRequestStatus(message: string): void {
+    clearAuthStatusResetTimeout();
+    setAuthRequestStatus({ state: 'success', message });
+    authStatusResetTimeoutRef.current = setTimeout(() => {
+      setAuthRequestStatus((current) => (current?.state === 'success' ? null : current));
+      authStatusResetTimeoutRef.current = null;
     }, 3500);
   }
   const internalCodePopoverRef = useRef<HTMLDivElement | null>(null);
@@ -1306,6 +1424,7 @@ export default function App() {
   const remotePendingChangesRef = useRef(0);
   const remoteLastObservedHashRef = useRef('');
   const remoteLastSavedHashRef = useRef('');
+  const normalizedProjectName = projectName.trim() || DEFAULT_PROJECT_NAME;
   const activeMethod = methods.find((method) => method.id === activeMethodId) ?? methods[0];
   const sections = useMemo(() => activeMethod?.sections ?? EMPTY_SECTIONS, [activeMethod]);
   const methodNameWarning = useMemo(() => {
@@ -1321,8 +1440,9 @@ export default function App() {
 
   function cloneSnapshot(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
     return {
-      methods: JSON.parse(JSON.stringify(snapshot.methods)) as MethodDocument[],
-      methodGroups: JSON.parse(JSON.stringify(snapshot.methodGroups)) as MethodGroup[],
+      projectName: snapshot.projectName,
+      methods: deepClone(snapshot.methods),
+      methodGroups: deepClone(snapshot.methodGroups),
       activeMethodId: snapshot.activeMethodId,
       selectedId: snapshot.selectedId
     };
@@ -1330,6 +1450,7 @@ export default function App() {
 
   function getWorkspaceSnapshot(): WorkspaceSnapshot {
     return {
+      projectName: normalizedProjectName,
       methods,
       methodGroups,
       activeMethodId,
@@ -1339,6 +1460,7 @@ export default function App() {
 
   function applyWorkspaceSnapshot(snapshot: WorkspaceSnapshot): void {
     historySuspendRef.current = true;
+    setProjectName(snapshot.projectName);
     setMethodsState(snapshot.methods);
     setMethodGroups(snapshot.methodGroups);
     setActiveMethodId(snapshot.activeMethodId);
@@ -1380,8 +1502,9 @@ export default function App() {
 
   function toPersistedHistorySnapshot(snapshot: WorkspaceSnapshot): PersistedHistoryState['undoStack'][number] {
     return {
-      methods: JSON.parse(JSON.stringify(snapshot.methods)) as unknown[],
-      methodGroups: JSON.parse(JSON.stringify(snapshot.methodGroups)) as unknown[],
+      projectName: snapshot.projectName,
+      methods: deepClone(snapshot.methods) as unknown[],
+      methodGroups: deepClone(snapshot.methodGroups) as unknown[],
       activeMethodId: snapshot.activeMethodId,
       selectedId: snapshot.selectedId
     };
@@ -1389,8 +1512,9 @@ export default function App() {
 
   function fromPersistedHistorySnapshot(snapshot: PersistedHistoryState['undoStack'][number]): WorkspaceSnapshot {
     return {
-      methods: JSON.parse(JSON.stringify(snapshot.methods)) as MethodDocument[],
-      methodGroups: JSON.parse(JSON.stringify(snapshot.methodGroups)) as MethodGroup[],
+      projectName: normalizeProjectName((snapshot as WorkspaceSnapshot).projectName),
+      methods: deepClone(snapshot.methods) as MethodDocument[],
+      methodGroups: deepClone(snapshot.methodGroups) as MethodGroup[],
       activeMethodId: snapshot.activeMethodId,
       selectedId: snapshot.selectedId
     };
@@ -1605,7 +1729,7 @@ export default function App() {
       setCanUndo(undoStackRef.current.length > 0);
       setCanRedo(redoStackRef.current.length > 0);
     }
-  }, [methods, methodGroups, activeMethodId, selectedId]);
+  }, [projectName, methods, methodGroups, activeMethodId, selectedId]);
 
   useEffect(() => {
     setMethodsState((prev) => {
@@ -1626,6 +1750,7 @@ export default function App() {
 
   function applyWorkspaceState(workspace: WorkspaceProjectData): void {
     const resolvedActiveMethod = workspace.methods.find((method) => method.id === workspace.activeMethodId) ?? workspace.methods[0];
+    setProjectName(normalizeProjectName(workspace.projectName));
     setMethodsState(workspace.methods);
     setMethodGroups(workspace.groups);
     setActiveMethodId(resolvedActiveMethod?.id ?? createMethodId());
@@ -1696,7 +1821,7 @@ export default function App() {
 
   async function submitAuthDialog(): Promise<void> {
     const current = authDialog;
-    if (!current || current.isSubmitting) return;
+    if (!current || current.isSubmitting || Boolean(authBusyKey)) return;
 
     const login = current.login.trim();
     const password = current.password;
@@ -1705,7 +1830,10 @@ export default function App() {
       return;
     }
 
+    const busyKey = current.mode === 'login' ? 'auth:login' : 'auth:register';
     setAuthDialog((prev) => (prev ? { ...prev, isSubmitting: true, error: '' } : prev));
+    setAuthBusyKey(busyKey);
+    startAuthRequestStatus(current.mode === 'login' ? 'Авторизация: выполняю вход...' : 'Авторизация: создаю аккаунт...');
     remoteHydratedRef.current = false;
 
     try {
@@ -1723,6 +1851,7 @@ export default function App() {
         setServerProjectId(null);
       }
       setToastMessage(current.mode === 'login' ? 'Вы вошли в аккаунт' : 'Регистрация выполнена');
+      completeAuthRequestStatus(current.mode === 'login' ? 'Авторизация: вход выполнен' : 'Авторизация: регистрация выполнена');
       setAuthDialog(null);
     } catch (error) {
       const message =
@@ -1731,9 +1860,12 @@ export default function App() {
           : current.mode === 'login'
             ? 'Не удалось войти'
             : 'Не удалось зарегистрироваться';
+      clearAuthStatusResetTimeout();
+      setAuthRequestStatus(null);
       setAuthDialog((prev) => (prev ? { ...prev, isSubmitting: false, error: message } : prev));
       setServerSyncError(message);
     } finally {
+      setAuthBusyKey(null);
       remoteHydratedRef.current = true;
     }
   }
@@ -1750,6 +1882,26 @@ export default function App() {
     if (!projectId) return 'проект';
     const found = serverProjects.find((project) => project.id === projectId);
     return found?.name?.trim() || 'проект';
+  }
+
+  function startProjectRename(): void {
+    setEditingProjectName(true);
+    setEditingProjectNameDraft(projectName);
+    setPendingProjectNameFocus(true);
+  }
+
+  function finishProjectRename(): void {
+    const nextName = normalizeProjectName(editingProjectNameDraft || projectName);
+    setProjectName(nextName);
+    setEditingProjectNameDraft('');
+    setEditingProjectName(false);
+    setPendingProjectNameFocus(false);
+  }
+
+  function cancelProjectRename(): void {
+    setEditingProjectNameDraft('');
+    setEditingProjectName(false);
+    setPendingProjectNameFocus(false);
   }
 
   async function saveServerProjectWithFallback(params: {
@@ -1775,10 +1927,15 @@ export default function App() {
 
   async function loadServerProjectIntoWorkspace(projectId: string): Promise<void> {
     const payload = (await loadServerProject(projectId)) as ServerProjectPayload;
-    applyWorkspaceState(payload.workspace);
+    const normalizedWorkspace = {
+      ...payload.workspace,
+      projectName: normalizeProjectName(payload.workspace.projectName || payload.name)
+    };
+
+    applyWorkspaceState(normalizedWorkspace);
     applyPersistedHistoryState(payload.history);
     setServerProjectId(payload.id);
-    const loadedHash = JSON.stringify(payload.workspace);
+    const loadedHash = JSON.stringify(normalizedWorkspace);
     remoteLastObservedHashRef.current = loadedHash;
     remoteLastSavedHashRef.current = loadedHash;
     remotePendingChangesRef.current = 0;
@@ -1804,15 +1961,39 @@ export default function App() {
     }
   }
 
-  function handleDeleteServerProject(): void {
-    if (!serverProjectId) return;
-    setPendingDeleteProjectId(serverProjectId);
-    setShowDeleteProjectDialog(true);
-  }
-
   function cancelDeleteServerProject(): void {
     setShowDeleteProjectDialog(false);
     setPendingDeleteProjectId(null);
+  }
+
+  function copySection(sectionId: string): void {
+    const section = sections.find((item) => item.id === sectionId);
+    if (!section) return;
+    setSectionClipboard({
+      type: 'section',
+      section: deepClone(section)
+    });
+    setToastMessage(`Секция «${resolveSectionTitle(section.title)}» скопирована`);
+  }
+
+  function pasteSectionRelative(targetSectionId: string, position: 'above' | 'below'): void {
+    if (!sectionClipboard || sectionClipboard.type !== 'section') return;
+
+    const nextSection = cloneSectionForPaste(sectionClipboard.section);
+    const nextSelectedId = nextSection.id;
+
+    setSections((prev) => {
+      const targetIndex = prev.findIndex((section) => section.id === targetSectionId);
+      if (targetIndex === -1) return prev;
+
+      const insertIndex = position === 'above' ? targetIndex : targetIndex + 1;
+      const next = [...prev];
+      next.splice(insertIndex, 0, nextSection);
+      return next;
+    });
+
+    setSelectedId(nextSelectedId);
+    setToastMessage(`Секция вставлена ${position === 'above' ? 'выше' : 'ниже'}`);
   }
 
   async function confirmDeleteServerProject(): Promise<void> {
@@ -1837,6 +2018,9 @@ export default function App() {
   }
 
   async function handleLogout(): Promise<void> {
+    if (authBusyKey) return;
+    setAuthBusyKey('auth:logout');
+    startAuthRequestStatus('Авторизация: выполняю выход...');
     let serverLogoutFailed = false;
     try {
       await logoutFromServer();
@@ -1867,6 +2051,12 @@ export default function App() {
           ? 'Серверная сессия не завершена. Локальные данные сохранены.'
           : 'Вы вышли из аккаунта'
       );
+      completeAuthRequestStatus(
+        serverLogoutFailed
+          ? 'Авторизация: локальный выход выполнен, сервер недоступен'
+          : 'Авторизация: выход выполнен'
+      );
+      setAuthBusyKey(null);
     }
   }
 
@@ -1966,8 +2156,43 @@ export default function App() {
   }
 
   function switchMethod(method: MethodDocument): void {
+    setEditingMethodId(null);
+    setEditingMethodNameDraft('');
     setActiveMethodId(method.id);
     setSelectedId(method.sections[0]?.id ?? createInitialSections()[0].id);
+    if (isCompactLayout) setIsSidebarHidden(true);
+  }
+
+  function startMethodRename(method: MethodDocument): void {
+    if (activeMethodId !== method.id) {
+      switchMethod(method);
+    }
+    setEditingMethodId(method.id);
+    setEditingMethodNameDraft(method.name);
+    setPendingMethodNameFocus(true);
+  }
+
+  function finishMethodRename(): void {
+    if (!editingMethodId) return;
+    const resolved = (editingMethodNameDraft || '').trim() || DEFAULT_METHOD_NAME;
+    setMethodsState((prev) =>
+      prev.map((method) =>
+        method.id === editingMethodId
+          ? {
+              ...method,
+              name: resolved,
+              updatedAt: new Date().toISOString()
+            }
+          : method
+      )
+    );
+    setEditingMethodNameDraft('');
+    setEditingMethodId(null);
+  }
+
+  function cancelMethodRename(): void {
+    setEditingMethodNameDraft('');
+    setEditingMethodId(null);
   }
 
   function setSections(next: DocSection[] | ((prev: DocSection[]) => DocSection[])): void {
@@ -1996,11 +2221,13 @@ export default function App() {
   }
 
   function createMethod(): void {
-    const name = `Метод ${methods.length + 1}`;
+    const name = `Проект ${methods.length + 1}`;
     const method = createMethodDocument(name, createInitialSections());
     setMethodsState((prev) => [...prev, method]);
     setActiveMethodId(method.id);
     setSelectedId(method.sections[0]?.id ?? createInitialSections()[0].id);
+    setEditingMethodId(method.id);
+    setEditingMethodNameDraft(name);
     setPendingMethodNameFocus(true);
     setTab('editor');
   }
@@ -2017,27 +2244,6 @@ export default function App() {
       methodName: activeMethod.name,
       sectionCount: activeMethod.sections.length
     });
-  }
-
-  function updateActiveMethodName(name: string): void {
-    if (!activeMethod) return;
-    setMethodsState((prev) =>
-      prev.map((method) =>
-        method.id === activeMethod.id
-          ? {
-              ...method,
-              name,
-              updatedAt: new Date().toISOString()
-            }
-          : method
-      )
-    );
-  }
-
-  function normalizeActiveMethodName(): void {
-    if (!activeMethod) return;
-    const resolved = activeMethod.name.trim() || DEFAULT_METHOD_NAME;
-    updateActiveMethodName(resolved);
   }
 
   function cancelDeleteMethod(): void {
@@ -2074,18 +2280,33 @@ export default function App() {
   }
 
   useEffect(() => {
+    if (!editingMethodId) return;
+    if (methods.some((method) => method.id === editingMethodId)) return;
+    setEditingMethodId(null);
+    setEditingMethodNameDraft('');
+  }, [methods]);
+
+  useEffect(() => {
     if (!sections.length) return;
     if (sections.some((section) => section.id === selectedId)) return;
     setSelectedId(sections[0].id);
   }, [sections, selectedId, activeMethodId]);
 
   useEffect(() => {
-    if (!pendingMethodNameFocus || !activeMethod || activeMethod.id !== activeMethodId) return;
+    if (!pendingMethodNameFocus || !activeMethod || activeMethod.id !== activeMethodId || editingMethodId !== activeMethod.id) return;
     if (!methodNameInputRef.current) return;
     methodNameInputRef.current.focus();
     methodNameInputRef.current.select();
     setPendingMethodNameFocus(false);
-  }, [pendingMethodNameFocus, activeMethod, activeMethodId]);
+  }, [pendingMethodNameFocus, activeMethod, activeMethodId, editingMethodId]);
+
+  useEffect(() => {
+    if (!pendingProjectNameFocus || !editingProjectName) return;
+    if (!projectNameInputRef.current) return;
+    projectNameInputRef.current.focus();
+    projectNameInputRef.current.select();
+    setPendingProjectNameFocus(false);
+  }, [pendingProjectNameFocus, editingProjectName]);
 
   useEffect(() => {
     if (!activeMethodId) return;
@@ -2670,18 +2891,76 @@ export default function App() {
     if (name === 'theme_sun') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4" /><path d="M12 2v3" /><path d="M12 19v3" /><path d="M2 12h3" /><path d="M19 12h3" /><path d="m4.9 4.9 2.1 2.1" /><path d="m17 17 2.1 2.1" /><path d="m19.1 4.9-2.1 2.1" /><path d="m7 17-2.1 2.1" /></svg>;
     if (name === 'add_row') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 7v10M7 12h10" /></svg>;
     if (name === 'format_json') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 5c-2 0-3 1.4-3 3.2V10c0 1.2-.6 2-2 2 1.4 0 2 .8 2 2v1.8C5 17.6 6 19 8 19" /><path d="M16 5c2 0 3 1.4 3 3.2V10c0 1.2.6 2 2 2-1.4 0-2 .8-2 2v1.8c0 1.8-1 3.2-3 3.2" /></svg>;
+    if (name === 'copy') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="9" width="10" height="10" rx="2" /><path d="M7 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1" /></svg>;
+    if (name === 'paste_above') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 17V7" /><path d="m8 11 4-4 4 4" /><path d="M5 20h14" /></svg>;
+    if (name === 'paste_below') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 7v10" /><path d="m8 13 4 4 4-4" /><path d="M5 4h14" /></svg>;
     if (name === 'ai_describe') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="4" y="4" width="16" height="12" rx="3" /><path d="M8 9h8" /><path d="M12 16v4" /><path d="M8 20h8" /></svg>;
     if (name === 'ai_map') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="6" cy="12" r="2" /><circle cx="18" cy="7" r="2" /><circle cx="18" cy="17" r="2" /><path d="M8 12h4" /><path d="M12 12l4-5" /><path d="M12 12l4 5" /></svg>;
     if (name === 'ai_mask') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3 5 6v5c0 4.2 2.6 8.2 7 10 4.4-1.8 7-5.8 7-10V6l-7-3Z" /><path d="M9 12h6" /><path d="M10 9h4" /></svg>;
     if (name === 'add_method') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 6v12M6 12h12" /></svg>;
     if (name === 'delete_method') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 12h10" /></svg>;
+    if (name === 'delete_section') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 7h14" /><path d="M9 7V5h6v2" /><path d="M8 7l1 12h6l1-12" /></svg>;
     if (name === 'add_section') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="4" y="4" width="16" height="16" rx="3" /><path d="M12 8v8M8 12h8" /></svg>;
     if (name === 'skip') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 6l8 6-8 6V6Z" /><path d="M14 6l8 6-8 6V6Z" /></svg>;
     if (name === 'search') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="6" /><path d="M20 20l-4.2-4.2" /></svg>;
     if (name === 'settings') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3" /><path d="M19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a7 7 0 0 0-1.7-1L14.5 3h-5l-.4 2a7 7 0 0 0-1.7 1L5 5l-2 3.4 2 1.6a7 7 0 0 0 0 2L3 13.6 5 17l2.4-1a7 7 0 0 0 1.7 1l.4 2h5l.4-2a7 7 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6c.1-.3.1-.7.1-1Z" /></svg>;
     if (name === 'user') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="8" r="4" /><path d="M4 20a8 8 0 0 1 16 0" /></svg>;
+    if (name === 'more') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>;
+    if (name === 'edit') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 20h4l10-10-4-4L4 16v4Z" /><path d="m13 7 4 4" /></svg>;
+    if (name === 'folder') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" /></svg>;
+    if (name === 'sidebar_panel') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /></svg>;
+    if (name === 'chevron_down') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6" /></svg>;
+    if (name === 'chevron_right') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m9 6 6 6-6 6" /></svg>;
 
     return null;
+  }
+
+  function renderSectionActionCluster(section: DocSection, layout: 'sidebar' | 'header' = 'header'): ReactNode {
+    const hasClipboardSection = sectionClipboard?.type === 'section';
+    const className = layout === 'sidebar' ? 'section-item-actions' : 'section-head-actions';
+
+    return (
+      <div className={className}>
+        <button
+          className="icon-button"
+          type="button"
+          aria-label="Копировать секцию"
+          title="Копировать секцию"
+          onClick={(event) => {
+            event.stopPropagation();
+            copySection(section.id);
+          }}
+        >
+          <span className="ui-icon" aria-hidden>{renderUiIcon('copy')}</span>
+        </button>
+        <button
+          className="icon-button"
+          type="button"
+          aria-label="Вставить секцию выше"
+          title="Вставить секцию выше"
+          disabled={!hasClipboardSection}
+          onClick={(event) => {
+            event.stopPropagation();
+            pasteSectionRelative(section.id, 'above');
+          }}
+        >
+          <span className="ui-icon" aria-hidden>{renderUiIcon('paste_above')}</span>
+        </button>
+        <button
+          className="icon-button"
+          type="button"
+          aria-label="Вставить секцию ниже"
+          title="Вставить секцию ниже"
+          disabled={!hasClipboardSection}
+          onClick={(event) => {
+            event.stopPropagation();
+            pasteSectionRelative(section.id, 'below');
+          }}
+        >
+          <span className="ui-icon" aria-hidden>{renderUiIcon('paste_below')}</span>
+        </button>
+      </div>
+    );
   }
 
   const onboardingEntryOptions: Array<{
@@ -2717,19 +2996,50 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined;
+
+    const mediaQuery = window.matchMedia(COMPACT_LAYOUT_MEDIA_QUERY);
+    const updateCompactLayout = (event?: MediaQueryListEvent): void => {
+      setIsCompactLayout(event ? event.matches : mediaQuery.matches);
+    };
+
+    updateCompactLayout();
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', updateCompactLayout);
+      return () => mediaQuery.removeEventListener('change', updateCompactLayout);
+    }
+
+    mediaQuery.addListener(updateCompactLayout);
+    return () => mediaQuery.removeListener(updateCompactLayout);
+  }, []);
+
+  useEffect(() => {
+    try {
+      if (isSidebarHidden) {
+        localStorage.setItem(SIDEBAR_HIDDEN_KEY, '1');
+      } else {
+        localStorage.removeItem(SIDEBAR_HIDDEN_KEY);
+      }
+    } catch {
+      // Ignore persistence errors for local preference.
+    }
+  }, [isSidebarHidden]);
+
+  useEffect(() => {
     setAutosave({ state: 'saving' });
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(asWorkspaceProjectData(methods, activeMethodId, methodGroups)));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(asWorkspaceProjectData(normalizedProjectName, methods, activeMethodId, methodGroups)));
       setAutosave({ state: 'saved', at: formatTime(new Date()) });
     } catch {
       setAutosave({ state: 'error' });
     }
-  }, [methods, activeMethodId, methodGroups]);
+  }, [normalizedProjectName, methods, activeMethodId, methodGroups]);
 
   useEffect(() => {
     if (!authUser || !remoteHydratedRef.current) return;
 
-    const workspace = asWorkspaceProjectData(methods, activeMethodId, methodGroups);
+    const workspace = asWorkspaceProjectData(normalizedProjectName, methods, activeMethodId, methodGroups);
     const currentHash = JSON.stringify(workspace);
 
     if (currentHash === remoteLastObservedHashRef.current) {
@@ -2750,19 +3060,19 @@ export default function App() {
         remoteSaveTimerRef.current = null;
       }
 
-      const latestWorkspace = asWorkspaceProjectData(methods, activeMethodId, methodGroups);
-      const projectName = activeMethod?.name?.trim() || 'Документ API';
+      const latestWorkspace = asWorkspaceProjectData(normalizedProjectName, methods, activeMethodId, methodGroups);
+      const nextProjectName = normalizedProjectName;
       const latestHash = JSON.stringify(latestWorkspace);
 
       try {
         const saved = await saveServerProjectWithFallback({
           projectId: serverProjectId ?? undefined,
-          name: projectName,
+          name: nextProjectName,
           workspace: latestWorkspace
         });
         setServerProjectId(saved.id);
         setServerSyncError('');
-        upsertServerProjectListEntry({ id: saved.id, name: projectName, updatedAt: saved.updatedAt });
+        upsertServerProjectListEntry({ id: saved.id, name: nextProjectName, updatedAt: saved.updatedAt });
         remoteLastSavedHashRef.current = latestHash;
         remotePendingChangesRef.current = 0;
       } catch (error) {
@@ -2861,6 +3171,27 @@ export default function App() {
 
       return next;
     });
+  }
+
+  function requestDeleteSection(id: string): void {
+    const section = sections.find((item) => item.id === id);
+    if (!section) return;
+    setPendingSectionDelete({
+      sectionId: section.id,
+      sectionTitle: resolveSectionTitle(section.title)
+    });
+  }
+
+  function cancelDeleteSection(): void {
+    setPendingSectionDelete(null);
+  }
+
+  function confirmDeleteSection(): void {
+    if (!pendingSectionDelete) return;
+    const { sectionId, sectionTitle } = pendingSectionDelete;
+    setPendingSectionDelete(null);
+    deleteSection(sectionId);
+    setToastMessage(`Раздел «${sectionTitle}» удален`);
   }
 
   function addDiagram(sectionId: string): void {
@@ -3421,6 +3752,13 @@ export default function App() {
     }
   }
 
+  function renderAiActionIcon(iconName: 'ai_describe' | 'ai_mask' | 'ai_map', isBusy: boolean): ReactNode {
+    if (isBusy) {
+      return <span className="ai-loader ai-loader-inline" aria-hidden="true" />;
+    }
+    return <span className="ui-icon" aria-hidden>{renderUiIcon(iconName)}</span>;
+  }
+
   function exportProjectJson(): void {
     if (!activeMethod) return;
     const methodSlug = slugifyMethodFileName(activeMethod.name);
@@ -3480,6 +3818,13 @@ export default function App() {
     markOnboardingExportTouched();
   }
 
+  function handleExportWiki(): void {
+    if (!activeMethod) return;
+    const methodSlug = slugifyMethodFileName(activeMethod.name);
+    downloadText(`${methodSlug}.documentation.wiki.txt`, wikiOutput);
+    markOnboardingExportTouched();
+  }
+
   function openHtmlPreview(): void {
     if (!activeMethod) return;
     setTab('html');
@@ -3487,8 +3832,7 @@ export default function App() {
 
   function openWikiPreview(): void {
     if (!activeMethod) return;
-    void copyToClipboard(wikiOutput);
-    setToastMessage('Wiki текст скопирован в буфер обмена.');
+    setTab('wiki');
   }
 
   async function copyToClipboard(value: string): Promise<void> {
@@ -3515,8 +3859,10 @@ export default function App() {
       const parsed = JSON.parse(text) as WorkspaceProjectData | ProjectData | Record<string, unknown>;
 
       if ('methods' in parsed && Array.isArray(parsed.methods)) {
-        const loaded = loadWorkspaceProjectFromPayload(parsed as WorkspaceProjectData);
-        applyWorkspaceState({ ...loaded, groups: ENABLE_MULTI_METHODS ? loaded.groups : [] });
+        setWorkspaceMethodsImportRouting({
+          fileName,
+          workspace: parsed as WorkspaceProjectData
+        });
         setImportError('');
         setProjectTextImport(null);
         return;
@@ -3559,6 +3905,113 @@ export default function App() {
       processImportedText(String(reader.result || ''), file.name);
     };
     reader.readAsText(file);
+  }
+
+  function getUniqueMethodImportName(name: string, takenNames: Set<string>): string {
+    const baseName = name.trim() || DEFAULT_METHOD_NAME;
+    if (!takenNames.has(baseName.toLowerCase())) {
+      return baseName;
+    }
+
+    let suffix = 2;
+    while (takenNames.has(`${baseName} ${suffix}`.toLowerCase())) {
+      suffix += 1;
+    }
+
+    return `${baseName} ${suffix}`;
+  }
+
+  function cancelWorkspaceMethodsImportRouting(): void {
+    setWorkspaceMethodsImportRouting(null);
+  }
+
+  function applyWorkspaceImportAsReplace(): void {
+    if (!workspaceMethodsImportRouting) return;
+    const loaded = loadWorkspaceProjectFromPayload(workspaceMethodsImportRouting.workspace);
+    applyWorkspaceState({ ...loaded, groups: ENABLE_MULTI_METHODS ? loaded.groups : [] });
+    setWorkspaceMethodsImportRouting(null);
+    setImportError('');
+    setToastMessage('Проект импортирован из JSON');
+  }
+
+  function applyWorkspaceImportAsMethodsMerge(): void {
+    if (!workspaceMethodsImportRouting) return;
+
+    const loaded = loadWorkspaceProjectFromPayload(workspaceMethodsImportRouting.workspace);
+    const importedMethodsSource = loaded.methods;
+
+    if (importedMethodsSource.length === 0) {
+      setWorkspaceMethodsImportRouting(null);
+      setImportError('JSON не содержит методов для импорта');
+      return;
+    }
+
+    const takenNames = new Set(methods.map((method) => method.name.trim().toLowerCase()));
+    const methodIdMap = new Map<string, string>();
+
+    const importedMethods = importedMethodsSource.map((method) => {
+      const originalId = method.id;
+      const nextId = createMethodId();
+      methodIdMap.set(originalId, nextId);
+
+      const nextName = getUniqueMethodImportName(method.name, takenNames);
+      takenNames.add(nextName.toLowerCase());
+
+      return {
+        ...method,
+        id: nextId,
+        name: nextName,
+        updatedAt: method.updatedAt || new Date().toISOString()
+      };
+    });
+
+    const importedGroups = ENABLE_MULTI_METHODS
+      ? loaded.groups
+          .map((group) => {
+            const remappedMethodIds = group.methodIds
+              .map((methodId) => methodIdMap.get(methodId) ?? null)
+              .filter((methodId): methodId is string => Boolean(methodId));
+
+            if (remappedMethodIds.length === 0) {
+              return null;
+            }
+
+            const remappedLinks = group.links
+              .map((link) => {
+                const fromMethodId = methodIdMap.get(link.fromMethodId);
+                const toMethodId = methodIdMap.get(link.toMethodId);
+                if (!fromMethodId || !toMethodId) return null;
+                return {
+                  ...link,
+                  fromMethodId,
+                  toMethodId
+                };
+              })
+              .filter((link): link is MethodGroup['links'][number] => Boolean(link));
+
+            return {
+              ...group,
+              id: `group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              methodIds: remappedMethodIds,
+              links: remappedLinks
+            };
+          })
+          .filter((group): group is MethodGroup => Boolean(group))
+      : [];
+
+    setMethodsState((current) => [...current, ...importedMethods]);
+    if (importedGroups.length > 0) {
+      setMethodGroups((current) => [...current, ...importedGroups]);
+    }
+
+    const firstImportedMethod = importedMethods[0];
+    setActiveMethodId(firstImportedMethod.id);
+    setSelectedId(firstImportedMethod.sections[0]?.id ?? createInitialSections()[0].id);
+    setTab('editor');
+
+    setWorkspaceMethodsImportRouting(null);
+    setImportError('');
+    setToastMessage(`Импортировано методов: ${importedMethods.length}`);
   }
 
   function openSourceTextImport(section: ParsedSection, target: ParseTarget): void {
@@ -3665,8 +4118,16 @@ export default function App() {
     return `${sectionId}:${diagramId}`;
   }
 
+  function getDiagramEditorNode(sectionId: string, diagramId: string): HTMLDivElement | null {
+    return diagramTextRefs.current[getDiagramEditorKey(sectionId, diagramId)] ?? null;
+  }
+
+  function bindDiagramEditorRef(sectionId: string, diagramId: string, node: HTMLDivElement | null): void {
+    diagramTextRefs.current[getDiagramEditorKey(sectionId, diagramId)] = node;
+  }
+
   function syncDiagramDescriptionFromEditor(sectionId: string, diagramId: string): void {
-    const editor = diagramTextRefs.current[getDiagramEditorKey(sectionId, diagramId)];
+    const editor = getDiagramEditorNode(sectionId, diagramId);
     if (!editor) return;
     const nextValue = editorElementToWikiText(editor);
     updateDiagram(sectionId, diagramId, (current) => ({ ...current, description: nextValue }));
@@ -3930,7 +4391,7 @@ export default function App() {
     action: RichTextAction,
     options?: RichTextCommandOptions
   ): void {
-    const editor = diagramTextRefs.current[getDiagramEditorKey(sectionId, diagramId)];
+    const editor = getDiagramEditorNode(sectionId, diagramId);
     if (!editor) return;
 
     restoreSelectionForEditor(editor);
@@ -4527,6 +4988,93 @@ export default function App() {
     setEditingField(null);
   }
 
+  function renderFieldName(value: string | null | undefined): ReactNode {
+    if (!value) return '—';
+
+    const parts = value.split('.');
+    if (parts.length === 1) {
+      return <span className="field-name-text">{value}</span>;
+    }
+
+    return (
+      <span className="field-name-text">
+        {parts.map((part, index) => (
+          <span key={`${value}-${index}`} className="field-name-part">
+            {part}
+            {index < parts.length - 1 ? (
+              <>
+                .
+                <wbr />
+              </>
+            ) : null}
+          </span>
+        ))}
+      </span>
+    );
+  }
+
+  function startParsedFieldColumnResize(event: ReactMouseEvent<HTMLButtonElement>): void {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const startX = event.clientX;
+    const startWidth = parsedFieldColumnWidth;
+    let latestWidth = startWidth;
+    document.body.classList.add('column-resizing');
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const delta = moveEvent.clientX - startX;
+      latestWidth = clampTableFieldColumnWidth(startWidth + delta);
+      setParsedFieldColumnWidth(latestWidth);
+    };
+
+    const handleMouseUp = () => {
+      document.body.classList.remove('column-resizing');
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+      persistParsedFieldColumnWidth(latestWidth);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  }
+
+  function resetParsedFieldColumnWidth(event: ReactMouseEvent<HTMLButtonElement>): void {
+    event.preventDefault();
+    event.stopPropagation();
+    setParsedFieldColumnWidth(DEFAULT_TABLE_FIELD_COLUMN_WIDTH);
+    persistParsedFieldColumnWidth(DEFAULT_TABLE_FIELD_COLUMN_WIDTH);
+  }
+
+  function renderParsedFieldColumnHeader(label: string): ReactNode {
+    return (
+      <div className="table-header-label">
+        <span>{label}</span>
+        <button
+          className="table-column-resizer"
+          type="button"
+          aria-label="Изменить ширину колонки параметра"
+          title="Потяните, чтобы изменить ширину. Двойной клик сбрасывает размер."
+          draggable={false}
+          onClick={(event) => event.stopPropagation()}
+          onMouseDown={startParsedFieldColumnResize}
+          onDoubleClick={resetParsedFieldColumnWidth}
+        />
+      </div>
+    );
+  }
+
+  function renderParsedTableColGroup(columns: RequestColumnKey[]): ReactNode {
+    return (
+      <colgroup>
+        {columns.map((column) => {
+          const style: CSSProperties | undefined = column === 'field' ? { width: `${parsedFieldColumnWidth}px` } : undefined;
+          return <col key={column} className={`table-col table-col-${column}`} style={style} />;
+        })}
+      </colgroup>
+    );
+  }
+
   function renderEditableFieldCell(section: ParsedSection, row: ParsedRow, options: EditableFieldOptions = {}): ReactNode {
     const allowEdit = options.allowEdit ?? true;
     const editTarget = options.editTarget ?? 'server';
@@ -4558,7 +5106,7 @@ export default function App() {
 
     return (
       <div className="field-display" onDoubleClick={() => allowEdit && startFieldEditing(section, row, editTarget)}>
-        <span>{row.field}</span>
+        <span className="field-name-cell">{renderFieldName(row.field)}</span>
         <span className="field-actions">
           {allowEdit && (
             <button className="icon-button" type="button" onClick={() => startFieldEditing(section, row, editTarget)} aria-label="Редактировать поле">
@@ -4605,7 +5153,7 @@ export default function App() {
 
     return (
       <div className="field-display" onDoubleClick={() => startClientFieldEditing(section, row)}>
-        <span>{row.clientField}</span>
+        <span className="field-name-cell">{renderFieldName(row.clientField)}</span>
         <span className="field-actions">
           <button className="icon-button" type="button" onClick={() => startClientFieldEditing(section, row)} aria-label="Редактировать client поле">
             ✎
@@ -4803,7 +5351,7 @@ export default function App() {
       if (!isMappingEditActive) {
         return (
           <div className="field-display" onDoubleClick={() => mappedValue && startMappedClientFieldEditing(section, mappedValue)}>
-            <span>{mappedValue ? options.find((option) => getParsedRowKey(option) === mappedValue)?.field ?? '—' : '—'}</span>
+            <span className="field-name-cell">{renderFieldName(mappedValue ? options.find((option) => getParsedRowKey(option) === mappedValue)?.field : '—')}</span>
             <span className="field-actions">
               <button
                 className="icon-button"
@@ -4941,6 +5489,10 @@ export default function App() {
     const rows = getSectionRows(section);
     const duplicateFieldSet = getDuplicateValueSet(section.rows.filter((row) => row.source !== 'header'));
     const duplicateClientFieldSet = isDualModelSection(section) ? getDuplicateValueSet(section.clientRows ?? []) : new Set<string>();
+    const fillDescriptionsBusy = aiBusyKey === `fill-descriptions:${section.id}`;
+    const suggestMappingsBusy = aiBusyKey === `suggest-mappings:${section.id}`;
+    const maskBothBodyBusy = aiBusyKey === `mask-fields:${section.id}:both:body`;
+    const maskServerBodyBusy = aiBusyKey === `mask-fields:${section.id}:server:body`;
 
     if (isDualModelSection(section)) {
       const columns = getRequestColumnOrder(section, rows);
@@ -4965,9 +5517,10 @@ export default function App() {
                 onClick={() => void fillFieldDescriptionsWithAi(section)}
                 disabled={Boolean(aiBusyKey)}
                 aria-label="AI: заполнить описания"
-                title="AI: заполнить описания"
+                aria-busy={fillDescriptionsBusy}
+                title={fillDescriptionsBusy ? 'AI: заполняю описания...' : 'AI: заполнить описания'}
               >
-                <span className="ui-icon" aria-hidden>{renderUiIcon('ai_describe')}</span>
+                {renderAiActionIcon('ai_describe', fillDescriptionsBusy)}
               </button>
               <button
                 className="ghost small table-action-icon"
@@ -4975,9 +5528,10 @@ export default function App() {
                 onClick={() => void runAiMasking(section, { target: 'both', scope: 'body' })}
                 disabled={Boolean(aiBusyKey)}
                 aria-label="AI: маскирование полей"
-                title="AI: маскирование полей"
+                aria-busy={maskBothBodyBusy}
+                title={maskBothBodyBusy ? 'AI: определяю поля для маскирования...' : 'AI: маскирование полей'}
               >
-                <span className="ui-icon" aria-hidden>{renderUiIcon('ai_mask')}</span>
+                {renderAiActionIcon('ai_mask', maskBothBodyBusy)}
               </button>
               {section.domainModelEnabled && (
                 <button
@@ -4986,9 +5540,10 @@ export default function App() {
                   onClick={() => void suggestParameterMappingsWithAi(section)}
                   disabled={Boolean(aiBusyKey)}
                   aria-label="AI: подобрать маппинг"
-                  title="AI: подобрать маппинг"
+                  aria-busy={suggestMappingsBusy}
+                  title={suggestMappingsBusy ? 'AI: подбираю маппинг...' : 'AI: подобрать маппинг'}
                 >
-                  <span className="ui-icon" aria-hidden>{renderUiIcon('ai_map')}</span>
+                  {renderAiActionIcon('ai_map', suggestMappingsBusy)}
                 </button>
               )}
             </div>
@@ -4998,7 +5553,8 @@ export default function App() {
 
       return (
         <div className="table-wrap">
-          <table>
+          <table className="parsed-table">
+            {renderParsedTableColGroup(columns)}
             <thead>
               <tr>
                 {columns.map((column) => (
@@ -5020,7 +5576,7 @@ export default function App() {
                     }}
                     onDragEnd={() => setDraggedColumn(null)}
                   >
-                    {getRequestColumnLabel(section, column)}
+                    {column === 'field' ? renderParsedFieldColumnHeader(getRequestColumnLabel(section, column)) : getRequestColumnLabel(section, column)}
                   </th>
                 ))}
               </tr>
@@ -5056,9 +5612,10 @@ export default function App() {
               onClick={() => void fillFieldDescriptionsWithAi(section)}
               disabled={Boolean(aiBusyKey)}
               aria-label="AI: заполнить описания"
-              title="AI: заполнить описания"
+              aria-busy={fillDescriptionsBusy}
+              title={fillDescriptionsBusy ? 'AI: заполняю описания...' : 'AI: заполнить описания'}
             >
-              <span className="ui-icon" aria-hidden>{renderUiIcon('ai_describe')}</span>
+              {renderAiActionIcon('ai_describe', fillDescriptionsBusy)}
             </button>
             <button
               className="ghost small table-action-icon"
@@ -5066,9 +5623,10 @@ export default function App() {
               onClick={() => void runAiMasking(section, { target: 'both', scope: 'body' })}
               disabled={Boolean(aiBusyKey)}
               aria-label="AI: маскирование полей"
-              title="AI: маскирование полей"
+              aria-busy={maskBothBodyBusy}
+              title={maskBothBodyBusy ? 'AI: определяю поля для маскирования...' : 'AI: маскирование полей'}
             >
-              <span className="ui-icon" aria-hidden>{renderUiIcon('ai_mask')}</span>
+              {renderAiActionIcon('ai_mask', maskBothBodyBusy)}
             </button>
             {section.domainModelEnabled && (
               <button
@@ -5077,9 +5635,10 @@ export default function App() {
                 onClick={() => void suggestParameterMappingsWithAi(section)}
                 disabled={Boolean(aiBusyKey)}
                 aria-label="AI: подобрать маппинг"
-                title="AI: подобрать маппинг"
+                aria-busy={suggestMappingsBusy}
+                title={suggestMappingsBusy ? 'AI: подбираю маппинг...' : 'AI: подобрать маппинг'}
               >
-                <span className="ui-icon" aria-hidden>{renderUiIcon('ai_map')}</span>
+                {renderAiActionIcon('ai_map', suggestMappingsBusy)}
               </button>
             )}
           </div>
@@ -5091,10 +5650,11 @@ export default function App() {
 
     return (
       <div className="table-wrap">
-        <table>
+        <table className="parsed-table">
+          {renderParsedTableColGroup(['field', 'type', 'required', 'description', 'maskInLogs', 'example'])}
           <thead>
             <tr>
-              <th>Поле</th>
+              <th>{renderParsedFieldColumnHeader('Поле')}</th>
               <th>Тип</th>
               <th>Обязательность</th>
               <th>Описание</th>
@@ -5138,9 +5698,10 @@ export default function App() {
             onClick={() => void fillFieldDescriptionsWithAi(section)}
             disabled={Boolean(aiBusyKey)}
             aria-label="AI: заполнить описания"
-            title="AI: заполнить описания"
+            aria-busy={fillDescriptionsBusy}
+            title={fillDescriptionsBusy ? 'AI: заполняю описания...' : 'AI: заполнить описания'}
           >
-            <span className="ui-icon" aria-hidden>{renderUiIcon('ai_describe')}</span>
+            {renderAiActionIcon('ai_describe', fillDescriptionsBusy)}
           </button>
           <button
             className="ghost small table-action-icon"
@@ -5148,9 +5709,10 @@ export default function App() {
             onClick={() => void runAiMasking(section, { target: 'server', scope: 'body' })}
             disabled={Boolean(aiBusyKey)}
             aria-label="AI: маскирование полей"
-            title="AI: маскирование полей"
+            aria-busy={maskServerBodyBusy}
+            title={maskServerBodyBusy ? 'AI: определяю поля для маскирования...' : 'AI: маскирование полей'}
           >
-            <span className="ui-icon" aria-hidden>{renderUiIcon('ai_mask')}</span>
+            {renderAiActionIcon('ai_mask', maskServerBodyBusy)}
           </button>
         </div>
       </div>
@@ -5160,6 +5722,7 @@ export default function App() {
   function renderRequestHeadersTable(section: ParsedSection, target: ParseTarget = 'server'): ReactNode {
     const isExternal = target === 'client';
     const headers = isExternal ? getExternalRequestHeaderRowsForEditor(section) : getRequestHeaderRowsForEditor(section);
+    const maskHeadersBusy = aiBusyKey === `mask-fields:${section.id}:${isExternal ? 'client' : 'server'}:headers`;
 
     return (
       <div className="table-wrap">
@@ -5380,9 +5943,10 @@ export default function App() {
             onClick={() => void runAiMasking(section, { target: isExternal ? 'client' : 'server', scope: 'headers' })}
             disabled={Boolean(aiBusyKey)}
             aria-label="AI: маскирование полей"
-            title="AI: маскирование полей"
+            aria-busy={maskHeadersBusy}
+            title={maskHeadersBusy ? 'AI: определяю поля для маскирования...' : 'AI: маскирование полей'}
           >
-            <span className="ui-icon" aria-hidden>{renderUiIcon('ai_mask')}</span>
+            {renderAiActionIcon('ai_mask', maskHeadersBusy)}
           </button>
         </div>
       </div>
@@ -5681,6 +6245,7 @@ export default function App() {
     const currentValue = isEditing ? editingSource.draft : value;
     const shouldOpenEmptyInput = !value.trim() && !isEditing;
     const hasSourceValue = Boolean(currentValue.trim());
+    const fixJsonBusy = aiBusyKey === `fix-json:${section.id}:${target}`;
 
     return (
       <div className="source-panel">
@@ -5722,13 +6287,14 @@ export default function App() {
                   <button
                     className="icon-button"
                     type="button"
-                    title="AI: исправить JSON"
+                    title={fixJsonBusy ? 'AI: исправляю JSON...' : 'AI: исправить JSON'}
                     aria-label="AI: исправить JSON"
+                    aria-busy={fixJsonBusy}
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() => void fixJsonSyntaxWithAi(section, target)}
                     disabled={!currentValue.trim() || Boolean(aiBusyKey)}
                   >
-                    AI
+                    {fixJsonBusy ? <span className="ai-loader ai-loader-inline" aria-hidden="true" /> : 'AI'}
                   </button>
                 )}
                 <button
@@ -5771,13 +6337,14 @@ export default function App() {
                   <button
                     className="icon-button"
                     type="button"
-                    title="AI: исправить JSON"
+                    title={fixJsonBusy ? 'AI: исправляю JSON...' : 'AI: исправить JSON'}
                     aria-label="AI: исправить JSON"
+                    aria-busy={fixJsonBusy}
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() => void fixJsonSyntaxWithAi(section, target)}
                     disabled={!currentValue.trim() || Boolean(aiBusyKey)}
                   >
-                    AI
+                    {fixJsonBusy ? <span className="ai-loader ai-loader-inline" aria-hidden="true" /> : 'AI'}
                   </button>
                 )}
                 <button
@@ -5970,570 +6537,9 @@ export default function App() {
 
         {section.error && <div className="alert error">{serverLabel}: {section.error}</div>}
         {section.clientError && <div className="alert error">{clientLabel}: {section.clientError}</div>}
-        {aiRequestStatus && (
-          <div className={`alert ai-status ${aiRequestStatus.state}`}>
-            {aiRequestStatus.state === 'loading' && <span className="ai-loader" aria-hidden="true" />}
-            <span>{aiRequestStatus.message}</span>
-          </div>
-        )}
         {aiErrorMessage && <div className="alert error">AI: {aiErrorMessage}</div>}
         {requestCellError && <div className="alert error">{requestCellError}</div>}
         {renderParsedTable(section)}
-      </div>
-    );
-  }
-
-  function renderDiagramEditor(section: DiagramSection): ReactNode {
-    return (
-      <div className="stack">
-        <div className="row gap">
-          <button className="ghost small" type="button" onClick={() => addDiagram(section.id)}>
-            + Диаграмма
-          </button>
-        </div>
-
-        {section.diagrams.map((diagram, index) => {
-          const blockId = `diagram-item-${diagram.id}`;
-          const title = diagram.title.trim() || `Диаграмма ${index + 1}`;
-          const effectiveEngine = resolveDiagramEngine(diagram.code, diagram.engine);
-          const isOpen = isExpanderOpen(section.id, blockId);
-          const hasDiagramCode = Boolean(diagram.code.trim());
-
-          return (
-            <details
-              key={diagram.id}
-              className="expander"
-              open={isOpen}
-              onToggle={(e) => setExpanderOpen(section.id, blockId, e.currentTarget.open)}
-            >
-              <summary className={`expander-summary ${!isOpen && hasDiagramCode ? 'with-diagram-preview' : ''}`}>
-                <span className="expander-summary-title">{title}</span>
-                {!isOpen && hasDiagramCode && (
-                  <span className="diagram-collapsed-preview">
-                    {effectiveEngine === 'mermaid' && <MermaidLivePreview code={diagram.code} />}
-                    {effectiveEngine === 'plantuml' && (
-                      <span className="diagram-preview">
-                        <img className="diagram-preview-image" src={getPlantUmlImageUrl(diagram.code, 'svg')} alt={title} loading="lazy" />
-                      </span>
-                    )}
-                  </span>
-                )}
-              </summary>
-              <div className="expander-body">
-                <div className="diagram-header-row">
-                  <label className="field">
-                    <div className="label">Название</div>
-                    <input
-                      type="text"
-                      value={diagram.title}
-                      onChange={(e) => updateDiagram(section.id, diagram.id, (current) => ({ ...current, title: e.target.value }))}
-                      placeholder="Например: Общий процесс"
-                    />
-                  </label>
-                  <div className="badge">{effectiveEngine === 'plantuml' ? 'PLANTUML (AUTO)' : 'MERMAID (AUTO)'}</div>
-                </div>
-
-                <label className="field">
-                  <div className="label">Код диаграммы</div>
-                  <textarea
-                    className="source-edit"
-                    rows={10}
-                    value={diagram.code}
-                    onChange={(e) =>
-                      updateDiagram(section.id, diagram.id, (current) => ({
-                        ...current,
-                        code: e.target.value,
-                        engine: resolveDiagramEngine(e.target.value, current.engine)
-                      }))
-                    }
-                    placeholder={effectiveEngine === 'mermaid' ? 'sequenceDiagram\nA->>B: Hello' : '@startuml\nAlice -> Bob: Hello\n@enduml'}
-                  />
-                </label>
-
-                <div className="label">Предпросмотр</div>
-                {!hasDiagramCode && <div className="muted">Вставьте код диаграммы для предпросмотра</div>}
-                {hasDiagramCode && effectiveEngine === 'mermaid' && <MermaidLivePreview code={diagram.code} />}
-                {hasDiagramCode && effectiveEngine === 'plantuml' && (
-                  <div className="diagram-preview">
-                    <img className="diagram-preview-image" src={getPlantUmlImageUrl(diagram.code, 'svg')} alt={title} loading="lazy" />
-                  </div>
-                )}
-
-                <div className="diagram-description-block">
-                  <div className="label">Текст под диаграммой</div>
-                  <div className="text-toolbar" role="toolbar" aria-label="Форматирование текста под диаграммой">
-                    <div className="toolbar-group" aria-label="Базовое форматирование">
-                      <button
-                        className="ghost small toolbar-button"
-                        type="button"
-                        title="Жирный"
-                        aria-label="Жирный"
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'bold')}
-                      >
-                        <span className="toolbar-icon toolbar-icon-bold">B</span>
-                      </button>
-                      <button
-                        className="ghost small toolbar-button"
-                        type="button"
-                        title="Код"
-                        aria-label="Код"
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'code')}
-                      >
-                        <span className="toolbar-icon">&lt;/&gt;</span>
-                      </button>
-                      <button
-                        className="ghost small toolbar-button"
-                        type="button"
-                        title="Выделение цветом"
-                        aria-label="Выделение цветом"
-                        onMouseDown={(event) => {
-                          event.preventDefault();
-                          const editor = diagramTextRefs.current[getDiagramEditorKey(section.id, diagram.id)];
-                          rememberSelectionForEditor(editor);
-                        }}
-                        onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'highlight', { color: DEFAULT_RICH_TEXT_HIGHLIGHT })}
-                      >
-                        <span className="toolbar-icon">🖍</span>
-                      </button>
-                    </div>
-                    <div className="toolbar-group" aria-label="Структура текста">
-                      <button
-                        className="ghost small toolbar-button"
-                        type="button"
-                        title="Подзаголовок"
-                        aria-label="Подзаголовок"
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'h3')}
-                      >
-                        <span className="toolbar-heading-glyph" aria-hidden="true">
-                          <span className="toolbar-heading-main">T</span>
-                          <span className="toolbar-heading-level">3</span>
-                        </span>
-                      </button>
-                      <button
-                        className="ghost small toolbar-button"
-                        type="button"
-                        title="Цитата"
-                        aria-label="Цитата"
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'quote')}
-                      >
-                        <span className="toolbar-icon">❝</span>
-                      </button>
-                    </div>
-                    <div className="toolbar-group" aria-label="Списки">
-                      <button
-                        className="ghost small toolbar-button"
-                        type="button"
-                        title="Маркированный список"
-                        aria-label="Маркированный список"
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'ul')}
-                      >
-                        <span className="toolbar-icon">•</span>
-                      </button>
-                      <button
-                        className="ghost small toolbar-button"
-                        type="button"
-                        title="Нумерованный список"
-                        aria-label="Нумерованный список"
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'ol')}
-                      >
-                        <span className="toolbar-icon">1.</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  <div
-                    ref={(node) => {
-                      diagramTextRefs.current[getDiagramEditorKey(section.id, diagram.id)] = node;
-                    }}
-                    className="rich-text-editor"
-                    contentEditable
-                    suppressContentEditableWarning
-                    onInput={() => syncDiagramDescriptionFromEditor(section.id, diagram.id)}
-                    onMouseUp={() => rememberSelectionForEditor(diagramTextRefs.current[getDiagramEditorKey(section.id, diagram.id)])}
-                    onKeyUp={() => rememberSelectionForEditor(diagramTextRefs.current[getDiagramEditorKey(section.id, diagram.id)])}
-                    onKeyDown={(event) => {
-                      const editor = diagramTextRefs.current[getDiagramEditorKey(section.id, diagram.id)];
-                      if (!editor) return;
-
-                      const handled = handleRichTextHotkeys(event, (action) => {
-                        rememberSelectionForEditor(editor);
-                        applyDiagramTextCommand(section.id, diagram.id, action);
-                      });
-
-                      if (handled) return;
-                    }}
-                  />
-                </div>
-
-                <div className="row gap">
-                  <button className="ghost small" type="button" onClick={() => deleteDiagram(section.id, diagram.id)}>
-                    Удалить диаграмму
-                  </button>
-                </div>
-              </div>
-            </details>
-          );
-        })}
-      </div>
-    );
-  }
-
-  function renderErrorsEditor(section: ErrorsSection): ReactNode {
-    const serverRequestParameterOptions = Array.from(
-      new Set(
-        sections
-          .filter((item): item is ParsedSection => item.kind === 'parsed' && item.sectionType === 'request')
-          .flatMap((item) => getSectionRows(item))
-          .map((row) => row.field.trim())
-          .filter(Boolean)
-      )
-    ).sort((left, right) => left.localeCompare(right));
-
-    return (
-      <div className="stack">
-        <datalist id="http-status-options">
-          {POPULAR_HTTP_STATUS_CODES.map((code) => (
-            <option key={code} value={code} />
-          ))}
-          <option value="-" />
-        </datalist>
-
-        <datalist id="server-request-param-options">
-          {serverRequestParameterOptions.map((value) => (
-            <option key={value} value={value} />
-          ))}
-        </datalist>
-
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>№</th>
-                <th>Client HTTP Status</th>
-                <th>Client Response</th>
-                <th>Trigger (условия возникновения)</th>
-                <th>Error Type</th>
-                <th>Server HTTP Status</th>
-                <th>Полный internalCode</th>
-                <th>Server Response</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {section.rows.map((row, index) => {
-                const clientResponseError = validateJsonDraft(row.clientResponseCode ?? '');
-                const normalizedCode = row.internalCode.trim();
-                const hasUnknownInternalCode = Boolean(normalizedCode) && !ERROR_CATALOG_BY_CODE.has(normalizedCode);
-                const internalCodeKey = `${section.id}-error-${index}`;
-                const isInternalCodeOpen = openInternalCodeKey === internalCodeKey;
-                const searchValue = normalizedCode.toLowerCase();
-                const internalCodeOptions = ERROR_CATALOG
-                  .filter((item) => {
-                    if (!searchValue) return true;
-                    return (
-                      item.internalCode.toLowerCase().includes(searchValue)
-                      || item.httpStatus.toLowerCase().includes(searchValue)
-                      || item.message.toLowerCase().includes(searchValue)
-                    );
-                  })
-                  .slice(0, 25);
-
-                return (
-                <tr key={`${section.id}-error-${index}`}>
-                  <td>{index + 1}</td>
-                  <td>
-                    <input
-                      type="text"
-                      list="http-status-options"
-                      value={row.clientHttpStatus}
-                      onChange={(e) => updateErrorRow(section.id, index, (current) => ({ ...current, clientHttpStatus: e.target.value }))}
-                    />
-                  </td>
-                  <td>
-                    <div className="error-response-cell">
-                      <input
-                        type="text"
-                        value={row.clientResponse}
-                        onChange={(e) => updateErrorRow(section.id, index, (current) => ({ ...current, clientResponse: e.target.value }))}
-                        placeholder="Описание client response"
-                      />
-                      <textarea
-                        className={clientResponseError ? 'input-warning' : ''}
-                        rows={getDynamicTextareaRows(row.clientResponseCode ?? '', 3, 10)}
-                        value={row.clientResponseCode ?? ''}
-                        onChange={(e) => updateErrorRow(section.id, index, (current) => ({ ...current, clientResponseCode: e.target.value }))}
-                        placeholder="Код client response для WIKI (JSON)"
-                      />
-                      <button className="ghost small" type="button" onClick={() => formatClientResponseCode(section.id, index)}>
-                        Форматировать JSON
-                      </button>
-                      {clientResponseError && <div className="inline-error">{clientResponseError}</div>}
-                    </div>
-                  </td>
-                  <td>
-                    <textarea
-                      rows={getDynamicTextareaRows(row.trigger, 2, 8)}
-                      value={row.trigger}
-                      onChange={(e) => updateErrorRow(section.id, index, (current) => ({ ...current, trigger: e.target.value }))}
-                    />
-                  </td>
-                  <td>
-                    <select
-                      value={row.errorType}
-                      onChange={(e) => updateErrorRow(section.id, index, (current) => ({ ...current, errorType: e.target.value as ErrorRow['errorType'] }))}
-                    >
-                      <option value="-">-</option>
-                      <option value="CommonException">CommonException</option>
-                      <option value="BusinessException">BusinessException</option>
-                      <option value="AlertException">AlertException</option>
-                    </select>
-                  </td>
-                  <td>
-                    <input
-                      type="text"
-                      disabled
-                      value={row.serverHttpStatus}
-                      title="Поле заполняется автоматически по internalCode"
-                    />
-                  </td>
-                  <td>
-                    <div
-                      className="internal-code-combobox"
-                      ref={(node) => {
-                        internalCodeAnchorRefs.current[internalCodeKey] = node;
-                      }}
-                    >
-                      <div className="internal-code-cell">
-                        <input
-                          className={hasUnknownInternalCode ? 'input-warning' : ''}
-                          type="text"
-                          value={row.internalCode}
-                          onFocus={() => {
-                            setOpenInternalCodeKey(internalCodeKey);
-                            setHighlightedInternalCodeIndex(0);
-                          }}
-                          onChange={(e) => {
-                            applyInternalCode(section.id, index, e.target.value);
-                            setOpenInternalCodeKey(internalCodeKey);
-                            setHighlightedInternalCodeIndex(0);
-                          }}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Escape') {
-                              event.preventDefault();
-                              setOpenInternalCodeKey(null);
-                              return;
-                            }
-
-                            if (event.key === 'ArrowDown') {
-                              event.preventDefault();
-                              if (!isInternalCodeOpen) {
-                                setOpenInternalCodeKey(internalCodeKey);
-                                setHighlightedInternalCodeIndex(0);
-                                return;
-                              }
-
-                              setHighlightedInternalCodeIndex((current) =>
-                                Math.min(current + 1, Math.max(internalCodeOptions.length - 1, 0))
-                              );
-                              return;
-                            }
-
-                            if (event.key === 'ArrowUp') {
-                              event.preventDefault();
-                              if (!isInternalCodeOpen) {
-                                setOpenInternalCodeKey(internalCodeKey);
-                                setHighlightedInternalCodeIndex(0);
-                                return;
-                              }
-
-                              setHighlightedInternalCodeIndex((current) => Math.max(current - 1, 0));
-                              return;
-                            }
-
-                            if (event.key === 'Enter' && isInternalCodeOpen && internalCodeOptions.length > 0) {
-                              event.preventDefault();
-                              const picked = internalCodeOptions[Math.min(highlightedInternalCodeIndex, internalCodeOptions.length - 1)];
-                              if (picked) {
-                                applyInternalCode(section.id, index, picked.internalCode);
-                                setOpenInternalCodeKey(null);
-                              }
-                            }
-                          }}
-                          title={hasUnknownInternalCode ? 'Код не найден в каталоге, заполните поля вручную или уточните internalCode' : ''}
-                          placeholder="Введите internalCode"
-                          aria-label="internalCode"
-                          aria-expanded={isInternalCodeOpen}
-                          aria-controls={`${internalCodeKey}-options`}
-                          aria-autocomplete="list"
-                        />
-                        <button
-                          className="internal-code-toggle"
-                          type="button"
-                          aria-label="Показать варианты internalCode"
-                          onClick={() => {
-                            setOpenInternalCodeKey((current) => (current === internalCodeKey ? null : internalCodeKey));
-                            setHighlightedInternalCodeIndex(0);
-                          }}
-                        >
-                          ▾
-                        </button>
-                      </div>
-                      {isInternalCodeOpen && internalCodePopoverState && createPortal(
-                        <div
-                          id={`${internalCodeKey}-options`}
-                          ref={internalCodePopoverRef}
-                          className={`internal-code-dropdown internal-code-dropdown-portal ${internalCodePopoverState.openUp ? 'is-top' : ''}`}
-                          role="listbox"
-                          style={{
-                            top: `${internalCodePopoverState.top}px`,
-                            left: `${internalCodePopoverState.left}px`,
-                            width: `${internalCodePopoverState.width}px`,
-                            maxHeight: `${internalCodePopoverState.maxHeight}px`
-                          }}
-                        >
-                          {internalCodeOptions.length === 0 && (
-                            <div className="internal-code-empty">Ничего не найдено</div>
-                          )}
-                          {internalCodeOptions.map((item, optionIndex) => (
-                            <button
-                              key={item.internalCode}
-                              type="button"
-                              className={`internal-code-option ${optionIndex === Math.min(highlightedInternalCodeIndex, Math.max(internalCodeOptions.length - 1, 0)) ? 'active' : ''}`}
-                              onMouseDown={(event) => event.preventDefault()}
-                              onMouseEnter={() => setHighlightedInternalCodeIndex(optionIndex)}
-                              onClick={() => {
-                                applyInternalCode(section.id, index, item.internalCode);
-                                setOpenInternalCodeKey(null);
-                              }}
-                            >
-                              <span className="internal-code-option-code">{item.internalCode}</span>
-                              <span className="internal-code-option-meta">{`${item.httpStatus} - ${item.message}`}</span>
-                            </button>
-                          ))}
-                        </div>,
-                        document.body
-                      )}
-                    </div>
-                    {hasUnknownInternalCode && <div className="inline-warning">Код не найден в каталоге</div>}
-                  </td>
-                  <td>
-                    <div className="error-response-cell">
-                      <input
-                        type="text"
-                        disabled
-                        value={row.message}
-                        title="Описание заполняется автоматически по internalCode"
-                      />
-                      <textarea
-                        rows={getDynamicTextareaRows(row.responseCode, 3, 10)}
-                        value={row.responseCode}
-                        onChange={(e) => updateErrorRow(section.id, index, (current) => ({ ...current, responseCode: e.target.value }))}
-                        placeholder="Код ответа для WIKI (JSON)"
-                      />
-                      <button className="ghost small table-action-icon" type="button" onClick={() => formatErrorResponseCode(section.id, index)} aria-label="Форматировать JSON" title="Форматировать JSON">
-                        <span className="ui-icon" aria-hidden>{renderUiIcon('format_json')}</span>
-                      </button>
-                    </div>
-                  </td>
-                  <td>
-                    <button className="icon-button danger" type="button" onClick={() => deleteErrorRow(section.id, index)} aria-label="Удалить строку">
-                      ×
-                    </button>
-                  </td>
-                </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          <div className="table-actions">
-            <button className="ghost small table-action-icon" type="button" onClick={() => addErrorRow(section.id)} aria-label="Добавить строку ошибки" title="Добавить строку ошибки">
-              <span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>
-            </button>
-          </div>
-        </div>
-
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>№</th>
-                <th>Параметр (server request)</th>
-                <th>Кейс валидации</th>
-                <th>Условие возникновения</th>
-                <th>cause</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {section.validationRules.map((rule, index) => (
-                <tr key={`${section.id}-validation-${index}`}>
-                  <td>{index + 1}</td>
-                  <td>
-                    <input
-                      type="text"
-                      list="server-request-param-options"
-                      value={rule.parameter}
-                      onChange={(e) => updateValidationRuleRow(section.id, index, (current) => ({ ...current, parameter: e.target.value }))}
-                      placeholder="Выберите из server request или введите вручную"
-                    />
-                  </td>
-                  <td>
-                    <select
-                      value={rule.validationCase}
-                      onChange={(e) =>
-                        updateValidationRuleRow(section.id, index, (current) => ({
-                          ...current,
-                          validationCase: e.target.value
-                        }))
-                      }
-                    >
-                      {VALIDATION_CASE_OPTIONS.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <textarea
-                      rows={getDynamicTextareaRows(rule.condition, 1, 6)}
-                      value={rule.condition}
-                      onChange={(e) => updateValidationRuleRow(section.id, index, (current) => ({ ...current, condition: e.target.value }))}
-                    />
-                  </td>
-                  <td>
-                    <textarea
-                      rows={getDynamicTextareaRows(rule.cause, 1, 6)}
-                      value={rule.cause}
-                      onChange={(e) => updateValidationRuleRow(section.id, index, (current) => ({ ...current, cause: e.target.value }))}
-                    />
-                  </td>
-                  <td>
-                    <button
-                      className="icon-button danger"
-                      type="button"
-                      onClick={() => deleteValidationRuleRow(section.id, index)}
-                      aria-label="Удалить правило валидации"
-                    >
-                      ×
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="table-actions">
-            <button className="ghost small table-action-icon" type="button" onClick={() => addValidationRuleRow(section.id)} aria-label="Добавить правило валидации" title="Добавить правило валидации">
-              <span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>
-            </button>
-          </div>
-        </div>
       </div>
     );
   }
@@ -6545,7 +6551,7 @@ export default function App() {
   const handleManualSave = async () => {
     setAutosave({ state: 'saving' });
 
-    const workspace = asWorkspaceProjectData(methods, activeMethodId, methodGroups);
+    const workspace = asWorkspaceProjectData(normalizedProjectName, methods, activeMethodId, methodGroups);
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(workspace));
     } catch {
@@ -6561,19 +6567,19 @@ export default function App() {
 
       if (!remoteSaveInFlightRef.current) {
         remoteSaveInFlightRef.current = true;
-        const projectName = activeMethod?.name?.trim() || 'Документ API';
+        const nextProjectName = normalizedProjectName;
         const history = getPersistedHistoryState();
         const workspaceHash = JSON.stringify(workspace);
 
         try {
           const saved = await saveServerProjectWithFallback({
             projectId: serverProjectId ?? undefined,
-            name: projectName,
+            name: nextProjectName,
             workspace,
             history
           });
           setServerProjectId(saved.id);
-          upsertServerProjectListEntry({ id: saved.id, name: projectName, updatedAt: saved.updatedAt });
+          upsertServerProjectListEntry({ id: saved.id, name: nextProjectName, updatedAt: saved.updatedAt });
           setServerSyncError('');
           remoteLastSavedHashRef.current = workspaceHash;
           remoteLastObservedHashRef.current = workspaceHash;
@@ -6719,6 +6725,35 @@ export default function App() {
         </div>
       )}
 
+      {pendingSectionDelete && (
+        <div
+          className="import-routing-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Подтверждение удаления раздела"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              cancelDeleteSection();
+            }
+          }}
+        >
+          <div className="import-routing-card">
+            <h2>Удалить раздел?</h2>
+            <p className="import-routing-file">
+              «{pendingSectionDelete.sectionTitle}». Действие необратимо.
+            </p>
+            <div className="import-routing-actions">
+              <button type="button" className="ghost" onClick={cancelDeleteSection}>
+                Отмена
+              </button>
+              <button type="button" onClick={confirmDeleteSection}>
+                Удалить раздел
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {authDialog && (
         <div
           className="import-routing-backdrop"
@@ -6759,13 +6794,42 @@ export default function App() {
               />
             </label>
             {authDialog.error && <div className="alert error">{authDialog.error}</div>}
+            {authDialog.isSubmitting && (
+              <div className="alert auth-status loading" role="status">
+                <span className="ai-loader" aria-hidden="true" />
+                <span>{authDialog.mode === 'login' ? 'Выполняем вход...' : 'Создаем аккаунт...'}</span>
+              </div>
+            )}
             <div className="import-routing-actions">
               <button type="button" className="ghost" onClick={closeAuthDialog} disabled={authDialog.isSubmitting}>
                 Отмена
               </button>
-              <button type="button" onClick={() => void submitAuthDialog()} disabled={authDialog.isSubmitting}>
-                {authDialog.isSubmitting ? 'Проверка...' : authDialog.mode === 'login' ? 'Войти' : 'Зарегистрироваться'}
+              <button type="button" onClick={() => void submitAuthDialog()} disabled={authDialog.isSubmitting} aria-busy={authDialog.isSubmitting}>
+                {authDialog.isSubmitting ? (
+                  <>
+                    <span className="ai-loader ai-loader-inline" aria-hidden="true" />
+                    <span>{authDialog.mode === 'login' ? 'Входим...' : 'Регистрируем...'}</span>
+                  </>
+                ) : authDialog.mode === 'login' ? 'Войти' : 'Зарегистрироваться'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {workspaceMethodsImportRouting && (
+        <div className="import-routing-backdrop" role="dialog" aria-modal="true" aria-label="Импорт методов из JSON">
+          <div className="import-routing-card">
+            <h2>Импорт JSON проекта</h2>
+            <p className="import-routing-file">Файл: {workspaceMethodsImportRouting.fileName}</p>
+            <p className="import-routing-file">
+              Обнаружен JSON вашей площадки с методами. Выберите режим импорта.
+            </p>
+
+            <div className="import-routing-actions">
+              <button type="button" className="ghost" onClick={cancelWorkspaceMethodsImportRouting}>Отмена</button>
+              <button type="button" className="ghost" onClick={applyWorkspaceImportAsReplace}>Заменить проект</button>
+              <button type="button" onClick={applyWorkspaceImportAsMethodsMerge}>Импортировать методы</button>
             </div>
           </div>
         </div>
@@ -6940,197 +7004,73 @@ export default function App() {
         </div>
       )}
 
-      <header ref={topbarRef} className="topbar">
-        <div className="brand">
-          <span className="logo" aria-hidden>
-            API
-          </span>
-          <div>
-            <h1>Doc Builder</h1>
-          </div>
-        </div>
-        <div className="actions">
-          <div className="actions-main">
-          <button className="ghost topbar-action" type="button" onClick={() => openProjectImportDialog(false)} aria-label="Импорт" title="Импорт">
-            <span className="ui-icon" aria-hidden>{renderUiIcon('import')}</span>
-          </button>
-          <input ref={importInputRef} className="hidden-file-input" type="file" accept="application/json" onChange={(e) => importProjectJson(e.target.files?.[0])} />
-          <button
-            className="ghost topbar-action topbar-format-btn"
-            onClick={exportProjectJson}
-            disabled={!activeMethod}
-            title={activeMethod ? `Скачать JSON. ${exportTitle}` : exportTitle}
-            aria-label="Скачать JSON"
-          >
-            <span className="ui-icon export-format-icon" data-format="JSON" aria-hidden>{renderUiIcon('download')}</span>
-          </button>
-          <button
-            className="primary topbar-action topbar-format-btn"
-            data-onboarding-anchor="export-docs"
-            onClick={openHtmlPreview}
-            disabled={!activeMethod}
-            title={activeMethod ? `Скачать HTML. ${exportTitle}` : exportTitle}
-            aria-label="Скачать HTML"
-          >
-            <span className="ui-icon export-format-icon" data-format="HTML" aria-hidden>{renderUiIcon('download')}</span>
-          </button>
-          <button
-            className="topbar-action topbar-format-btn"
-            onClick={openWikiPreview}
-            disabled={!activeMethod}
-            title={activeMethod ? `Скачать WIKI. ${exportTitle}` : exportTitle}
-            aria-label="Скачать WIKI"
-          >
-            <span className="ui-icon export-format-icon" data-format="WIKI" aria-hidden>{renderUiIcon('download')}</span>
-          </button>
-          </div>
-          <div className="actions-side">
-          <div className="history-controls" role="group" aria-label="История изменений">
-            <button type="button" className="ghost history-btn" onClick={undoWorkspace} disabled={!canUndo} title="Отменить (Ctrl+Z)">
-              <span className="ui-icon" aria-hidden>{renderUiIcon('undo')}</span>
-            </button>
-            <button type="button" className="ghost history-btn" onClick={redoWorkspace} disabled={!canRedo} title="Повторить (Ctrl+Shift+Z / Ctrl+Y)">
-              <span className="ui-icon" aria-hidden>{renderUiIcon('redo')}</span>
-            </button>
-          </div>
-          <div className="actions-side-divider" aria-hidden />
-          {authLoading ? (
-            <span className="badge autosave-badge idle">Проверка входа...</span>
-          ) : authUser ? (
-            <>
-              <div className="server-project-select">
-                <select
-                  value={serverProjectId ?? ''}
-                  onChange={(event) => void handleServerProjectSelect(event.target.value)}
-                  aria-label="Проект на сервере"
-                >
-                  <option value="">Новый проект</option>
-                  {serverProjects.map((project) => (
-                    <option key={project.id} value={project.id}>
-                      {project.name || 'Документ API'}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <button
-                type="button"
-                className="ghost small"
-                onClick={handleDeleteServerProject}
-                disabled={!serverProjectId}
-                title={serverProjectId ? 'Удалить выбранный проект' : 'Выберите проект'}
-              >
-                Удалить проект
-              </button>
-              <span className="badge autosave-badge saved" title={authUser.login}>{authUser.login}</span>
-              <button type="button" className="ghost small" onClick={() => void handleLogout()}>
-                Выйти
-              </button>
-            </>
-          ) : (
-            <>
-              <button type="button" className="ghost small" onClick={() => openAuthDialog('login')}>
-                Войти
-              </button>
-              <button type="button" className="ghost small" onClick={() => openAuthDialog('register')}>
-                Регистрация
-              </button>
-            </>
-          )}
-          <div className="actions-side-divider" aria-hidden />
-          {isOnboardingHeaderAvailable && (
-            <button
-              type="button"
-              className={`onboarding-nav-toggle ${isOnboardingNavVisible ? 'active' : ''}`}
-              onClick={toggleOnboardingHeaderNavigation}
-              aria-label={isOnboardingNavVisible ? 'Скрыть панель навигации' : 'Показать панель навигации'}
-              title={isOnboardingNavVisible ? 'Скрыть панель навигации' : 'Показать панель навигации'}
-            >
-              <span className="ui-icon onboarding-nav-icon" aria-hidden>{renderUiIcon('onboarding_nav')}</span>
-            </button>
-          )}
-          <div className="actions-side-divider" aria-hidden />
-          <button
-            type="button"
-            className="theme-mermaid-toggle"
-            onClick={toggleTheme}
-            aria-label={theme === 'dark' ? 'Включить светлую тему' : 'Включить ночную тему'}
-            title={theme === 'dark' ? 'Включить светлую тему' : 'Включить ночную тему'}
-          >
-            <span className="ui-icon" aria-hidden>{renderUiIcon(theme === 'dark' ? 'theme_sun' : 'theme_moon')}</span>
-          </button>
-          <button
-            type="button"
-            className={`badge autosave-badge manual-save ${autosave.state}`}
-            onClick={() => void handleManualSave()}
-            aria-live="polite"
-            title="Сохранить сейчас"
-          >
-            <span className="ui-icon autosave-icon" aria-hidden>{renderUiIcon('save')}</span>
-            {autosave.state === 'saving' && 'Сохранение...'}
-            {autosave.state === 'saved' && (
-              <>
-                <span className="status-time">{autosave.at ?? '--:--'}</span>
-              </>
-            )}
-            {autosave.state === 'error' && 'Ошибка сохранения'}
-            {autosave.state === 'idle' && 'Готово'}
-          </button>
-          </div>
-        </div>
-
-        {isOnboardingHeaderAvailable && isOnboardingNavVisible && (
-          <section
-            className="onboarding-stepbar collapsed in-topbar"
-            data-onboarding-anchor="choose-entry"
-            aria-live="polite"
-            aria-label="Пошаговая навигация"
-          >
-            <div className="onboarding-stepbar-track" role="list" aria-label="Прогресс шагов">
-              {ONBOARDING_STEPS.map((step, index) => {
-                const isDone = index < onboardingResolvedStepIndex;
-                const isCurrent = step.id === activeOnboardingStep.id;
-                const access = canNavigateToOnboardingStep(step.id);
-                return (
-                  <button
-                    key={step.id}
-                    type="button"
-                    role="listitem"
-                    className={`onboarding-step-chip ${isDone ? 'done' : ''} ${isCurrent ? 'current' : ''} ${access.allowed ? 'available' : 'blocked'}`}
-                    aria-current={isCurrent ? 'step' : undefined}
-                    aria-disabled={!access.allowed}
-                    disabled={!access.allowed}
-                    title={access.allowed ? step.description : access.reason}
-                    onClick={() => jumpToOnboardingStep(step.id)}
-                  >
-                    {step.title}
-                  </button>
-                );
-              })}
-            </div>
-            {onboardingStepHint && <div className="onboarding-stepbar-tip">{onboardingStepHint}</div>}
-            <div className="onboarding-stepbar-actions">
-              <button
-                type="button"
-                className="small onboarding-stepbar-icon-btn primary"
-                aria-label={onboardingPrimaryActionLabel}
-                title={onboardingPrimaryActionLabel}
-                onClick={activeOnboardingHint ? handleActiveOnboardingHintAction : focusOnboardingCurrentStep}
-              >
-                <svg className="onboarding-eye-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                  <path d="M2 12c2.4-4 5.8-6 10-6s7.6 2 10 6c-2.4 4-5.8 6-10 6s-7.6-2-10-6Z" />
-                  <circle cx="12" cy="12" r="3.2" />
-                </svg>
-              </button>
-            </div>
-          </section>
-        )}
-      </header>
+      <AppTopbar
+        topbarRef={topbarRef}
+        importInputRef={importInputRef}
+        canExport={Boolean(activeMethod)}
+        exportTitle={exportTitle}
+        authLoading={authLoading}
+        authUserLogin={authUser?.login ?? null}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        isOnboardingHeaderAvailable={isOnboardingHeaderAvailable}
+        isOnboardingNavVisible={isOnboardingNavVisible}
+        isSidebarHidden={isSidebarHidden}
+        theme={theme}
+        autosaveState={autosave.state}
+        autosaveAt={autosave.at ?? null}
+        isLogoutBusy={authBusyKey === 'auth:logout'}
+        onboardingSteps={ONBOARDING_STEPS}
+        onboardingResolvedStepIndex={onboardingResolvedStepIndex}
+        activeOnboardingStepId={activeOnboardingStep.id}
+        onboardingStepHint={onboardingStepHint}
+        onboardingPrimaryActionLabel={onboardingPrimaryActionLabel}
+        onOpenProjectImport={() => openProjectImportDialog(false)}
+        onImportProjectJson={(file) => importProjectJson(file)}
+        onExportProjectJson={exportProjectJson}
+        onOpenHtmlPreview={openHtmlPreview}
+        onOpenWikiPreview={openWikiPreview}
+        onUndoWorkspace={undoWorkspace}
+        onRedoWorkspace={redoWorkspace}
+        onLogout={() => void handleLogout()}
+        onOpenLogin={() => openAuthDialog('login')}
+        onOpenRegister={() => openAuthDialog('register')}
+        onToggleOnboardingHeaderNavigation={toggleOnboardingHeaderNavigation}
+        onToggleSidebar={() => setIsSidebarHidden((current) => !current)}
+        onToggleTheme={toggleTheme}
+        onManualSave={() => void handleManualSave()}
+        onJumpToOnboardingStep={jumpToOnboardingStep}
+        onPrimaryOnboardingAction={activeOnboardingHint ? handleActiveOnboardingHintAction : focusOnboardingCurrentStep}
+        canNavigateToOnboardingStep={canNavigateToOnboardingStep}
+        renderUiIcon={renderUiIcon}
+      />
 
       {importError && <div className="alert error">Ошибка импорта: {importError}</div>}
       {serverSyncError && <div className="alert error">Ошибка синхронизации: {serverSyncError}</div>}
       {toastMessage && <div className="toast-info">{toastMessage}</div>}
 
+      {isCompactLayout && !isSidebarHidden && (
+        <button
+          type="button"
+          className="sidebar-mobile-backdrop"
+          aria-label="Закрыть боковую панель"
+          onClick={() => setIsSidebarHidden(true)}
+        />
+      )}
+
       <div className="sync-alert-stack">
+        {aiRequestStatus && (
+          <div className={`alert ai-status ${aiRequestStatus.state}`} role="status">
+            {aiRequestStatus.state === 'loading' && <span className="ai-loader" aria-hidden="true" />}
+            <span>{aiRequestStatus.message}</span>
+          </div>
+        )}
+        {authRequestStatus && (
+          <div className={`alert auth-status ${authRequestStatus.state}`} role="status">
+            {authRequestStatus.state === 'loading' && <span className="ai-loader" aria-hidden="true" />}
+            <span>{authRequestStatus.message}</span>
+          </div>
+        )}
         {selectedSection?.kind === 'parsed' &&
           renderSourceAlert(
             `${selectedSection.id}-server`,
@@ -7162,133 +7102,69 @@ export default function App() {
           )}
       </div>
 
-      <div className="layout">
-        <aside className="sidebar" role="region" aria-label={ENABLE_MULTI_METHODS ? 'Методы и секции' : 'Секции'}>
-          {ENABLE_MULTI_METHODS && (
-            <div className="sidebar-panel method-panel">
-              <div className="sidebar-panel-head">
-                <div className="muted">Методы</div>
-              </div>
-              <div className="method-list" role="listbox" aria-label="Список методов">
-                {methods.map((method) => (
-                  <button
-                    key={method.id}
-                    type="button"
-                    className={`section-item method-item ${activeMethod?.id === method.id ? 'active' : ''}`}
-                    onClick={() => switchMethod(method)}
-                  >
-                    <div className="section-title">{method.name}</div>
-                    <div className="chips">
-                      <span className="chip">{method.sections.length} секц.</span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-              <div className="method-actions">
-                <button className="ghost small topbar-action method-icon-btn" type="button" onClick={createMethod} aria-label="Добавить метод" title="Добавить метод">
-                  <span className="ui-icon" aria-hidden>{renderUiIcon('add_method')}</span>
-                </button>
-                <button className="ghost small topbar-action method-icon-btn" type="button" onClick={deleteActiveMethod} disabled={methods.length <= 1 || !activeMethod} aria-label="Удалить метод" title="Удалить метод">
-                  <span className="ui-icon" aria-hidden>{renderUiIcon('delete_method')}</span>
-                </button>
-              </div>
-              {activeMethod && (
-                <input
-                  ref={methodNameInputRef}
-                  className="inline-input"
-                  type="text"
-                  value={activeMethod.name}
-                  onChange={(event) => updateActiveMethodName(event.target.value)}
-                  onBlur={normalizeActiveMethodName}
-                  placeholder="Название метода"
-                  aria-label="Название активного метода"
-                />
-              )}
-              {methodNameWarning && <div className="method-warning">{methodNameWarning}</div>}
-            </div>
-          )}
-
-          <div className={`sidebar-panel section-panel ${isSectionPanelPulse ? 'section-panel-pulse' : ''}`}>
-            <div className="section-list-head">
-              <div className="muted">Секции</div>
-              <div className="context-pill context-pill-transition" aria-live="polite">
-                {activeMethod ? activeMethod.name : 'Метод не выбран'}
-              </div>
-            </div>
-            <div className="section-list">
-              {sections.map((section) => {
-                const error = validationMap.get(section.id);
-                return (
-                  <button
-                    key={section.id}
-                    role="option"
-                    aria-selected={selectedSection?.id === section.id}
-                    className={`section-item ${selectedSection?.id === section.id ? 'active' : ''} ${error ? 'warn' : ''} ${!section.enabled ? 'disabled' : ''}`}
-                    draggable
-                    onDragStart={() => setDraggingId(section.id)}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={() => {
-                      if (draggingId) setSections((prev) => reorderSections(prev, draggingId, section.id));
-                      setDraggingId(null);
-                    }}
-                    onClick={() => setSelectedId(section.id)}
-                  >
-                    <div className="section-title">{resolveSectionTitle(section.title)}</div>
-                    <div className="chips">
-                      {section.kind === 'parsed' && (
-                        <span className="chip">
-                          {section.sectionType === 'request'
-                            ? 'REQUEST'
-                            : section.sectionType === 'response'
-                              ? 'RESPONSE'
-                              : section.format.toUpperCase()}
-                        </span>
-                      )}
-                      {section.kind === 'diagram' && <span className="chip">DIAGRAM</span>}
-                      {section.kind === 'errors' && <span className="chip">ERRORS</span>}
-                      {!section.enabled && <span className="chip muted">off</span>}
-                      {error && <span className="chip danger">err</span>}
-                    </div>
-                  </button>
-                );
-              })}
-              {sections.length === 0 && (
-                <div className="empty-state">
-                  <div>У выбранного метода пока нет секций.</div>
-                  <button className="ghost small" type="button" onClick={() => addSectionByType('text')} aria-label="Добавить первую секцию" title="Добавить первую секцию">
-                    <span className="ui-icon" aria-hidden>{renderUiIcon('add_section')}</span>
-                  </button>
-                </div>
-              )}
-            </div>
-            <div className="sidebar-footer">
-              <div className="add-block-menu">
-                <button className="ghost small topbar-action" type="button" onClick={() => setIsAddBlockMenuOpen((current) => !current)} aria-label="Добавить секцию" title="Добавить секцию">
-                  <span className="ui-icon" aria-hidden>{renderUiIcon('add_section')}</span>
-                </button>
-                {isAddBlockMenuOpen && (
-                  <div className="add-block-popover" role="menu" aria-label="Тип нового блока">
-                    {ADDABLE_BLOCK_TYPES.map((item) => (
-                      <button
-                        key={item.type}
-                        className="add-block-option"
-                        type="button"
-                        role="menuitem"
-                        onClick={() => addSectionByType(item.type)}
-                      >
-                        <span className="add-block-option-title">{item.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </aside>
+      <div
+        className={`layout ${isSidebarHidden ? 'sidebar-hidden' : ''}`}
+        style={{ '--sidebar-width': `${sidebarWidth}px` } as CSSProperties}
+      >
+        {!isSidebarHidden && (
+          <MethodSectionSidebar
+            enableMultiMethods={ENABLE_MULTI_METHODS}
+            normalizedProjectName={normalizedProjectName}
+            editingProjectName={editingProjectName}
+            editingProjectNameDraft={editingProjectNameDraft}
+            projectNameInputRef={projectNameInputRef}
+            isProjectFolderExpanded={isProjectFolderExpanded}
+            methods={methods}
+            activeMethodId={activeMethod?.id}
+            editingMethodId={editingMethodId}
+            editingMethodNameDraft={editingMethodNameDraft}
+            methodNameWarning={methodNameWarning}
+            methodNameInputRef={methodNameInputRef}
+            canDeleteMethod={methods.length > 1 && Boolean(activeMethod)}
+            sections={sections}
+            selectedSectionId={selectedSection?.id}
+            validationMap={validationMap}
+            draggingId={draggingId}
+            isSectionPanelPulse={isSectionPanelPulse}
+            isAddBlockMenuOpen={isAddBlockMenuOpen}
+            addableBlockTypes={ADDABLE_BLOCK_TYPES}
+            onStartProjectRename={startProjectRename}
+            onProjectNameDraftChange={setEditingProjectNameDraft}
+            onFinishProjectRename={finishProjectRename}
+            onCancelProjectRename={cancelProjectRename}
+            onToggleProjectFolder={() => setIsProjectFolderExpanded((current) => !current)}
+            onSwitchMethod={switchMethod}
+            onStartMethodRename={startMethodRename}
+            onMethodNameDraftChange={setEditingMethodNameDraft}
+            onFinishMethodRename={finishMethodRename}
+            onCancelMethodRename={cancelMethodRename}
+            onCreateMethod={createMethod}
+            onDeleteActiveMethod={deleteActiveMethod}
+            onDragStartSection={setDraggingId}
+            onDropSection={(targetId) => {
+              if (draggingId) {
+                setSections((prev) => reorderSections(prev, draggingId, targetId));
+              }
+              setDraggingId(null);
+            }}
+            onSelectSection={(sectionId) => {
+              setSelectedId(sectionId);
+              if (isCompactLayout) setIsSidebarHidden(true);
+            }}
+            onToggleAddBlockMenu={() => setIsAddBlockMenuOpen((current) => !current)}
+            onAddSectionByType={addSectionByType}
+            onStartSidebarResize={startSidebarResize}
+            renderUiIcon={renderUiIcon}
+            resolveSectionTitle={resolveSectionTitle}
+          />
+        )}
 
         <main className="workspace" role="main">
           {selectedSection ? (
-            <div className="panes">
+            <>
+              <WorkspaceTabs tab={tab} onOpenEditor={() => setTab('editor')} onOpenHtml={openHtmlPreview} onOpenWiki={openWikiPreview} />
+
+              <div className="panes">
               {tab === 'editor' && (
                 <section className="panel">
                   <div className="panel-head">
@@ -7296,11 +7172,16 @@ export default function App() {
                       <div className="panel-title">{renderEditableSectionTitle(selectedSection)}</div>
                     </div>
                     <div className="row gap">
-                      {isCustomSection(selectedSection) && (
-                        <button className="ghost small" type="button" onClick={() => deleteSection(selectedSection.id)}>
-                          Удалить
-                        </button>
-                      )}
+                      {renderSectionActionCluster(selectedSection, 'header')}
+                      <button
+                        className="icon-button danger"
+                        type="button"
+                        onClick={() => requestDeleteSection(selectedSection.id)}
+                        aria-label="Удалить раздел"
+                        title="Удалить раздел"
+                      >
+                        <span className="ui-icon" aria-hidden>{renderUiIcon('delete_section')}</span>
+                      </button>
                       <label className="switch">
                         <input
                           type="checkbox"
@@ -7451,26 +7332,60 @@ export default function App() {
                   )}
 
                   {selectedSection.kind === 'parsed' && (
-                    <>
-                      {isDualModelSection(selectedSection) ? (
-                        renderRequestEditor(selectedSection)
-                      ) : (
-                        <div className="stack">
-                          {renderSourceEditor(selectedSection, 'server')}
-                          <div className="row gap">
-                            <button className="ghost small" type="button" onClick={() => addManualRow(selectedSection)}>
-                              + Параметр
-                            </button>
-                          </div>
-                          {selectedSection.error && <div className="alert error">{selectedSection.error}</div>}
-                          {renderParsedTable(selectedSection)}
-                        </div>
-                      )}
-                    </>
+                    <ParsedSectionEditor
+                      section={selectedSection}
+                      isDualModelSection={isDualModelSection}
+                      renderRequestEditor={renderRequestEditor}
+                      renderSourceEditor={renderSourceEditor}
+                      onAddManualRow={addManualRow}
+                      renderParsedTable={renderParsedTable}
+                    />
                   )}
 
-                  {selectedSection.kind === 'diagram' && renderDiagramEditor(selectedSection)}
-                  {selectedSection.kind === 'errors' && renderErrorsEditor(selectedSection)}
+                  {selectedSection.kind === 'diagram' && (
+                    <DiagramSectionEditor
+                      section={selectedSection}
+                      defaultRichTextHighlight={DEFAULT_RICH_TEXT_HIGHLIGHT}
+                      isExpanderOpen={isExpanderOpen}
+                      setExpanderOpen={setExpanderOpen}
+                      onAddDiagram={addDiagram}
+                      onUpdateDiagram={updateDiagram}
+                      onDeleteDiagram={deleteDiagram}
+                      getDiagramEditorNode={getDiagramEditorNode}
+                      onBindDiagramEditorRef={bindDiagramEditorRef}
+                      syncDiagramDescriptionFromEditor={syncDiagramDescriptionFromEditor}
+                      rememberSelectionForEditor={rememberSelectionForEditor}
+                      applyDiagramTextCommand={applyDiagramTextCommand}
+                      handleRichTextHotkeys={handleRichTextHotkeys}
+                    />
+                  )}
+                  {selectedSection.kind === 'errors' && (
+                    <ErrorsSectionEditor
+                      section={selectedSection}
+                      sections={sections}
+                      validationCaseOptions={VALIDATION_CASE_OPTIONS}
+                      openInternalCodeKey={openInternalCodeKey}
+                      highlightedInternalCodeIndex={highlightedInternalCodeIndex}
+                      internalCodePopoverState={internalCodePopoverState}
+                      internalCodeAnchorRefs={internalCodeAnchorRefs}
+                      internalCodePopoverRef={internalCodePopoverRef}
+                      setOpenInternalCodeKey={setOpenInternalCodeKey}
+                      setHighlightedInternalCodeIndex={setHighlightedInternalCodeIndex}
+                      updateErrorRow={updateErrorRow}
+                      formatClientResponseCode={formatClientResponseCode}
+                      applyInternalCode={applyInternalCode}
+                      formatErrorResponseCode={formatErrorResponseCode}
+                      deleteErrorRow={deleteErrorRow}
+                      addErrorRow={addErrorRow}
+                      updateValidationRuleRow={updateValidationRuleRow}
+                      deleteValidationRuleRow={deleteValidationRuleRow}
+                      addValidationRuleRow={addValidationRuleRow}
+                      getSectionRows={getSectionRows}
+                      getDynamicTextareaRows={getDynamicTextareaRows}
+                      validateJsonDraft={validateJsonDraft}
+                      renderUiIcon={renderUiIcon}
+                    />
+                  )}
                 </section>
               )}
 
@@ -7495,6 +7410,21 @@ export default function App() {
                 <section className="panel">
                   <div className="panel-head">
                     <div className="panel-title">Предпросмотр Wiki</div>
+                    <div className="row gap">
+                      <button
+                        type="button"
+                        className="ghost small"
+                        onClick={() => {
+                          void copyToClipboard(wikiOutput);
+                          setToastMessage('Wiki текст скопирован в буфер обмена.');
+                        }}
+                      >
+                        Скопировать
+                      </button>
+                      <button type="button" className="ghost small" onClick={handleExportWiki}>
+                        Скачать
+                      </button>
+                    </div>
                   </div>
                   <div className="wiki-preview-wrap">
                     <button
@@ -7516,7 +7446,8 @@ export default function App() {
                   </div>
                 </section>
               )}
-            </div>
+              </div>
+            </>
           ) : (
             <div className="muted">Секция не выбрана</div>
           )}

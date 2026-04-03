@@ -4,10 +4,10 @@
 Документ описывает актуальную архитектуру `doc-builder`: модель данных, ключевые потоки, границы MVP и оценку необходимости рефакторинга.
 
 ## Технический контур
-- Frontend-only SPA на React + TypeScript + Vite.
+- SPA на React + TypeScript + Vite с клиентским UI и используемым API-слоем для auth и server sync.
 - Точка входа: [src/main.tsx](src/main.tsx).
-- Оркестрация UI, состояния и действий сосредоточена в [src/App.tsx](src/App.tsx).
-- Серверная часть в рантайме не используется: `server/` сейчас является заготовкой.
+- Основная оркестрация состояния и use-case действий сосредоточена в [src/App.tsx](src/App.tsx); shell-UI поэтапно выносится в `components/`.
+- В проекте используются API-маршруты из `api/` и клиент `src/serverSyncClient.ts`; серверный слой больше не является только заготовкой.
 
 ## Внутренний формат проекта
 Состояние проекта хранится и экспортируется как `ProjectData` (см. [src/types.ts](src/types.ts)):
@@ -86,7 +86,14 @@ XML в текущей версии не поддерживается.
 - Экспорт проекта в JSON выполняется из [src/App.tsx](src/App.tsx) (`asProjectData`).
 
 ## Слои и ответственность модулей
-- `App.tsx`: orchestration layer (state, UI actions, parse/export/import/autosave).
+- `App.tsx`: orchestration layer (state, use-case actions, wiring of feature components).
+- `components/AppTopbar.tsx`: topbar shell (import/export actions, history controls, auth entry points, onboarding stepbar).
+- `components/WorkspaceTabs.tsx`: workspace mode navigation (`editor/html/wiki`).
+- `components/MethodSectionSidebar.tsx`: sidebar shell (project/method tree, section list, add block entrypoint, resize handle trigger).
+- `components/ParsedSectionEditor.tsx`: wrapper of parsed section rendering flow (`request/response` editor vs generic parsed source/table).
+- `components/DiagramSectionEditor.tsx`: diagram section feature shell (diagram list, source input, preview, rich-text description actions).
+- `components/ErrorsSectionEditor.tsx`: error matrix feature shell (internalCode picker, formatting helpers, validation rules table).
+- `components/MermaidLivePreview.tsx`: isolated Mermaid preview renderer with fallback image flow.
 - `types.ts`: доменные типы и контракт состояния.
 - `parsers.ts`: преобразование входа в `ParsedRow[]`.
 - `requestHeaders.ts` / `requestColumns.ts`: прикладная логика request/response представления.
@@ -98,7 +105,7 @@ XML в текущей версии не поддерживается.
 ## Ограничения MVP
 - Нет серверной синхронизации, хранилище только localStorage + JSON import/export.
 - Покрытие автотестами внедрено на MVP-уровне (unit + integration), но требует дальнейшего расширения при росте функционала.
-- `App.tsx` содержит очень большой объем UI и бизнес-логики в одном файле.
+- `App.tsx` остается крупным и все еще содержит большой объем UI и бизнес-логики, но shell-часть верхней панели, workspace tabs, sidebar, parsed-section wrapper, diagram editor и errors editor уже вынесены в `components/`.
 - Эвристики парсинга cURL и определения типов покрывают типовые кейсы, но не являются строгим парсером спецификаций.
 
 ## Оценка рефакторинга на текущем этапе
@@ -124,7 +131,7 @@ XML в текущей версии не поддерживается.
 ## Рекомендуемый план без остановки разработки
 1. Выделить `useProjectState` (load/save/import/export/reset + sanitize).
 2. Выделить `useParsedSections` (parse, sync, drift, mapping, auth/meta).
-3. Разделить UI на компоненты: `SectionSidebar`, `TextSectionEditor`, `RequestSectionEditor`, `PreviewTabs`.
+3. Продолжить декомпозицию UI: вынести `TextSectionEditor` и `RequestSectionEditor` (часть parsed/request use-case), затем сократить прокидывание props через feature-level hooks.
 4. Добавить тесты на чистые функции: `parseToRows`, `buildInputFromRows`, `getRequestRows`.
 
 Такой подход снижает риск регрессий и не блокирует поставку новых функций.

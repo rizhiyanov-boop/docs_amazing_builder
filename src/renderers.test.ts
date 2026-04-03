@@ -16,7 +16,8 @@ describe('renderers', () => {
   it('renders wiki document shell and sections', () => {
     const wiki = renderWikiDocument(makeSectionsForRender());
 
-    expect(wiki).toContain('h1. Документация API');
+    expect(wiki).toContain('{toc}');
+    expect(wiki).toContain('h2. История изменений');
     expect(wiki).toContain('h2. Цель');
     expect(wiki).toContain('Тестовая цель');
   });

@@ -136,6 +136,7 @@ export interface MethodGroup {
 
 export interface WorkspaceProjectData {
   version: number;
+  projectName?: string;
   updatedAt: string;
   activeMethodId?: string;
   methods: MethodDocument[];

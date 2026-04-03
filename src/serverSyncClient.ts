@@ -6,6 +6,7 @@ export type AuthUser = {
 };
 
 export type WorkspaceSnapshot = {
+  projectName?: string;
   methods: unknown[];
   methodGroups: unknown[];
   activeMethodId: string;

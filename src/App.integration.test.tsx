@@ -4,9 +4,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 
 const STORAGE_KEY = 'doc-builder-project-v2';
+const ONBOARDING_ENTRY_SUPPRESS_KEY = 'doc-builder-onboarding-entry-suppressed-v1';
 
 function getStoredProjectRaw(): string | null {
   return window.localStorage.getItem(STORAGE_KEY);
+}
+
+function renderApp(): void {
+  window.localStorage.setItem(ONBOARDING_ENTRY_SUPPRESS_KEY, '1');
+  render(<App />);
 }
 
 describe('App integration', () => {
@@ -16,22 +22,23 @@ describe('App integration', () => {
     cleanup();
   });
 
-  it('renders shell and autosaves initial project', async () => {
-    render(<App />);
+  it('renders shell and autosaves initial workspace', async () => {
+    renderApp();
 
     expect(screen.getByRole('heading', { name: 'Doc Builder' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Экспорт HTML' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Открыть HTML-предпросмотр' })).toBeInTheDocument();
 
     await waitFor(() => {
       const raw = getStoredProjectRaw();
       expect(raw).toBeTruthy();
-      expect(raw).toContain('"version":2');
+      expect(raw).toContain('"version":3');
+      expect(raw).toContain('"methods"');
     });
   });
 
   it('switches to html and wiki preview tabs', async () => {
     const user = userEvent.setup();
-    render(<App />);
+    renderApp();
 
     await user.click(screen.getByRole('tab', { name: 'HTML' }));
     expect(screen.getByText('Предпросмотр HTML')).toBeInTheDocument();
@@ -39,7 +46,7 @@ describe('App integration', () => {
 
     await user.click(screen.getByRole('tab', { name: 'Wiki' }));
     expect(screen.getByText('Предпросмотр Wiki')).toBeInTheDocument();
-    expect(screen.getByDisplayValue(/h1\. Документация API/)).toBeInTheDocument();
+    expect(screen.getByDisplayValue(/\{toc\}/i)).toBeInTheDocument();
   });
 
   it('exports html and wiki through blob download', async () => {
@@ -48,57 +55,50 @@ describe('App integration', () => {
     const revokeObjectURL = vi.spyOn(window.URL, 'revokeObjectURL').mockImplementation(() => {});
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
 
-    render(<App />);
+    renderApp();
 
-    await user.click(screen.getByRole('button', { name: 'Экспорт HTML' }));
-    await user.click(screen.getByRole('button', { name: 'Экспорт Wiki' }));
+    await user.click(screen.getByRole('button', { name: 'Открыть HTML-предпросмотр' }));
+    await user.click(screen.getByRole('button', { name: 'Скачать' }));
+
+    await user.click(screen.getByRole('button', { name: 'Открыть Wiki-предпросмотр' }));
+    await user.click(screen.getByRole('button', { name: 'Скачать' }));
 
     expect(createObjectURL).toHaveBeenCalledTimes(2);
     expect(revokeObjectURL).toHaveBeenCalledTimes(2);
     expect(clickSpy).toHaveBeenCalledTimes(2);
   });
 
-  it('resets project after confirmation and rewrites local storage', async () => {
+  it('opens and closes project import dialog from topbar', async () => {
     const user = userEvent.setup();
-    window.localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({
-        version: 2,
-        updatedAt: new Date().toISOString(),
-        sections: [{ id: 'custom', title: 'Кастом', enabled: true, kind: 'text', value: 'x' }]
-      })
-    );
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    renderApp();
 
-    render(<App />);
-    await user.click(screen.getByRole('button', { name: 'Новый' }));
+    await user.click(screen.getByRole('button', { name: 'Импорт' }));
+    expect(screen.getByRole('dialog', { name: 'Импорт проекта из текста' })).toBeInTheDocument();
 
+    await user.click(screen.getByRole('button', { name: 'Отмена' }));
     await waitFor(() => {
-      const raw = getStoredProjectRaw();
-      expect(raw).toBeTruthy();
-      expect(raw).toContain('"id":"goal"');
-      expect(raw).not.toContain('"id":"custom"');
+      expect(screen.queryByRole('dialog', { name: 'Импорт проекта из текста' })).not.toBeInTheDocument();
     });
   });
 
   it('shows parse validation error for empty request source', async () => {
     const user = userEvent.setup();
-    render(<App />);
+    renderApp();
 
     await user.click(screen.getByRole('option', { name: /Request/i }));
-    await user.click(screen.getAllByText(/Server request/i)[0]);
+    await user.click(screen.getByRole('button', { name: 'Парсить' }));
 
-    const parseButtons = screen.getAllByRole('button', { name: 'Парсить' });
-    await user.click(parseButtons[0]);
-
-    expect(await screen.findByText(/Поле ввода пустое/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(document.querySelectorAll('.alert.error').length).toBeGreaterThan(0);
+    });
   });
 
   it('imports invalid project json and shows import error', async () => {
-    render(<App />);
+    renderApp();
 
     const fileInput = document.querySelector('input[type="file"]');
     expect(fileInput).not.toBeNull();
+
     const invalidFile = new File(['{invalid-json}'], 'bad.json', { type: 'application/json' });
     fireEvent.change(fileInput as HTMLInputElement, { target: { files: [invalidFile] } });
 

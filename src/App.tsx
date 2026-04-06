@@ -83,6 +83,7 @@ import type {
 const STORAGE_KEY = 'doc-builder-project-v2';
 const STORAGE_SERVER_PROJECT_ID_KEY = 'doc-builder-server-project-id-v1';
 const ONBOARDING_ENTRY_SUPPRESS_KEY = 'doc-builder-onboarding-entry-suppressed-v1';
+const THEME_STORAGE_KEY = 'doc-builder-theme-v1';
 const TABLE_FIELD_COLUMN_WIDTH_KEY = 'doc-builder-table-field-column-width-v1';
 const SIDEBAR_WIDTH_KEY = 'doc-builder-sidebar-width-v1';
 const SIDEBAR_HIDDEN_KEY = 'doc-builder-sidebar-hidden-v1';
@@ -154,6 +155,15 @@ function loadPersistedServerProjectId(): string | null {
     return localStorage.getItem(STORAGE_SERVER_PROJECT_ID_KEY);
   } catch {
     return null;
+  }
+}
+
+function loadPersistedTheme(): ThemeName {
+  try {
+    const raw = localStorage.getItem(THEME_STORAGE_KEY);
+    return raw === 'dark' ? 'dark' : 'light';
+  } catch {
+    return 'light';
   }
 }
 
@@ -1235,7 +1245,7 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string>(() => initialWorkspace.methods[0]?.sections[0]?.id ?? createInitialSections()[0].id);
   const [tab, setTab] = useState<TabKey>('editor');
   const [sectionJumpHighlightId, setSectionJumpHighlightId] = useState<string | null>(null);
-  const [theme, setTheme] = useState<ThemeName>('light');
+  const [theme, setTheme] = useState<ThemeName>(() => loadPersistedTheme());
   const [autosave, setAutosave] = useState<AutosaveInfo>({ state: 'idle' });
   const [importError, setImportError] = useState('');
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -2812,6 +2822,7 @@ export default function App() {
 
   useEffect(() => {
     if (tab !== 'editor') return;
+    if (editingField || editingRequestCell || editingHeaderCell || editingTitle || editingSource || editingMappingCell) return;
     if (typeof window === 'undefined' || typeof window.IntersectionObserver !== 'function') return;
 
     const anchors = sections
@@ -2875,7 +2886,7 @@ export default function App() {
       }
       sectionVisibilityRatiosRef.current.clear();
     };
-  }, [tab, sections, selectedId]);
+  }, [tab, sections, selectedId, editingField, editingRequestCell, editingHeaderCell, editingTitle, editingSource, editingMappingCell]);
 
   function isSelectionInsideListItem(): boolean {
     if (!textEditor) return false;
@@ -3477,6 +3488,14 @@ export default function App() {
 
   useEffect(() => {
     applyThemeToRoot(theme);
+  }, [theme]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, theme);
+    } catch {
+      // Ignore persistence errors for local preference.
+    }
   }, [theme]);
 
   useEffect(() => {

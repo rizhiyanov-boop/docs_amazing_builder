@@ -41,7 +41,7 @@ import { fillDescriptionsWithAi, repairJsonWithAi, suggestMappingsWithAi, sugges
 import { AppTopbar } from './components/AppTopbar';
 import { DiagramSectionEditor } from './components/DiagramSectionEditor';
 import { ErrorsSectionEditor } from './components/ErrorsSectionEditor';
-import { MethodSectionSidebar, type AddableBlockType } from './components/MethodSectionSidebar';
+import { MethodSectionSidebar } from './components/MethodSectionSidebar';
 import { ParsedSectionEditor } from './components/ParsedSectionEditor';
 import { WorkspaceTabs } from './components/WorkspaceTabs';
 import {
@@ -93,6 +93,10 @@ const HISTORY_LIMIT = 50;
 const HISTORY_COALESCE_MS = 700;
 const REMOTE_SAVE_CHANGE_THRESHOLD = 10;
 const REMOTE_SAVE_IDLE_MS = 20000;
+const LOCAL_AUTOSAVE_DEBOUNCE_MS = 320;
+const PROJECT_CACHE_TTL_MS = 3 * 60 * 1000;
+const PROJECT_PRELOAD_CONCURRENCY = 2;
+const PROJECT_PRELOAD_START_DELAY_MS = 900;
 const DEFAULT_TABLE_FIELD_COLUMN_WIDTH = 320;
 const MIN_TABLE_FIELD_COLUMN_WIDTH = 220;
 const MAX_TABLE_FIELD_COLUMN_WIDTH = 640;
@@ -271,6 +275,18 @@ type ServerProjectPayload = {
   updatedAt: string;
 };
 
+type CachedServerProjectData = {
+  workspace: WorkspaceProjectData;
+  history: PersistedHistoryState | null;
+  loadedAt: number;
+};
+
+type ProjectMethodPreview = {
+  id: string;
+  name: string;
+  sectionCount: number;
+};
+
 type JsonImportRoutingState = {
   fileName: string;
   rawText: string;
@@ -405,43 +421,8 @@ const RICH_TEXT_HIGHLIGHT_OPTIONS = [
   { value: '#bfdbfe', label: 'Синий' }
 ] as const;
 
-const ADDABLE_BLOCK_TYPES: Array<{ type: AddableBlockType; label: string }> = [
-  { type: 'text', label: 'Текстовый блок' },
-  { type: 'request', label: 'Request блок' },
-  { type: 'response', label: 'Response блок' },
-  { type: 'error-logic', label: 'Логика обработки ошибок' },
-  { type: 'diagram', label: 'Диаграмма' }
-];
-const AUTO_SECTION_TITLE_BASE: Record<AddableBlockType, string> = {
-  text: 'Текстовый блок',
-  request: 'Request блок',
-  response: 'Response блок',
-  'error-logic': 'Логика обработки ошибок',
-  diagram: 'Диаграмма'
-};
-
 function usesStructuredPlaceholder(type: string): boolean {
   return ['object', 'array', 'array_object'].includes(type);
-}
-
-function createAutoSectionTitle(sections: DocSection[], type: AddableBlockType): string {
-  const baseTitle = AUTO_SECTION_TITLE_BASE[type];
-  const escapedBase = baseTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const matcher = new RegExp(`^${escapedBase}(?:\\s+(\\d+))?$`);
-
-  const nextIndex =
-    sections.reduce((maxValue, section) => {
-      const match = resolveSectionTitle(section.title).match(matcher);
-      if (!match) return maxValue;
-      const index = match[1] ? Number(match[1]) : 1;
-      return Math.max(maxValue, index);
-    }, 0) + 1;
-
-  return `${baseTitle} ${nextIndex}`;
-}
-
-function createTextSection(id = `custom-${Date.now()}`, title = DEFAULT_SECTION_TITLE): DocSection {
-  return { id, title, enabled: true, kind: 'text', value: '' };
 }
 
 function createParsedSection(sectionType: ParsedSectionType, id = `custom-${sectionType}-${Date.now()}`): ParsedSection {
@@ -1228,6 +1209,11 @@ function getDynamicTextareaRows(value: string, minRows = 1, maxRows = 8): number
 
 export default function App() {
   const activeTextSectionIdRef = useRef<string | null>(null);
+  const sectionAnchorRefs = useRef<Map<string, HTMLElement>>(new Map());
+  const sectionVisibilityRatiosRef = useRef<Map<string, number>>(new Map());
+  const suppressObserverSelectionUntilRef = useRef<number>(0);
+  const observerRafRef = useRef<number | null>(null);
+  const sectionJumpHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const richEditorSelectionRef = useRef<{ editor: HTMLElement; range: Range } | null>(null);
   const topbarRef = useRef<HTMLElement | null>(null);
   const aiStatusResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1246,6 +1232,7 @@ export default function App() {
   const [activeMethodId, setActiveMethodId] = useState<string>(() => initialWorkspace.activeMethodId ?? initialWorkspace.methods[0]?.id ?? createMethodId());
   const [selectedId, setSelectedId] = useState<string>(() => initialWorkspace.methods[0]?.sections[0]?.id ?? createInitialSections()[0].id);
   const [tab, setTab] = useState<TabKey>('editor');
+  const [sectionJumpHighlightId, setSectionJumpHighlightId] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeName>('light');
   const [autosave, setAutosave] = useState<AutosaveInfo>({ state: 'idle' });
   const [importError, setImportError] = useState('');
@@ -1277,14 +1264,17 @@ export default function App() {
   const [openInternalCodeKey, setOpenInternalCodeKey] = useState<string | null>(null);
   const [highlightedInternalCodeIndex, setHighlightedInternalCodeIndex] = useState(0);
   const [internalCodePopoverState, setInternalCodePopoverState] = useState<InternalCodePopoverState | null>(null);
-  const [isAddBlockMenuOpen, setIsAddBlockMenuOpen] = useState(false);
+  const [isAddEntityMenuOpen, setIsAddEntityMenuOpen] = useState(false);
+  const [isDeleteEntityMenuOpen, setIsDeleteEntityMenuOpen] = useState(false);
   const [isOnboardingNavVisible, setIsOnboardingNavVisible] = useState(false);
   const [pendingMethodNameFocus, setPendingMethodNameFocus] = useState(false);
   const [pendingProjectNameFocus, setPendingProjectNameFocus] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [deletedRowUndo, setDeletedRowUndo] = useState<DeletedRowUndoState | null>(null);
   const [sectionClipboard, setSectionClipboard] = useState<SectionClipboardState | null>(null);
-  const [isProjectFolderExpanded, setIsProjectFolderExpanded] = useState(true);
+  const [openSectionActionsMenuId, setOpenSectionActionsMenuId] = useState<string | null>(null);
+  const [expandedProjectIds, setExpandedProjectIds] = useState<Record<string, true>>({});
+  const [expandedMethodId, setExpandedMethodId] = useState<string | null>(() => initialWorkspace.activeMethodId ?? initialWorkspace.methods[0]?.id ?? null);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [isSectionPanelPulse, setIsSectionPanelPulse] = useState(false);
@@ -1310,16 +1300,35 @@ export default function App() {
   const [authUser, setAuthUser] = useState<ServerAuthUser | null>(null);
   const [serverProjectId, setServerProjectId] = useState<string | null>(() => loadPersistedServerProjectId());
   const [serverProjects, setServerProjects] = useState<ProjectListItem[]>([]);
+  const [projectMethodCounts, setProjectMethodCounts] = useState<Record<string, number>>({});
+  const [projectMethodPreviews, setProjectMethodPreviews] = useState<Record<string, ProjectMethodPreview[]>>({});
   const [serverSyncError, setServerSyncError] = useState('');
+  const [isProjectSwitching, setIsProjectSwitching] = useState(false);
+  const [switchingProjectId, setSwitchingProjectId] = useState<string | null>(null);
   const internalCodeAnchorRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   useEffect(() => {
     return () => {
+      if (observerRafRef.current !== null && typeof window !== 'undefined') {
+        window.cancelAnimationFrame(observerRafRef.current);
+      }
+      if (sectionJumpHighlightTimerRef.current) {
+        clearTimeout(sectionJumpHighlightTimerRef.current);
+      }
       if (aiStatusResetTimeoutRef.current) {
         clearTimeout(aiStatusResetTimeoutRef.current);
       }
       if (authStatusResetTimeoutRef.current) {
         clearTimeout(authStatusResetTimeoutRef.current);
+      }
+      if (localAutosaveTimerRef.current !== null) {
+        window.clearTimeout(localAutosaveTimerRef.current);
+      }
+      if (localAutosaveFlushRef.current !== null) {
+        window.clearTimeout(localAutosaveFlushRef.current);
+      }
+      if (preloadQueueTimerRef.current !== null) {
+        window.clearTimeout(preloadQueueTimerRef.current);
       }
     };
   }, []);
@@ -1338,6 +1347,41 @@ export default function App() {
     } catch {
       // Ignore persistence errors for local preference.
     }
+  }
+
+  function persistLocalWorkspace(workspace: WorkspaceProjectData): boolean {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(workspace));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function getMethodPreviews(workspace: WorkspaceProjectData): ProjectMethodPreview[] {
+    return workspace.methods.map((method) => ({
+      id: method.id,
+      name: method.name,
+      sectionCount: method.sections.length
+    }));
+  }
+
+  function upsertProjectCache(projectId: string, cached: CachedServerProjectData): void {
+    projectCacheRef.current.set(projectId, cached);
+    setProjectMethodPreviews((current) => ({
+      ...current,
+      [projectId]: getMethodPreviews(cached.workspace)
+    }));
+  }
+
+  function removeProjectCache(projectId: string): void {
+    projectCacheRef.current.delete(projectId);
+    setProjectMethodPreviews((current) => {
+      if (!(projectId in current)) return current;
+      const next = { ...current };
+      delete next[projectId];
+      return next;
+    });
   }
 
   function startSidebarResize(event: ReactMouseEvent<HTMLButtonElement>): void {
@@ -1424,6 +1468,11 @@ export default function App() {
   const remotePendingChangesRef = useRef(0);
   const remoteLastObservedHashRef = useRef('');
   const remoteLastSavedHashRef = useRef('');
+  const projectCacheRef = useRef<Map<string, CachedServerProjectData>>(new Map());
+  const preloadInFlightRef = useRef<Set<string>>(new Set());
+  const preloadQueueTimerRef = useRef<number | null>(null);
+  const localAutosaveTimerRef = useRef<number | null>(null);
+  const localAutosaveFlushRef = useRef<number | null>(null);
   const normalizedProjectName = projectName.trim() || DEFAULT_PROJECT_NAME;
   const activeMethod = methods.find((method) => method.id === activeMethodId) ?? methods[0];
   const sections = useMemo(() => activeMethod?.sections ?? EMPTY_SECTIONS, [activeMethod]);
@@ -1616,6 +1665,91 @@ export default function App() {
   }, [serverProjectId]);
 
   useEffect(() => {
+    if (!serverProjectId) return;
+    setExpandedProjectIds((current) => {
+      if (current[serverProjectId]) return current;
+      return {
+        ...current,
+        [serverProjectId]: true
+      };
+    });
+  }, [serverProjectId]);
+
+  useEffect(() => {
+    const availableProjectIds = new Set(serverProjects.map((project) => project.id));
+    for (const cachedId of Array.from(projectCacheRef.current.keys())) {
+      if (!availableProjectIds.has(cachedId)) {
+        removeProjectCache(cachedId);
+      }
+    }
+  }, [serverProjects]);
+
+  useEffect(() => {
+    if (!authUser) return;
+    if (serverProjects.length === 0) return;
+
+    let cancelled = false;
+
+    if (preloadQueueTimerRef.current !== null) {
+      window.clearTimeout(preloadQueueTimerRef.current);
+      preloadQueueTimerRef.current = null;
+    }
+
+    const runPreloadQueue = async (): Promise<void> => {
+      const targetIds = serverProjects
+        .map((project) => project.id)
+        .filter((projectId) => projectId !== serverProjectId);
+
+      if (targetIds.length === 0) return;
+
+      let cursor = 0;
+      const worker = async (): Promise<void> => {
+        while (!cancelled) {
+          const targetId = targetIds[cursor];
+          cursor += 1;
+          if (!targetId) return;
+
+          const cached = projectCacheRef.current.get(targetId);
+          if (cached && isProjectCacheFresh(cached)) {
+            continue;
+          }
+          if (preloadInFlightRef.current.has(targetId)) {
+            continue;
+          }
+
+          preloadInFlightRef.current.add(targetId);
+          try {
+            await preloadServerProjectToCache(targetId);
+          } catch {
+            // Ignore preload errors: they should not block interactive flow.
+          } finally {
+            preloadInFlightRef.current.delete(targetId);
+          }
+        }
+      };
+
+      const workers = Array.from(
+        { length: Math.min(PROJECT_PRELOAD_CONCURRENCY, targetIds.length) },
+        () => worker()
+      );
+      await Promise.all(workers);
+    };
+
+    preloadQueueTimerRef.current = window.setTimeout(() => {
+      void runPreloadQueue();
+      preloadQueueTimerRef.current = null;
+    }, PROJECT_PRELOAD_START_DELAY_MS);
+
+    return () => {
+      cancelled = true;
+      if (preloadQueueTimerRef.current !== null) {
+        window.clearTimeout(preloadQueueTimerRef.current);
+        preloadQueueTimerRef.current = null;
+      }
+    };
+  }, [authUser, serverProjects, serverProjectId]);
+
+  useEffect(() => {
     const topbar = topbarRef.current;
     const root = document.documentElement;
     if (!topbar) return;
@@ -1741,6 +1875,53 @@ export default function App() {
         return {
           ...method,
           sections: normalizedSections
+        };
+      });
+
+      return changed ? next : prev;
+    });
+  }, []);
+
+  useEffect(() => {
+    setMethodsState((prev) => {
+      let changed = false;
+      const next = prev.map((method) => {
+        const sections = method.sections.map((section) => {
+          if (section.kind !== 'parsed') return section;
+
+          let sectionChanged = false;
+          const rows = section.rows.map((row) => {
+            if (row.sourceField?.trim() || !row.field.trim()) return row;
+            sectionChanged = true;
+            return { ...row, sourceField: row.field.trim() };
+          });
+
+          if (section.sectionType !== 'request' && section.sectionType !== 'response') {
+            if (!sectionChanged) return section;
+            changed = true;
+            return { ...section, rows };
+          }
+
+          const clientRows = (section.clientRows ?? []).map((row) => {
+            const nextSourceField = row.sourceField?.trim() || row.field.trim();
+            if (!nextSourceField || row.sourceField?.trim()) return row;
+            sectionChanged = true;
+            return { ...row, sourceField: nextSourceField };
+          });
+
+          if (!sectionChanged) return section;
+          changed = true;
+          return {
+            ...section,
+            rows,
+            clientRows
+          };
+        });
+
+        if (sections === method.sections) return method;
+        return {
+          ...method,
+          sections
         };
       });
 
@@ -1925,20 +2106,73 @@ export default function App() {
     }
   }
 
-  async function loadServerProjectIntoWorkspace(projectId: string): Promise<void> {
-    const payload = (await loadServerProject(projectId)) as ServerProjectPayload;
+  function isProjectCacheFresh(cached: CachedServerProjectData): boolean {
+    return Date.now() - cached.loadedAt < PROJECT_CACHE_TTL_MS;
+  }
+
+  function payloadToCachedServerProject(payload: ServerProjectPayload): CachedServerProjectData {
     const normalizedWorkspace = {
       ...payload.workspace,
       projectName: normalizeProjectName(payload.workspace.projectName || payload.name)
     };
 
+    return {
+      workspace: deepClone(normalizedWorkspace),
+      history: payload.history ? deepClone(payload.history) : null,
+      loadedAt: Date.now()
+    };
+  }
+
+  function applyLoadedServerProject(payload: ServerProjectPayload): void {
+    const cached = payloadToCachedServerProject(payload);
+    const normalizedWorkspace = deepClone(cached.workspace);
+
     applyWorkspaceState(normalizedWorkspace);
     applyPersistedHistoryState(payload.history);
     setServerProjectId(payload.id);
+    setProjectMethodCounts((current) => ({
+      ...current,
+      [payload.id]: normalizedWorkspace.methods.length
+    }));
+    upsertProjectCache(payload.id, cached);
     const loadedHash = JSON.stringify(normalizedWorkspace);
     remoteLastObservedHashRef.current = loadedHash;
     remoteLastSavedHashRef.current = loadedHash;
     remotePendingChangesRef.current = 0;
+  }
+
+  function applyCachedServerProject(projectId: string, cached: CachedServerProjectData): void {
+    const cachedWorkspace = deepClone(cached.workspace);
+    applyWorkspaceState(cachedWorkspace);
+    applyPersistedHistoryState(cached.history ? deepClone(cached.history) : null);
+    setServerProjectId(projectId);
+    setProjectMethodCounts((current) => ({
+      ...current,
+      [projectId]: cachedWorkspace.methods.length
+    }));
+    const loadedHash = JSON.stringify(cachedWorkspace);
+    remoteLastObservedHashRef.current = loadedHash;
+    remoteLastSavedHashRef.current = loadedHash;
+    remotePendingChangesRef.current = 0;
+  }
+
+  async function loadServerProjectIntoWorkspace(projectId: string): Promise<void> {
+    const payload = (await loadServerProject(projectId)) as ServerProjectPayload;
+    applyLoadedServerProject(payload);
+  }
+
+  async function preloadServerProjectToCache(projectId: string): Promise<void> {
+    if (!projectId) return;
+    const cached = projectCacheRef.current.get(projectId);
+    if (cached && isProjectCacheFresh(cached)) return;
+
+    const payload = (await loadServerProject(projectId)) as ServerProjectPayload;
+    const nextCached = payloadToCachedServerProject(payload);
+    upsertProjectCache(projectId, nextCached);
+    setProjectMethodCounts((current) => ({
+      ...current,
+      [projectId]: nextCached.workspace.methods.length
+    }));
   }
 
   async function handleServerProjectSelect(nextId: string): Promise<void> {
@@ -1949,8 +2183,22 @@ export default function App() {
       return;
     }
 
+    if (nextId === serverProjectId && !isProjectSwitching) {
+      return;
+    }
+
+    setIsProjectSwitching(true);
+    setSwitchingProjectId(nextId);
+
     try {
       remoteHydratedRef.current = false;
+      const cached = projectCacheRef.current.get(nextId);
+      if (cached && isProjectCacheFresh(cached)) {
+        applyCachedServerProject(nextId, cached);
+        setServerSyncError('');
+        setToastMessage('Проект открыт из кэша');
+        return;
+      }
       await loadServerProjectIntoWorkspace(nextId);
       setServerSyncError('');
       setToastMessage('Проект загружен с сервера');
@@ -1958,12 +2206,25 @@ export default function App() {
       setServerSyncError(error instanceof Error ? error.message : 'Ошибка синхронизации с сервером');
     } finally {
       remoteHydratedRef.current = true;
+      setSwitchingProjectId(null);
+      setIsProjectSwitching(false);
     }
   }
 
   function cancelDeleteServerProject(): void {
     setShowDeleteProjectDialog(false);
     setPendingDeleteProjectId(null);
+  }
+
+  function requestDeleteCurrentProject(): void {
+    setIsDeleteEntityMenuOpen(false);
+    if (!serverProjectId) {
+      setToastMessage('Удаление доступно только для сохраненного проекта.');
+      return;
+    }
+
+    setPendingDeleteProjectId(serverProjectId);
+    setShowDeleteProjectDialog(true);
   }
 
   function copySection(sectionId: string): void {
@@ -2001,19 +2262,45 @@ export default function App() {
     if (!projectId) return;
     setShowDeleteProjectDialog(false);
     setPendingDeleteProjectId(null);
-    try {
-      await deleteServerProject(projectId);
-      const nextProjects = serverProjects.filter((project) => project.id !== projectId);
-      setServerProjects(nextProjects);
+
+    const previousProjects = serverProjects;
+    const previousServerProjectId = serverProjectId;
+    const deletedProjectCache = projectCacheRef.current.get(projectId);
+    const nextProjects = serverProjects.filter((project) => project.id !== projectId);
+
+    setServerProjects(nextProjects);
+    removeProjectCache(projectId);
+
+    if (previousServerProjectId === projectId) {
       if (nextProjects.length > 0) {
-        await handleServerProjectSelect(nextProjects[0].id);
+        void handleServerProjectSelect(nextProjects[0].id);
       } else {
         setServerProjectId(null);
         setServerSyncError('');
-        setToastMessage('Проект удален');
       }
+    }
+
+    setToastMessage('Удаляю проект...');
+
+    try {
+      await deleteServerProject(projectId);
+      setToastMessage('Проект удален');
     } catch (error) {
+      if (deletedProjectCache) {
+        upsertProjectCache(projectId, deletedProjectCache);
+      }
+      setServerProjects(previousProjects);
+
+      if (previousServerProjectId === projectId) {
+        if (deletedProjectCache && isProjectCacheFresh(deletedProjectCache)) {
+          applyCachedServerProject(projectId, deletedProjectCache);
+        } else {
+          void handleServerProjectSelect(projectId);
+        }
+      }
+
       setServerSyncError(error instanceof Error ? error.message : 'Ошибка удаления проекта');
+      setToastMessage('Не удалось удалить проект. Состояние восстановлено.');
     }
   }
 
@@ -2159,8 +2446,16 @@ export default function App() {
     setEditingMethodId(null);
     setEditingMethodNameDraft('');
     setActiveMethodId(method.id);
+    setExpandedMethodId(method.id);
     setSelectedId(method.sections[0]?.id ?? createInitialSections()[0].id);
     if (isCompactLayout) setIsSidebarHidden(true);
+  }
+
+  function toggleMethodExpanded(method: MethodDocument): void {
+    setExpandedMethodId((current) => (current === method.id ? null : method.id));
+    if (activeMethodId !== method.id) {
+      switchMethod(method);
+    }
   }
 
   function startMethodRename(method: MethodDocument): void {
@@ -2225,14 +2520,28 @@ export default function App() {
     const method = createMethodDocument(name, createInitialSections());
     setMethodsState((prev) => [...prev, method]);
     setActiveMethodId(method.id);
+    setExpandedMethodId(method.id);
     setSelectedId(method.sections[0]?.id ?? createInitialSections()[0].id);
     setEditingMethodId(method.id);
     setEditingMethodNameDraft(name);
     setPendingMethodNameFocus(true);
     setTab('editor');
+    setIsAddEntityMenuOpen(false);
+    setIsDeleteEntityMenuOpen(false);
+  }
+
+  function createProject(): void {
+    const seed = createWorkspaceSeed();
+    applyWorkspaceState(seed);
+    setServerProjectId(null);
+    setServerSyncError('');
+    setIsAddEntityMenuOpen(false);
+    setIsDeleteEntityMenuOpen(false);
+    setToastMessage('Создан новый пустой проект.');
   }
 
   function deleteActiveMethod(): void {
+    setIsDeleteEntityMenuOpen(false);
     if (!activeMethod) return;
     if (methods.length <= 1) {
       setToastMessage('Нельзя удалить последний метод. Сначала создайте еще один метод.');
@@ -2263,7 +2572,10 @@ export default function App() {
       const fallback = next[currentIndex] ?? next[currentIndex - 1] ?? next[0];
       if (fallback) {
         setActiveMethodId(fallback.id);
+        setExpandedMethodId(fallback.id);
         setSelectedId(fallback.sections[0]?.id ?? createInitialSections()[0].id);
+      } else {
+        setExpandedMethodId(null);
       }
       return next;
     });
@@ -2453,6 +2765,73 @@ export default function App() {
 
   const selectedSection = sections.find((section) => section.id === selectedId) ?? sections[0];
   const activeTextSection = selectedSection?.kind === 'text' ? selectedSection : null;
+
+  useEffect(() => {
+    if (tab !== 'editor') return;
+    if (typeof window === 'undefined' || typeof window.IntersectionObserver !== 'function') return;
+
+    const anchors = sections
+      .map((section) => ({ sectionId: section.id, node: sectionAnchorRefs.current.get(section.id) }))
+      .filter((item): item is { sectionId: string; node: HTMLElement } => Boolean(item.node));
+
+    if (anchors.length === 0) return;
+
+    const observer = new window.IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const sectionId = (entry.target as HTMLElement).dataset.sectionId;
+          if (!sectionId) continue;
+          if (entry.isIntersecting) {
+            sectionVisibilityRatiosRef.current.set(sectionId, entry.intersectionRatio);
+          } else {
+            sectionVisibilityRatiosRef.current.delete(sectionId);
+          }
+        }
+
+        if (observerRafRef.current !== null) return;
+        observerRafRef.current = window.requestAnimationFrame(() => {
+          observerRafRef.current = null;
+          if (Date.now() < suppressObserverSelectionUntilRef.current) return;
+
+          let bestSectionId: string | null = null;
+          let bestRatio = -1;
+          for (const section of sections) {
+            const ratio = sectionVisibilityRatiosRef.current.get(section.id);
+            if (ratio === undefined) continue;
+            if (ratio > bestRatio) {
+              bestRatio = ratio;
+              bestSectionId = section.id;
+            }
+          }
+
+          if (!bestSectionId || bestRatio < 0.2) return;
+          if (bestSectionId === selectedId) return;
+
+          const currentRatio = sectionVisibilityRatiosRef.current.get(selectedId) ?? 0;
+          const ratioDelta = bestRatio - currentRatio;
+          if (ratioDelta < 0.08) return;
+
+          setSelectedId(bestSectionId);
+        });
+      },
+      {
+        threshold: [0.2, 0.45, 0.7],
+        rootMargin: '-96px 0px -35% 0px'
+      }
+    );
+
+    sectionVisibilityRatiosRef.current.clear();
+    for (const item of anchors) observer.observe(item.node);
+
+    return () => {
+      observer.disconnect();
+      if (observerRafRef.current !== null) {
+        window.cancelAnimationFrame(observerRafRef.current);
+        observerRafRef.current = null;
+      }
+      sectionVisibilityRatiosRef.current.clear();
+    };
+  }, [tab, sections, selectedId]);
 
   function isSelectionInsideListItem(): boolean {
     if (!textEditor) return false;
@@ -2898,7 +3277,7 @@ export default function App() {
     if (name === 'ai_map') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="6" cy="12" r="2" /><circle cx="18" cy="7" r="2" /><circle cx="18" cy="17" r="2" /><path d="M8 12h4" /><path d="M12 12l4-5" /><path d="M12 12l4 5" /></svg>;
     if (name === 'ai_mask') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3 5 6v5c0 4.2 2.6 8.2 7 10 4.4-1.8 7-5.8 7-10V6l-7-3Z" /><path d="M9 12h6" /><path d="M10 9h4" /></svg>;
     if (name === 'add_method') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 6v12M6 12h12" /></svg>;
-    if (name === 'delete_method') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 12h10" /></svg>;
+    if (name === 'delete_method') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12h14" /></svg>;
     if (name === 'delete_section') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 7h14" /><path d="M9 7V5h6v2" /><path d="M8 7l1 12h6l1-12" /></svg>;
     if (name === 'add_section') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="4" y="4" width="16" height="16" rx="3" /><path d="M12 8v8M8 12h8" /></svg>;
     if (name === 'skip') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 6l8 6-8 6V6Z" /><path d="M14 6l8 6-8 6V6Z" /></svg>;
@@ -2918,6 +3297,7 @@ export default function App() {
   function renderSectionActionCluster(section: DocSection, layout: 'sidebar' | 'header' = 'header'): ReactNode {
     const hasClipboardSection = sectionClipboard?.type === 'section';
     const className = layout === 'sidebar' ? 'section-item-actions' : 'section-head-actions';
+    const isMenuOpen = openSectionActionsMenuId === section.id;
 
     return (
       <div className={className}>
@@ -2933,35 +3313,95 @@ export default function App() {
         >
           <span className="ui-icon" aria-hidden>{renderUiIcon('copy')}</span>
         </button>
-        <button
-          className="icon-button"
-          type="button"
-          aria-label="Вставить секцию выше"
-          title="Вставить секцию выше"
-          disabled={!hasClipboardSection}
-          onClick={(event) => {
-            event.stopPropagation();
-            pasteSectionRelative(section.id, 'above');
-          }}
-        >
-          <span className="ui-icon" aria-hidden>{renderUiIcon('paste_above')}</span>
-        </button>
-        <button
-          className="icon-button"
-          type="button"
-          aria-label="Вставить секцию ниже"
-          title="Вставить секцию ниже"
-          disabled={!hasClipboardSection}
-          onClick={(event) => {
-            event.stopPropagation();
-            pasteSectionRelative(section.id, 'below');
-          }}
-        >
-          <span className="ui-icon" aria-hidden>{renderUiIcon('paste_below')}</span>
-        </button>
+        <div className="section-action-menu">
+          <button
+            className="icon-button section-action-more-btn"
+            type="button"
+            aria-label="Дополнительные действия секции"
+            title="Дополнительные действия"
+            aria-expanded={isMenuOpen}
+            onClick={(event) => {
+              event.stopPropagation();
+              setOpenSectionActionsMenuId((current) => (current === section.id ? null : section.id));
+            }}
+          >
+            <span className="ui-icon" aria-hidden>{renderUiIcon('more')}</span>
+          </button>
+          {isMenuOpen && (
+            <div className="add-block-popover section-action-popover" role="menu" aria-label="Действия секции">
+              <button
+                className="add-block-option"
+                type="button"
+                role="menuitem"
+                disabled={!hasClipboardSection}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  pasteSectionRelative(section.id, 'above');
+                  setOpenSectionActionsMenuId(null);
+                }}
+              >
+                <span className="add-block-option-title">Вставить секцию выше</span>
+              </button>
+              <button
+                className="add-block-option"
+                type="button"
+                role="menuitem"
+                disabled={!hasClipboardSection}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  pasteSectionRelative(section.id, 'below');
+                  setOpenSectionActionsMenuId(null);
+                }}
+              >
+                <span className="add-block-option-title">Вставить секцию ниже</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     );
   }
+
+  useEffect(() => {
+    if (!openSectionActionsMenuId) return;
+
+    const handleOutsideClick = (event: MouseEvent): void => {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        setOpenSectionActionsMenuId(null);
+        return;
+      }
+
+      if (target.closest('.section-action-menu')) return;
+      setOpenSectionActionsMenuId(null);
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick, true);
+    return () => document.removeEventListener('mousedown', handleOutsideClick, true);
+  }, [openSectionActionsMenuId]);
+
+  useEffect(() => {
+    if (!isAddEntityMenuOpen && !isDeleteEntityMenuOpen) return;
+
+    const handleOutsideClick = (event: MouseEvent): void => {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        setIsAddEntityMenuOpen(false);
+        setIsDeleteEntityMenuOpen(false);
+        return;
+      }
+
+      if (target.closest('.add-entity-menu') || target.closest('.delete-entity-menu')) {
+        return;
+      }
+
+      setIsAddEntityMenuOpen(false);
+      setIsDeleteEntityMenuOpen(false);
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick, true);
+    return () => document.removeEventListener('mousedown', handleOutsideClick, true);
+  }, [isAddEntityMenuOpen, isDeleteEntityMenuOpen]);
 
   const onboardingEntryOptions: Array<{
     id: OnboardingEntryPath;
@@ -3028,12 +3468,37 @@ export default function App() {
 
   useEffect(() => {
     setAutosave({ state: 'saving' });
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(asWorkspaceProjectData(normalizedProjectName, methods, activeMethodId, methodGroups)));
-      setAutosave({ state: 'saved', at: formatTime(new Date()) });
-    } catch {
-      setAutosave({ state: 'error' });
+
+    if (localAutosaveTimerRef.current !== null) {
+      window.clearTimeout(localAutosaveTimerRef.current);
     }
+    if (localAutosaveFlushRef.current !== null) {
+      window.clearTimeout(localAutosaveFlushRef.current);
+      localAutosaveFlushRef.current = null;
+    }
+
+    localAutosaveTimerRef.current = window.setTimeout(() => {
+      localAutosaveTimerRef.current = null;
+      localAutosaveFlushRef.current = window.setTimeout(() => {
+        localAutosaveFlushRef.current = null;
+        const workspace = asWorkspaceProjectData(normalizedProjectName, methods, activeMethodId, methodGroups);
+        if (persistLocalWorkspace(workspace)) {
+          setAutosave({ state: 'saved', at: formatTime(new Date()) });
+        } else {
+          setAutosave({ state: 'error' });
+        }
+      }, 0);
+    }, LOCAL_AUTOSAVE_DEBOUNCE_MS);
+
+    return () => {
+      if (localAutosaveTimerRef.current !== null) {
+        window.clearTimeout(localAutosaveTimerRef.current);
+      }
+      if (localAutosaveFlushRef.current !== null) {
+        window.clearTimeout(localAutosaveFlushRef.current);
+        localAutosaveFlushRef.current = null;
+      }
+    };
   }, [normalizedProjectName, methods, activeMethodId, methodGroups]);
 
   useEffect(() => {
@@ -3071,6 +3536,15 @@ export default function App() {
           workspace: latestWorkspace
         });
         setServerProjectId(saved.id);
+        setProjectMethodCounts((current) => ({
+          ...current,
+          [saved.id]: latestWorkspace.methods.length
+        }));
+        upsertProjectCache(saved.id, {
+          workspace: deepClone(latestWorkspace),
+          history: null,
+          loadedAt: Date.now()
+        });
         setServerSyncError('');
         upsertServerProjectListEntry({ id: saved.id, name: nextProjectName, updatedAt: saved.updatedAt });
         remoteLastSavedHashRef.current = latestHash;
@@ -3217,21 +3691,6 @@ export default function App() {
       const nextDiagrams = section.diagrams.filter((diagram) => diagram.id !== diagramId);
       return { ...section, diagrams: nextDiagrams.length > 0 ? nextDiagrams : [createDiagramItem()] };
     });
-  }
-
-  function addSectionByType(type: AddableBlockType): void {
-    const nextSection =
-      type === 'text' || type === 'error-logic'
-        ? createTextSection(undefined, AUTO_SECTION_TITLE_BASE[type])
-        : type === 'diagram'
-          ? createDiagramSection()
-        : createParsedSection(type);
-    setSections((prev) => {
-      nextSection.title = createAutoSectionTitle(prev, type);
-      return [...prev, nextSection];
-    });
-    setSelectedId(nextSection.id);
-    setIsAddBlockMenuOpen(false);
   }
 
   function updateErrorRow(sectionId: string, rowIndex: number, updater: (row: ErrorRow) => ErrorRow): void {
@@ -4461,8 +4920,10 @@ export default function App() {
   }
 
   function addManualRow(section: ParsedSection, target: ParseTarget = 'server'): void {
+    const nextField = `newField${Date.now()}`;
     const manualRow: ParsedRow = {
-      field: `newField${Date.now()}`,
+      field: nextField,
+      sourceField: nextField,
       origin: 'manual',
       type: 'string',
       required: '+',
@@ -4481,8 +4942,10 @@ export default function App() {
   }
 
   function addRequestHeader(section: ParsedSection): void {
+    const nextField = `X-CUSTOM-${Date.now()}`;
     const manualHeader: ParsedRow = {
-      field: `X-CUSTOM-${Date.now()}`,
+      field: nextField,
+      sourceField: nextField,
       origin: 'manual',
       enabled: true,
       type: 'string',
@@ -4499,8 +4962,10 @@ export default function App() {
   }
 
   function addExternalRequestHeader(section: ParsedSection): void {
+    const nextField = `X-CUSTOM-${Date.now()}`;
     const manualHeader: ParsedRow = {
-      field: `X-CUSTOM-${Date.now()}`,
+      field: nextField,
+      sourceField: nextField,
       origin: 'manual',
       enabled: true,
       type: 'string',
@@ -6552,9 +7017,7 @@ export default function App() {
     setAutosave({ state: 'saving' });
 
     const workspace = asWorkspaceProjectData(normalizedProjectName, methods, activeMethodId, methodGroups);
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(workspace));
-    } catch {
+    if (!persistLocalWorkspace(workspace)) {
       setAutosave({ state: 'error' });
       return;
     }
@@ -6579,6 +7042,15 @@ export default function App() {
             history
           });
           setServerProjectId(saved.id);
+          setProjectMethodCounts((current) => ({
+            ...current,
+            [saved.id]: workspace.methods.length
+          }));
+          upsertProjectCache(saved.id, {
+            workspace: deepClone(workspace),
+            history: history ? deepClone(history) : null,
+            loadedAt: Date.now()
+          });
           upsertServerProjectListEntry({ id: saved.id, name: nextProjectName, updatedAt: saved.updatedAt });
           setServerSyncError('');
           remoteLastSavedHashRef.current = workspaceHash;
@@ -6601,6 +7073,7 @@ export default function App() {
     ONBOARDING_FEATURES.onboardingV1
     && ONBOARDING_FEATURES.onboardingGuidedMode
     && !showOnboardingEntry;
+  const sidebarProjectSwitchProps = { isProjectSwitching, switchingProjectId } as const;
 
   const toggleOnboardingHeaderNavigation = () => {
     setIsOnboardingNavVisible((current) => !current);
@@ -7108,13 +7581,19 @@ export default function App() {
       >
         {!isSidebarHidden && (
           <MethodSectionSidebar
+            {...(sidebarProjectSwitchProps as any)}
             enableMultiMethods={ENABLE_MULTI_METHODS}
             normalizedProjectName={normalizedProjectName}
             editingProjectName={editingProjectName}
             editingProjectNameDraft={editingProjectNameDraft}
             projectNameInputRef={projectNameInputRef}
-            isProjectFolderExpanded={isProjectFolderExpanded}
+            expandedProjectIds={expandedProjectIds}
+            expandedMethodId={expandedMethodId}
             methods={methods}
+            serverProjects={serverProjects}
+            currentProjectId={serverProjectId}
+            projectMethodCounts={projectMethodCounts}
+            projectMethodPreviews={projectMethodPreviews}
             activeMethodId={activeMethod?.id}
             editingMethodId={editingMethodId}
             editingMethodNameDraft={editingMethodNameDraft}
@@ -7126,20 +7605,42 @@ export default function App() {
             validationMap={validationMap}
             draggingId={draggingId}
             isSectionPanelPulse={isSectionPanelPulse}
-            isAddBlockMenuOpen={isAddBlockMenuOpen}
-            addableBlockTypes={ADDABLE_BLOCK_TYPES}
+            isAddEntityMenuOpen={isAddEntityMenuOpen}
+            isDeleteEntityMenuOpen={isDeleteEntityMenuOpen}
+            onCreateProject={createProject}
+            onSelectProject={(projectId) => {
+              if (!projectId) return;
+              if (projectId === serverProjectId || isProjectSwitching) return;
+              void handleServerProjectSelect(projectId);
+            }}
             onStartProjectRename={startProjectRename}
             onProjectNameDraftChange={setEditingProjectNameDraft}
             onFinishProjectRename={finishProjectRename}
             onCancelProjectRename={cancelProjectRename}
-            onToggleProjectFolder={() => setIsProjectFolderExpanded((current) => !current)}
+            onToggleProjectExpanded={(projectId) => {
+              if (!projectId) return;
+              setExpandedProjectIds((current) => {
+                if (current[projectId]) {
+                  const next = { ...current };
+                  delete next[projectId];
+                  return next;
+                }
+                return {
+                  ...current,
+                  [projectId]: true
+                };
+              });
+            }}
             onSwitchMethod={switchMethod}
+            onToggleMethodExpanded={toggleMethodExpanded}
             onStartMethodRename={startMethodRename}
             onMethodNameDraftChange={setEditingMethodNameDraft}
             onFinishMethodRename={finishMethodRename}
             onCancelMethodRename={cancelMethodRename}
             onCreateMethod={createMethod}
+            canDeleteProject={Boolean(serverProjectId)}
             onDeleteActiveMethod={deleteActiveMethod}
+            onRequestDeleteProject={requestDeleteCurrentProject}
             onDragStartSection={setDraggingId}
             onDropSection={(targetId) => {
               if (draggingId) {
@@ -7149,10 +7650,36 @@ export default function App() {
             }}
             onSelectSection={(sectionId) => {
               setSelectedId(sectionId);
+              suppressObserverSelectionUntilRef.current = Date.now() + 750;
+              if (sectionJumpHighlightTimerRef.current) {
+                clearTimeout(sectionJumpHighlightTimerRef.current);
+              }
+              setSectionJumpHighlightId(sectionId);
+              sectionJumpHighlightTimerRef.current = setTimeout(() => {
+                setSectionJumpHighlightId((current) => (current === sectionId ? null : current));
+              }, 850);
+              setTab('editor');
+              const scrollToTargetSection = (): void => {
+                const target = sectionAnchorRefs.current.get(sectionId);
+                if (!target) return;
+                if (typeof target.scrollIntoView !== 'function') return;
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              };
+              if (typeof window !== 'undefined') {
+                window.requestAnimationFrame(() => {
+                  window.requestAnimationFrame(scrollToTargetSection);
+                });
+              }
               if (isCompactLayout) setIsSidebarHidden(true);
             }}
-            onToggleAddBlockMenu={() => setIsAddBlockMenuOpen((current) => !current)}
-            onAddSectionByType={addSectionByType}
+            onToggleAddEntityMenu={() => {
+              setIsDeleteEntityMenuOpen(false);
+              setIsAddEntityMenuOpen((current) => !current);
+            }}
+            onToggleDeleteEntityMenu={() => {
+              setIsAddEntityMenuOpen(false);
+              setIsDeleteEntityMenuOpen((current) => !current);
+            }}
             onStartSidebarResize={startSidebarResize}
             renderUiIcon={renderUiIcon}
             resolveSectionTitle={resolveSectionTitle}
@@ -7166,227 +7693,259 @@ export default function App() {
 
               <div className="panes">
               {tab === 'editor' && (
-                <section className="panel">
-                  <div className="panel-head">
-                    <div>
-                      <div className="panel-title">{renderEditableSectionTitle(selectedSection)}</div>
-                    </div>
-                    <div className="row gap">
-                      {renderSectionActionCluster(selectedSection, 'header')}
-                      <button
-                        className="icon-button danger"
-                        type="button"
-                        onClick={() => requestDeleteSection(selectedSection.id)}
-                        aria-label="Удалить раздел"
-                        title="Удалить раздел"
+                <div className="editor-stream">
+                  {sections.map((section) => {
+                    const isActiveSection = selectedSection?.id === section.id;
+                    const isJumpHighlighted = sectionJumpHighlightId === section.id;
+                    return (
+                      <section
+                        key={section.id}
+                        id={`section-${section.id}`}
+                        data-section-id={section.id}
+                        className={`panel editor-section ${isActiveSection ? 'editor-section-active' : ''} ${isJumpHighlighted ? 'editor-section-jump' : ''}`}
+                        ref={(node) => {
+                          if (node) {
+                            sectionAnchorRefs.current.set(section.id, node);
+                          } else {
+                            sectionAnchorRefs.current.delete(section.id);
+                          }
+                        }}
                       >
-                        <span className="ui-icon" aria-hidden>{renderUiIcon('delete_section')}</span>
-                      </button>
-                      <label className="switch">
-                        <input
-                          type="checkbox"
-                          checked={selectedSection.enabled}
-                          onChange={(e) => updateSection(selectedSection.id, (current) => ({ ...current, enabled: e.target.checked }))}
-                        />
-                        <span>Активна</span>
-                      </label>
-                    </div>
-                  </div>
-
-                  {selectedSection.kind === 'text' && (
-                    <div className="stack">
-                      <div className="editor-toolbar-shell" data-onboarding-anchor="refine-structure">
-                        <div className="editor-toolbar-head">
-                          <div className="editor-toolbar-title">Редактор текста</div>
-                          <div className="editor-toolbar-note">Выделите текст и примените форматирование</div>
-                        </div>
-                        <div className="text-toolbar" role="toolbar" aria-label="Форматирование текста">
-                          <div className="toolbar-group" aria-label="Базовое форматирование">
-                            <button
-                              className="ghost small toolbar-button"
-                              type="button"
-                              title="Жирный"
-                              aria-label="Жирный"
-                              onMouseDown={(event) => {
-                                event.preventDefault();
-                                rememberTextSelection();
-                              }}
-                              onClick={() => applyTextEditorCommand(selectedSection.id, 'bold')}
-                            >
-                              <span className="toolbar-icon toolbar-icon-bold">B</span>
-                            </button>
-                            <button
-                              className="ghost small toolbar-button"
-                              type="button"
-                              title="Код"
-                              aria-label="Код"
-                              onMouseDown={(event) => {
-                                event.preventDefault();
-                                rememberTextSelection();
-                              }}
-                              onClick={() => applyTextEditorCommand(selectedSection.id, 'code')}
-                            >
-                              <span className="toolbar-icon">&lt;/&gt;</span>
-                            </button>
-                            <button
-                              className="ghost small toolbar-button"
-                              type="button"
-                              title="Выделение цветом"
-                              aria-label="Выделение цветом"
-                              onMouseDown={(event) => {
-                                event.preventDefault();
-                                rememberTextSelection();
-                              }}
-                              onClick={() => applyTextEditorCommand(selectedSection.id, 'highlight', { color: DEFAULT_RICH_TEXT_HIGHLIGHT })}
-                            >
-                              <span className="toolbar-icon">🖍</span>
-                            </button>
+                        <div className="panel-head">
+                          <div>
+                            <div className="panel-title">{renderEditableSectionTitle(section)}</div>
                           </div>
-                          <div className="toolbar-group" aria-label="Структура текста">
-                            <button
-                              className="ghost small toolbar-button"
-                              type="button"
-                              title="Подзаголовок"
-                              aria-label="Подзаголовок"
-                              onMouseDown={(event) => {
-                                event.preventDefault();
-                                rememberTextSelection();
-                              }}
-                              onClick={() => applyTextEditorCommand(selectedSection.id, 'h3')}
-                            >
-                              <span className="toolbar-heading-glyph" aria-hidden="true">
-                                <span className="toolbar-heading-main">T</span>
-                                <span className="toolbar-heading-level">3</span>
-                              </span>
-                            </button>
-                            <button
-                              className="ghost small toolbar-button"
-                              type="button"
-                              title="Цитата"
-                              aria-label="Цитата"
-                              onMouseDown={(event) => {
-                                event.preventDefault();
-                                rememberTextSelection();
-                              }}
-                              onClick={() => applyTextEditorCommand(selectedSection.id, 'quote')}
-                            >
-                              <span className="toolbar-icon">❝</span>
-                            </button>
-                          </div>
-                          <div className="toolbar-group" aria-label="Списки">
-                            <button
-                              className="ghost small toolbar-button"
-                              type="button"
-                              title="Маркированный список"
-                              aria-label="Маркированный список"
-                              onMouseDown={(event) => {
-                                event.preventDefault();
-                                rememberTextSelection();
-                              }}
-                              onClick={() => applyTextEditorCommand(selectedSection.id, 'ul')}
-                            >
-                              <span className="toolbar-icon">•</span>
-                            </button>
-                            <button
-                              className="ghost small toolbar-button"
-                              type="button"
-                              title="Нумерованный список"
-                              aria-label="Нумерованный список"
-                              onMouseDown={(event) => {
-                                event.preventDefault();
-                                rememberTextSelection();
-                              }}
-                              onClick={() => applyTextEditorCommand(selectedSection.id, 'ol')}
-                            >
-                              <span className="toolbar-icon">1.</span>
-                            </button>
+                          <div className="row gap">
+                            {renderSectionActionCluster(section, 'header')}
+                            {isActiveSection && (
+                              <button
+                                className="icon-button danger section-delete-btn"
+                                type="button"
+                                onClick={() => requestDeleteSection(section.id)}
+                                aria-label="Удалить раздел"
+                                title="Удалить раздел"
+                              >
+                                <span className="ui-icon" aria-hidden>{renderUiIcon('delete_section')}</span>
+                              </button>
+                            )}
+                            <label className="switch">
+                              <input
+                                type="checkbox"
+                                checked={section.enabled}
+                                onChange={(e) => updateSection(section.id, (current) => ({ ...current, enabled: e.target.checked }))}
+                              />
+                              <span>Активна</span>
+                            </label>
                           </div>
                         </div>
-                      </div>
-                      <div className="panel-sub">Поддерживаются подзаголовки, цитаты, код и вложенные списки с Tab.</div>
-                      <label className="field">
-                        <div className="label">Содержимое</div>
-                        <EditorContent
-                          editor={textEditor}
-                          onKeyDown={(event) => {
-                            const handled = handleRichTextHotkeys(event, (action) => applyTextEditorCommand(selectedSection.id, action));
-                            if (handled) return;
 
-                            if (event.key !== 'Tab' || !textEditor) return;
-                            if (!isSelectionInsideListItem()) return;
+                        {section.kind === 'text' && (
+                          <div className="stack">
+                            {isActiveSection ? (
+                              <>
+                                <div className="editor-toolbar-shell" data-onboarding-anchor="refine-structure">
+                                  <div className="editor-toolbar-head">
+                                    <div className="editor-toolbar-title">Редактор текста</div>
+                                    <div className="editor-toolbar-note">Выделите текст и примените форматирование</div>
+                                  </div>
+                                  <div className="text-toolbar" role="toolbar" aria-label="Форматирование текста">
+                                    <div className="toolbar-group" aria-label="Базовое форматирование">
+                                      <button
+                                        className="ghost small toolbar-button"
+                                        type="button"
+                                        title="Жирный"
+                                        aria-label="Жирный"
+                                        onMouseDown={(event) => {
+                                          event.preventDefault();
+                                          rememberTextSelection();
+                                        }}
+                                        onClick={() => applyTextEditorCommand(section.id, 'bold')}
+                                      >
+                                        <span className="toolbar-icon toolbar-icon-bold">B</span>
+                                      </button>
+                                      <button
+                                        className="ghost small toolbar-button"
+                                        type="button"
+                                        title="Код"
+                                        aria-label="Код"
+                                        onMouseDown={(event) => {
+                                          event.preventDefault();
+                                          rememberTextSelection();
+                                        }}
+                                        onClick={() => applyTextEditorCommand(section.id, 'code')}
+                                      >
+                                        <span className="toolbar-icon">&lt;/&gt;</span>
+                                      </button>
+                                      <button
+                                        className="ghost small toolbar-button"
+                                        type="button"
+                                        title="Выделение цветом"
+                                        aria-label="Выделение цветом"
+                                        onMouseDown={(event) => {
+                                          event.preventDefault();
+                                          rememberTextSelection();
+                                        }}
+                                        onClick={() => applyTextEditorCommand(section.id, 'highlight', { color: DEFAULT_RICH_TEXT_HIGHLIGHT })}
+                                      >
+                                        <span className="toolbar-icon">🖍</span>
+                                      </button>
+                                    </div>
+                                    <div className="toolbar-group" aria-label="Структура текста">
+                                      <button
+                                        className="ghost small toolbar-button"
+                                        type="button"
+                                        title="Подзаголовок"
+                                        aria-label="Подзаголовок"
+                                        onMouseDown={(event) => {
+                                          event.preventDefault();
+                                          rememberTextSelection();
+                                        }}
+                                        onClick={() => applyTextEditorCommand(section.id, 'h3')}
+                                      >
+                                        <span className="toolbar-heading-glyph" aria-hidden="true">
+                                          <span className="toolbar-heading-main">T</span>
+                                          <span className="toolbar-heading-level">3</span>
+                                        </span>
+                                      </button>
+                                      <button
+                                        className="ghost small toolbar-button"
+                                        type="button"
+                                        title="Цитата"
+                                        aria-label="Цитата"
+                                        onMouseDown={(event) => {
+                                          event.preventDefault();
+                                          rememberTextSelection();
+                                        }}
+                                        onClick={() => applyTextEditorCommand(section.id, 'quote')}
+                                      >
+                                        <span className="toolbar-icon">❝</span>
+                                      </button>
+                                    </div>
+                                    <div className="toolbar-group" aria-label="Списки">
+                                      <button
+                                        className="ghost small toolbar-button"
+                                        type="button"
+                                        title="Маркированный список"
+                                        aria-label="Маркированный список"
+                                        onMouseDown={(event) => {
+                                          event.preventDefault();
+                                          rememberTextSelection();
+                                        }}
+                                        onClick={() => applyTextEditorCommand(section.id, 'ul')}
+                                      >
+                                        <span className="toolbar-icon">•</span>
+                                      </button>
+                                      <button
+                                        className="ghost small toolbar-button"
+                                        type="button"
+                                        title="Нумерованный список"
+                                        aria-label="Нумерованный список"
+                                        onMouseDown={(event) => {
+                                          event.preventDefault();
+                                          rememberTextSelection();
+                                        }}
+                                        onClick={() => applyTextEditorCommand(section.id, 'ol')}
+                                      >
+                                        <span className="toolbar-icon">1.</span>
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="panel-sub">Поддерживаются подзаголовки, цитаты, код и вложенные списки с Tab.</div>
+                                <label className="field">
+                                  <div className="label">Содержимое</div>
+                                  <EditorContent
+                                    editor={textEditor}
+                                    onKeyDown={(event) => {
+                                      const handled = handleRichTextHotkeys(event, (action) => applyTextEditorCommand(section.id, action));
+                                      if (handled) return;
 
-                            event.preventDefault();
-                            if (event.shiftKey) {
-                              textEditor.chain().focus().liftListItem('listItem').run();
-                            } else {
-                              const sunk = textEditor.chain().focus().sinkListItem('listItem').run();
-                              if (!sunk) {
-                                textEditor.chain().focus().splitListItem('listItem').sinkListItem('listItem').run();
-                              }
-                            }
-                            syncTextSectionFromEditor(selectedSection.id);
-                          }}
-                        />
-                      </label>
-                    </div>
-                  )}
+                                      if (event.key !== 'Tab' || !textEditor) return;
+                                      if (!isSelectionInsideListItem()) return;
 
-                  {selectedSection.kind === 'parsed' && (
-                    <ParsedSectionEditor
-                      section={selectedSection}
-                      isDualModelSection={isDualModelSection}
-                      renderRequestEditor={renderRequestEditor}
-                      renderSourceEditor={renderSourceEditor}
-                      onAddManualRow={addManualRow}
-                      renderParsedTable={renderParsedTable}
-                    />
-                  )}
+                                      event.preventDefault();
+                                      if (event.shiftKey) {
+                                        textEditor.chain().focus().liftListItem('listItem').run();
+                                      } else {
+                                        const sunk = textEditor.chain().focus().sinkListItem('listItem').run();
+                                        if (!sunk) {
+                                          textEditor.chain().focus().splitListItem('listItem').sinkListItem('listItem').run();
+                                        }
+                                      }
+                                      syncTextSectionFromEditor(section.id);
+                                    }}
+                                  />
+                                </label>
+                              </>
+                            ) : (
+                              <label className="field">
+                                <div className="label">Содержимое</div>
+                                <div className="rich-text-preview" dangerouslySetInnerHTML={{ __html: richTextToHtml(section.value, { editable: false }) }} />
+                              </label>
+                            )}
+                          </div>
+                        )}
 
-                  {selectedSection.kind === 'diagram' && (
-                    <DiagramSectionEditor
-                      section={selectedSection}
-                      defaultRichTextHighlight={DEFAULT_RICH_TEXT_HIGHLIGHT}
-                      isExpanderOpen={isExpanderOpen}
-                      setExpanderOpen={setExpanderOpen}
-                      onAddDiagram={addDiagram}
-                      onUpdateDiagram={updateDiagram}
-                      onDeleteDiagram={deleteDiagram}
-                      getDiagramEditorNode={getDiagramEditorNode}
-                      onBindDiagramEditorRef={bindDiagramEditorRef}
-                      syncDiagramDescriptionFromEditor={syncDiagramDescriptionFromEditor}
-                      rememberSelectionForEditor={rememberSelectionForEditor}
-                      applyDiagramTextCommand={applyDiagramTextCommand}
-                      handleRichTextHotkeys={handleRichTextHotkeys}
-                    />
-                  )}
-                  {selectedSection.kind === 'errors' && (
-                    <ErrorsSectionEditor
-                      section={selectedSection}
-                      sections={sections}
-                      validationCaseOptions={VALIDATION_CASE_OPTIONS}
-                      openInternalCodeKey={openInternalCodeKey}
-                      highlightedInternalCodeIndex={highlightedInternalCodeIndex}
-                      internalCodePopoverState={internalCodePopoverState}
-                      internalCodeAnchorRefs={internalCodeAnchorRefs}
-                      internalCodePopoverRef={internalCodePopoverRef}
-                      setOpenInternalCodeKey={setOpenInternalCodeKey}
-                      setHighlightedInternalCodeIndex={setHighlightedInternalCodeIndex}
-                      updateErrorRow={updateErrorRow}
-                      formatClientResponseCode={formatClientResponseCode}
-                      applyInternalCode={applyInternalCode}
-                      formatErrorResponseCode={formatErrorResponseCode}
-                      deleteErrorRow={deleteErrorRow}
-                      addErrorRow={addErrorRow}
-                      updateValidationRuleRow={updateValidationRuleRow}
-                      deleteValidationRuleRow={deleteValidationRuleRow}
-                      addValidationRuleRow={addValidationRuleRow}
-                      getSectionRows={getSectionRows}
-                      getDynamicTextareaRows={getDynamicTextareaRows}
-                      validateJsonDraft={validateJsonDraft}
-                      renderUiIcon={renderUiIcon}
-                    />
-                  )}
-                </section>
+                        {section.kind === 'parsed' && (
+                          <ParsedSectionEditor
+                            section={section}
+                            isDualModelSection={isDualModelSection}
+                            renderRequestEditor={renderRequestEditor}
+                            renderSourceEditor={renderSourceEditor}
+                            onAddManualRow={addManualRow}
+                            renderParsedTable={renderParsedTable}
+                          />
+                        )}
+
+                        {section.kind === 'diagram' && (
+                          <DiagramSectionEditor
+                            section={section}
+                            defaultRichTextHighlight={DEFAULT_RICH_TEXT_HIGHLIGHT}
+                            isExpanderOpen={isExpanderOpen}
+                            setExpanderOpen={setExpanderOpen}
+                            onAddDiagram={addDiagram}
+                            onUpdateDiagram={updateDiagram}
+                            onDeleteDiagram={deleteDiagram}
+                            getDiagramEditorNode={getDiagramEditorNode}
+                            onBindDiagramEditorRef={bindDiagramEditorRef}
+                            syncDiagramDescriptionFromEditor={syncDiagramDescriptionFromEditor}
+                            rememberSelectionForEditor={rememberSelectionForEditor}
+                            applyDiagramTextCommand={applyDiagramTextCommand}
+                            handleRichTextHotkeys={handleRichTextHotkeys}
+                          />
+                        )}
+
+                        {section.kind === 'errors' && (
+                          <ErrorsSectionEditor
+                            section={section}
+                            sections={sections}
+                            validationCaseOptions={VALIDATION_CASE_OPTIONS}
+                            openInternalCodeKey={openInternalCodeKey}
+                            highlightedInternalCodeIndex={highlightedInternalCodeIndex}
+                            internalCodePopoverState={internalCodePopoverState}
+                            internalCodeAnchorRefs={internalCodeAnchorRefs}
+                            internalCodePopoverRef={internalCodePopoverRef}
+                            setOpenInternalCodeKey={setOpenInternalCodeKey}
+                            setHighlightedInternalCodeIndex={setHighlightedInternalCodeIndex}
+                            updateErrorRow={updateErrorRow}
+                            formatClientResponseCode={formatClientResponseCode}
+                            applyInternalCode={applyInternalCode}
+                            formatErrorResponseCode={formatErrorResponseCode}
+                            deleteErrorRow={deleteErrorRow}
+                            addErrorRow={addErrorRow}
+                            updateValidationRuleRow={updateValidationRuleRow}
+                            deleteValidationRuleRow={deleteValidationRuleRow}
+                            addValidationRuleRow={addValidationRuleRow}
+                            getSectionRows={getSectionRows}
+                            getDynamicTextareaRows={getDynamicTextareaRows}
+                            validateJsonDraft={validateJsonDraft}
+                            renderUiIcon={renderUiIcon}
+                          />
+                        )}
+                      </section>
+                    );
+                  })}
+                </div>
               )}
 
               {tab === 'html' && (

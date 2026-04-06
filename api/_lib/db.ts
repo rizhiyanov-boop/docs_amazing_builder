@@ -11,7 +11,9 @@ export type AuthUser = {
 };
 
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
+const SESSION_CLEANUP_INTERVAL_MS = 1000 * 60 * 5;
 let schemaReady = false;
+let lastSessionCleanupAt = 0;
 
 const sql = neon(process.env.DATABASE_URL || process.env.POSTGRES_URL || '');
 
@@ -92,6 +94,11 @@ async function ensureSchema(): Promise<void> {
 
 async function cleanupExpiredSessions(): Promise<void> {
   await ensureSchema();
+  const now = Date.now();
+  if (now - lastSessionCleanupAt < SESSION_CLEANUP_INTERVAL_MS) {
+    return;
+  }
+  lastSessionCleanupAt = now;
   await sql`DELETE FROM sessions WHERE expires_at <= now()`;
 }
 

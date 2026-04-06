@@ -32,7 +32,7 @@ function isDualModelSection(section: ParsedSection): boolean {
 }
 
 function getRowKey(row: ParsedRow): string {
-  return row.sourceField?.trim() || row.field.trim();
+  return row.sourceField?.trim() || row.field.trim() || row.clientSourceField?.trim() || row.clientField?.trim() || '';
 }
 
 function normalizeKey(value: string): string {

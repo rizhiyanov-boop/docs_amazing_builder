@@ -26,6 +26,19 @@ type ApiEnvelope<T> = {
   error?: string;
 };
 
+const API_MODE_HINT =
+  'Для auth/синхронизации запустите full-stack режим через `npx vercel dev` и откройте http://localhost:3001 (не только Vite на http://localhost:5173).';
+
+function isLikelyHtmlResponse(body: string, contentType: string): boolean {
+  if (contentType.toLowerCase().includes('text/html')) return true;
+  const head = body.trimStart().slice(0, 200).toLowerCase();
+  return head.startsWith('<!doctype html') || head.startsWith('<html');
+}
+
+function isApiUnavailableErrorMessage(message: string): boolean {
+  return message.includes('вернул некорректный ответ') || message.includes('вернул пустой ответ');
+}
+
 export type ProjectListItem = {
   id: string;
   name: string;
@@ -42,14 +55,19 @@ export type LoadedProject = {
 
 async function parseResponse<T>(response: Response): Promise<T> {
   let payload: ApiEnvelope<T> | null = null;
+  const contentType = response.headers.get('content-type') || '';
+  const text = await response.text();
+
+  if (text.trim() && isLikelyHtmlResponse(text, contentType)) {
+    throw new Error(`Сервер вернул HTML вместо JSON (HTTP ${response.status}). ${API_MODE_HINT}`);
+  }
 
   try {
-    const text = await response.text();
     if (text.trim()) {
       payload = JSON.parse(text) as ApiEnvelope<T>;
     }
   } catch {
-    throw new Error(`Сервер вернул некорректный ответ (HTTP ${response.status}). Проверьте, что API запущен.`);
+    throw new Error(`Сервер вернул некорректный ответ (HTTP ${response.status}). ${API_MODE_HINT}`);
   }
 
   if (!response.ok) {
@@ -60,20 +78,28 @@ async function parseResponse<T>(response: Response): Promise<T> {
   }
 
   if (!payload?.data) {
-    throw new Error(`Сервер вернул пустой ответ (HTTP ${response.status}). Проверьте, что API запущен.`);
+    throw new Error(`Сервер вернул пустой ответ (HTTP ${response.status}). ${API_MODE_HINT}`);
   }
 
   return payload.data;
 }
 
 export async function fetchCurrentUser(): Promise<AuthUser | null> {
-  const response = await fetch('/api/auth/me', {
-    method: 'GET',
-    credentials: 'include'
-  });
+  try {
+    const response = await fetch('/api/auth/me', {
+      method: 'GET',
+      credentials: 'include'
+    });
 
-  const payload = await parseResponse<{ user: AuthUser | null }>(response);
-  return payload.user;
+    const payload = await parseResponse<{ user: AuthUser | null }>(response);
+    return payload.user;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    if (isApiUnavailableErrorMessage(message) || message.includes('HTML вместо JSON')) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 export async function registerWithPassword(payload: { login: string; password: string }): Promise<AuthUser> {

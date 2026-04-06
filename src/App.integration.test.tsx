@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
@@ -85,11 +85,30 @@ describe('App integration', () => {
     const user = userEvent.setup();
     renderApp();
 
-    await user.click(screen.getByRole('option', { name: /Request/i }));
-    await user.click(screen.getByRole('button', { name: 'Парсить' }));
+    const navTree = screen.getByRole('tree', { name: 'Проект, методы и секции' });
+    await user.click(within(navTree).getByRole('treeitem', { name: /Request/i }));
+    const activeSection = document.querySelector('.editor-section-active');
+    expect(activeSection).not.toBeNull();
+    const parseButton = activeSection?.querySelector('button[title="Запустить парсер"]') as HTMLButtonElement | null;
+    expect(parseButton).not.toBeNull();
+    await user.click(parseButton as HTMLButtonElement);
 
     await waitFor(() => {
       expect(document.querySelectorAll('.alert.error').length).toBeGreaterThan(0);
+    });
+  });
+
+  it('switches active editor section from toc click', async () => {
+    const user = userEvent.setup();
+    renderApp();
+
+    const navTree = screen.getByRole('tree', { name: 'Проект, методы и секции' });
+    await user.click(within(navTree).getByRole('treeitem', { name: /Response/i }));
+
+    await waitFor(() => {
+      const responseSection = document.querySelector('#section-response');
+      expect(responseSection).not.toBeNull();
+      expect(responseSection?.classList.contains('editor-section-active')).toBe(true);
     });
   });
 

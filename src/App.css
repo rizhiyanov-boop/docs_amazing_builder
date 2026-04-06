@@ -790,6 +790,8 @@ body {
   align-items: center;
   gap: var(--space-1-5);
   flex-wrap: wrap;
+  margin-left: auto;
+  justify-content: flex-end;
 }
 
 .topbar-history-cluster {
@@ -798,6 +800,42 @@ body {
 
 .topbar-system-cluster {
   background: color-mix(in srgb, var(--panel) 68%, transparent);
+  margin-left: auto;
+  justify-content: flex-end;
+}
+
+.topbar-auth-pending {
+  min-height: var(--topbar-control-height);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+}
+
+.topbar-user-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--topbar-control-height);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-pill);
+  border: calc(var(--space-1) / 4) solid color-mix(in srgb, var(--accent-solid) 30%, var(--border));
+  background: color-mix(in srgb, var(--accent-solid) 12%, var(--panel));
+  color: var(--text);
+  font-weight: 600;
+}
+
+.topbar-user-icon {
+  width: var(--space-6);
+  height: var(--space-6);
+  color: color-mix(in srgb, var(--accent-solid) 70%, var(--text));
+}
+
+.topbar-user-name {
+  max-width: calc(var(--space-1) * 180 / 4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .onboarding-nav-toggle {

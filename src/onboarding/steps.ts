@@ -1,6 +1,6 @@
 import type { DocSection, ErrorsSection, ParsedSection } from '../types';
 
-export type OnboardingStepId = 'choose-entry' | 'prepare-source' | 'run-parse' | 'refine-structure' | 'export-docs';
+export type OnboardingStepId = 'prepare-source' | 'run-parse' | 'refine-structure' | 'export-docs';
 
 export interface OnboardingStepDefinition {
   id: OnboardingStepId;
@@ -16,11 +16,6 @@ export interface OnboardingProgressContext {
 }
 
 export const ONBOARDING_STEPS: readonly OnboardingStepDefinition[] = [
-  {
-    id: 'choose-entry',
-    title: 'Выбор сценария',
-    description: 'Выберите быстрый старт, пустой проект или импорт JSON.'
-  },
   {
     id: 'prepare-source',
     title: 'Подготовьте источник',

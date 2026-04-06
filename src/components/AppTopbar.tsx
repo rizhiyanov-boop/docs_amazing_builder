@@ -26,7 +26,7 @@ type AppTopbarProps = {
   autosaveAt: string | null;
   isLogoutBusy: boolean;
   onboardingSteps: readonly OnboardingStepViewModel[];
-  onboardingResolvedStepIndex: number;
+  onboardingStepCompleted: Record<OnboardingStepId, boolean>;
   activeOnboardingStepId: OnboardingStepId;
   onboardingStepHint: string;
   onboardingPrimaryActionLabel: string;
@@ -67,7 +67,7 @@ export function AppTopbar({
   autosaveAt,
   isLogoutBusy,
   onboardingSteps,
-  onboardingResolvedStepIndex,
+  onboardingStepCompleted,
   activeOnboardingStepId,
   onboardingStepHint,
   onboardingPrimaryActionLabel,
@@ -90,6 +90,11 @@ export function AppTopbar({
   canNavigateToOnboardingStep,
   renderUiIcon
 }: AppTopbarProps): ReactNode {
+  // Autosave stays wired for now, but hidden from topbar UI by product request.
+  void autosaveState;
+  void autosaveAt;
+  void onManualSave;
+
   return (
     <header ref={topbarRef} className="topbar">
       <div className="topbar-context">
@@ -156,13 +161,16 @@ export function AppTopbar({
           </div>
           <div className="topbar-cluster topbar-system-cluster">
             {authLoading ? (
-              <span className="badge autosave-badge idle">
+              <span className="badge topbar-auth-pending">
                 <span className="ai-loader ai-loader-inline" aria-hidden="true" />
                 <span>Проверка входа...</span>
               </span>
             ) : authUserLogin ? (
               <>
-                <span className="badge autosave-badge saved" title={authUserLogin}>{authUserLogin}</span>
+                <span className="topbar-user-pill" title={authUserLogin}>
+                  <span className="ui-icon topbar-user-icon" aria-hidden>{renderUiIcon('user')}</span>
+                  <span className="topbar-user-name">{authUserLogin}</span>
+                </span>
                 <button type="button" className="ghost small" onClick={onLogout} disabled={isLogoutBusy} aria-busy={isLogoutBusy}>
                   {isLogoutBusy ? (
                     <>
@@ -213,23 +221,6 @@ export function AppTopbar({
             >
               <span className="ui-icon" aria-hidden>{renderUiIcon(theme === 'dark' ? 'theme_sun' : 'theme_moon')}</span>
             </button>
-            <button
-              type="button"
-              className={`badge autosave-badge manual-save ${autosaveState}`}
-              onClick={onManualSave}
-              aria-live="polite"
-              title="Сохранить сейчас"
-            >
-              <span className="ui-icon autosave-icon" aria-hidden>{renderUiIcon('save')}</span>
-              {autosaveState === 'saving' && 'Сохранение...'}
-              {autosaveState === 'saved' && (
-                <>
-                  <span className="status-time">{autosaveAt ?? '--:--'}</span>
-                </>
-              )}
-              {autosaveState === 'error' && 'Ошибка сохранения'}
-              {autosaveState === 'idle' && 'Готово'}
-            </button>
           </div>
         </div>
       </div>
@@ -237,13 +228,13 @@ export function AppTopbar({
       {isOnboardingHeaderAvailable && isOnboardingNavVisible && (
         <section
           className="onboarding-stepbar collapsed in-topbar"
-          data-onboarding-anchor="choose-entry"
+          data-onboarding-anchor="prepare-source"
           aria-live="polite"
           aria-label="Пошаговая навигация"
         >
           <div className="onboarding-stepbar-track" role="list" aria-label="Прогресс шагов">
-            {onboardingSteps.map((step, index) => {
-              const isDone = index < onboardingResolvedStepIndex;
+            {onboardingSteps.map((step) => {
+              const isDone = onboardingStepCompleted[step.id] ?? false;
               const isCurrent = step.id === activeOnboardingStepId;
               const access = canNavigateToOnboardingStep(step.id);
               return (
@@ -258,6 +249,7 @@ export function AppTopbar({
                   title={access.allowed ? step.description : access.reason}
                   onClick={() => onJumpToOnboardingStep(step.id)}
                 >
+                  <span aria-hidden="true">{isDone ? '[x] ' : '[ ] '}</span>
                   {step.title}
                 </button>
               );

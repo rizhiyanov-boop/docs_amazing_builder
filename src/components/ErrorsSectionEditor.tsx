@@ -2,6 +2,7 @@ import type { Dispatch, ReactNode, RefObject, SetStateAction } from 'react';
 import { createPortal } from 'react-dom';
 import { ERROR_CATALOG, ERROR_CATALOG_BY_CODE, POPULAR_HTTP_STATUS_CODES } from '../errorCatalog';
 import type { DocSection, ErrorRow, ErrorsSection, ParsedRow, ParsedSection, ValidationRuleRow } from '../types';
+import { buildValidationCause } from '../validationCause';
 
 type InternalCodePopoverState = {
   top: number;
@@ -62,11 +63,40 @@ export function ErrorsSectionEditor({
   validateJsonDraft,
   renderUiIcon
 }: ErrorsSectionEditorProps): ReactNode {
+  const serverRequestRows = sections
+    .filter((item): item is ParsedSection => item.kind === 'parsed' && item.sectionType === 'request')
+    .flatMap((item) => getSectionRows(item));
+
+  const serverRequestFieldTypeMap = new Map(
+    serverRequestRows
+      .map((row) => [row.field.trim().toLowerCase(), row.type] as const)
+      .filter(([field]) => Boolean(field))
+  );
+
+  function updateValidationRuleWithAutocause(
+    rowIndex: number,
+    patch: Partial<Pick<ValidationRuleRow, 'parameter' | 'validationCase' | 'condition'>>
+  ): void {
+    updateValidationRuleRow(section.id, rowIndex, (current) => {
+      const next = { ...current, ...patch };
+      const parameterType = serverRequestFieldTypeMap.get(next.parameter.trim().toLowerCase());
+      const nextCause = buildValidationCause({
+        parameter: next.parameter,
+        validationCase: next.validationCase,
+        condition: next.condition,
+        parameterType
+      });
+
+      return {
+        ...next,
+        cause: nextCause
+      };
+    });
+  }
+
   const serverRequestParameterOptions = Array.from(
     new Set(
-      sections
-        .filter((item): item is ParsedSection => item.kind === 'parsed' && item.sectionType === 'request')
-        .flatMap((item) => getSectionRows(item))
+      serverRequestRows
         .map((row) => row.field.trim())
         .filter(Boolean)
     )
@@ -302,17 +332,11 @@ export function ErrorsSectionEditor({
                   </td>
                   <td>
                     <div className="error-response-cell">
-                      <input
-                        type="text"
-                        disabled
-                        value={row.message}
-                        title="Описание заполняется автоматически по internalCode"
-                      />
                       <textarea
                         rows={getDynamicTextareaRows(row.responseCode, 3, 10)}
                         value={row.responseCode}
                         onChange={(e) => updateErrorRow(section.id, index, (current) => ({ ...current, responseCode: e.target.value }))}
-                        placeholder="Код ответа для WIKI (JSON)"
+                        placeholder="Server response JSON"
                       />
                       <button className="ghost small table-action-icon" type="button" onClick={() => formatErrorResponseCode(section.id, index)} aria-label="Форматировать JSON" title="Форматировать JSON">
                         <span className="ui-icon" aria-hidden>{renderUiIcon('format_json')}</span>
@@ -357,19 +381,14 @@ export function ErrorsSectionEditor({
                     type="text"
                     list="server-request-param-options"
                     value={rule.parameter}
-                    onChange={(e) => updateValidationRuleRow(section.id, index, (current) => ({ ...current, parameter: e.target.value }))}
+                    onChange={(e) => updateValidationRuleWithAutocause(index, { parameter: e.target.value })}
                     placeholder="Выберите из server request или введите вручную"
                   />
                 </td>
                 <td>
                   <select
                     value={rule.validationCase}
-                    onChange={(e) =>
-                      updateValidationRuleRow(section.id, index, (current) => ({
-                        ...current,
-                        validationCase: e.target.value
-                      }))
-                    }
+                    onChange={(e) => updateValidationRuleWithAutocause(index, { validationCase: e.target.value })}
                   >
                     {validationCaseOptions.map((option) => (
                       <option key={option} value={option}>
@@ -382,7 +401,7 @@ export function ErrorsSectionEditor({
                   <textarea
                     rows={getDynamicTextareaRows(rule.condition, 1, 6)}
                     value={rule.condition}
-                    onChange={(e) => updateValidationRuleRow(section.id, index, (current) => ({ ...current, condition: e.target.value }))}
+                    onChange={(e) => updateValidationRuleWithAutocause(index, { condition: e.target.value })}
                   />
                 </td>
                 <td>

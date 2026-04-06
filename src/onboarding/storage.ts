@@ -10,7 +10,7 @@ function createDefaultState(): OnboardingState {
     seenAt: new Date().toISOString(),
     completedAt: null,
     dismissed: false,
-    currentStep: 'choose-entry',
+    currentStep: 'prepare-source',
     entryPath: null
   };
 }
@@ -28,7 +28,7 @@ export function loadOnboardingState(): OnboardingState {
       seenAt: parsed.seenAt ?? new Date().toISOString(),
       completedAt: parsed.completedAt ?? null,
       dismissed: parsed.dismissed ?? false,
-      currentStep: isOnboardingStepId(parsedStep) ? parsedStep : 'choose-entry',
+      currentStep: isOnboardingStepId(parsedStep) ? parsedStep : 'prepare-source',
       entryPath: parsed.entryPath ?? null
     };
   } catch {
@@ -47,7 +47,7 @@ export function markOnboardingStarted(entryPath: OnboardingEntryPath): Onboardin
     seenAt: new Date().toISOString(),
     completedAt: null,
     dismissed: false,
-    currentStep: 'choose-entry',
+    currentStep: 'prepare-source',
     entryPath
   };
   saveOnboardingState(next);

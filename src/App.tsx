@@ -9,6 +9,7 @@ import './App.css';
 import { parseCurlMeta, parseToRows } from './parsers';
 import { getDiagramExportFileName, getDiagramImageUrl, resolveDiagramEngine } from './diagramUtils';
 import { ERROR_CATALOG_BY_CODE } from './errorCatalog';
+import { buildServerErrorResponseTemplate } from './errorResponseTemplate';
 import { getRequestColumnLabel, getRequestColumnOrder, moveRequestColumn } from './requestColumns';
 import {
   DEFAULT_API_KEY_EXAMPLE,
@@ -42,6 +43,7 @@ import { AppTopbar } from './components/AppTopbar';
 import { DiagramSectionEditor } from './components/DiagramSectionEditor';
 import { ErrorsSectionEditor } from './components/ErrorsSectionEditor';
 import { MethodSectionSidebar } from './components/MethodSectionSidebar';
+import type { AddableBlockType } from './components/MethodSectionSidebar';
 import { ParsedSectionEditor } from './components/ParsedSectionEditor';
 import { WorkspaceTabs } from './components/WorkspaceTabs';
 import {
@@ -406,6 +408,19 @@ const TYPE_OPTIONS_EXTENDED = [
 const REQUIRED_OPTIONS = ['+', OPTIONAL_MARK, '-'];
 const STRUCTURED_EXAMPLE_PLACEHOLDER = '-';
 const VALIDATION_CASE_OPTIONS = [
+  'NotNull',
+  'NotBlank',
+  'NotEmpty',
+  'Size',
+  'Positive',
+  'Negative',
+  'Past',
+  'Future',
+  'PastOrPresent',
+  'FutureOrPresent',
+  'Pattern',
+  'Digits',
+  'Custom',
   'Отсутствует обязательное поле',
   'Поле не должно быть пустым',
   'Некорректный тип данных',
@@ -552,6 +567,29 @@ function cloneSectionForPaste(section: DocSection): DocSection {
   return {
     ...cloned,
     id: nextSectionId
+  };
+}
+
+function createSectionFromBlockType(blockType: AddableBlockType): DocSection {
+  if (blockType === 'request') {
+    return createParsedSection('request', createSectionId('request'));
+  }
+  if (blockType === 'response') {
+    return createParsedSection('response', createSectionId('response'));
+  }
+  if (blockType === 'error-logic') {
+    return createErrorsSection(createSectionId('errors'), 'Ошибки');
+  }
+  if (blockType === 'diagram') {
+    return createDiagramSection(createSectionId('diagram'));
+  }
+
+  return {
+    id: createSectionId('text'),
+    title: 'Новый раздел',
+    enabled: true,
+    kind: 'text',
+    value: ''
   };
 }
 
@@ -2269,6 +2307,24 @@ export default function App() {
     setToastMessage(`Секция вставлена ${position === 'above' ? 'выше' : 'ниже'}`);
   }
 
+  function addSectionRelative(targetSectionId: string, blockType: AddableBlockType, position: 'above' | 'below' = 'below'): void {
+    const nextSection = createSectionFromBlockType(blockType);
+    const nextSelectedId = nextSection.id;
+
+    setSections((prev) => {
+      const targetIndex = prev.findIndex((section) => section.id === targetSectionId);
+      if (targetIndex === -1) return prev;
+
+      const insertIndex = position === 'above' ? targetIndex : targetIndex + 1;
+      const next = [...prev];
+      next.splice(insertIndex, 0, nextSection);
+      return next;
+    });
+
+    setSelectedId(nextSelectedId);
+    setToastMessage('Раздел добавлен');
+  }
+
   async function confirmDeleteServerProject(): Promise<void> {
     const projectId = pendingDeleteProjectId;
     if (!projectId) return;
@@ -2528,7 +2584,7 @@ export default function App() {
   }
 
   function createMethod(): void {
-    const name = `Проект ${methods.length + 1}`;
+    const name = `Метод ${methods.length + 1}`;
     const method = createMethodDocument(name, createInitialSections());
     setMethodsState((prev) => [...prev, method]);
     setActiveMethodId(method.id);
@@ -2627,7 +2683,11 @@ export default function App() {
   useEffect(() => {
     if (!pendingProjectNameFocus || !editingProjectName) return;
     if (!projectNameInputRef.current) return;
-    projectNameInputRef.current.focus();
+    try {
+      projectNameInputRef.current.focus({ preventScroll: true });
+    } catch {
+      projectNameInputRef.current.focus();
+    }
     projectNameInputRef.current.select();
     setPendingProjectNameFocus(false);
   }, [pendingProjectNameFocus, editingProjectName]);
@@ -3058,9 +3118,14 @@ export default function App() {
 
   const htmlPreviewOutput = useMemo(() => renderHtmlDocument(sections, theme, { interactive: false }), [sections, theme]);
   const wikiOutput = useMemo(() => renderWikiDocument(sections), [sections]);
-  const onboardingResolvedStepIndex = useMemo(
-    () => Math.max(0, ONBOARDING_STEPS.findIndex((step) => step.id === onboardingState.currentStep)),
-    [onboardingState.currentStep]
+  const onboardingStepCompleted = useMemo<Record<OnboardingStepId, boolean>>(
+    () => ({
+      'prepare-source': onboardingProgress.hasSourceInput,
+      'run-parse': onboardingProgress.hasParsedRows,
+      'refine-structure': onboardingProgress.hasStructuredContent,
+      'export-docs': onboardingState.status === 'completed' || onboardingProgress.hasExportedDocs
+    }),
+    [onboardingProgress, onboardingState.status]
   );
   const onboardingNavStepIndex = useMemo(
     () => Math.max(0, ONBOARDING_STEPS.findIndex((step) => step.id === onboardingNavStep)),
@@ -3138,25 +3203,14 @@ export default function App() {
 
     return {
       tab: 'editor',
-      anchor: 'choose-entry'
+      anchor: 'prepare-source'
     };
   }
 
   function canNavigateToOnboardingStep(stepId: OnboardingStepId): { allowed: boolean; reason?: string } {
     const targetIndex = ONBOARDING_STEPS.findIndex((step) => step.id === stepId);
     if (targetIndex < 0) return { allowed: false, reason: 'Шаг не найден.' };
-
-    // Going to current or previous steps should always be allowed.
-    if (targetIndex <= onboardingNavStepIndex) return { allowed: true };
-
-    // Forward jumps are limited by completed progress.
-    if (targetIndex <= onboardingResolvedStepIndex) return { allowed: true };
-
-    const previousStep = ONBOARDING_STEPS[Math.max(0, targetIndex - 1)];
-    return {
-      allowed: false,
-      reason: `Сначала завершите шаг: ${previousStep?.title ?? 'предыдущий шаг'}`
-    };
+    return { allowed: true };
   }
 
   function spotlightOnboardingAnchor(anchor: string, stepTitle: string): void {
@@ -3194,12 +3248,7 @@ export default function App() {
   }
 
   function goToOnboardingStep(stepId: OnboardingStepId, source: OnboardingNavSource, force = false): void {
-    const access = canNavigateToOnboardingStep(stepId);
-    if (!force && !access.allowed) {
-      setOnboardingStepHintMessage(access.reason ?? 'Переход недоступен.');
-      emitOnboardingEvent('onboarding_step_blocked', { stepId, source });
-      return;
-    }
+    void force;
 
     setOnboardingNavStep(stepId);
 
@@ -3388,27 +3437,61 @@ export default function App() {
                 className="add-block-option"
                 type="button"
                 role="menuitem"
-                disabled={!hasClipboardSection}
                 onClick={(event) => {
                   event.stopPropagation();
-                  pasteSectionRelative(section.id, 'above');
+                  addSectionRelative(section.id, 'text', 'below');
                   setOpenSectionActionsMenuId(null);
                 }}
               >
-                <span className="add-block-option-title">Вставить секцию выше</span>
+                <span className="add-block-option-title">Добавить текстовый раздел</span>
               </button>
               <button
                 className="add-block-option"
                 type="button"
                 role="menuitem"
-                disabled={!hasClipboardSection}
                 onClick={(event) => {
                   event.stopPropagation();
-                  pasteSectionRelative(section.id, 'below');
+                  addSectionRelative(section.id, 'request', 'below');
                   setOpenSectionActionsMenuId(null);
                 }}
               >
-                <span className="add-block-option-title">Вставить секцию ниже</span>
+                <span className="add-block-option-title">Добавить Request</span>
+              </button>
+              <button
+                className="add-block-option"
+                type="button"
+                role="menuitem"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  addSectionRelative(section.id, 'response', 'below');
+                  setOpenSectionActionsMenuId(null);
+                }}
+              >
+                <span className="add-block-option-title">Добавить Response</span>
+              </button>
+              <button
+                className="add-block-option"
+                type="button"
+                role="menuitem"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  addSectionRelative(section.id, 'diagram', 'below');
+                  setOpenSectionActionsMenuId(null);
+                }}
+              >
+                <span className="add-block-option-title">Добавить диаграмму</span>
+              </button>
+              <button
+                className="add-block-option"
+                type="button"
+                role="menuitem"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  addSectionRelative(section.id, 'error-logic', 'below');
+                  setOpenSectionActionsMenuId(null);
+                }}
+              >
+                <span className="add-block-option-title">Добавить ошибки</span>
               </button>
             </div>
           )}
@@ -3812,7 +3895,11 @@ export default function App() {
               ? {
                   ...row,
                   trigger: row.trigger.trim() || 'Ошибка валидации',
-                  message: preset?.message ?? row.message
+                  message: preset?.message ?? row.message,
+                  responseCode: buildServerErrorResponseTemplate({
+                    code: '100101',
+                    message: preset?.message ?? row.message ?? 'Bad request sent to the system'
+                  })
                 }
               : row
           )
@@ -3828,7 +3915,10 @@ export default function App() {
         serverHttpStatus: preset?.httpStatus ?? '400',
         internalCode: '100101',
         message: preset?.message ?? 'Bad request sent to the system',
-        responseCode: ''
+        responseCode: buildServerErrorResponseTemplate({
+          code: '100101',
+          message: preset?.message ?? 'Bad request sent to the system'
+        })
       };
 
       const isSingleEmptyRow =
@@ -3868,14 +3958,19 @@ export default function App() {
           ...row,
           internalCode: normalizedCode,
           serverHttpStatus: '',
-          message: ''
+          message: '',
+          responseCode: ''
         };
       }
       return {
         ...row,
         internalCode: normalizedCode,
         serverHttpStatus: preset.httpStatus,
-        message: preset.message
+        message: preset.message,
+        responseCode: buildServerErrorResponseTemplate({
+          code: normalizedCode,
+          message: preset.message
+        })
       };
     });
   }
@@ -7680,7 +7775,7 @@ export default function App() {
         autosaveAt={autosave.at ?? null}
         isLogoutBusy={authBusyKey === 'auth:logout'}
         onboardingSteps={ONBOARDING_STEPS}
-        onboardingResolvedStepIndex={onboardingResolvedStepIndex}
+        onboardingStepCompleted={onboardingStepCompleted}
         activeOnboardingStepId={activeOnboardingStep.id}
         onboardingStepHint={onboardingStepHint}
         onboardingPrimaryActionLabel={onboardingPrimaryActionLabel}

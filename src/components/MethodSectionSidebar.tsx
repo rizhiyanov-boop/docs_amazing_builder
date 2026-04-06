@@ -167,8 +167,11 @@ export function MethodSectionSidebar({
                             type="text"
                             value={editingProjectNameDraft}
                             onChange={(event) => onProjectNameDraftChange(event.target.value)}
+                            onMouseDown={(event) => event.stopPropagation()}
+                            onClick={(event) => event.stopPropagation()}
                             onBlur={onFinishProjectRename}
                             onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
+                              event.stopPropagation();
                               if (event.key === 'Enter') {
                                 event.preventDefault();
                                 onFinishProjectRename();

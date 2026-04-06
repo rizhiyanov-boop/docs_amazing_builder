@@ -3854,6 +3854,358 @@ tr:nth-child(odd) td {
   }
 }
 
+.workspace.workspace-flow-focus {
+  padding: var(--space-2);
+  min-height: 82vh;
+}
+
+.workspace-context-tabs {
+  display: inline-flex;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
+}
+
+.workspace-context-tab {
+  border: calc(var(--space-1) / 4) solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--card);
+  color: var(--text);
+  padding: var(--space-1-5) var(--space-3);
+  font-size: var(--font-size-xs);
+}
+
+.workspace-context-tab.active {
+  background: color-mix(in srgb, var(--accent-solid) 12%, var(--card));
+  border-color: color-mix(in srgb, var(--accent-solid) 40%, var(--border));
+  color: var(--active-text);
+}
+
+.project-docs-layout {
+  display: grid;
+  grid-template-columns: minmax(13rem, 18rem) minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.project-docs-sidebar {
+  border: calc(var(--space-1) / 4) solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.project-docs-sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.project-docs-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.project-docs-item {
+  width: 100%;
+  text-align: left;
+  border: calc(var(--space-1) / 4) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  padding: var(--space-2);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.project-docs-item.active {
+  border-color: color-mix(in srgb, var(--accent-solid) 40%, var(--border));
+  background: color-mix(in srgb, var(--active-bg) 30%, var(--card));
+}
+
+.project-docs-item-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-docs-item-type {
+  font-size: var(--font-size-2xs);
+  color: var(--muted);
+}
+
+.project-docs-flow-preview {
+  margin-top: var(--space-2);
+  border-color: color-mix(in srgb, var(--accent-solid) 28%, var(--border));
+}
+
+.project-docs-flow-preview .panel-head {
+  align-items: center;
+}
+
+.project-docs-flow-preview .diagram-preview {
+  border: calc(var(--space-1) / 4) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  padding: var(--space-2);
+}
+
+.flows-layout {
+  display: grid;
+  grid-template-columns: minmax(13rem, 16rem) minmax(0, 1fr) minmax(12rem, 16rem);
+  gap: var(--space-3);
+  min-height: 78vh;
+}
+
+.flows-layout.fullscreen {
+  position: fixed;
+  inset: var(--space-2);
+  z-index: 1200;
+  background: color-mix(in srgb, var(--panel) 95%, var(--bg));
+  border: calc(var(--space-1) / 4) solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  padding: var(--space-2);
+  min-height: auto;
+  height: calc(100dvh - var(--space-4));
+}
+
+.flows-list-panel,
+.flows-issues {
+  border: calc(var(--space-1) / 4) solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.flows-layout.fullscreen .flows-list-panel,
+.flows-layout.fullscreen .flows-issues,
+.flows-layout.fullscreen .flows-main {
+  min-height: calc(100dvh - var(--space-8));
+}
+
+.flows-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.flows-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.flows-list-item {
+  width: 100%;
+  border: calc(var(--space-1) / 4) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  padding: var(--space-2);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  text-align: left;
+}
+
+.flows-list-item.active {
+  border-color: color-mix(in srgb, var(--accent-solid) 40%, var(--border));
+  background: color-mix(in srgb, var(--active-bg) 30%, var(--card));
+}
+
+.flow-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.flows-workspace {
+  display: grid;
+  grid-template-columns: minmax(10rem, 13rem) minmax(0, 1fr) minmax(14rem, 18rem);
+  gap: var(--space-2);
+  min-height: 74vh;
+}
+
+.flows-layout.fullscreen .flows-workspace {
+  min-height: calc(100dvh - var(--space-20));
+}
+
+.flows-library,
+.flows-inspector {
+  border: calc(var(--space-1) / 4) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  padding: var(--space-2);
+  min-height: 30rem;
+}
+
+.flows-method-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-height: 20rem;
+  overflow: auto;
+}
+
+.flow-canvas-wrap {
+  border: calc(var(--space-1) / 4) solid var(--border);
+  border-radius: var(--radius-sm);
+  background:
+    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--border) 55%, transparent) 1px, transparent 0) 0 0/20px 20px,
+    var(--card);
+  overflow: auto;
+  min-height: 30rem;
+  min-height: 74vh;
+}
+
+.flows-layout.fullscreen .flow-canvas-wrap {
+  min-height: calc(100dvh - var(--space-24));
+}
+
+.flow-canvas {
+  position: relative;
+  min-width: 110rem;
+  min-height: 74vh;
+}
+
+.flows-layout.fullscreen .flow-canvas {
+  min-height: calc(100dvh - var(--space-24));
+}
+
+.flow-edge-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.flow-edge-layer .flow-edge {
+  fill: none;
+  stroke: color-mix(in srgb, var(--border) 80%, var(--text));
+  stroke-width: 2;
+  pointer-events: all;
+  cursor: pointer;
+}
+
+.flow-edge-layer .flow-edge.active {
+  stroke: var(--accent-solid);
+  stroke-width: 3;
+}
+
+.flow-edge-label {
+  font-size: 11px;
+  fill: var(--muted);
+  text-anchor: middle;
+}
+
+.flow-node {
+  position: absolute;
+  width: 11.25rem;
+  border: calc(var(--space-1) / 4) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  padding: var(--space-2);
+  cursor: move;
+  box-shadow: var(--shadow);
+}
+
+.flow-node.active {
+  border-color: var(--accent-solid);
+}
+
+.flow-node.connect-from {
+  border-color: color-mix(in srgb, var(--accent-solid) 72%, var(--border));
+  box-shadow: 0 0 0 calc(var(--space-1) / 2) color-mix(in srgb, var(--accent-solid) 28%, transparent), var(--shadow);
+}
+
+.flow-node-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-1);
+}
+
+.flow-node-title {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.flow-node-sub {
+  font-size: var(--font-size-xs);
+  color: var(--muted);
+}
+
+.flow-node.start {
+  border-color: color-mix(in srgb, #10b981 45%, var(--border));
+}
+
+.flow-node.end {
+  border-color: color-mix(in srgb, #ef4444 45%, var(--border));
+}
+
+.flow-node.note {
+  border-style: dashed;
+}
+
+.flow-mapping-card {
+  border: calc(var(--space-1) / 4) solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.flow-link-builder {
+  border: calc(var(--space-1) / 4) solid color-mix(in srgb, var(--accent-solid) 35%, var(--border));
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  background: color-mix(in srgb, var(--active-bg) 35%, var(--card));
+}
+
+.flow-narrative-list {
+  margin: 0;
+  padding-left: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.flow-issue {
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+  border: calc(var(--space-1) / 4) solid var(--border);
+  font-size: var(--font-size-xs);
+}
+
+.flow-issue.error {
+  border-color: color-mix(in srgb, var(--danger) 50%, var(--border));
+}
+
+.flow-issue.warning {
+  border-color: color-mix(in srgb, var(--warning) 60%, var(--border));
+}
+
+@media (max-width: 72rem) {
+  .project-docs-layout,
+  .flows-layout,
+  .flows-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 
 
 

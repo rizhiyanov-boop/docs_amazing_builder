@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { MutableRefObject } from 'react';
-import type { MethodDocument, MethodGroup, WorkspaceProjectData } from '../types';
+import type { MethodDocument, MethodGroup, ProjectFlow, ProjectSection, WorkspaceProjectData } from '../types';
 import type { AuthUser as ServerAuthUser } from '../serverSyncClient';
 
 type SaveResult = {
@@ -15,6 +15,8 @@ type UseRemoteProjectAutosaveOptions = {
   methods: MethodDocument[];
   activeMethodId: string;
   methodGroups: MethodGroup[];
+  projectSections: ProjectSection[];
+  flows: ProjectFlow[];
   serverProjectId: string | null;
   remoteSaveChangeThreshold: number;
   remoteSaveIdleMs: number;
@@ -49,6 +51,8 @@ export function useRemoteProjectAutosave({
   methods,
   activeMethodId,
   methodGroups,
+  projectSections,
+  flows,
   serverProjectId,
   remoteSaveChangeThreshold,
   remoteSaveIdleMs,
@@ -141,6 +145,8 @@ export function useRemoteProjectAutosave({
     methods,
     activeMethodId,
     methodGroups,
+    projectSections,
+    flows,
     serverProjectId,
     remoteHydratedRef,
     remoteSaveChangeThreshold,

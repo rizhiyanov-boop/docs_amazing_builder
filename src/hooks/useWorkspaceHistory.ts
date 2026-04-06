@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
-import type { MethodDocument, MethodGroup } from '../types';
+import type { MethodDocument, MethodGroup, ProjectFlow, ProjectSection } from '../types';
 import type { PersistedHistoryState } from '../serverSyncClient';
 
 export type WorkspaceSnapshot = {
   projectName: string;
   methods: MethodDocument[];
   methodGroups: MethodGroup[];
+  projectSections: ProjectSection[];
+  flows: ProjectFlow[];
   activeMethodId: string;
   selectedId: string;
 };
@@ -15,6 +17,8 @@ type UseWorkspaceHistoryOptions = {
   projectName: string;
   methods: MethodDocument[];
   methodGroups: MethodGroup[];
+  projectSections: ProjectSection[];
+  flows: ProjectFlow[];
   activeMethodId: string;
   selectedId: string;
   historyLimit: number;
@@ -24,6 +28,8 @@ type UseWorkspaceHistoryOptions = {
   setProjectName: Dispatch<SetStateAction<string>>;
   setMethodsState: Dispatch<SetStateAction<MethodDocument[]>>;
   setMethodGroups: Dispatch<SetStateAction<MethodGroup[]>>;
+  setProjectSections: Dispatch<SetStateAction<ProjectSection[]>>;
+  setFlows: Dispatch<SetStateAction<ProjectFlow[]>>;
   setActiveMethodId: Dispatch<SetStateAction<string>>;
   setSelectedId: Dispatch<SetStateAction<string>>;
 };
@@ -41,6 +47,8 @@ export function useWorkspaceHistory({
   projectName,
   methods,
   methodGroups,
+  projectSections,
+  flows,
   activeMethodId,
   selectedId,
   historyLimit,
@@ -50,6 +58,8 @@ export function useWorkspaceHistory({
   setProjectName,
   setMethodsState,
   setMethodGroups,
+  setProjectSections,
+  setFlows,
   setActiveMethodId,
   setSelectedId
 }: UseWorkspaceHistoryOptions): UseWorkspaceHistoryResult {
@@ -66,6 +76,8 @@ export function useWorkspaceHistory({
     projectName: snapshot.projectName,
     methods: deepClone(snapshot.methods),
     methodGroups: deepClone(snapshot.methodGroups),
+    projectSections: deepClone(snapshot.projectSections),
+    flows: deepClone(snapshot.flows),
     activeMethodId: snapshot.activeMethodId,
     selectedId: snapshot.selectedId
   }), [deepClone]);
@@ -74,15 +86,19 @@ export function useWorkspaceHistory({
     projectName,
     methods,
     methodGroups,
+    projectSections,
+    flows,
     activeMethodId,
     selectedId
-  }), [projectName, methods, methodGroups, activeMethodId, selectedId]);
+  }), [projectName, methods, methodGroups, projectSections, flows, activeMethodId, selectedId]);
 
   function applyWorkspaceSnapshot(snapshot: WorkspaceSnapshot): void {
     historySuspendRef.current = true;
     setProjectName(snapshot.projectName);
     setMethodsState(snapshot.methods);
     setMethodGroups(snapshot.methodGroups);
+    setProjectSections(snapshot.projectSections);
+    setFlows(snapshot.flows);
     setActiveMethodId(snapshot.activeMethodId);
     setSelectedId(snapshot.selectedId);
     window.setTimeout(() => {
@@ -117,6 +133,8 @@ export function useWorkspaceHistory({
       projectName: snapshot.projectName,
       methods: deepClone(snapshot.methods) as unknown[],
       methodGroups: deepClone(snapshot.methodGroups) as unknown[],
+      projectSections: deepClone(snapshot.projectSections) as unknown[],
+      flows: deepClone(snapshot.flows) as unknown[],
       activeMethodId: snapshot.activeMethodId,
       selectedId: snapshot.selectedId
     };
@@ -127,6 +145,8 @@ export function useWorkspaceHistory({
       projectName: normalizeProjectName(snapshot.projectName),
       methods: deepClone(snapshot.methods) as MethodDocument[],
       methodGroups: deepClone(snapshot.methodGroups) as MethodGroup[],
+      projectSections: deepClone((snapshot as PersistedHistoryState['undoStack'][number] & { projectSections?: unknown[] }).projectSections ?? []) as ProjectSection[],
+      flows: deepClone((snapshot as PersistedHistoryState['undoStack'][number] & { flows?: unknown[] }).flows ?? []) as ProjectFlow[],
       activeMethodId: snapshot.activeMethodId,
       selectedId: snapshot.selectedId
     };

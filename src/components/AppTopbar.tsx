@@ -33,6 +33,8 @@ type AppTopbarProps = {
   onOpenProjectImport: () => void;
   onImportProjectJson: (file: File | undefined) => void;
   onExportProjectJson: () => void;
+  onExportFullProjectHtml: () => void;
+  onExportFullProjectWiki: () => void;
   onOpenHtmlPreview: () => void;
   onOpenWikiPreview: () => void;
   onUndoWorkspace: () => void;
@@ -74,6 +76,8 @@ export function AppTopbar({
   onOpenProjectImport,
   onImportProjectJson,
   onExportProjectJson,
+  onExportFullProjectHtml,
+  onExportFullProjectWiki,
   onOpenHtmlPreview,
   onOpenWikiPreview,
   onUndoWorkspace,
@@ -146,6 +150,24 @@ export function AppTopbar({
             aria-label="Открыть Wiki-предпросмотр"
           >
             <span className="ui-icon export-format-icon" data-format="WIKI" aria-hidden>{renderUiIcon('download')}</span>
+          </button>
+          <button
+            className="ghost small"
+            type="button"
+            onClick={onExportFullProjectHtml}
+            disabled={!canExport}
+            title={canExport ? 'Скачать полный проект в HTML' : exportTitle}
+          >
+            Проект HTML
+          </button>
+          <button
+            className="ghost small"
+            type="button"
+            onClick={onExportFullProjectWiki}
+            disabled={!canExport}
+            title={canExport ? 'Скачать полный проект в Wiki' : exportTitle}
+          >
+            Проект Wiki
           </button>
         </div>
         <div className="actions-side">

@@ -18,6 +18,7 @@ export interface DiagramItem {
 }
 
 export interface ParsedRow {
+  id?: string;
   field: string;
   sourceField?: string;
   origin?: 'parsed' | 'manual' | 'generated';
@@ -141,10 +142,79 @@ export interface WorkspaceProjectData {
   activeMethodId?: string;
   methods: MethodDocument[];
   groups: MethodGroup[];
+  projectSections?: ProjectSection[];
+  flows?: ProjectFlow[];
 }
 
 export interface ProjectData {
   version: number;
   updatedAt: string;
   sections: DocSection[];
+}
+
+export interface ProjectSection {
+  id: string;
+  title: string;
+  enabled: boolean;
+  type: 'text' | 'markdown' | 'note' | 'checklist';
+  content: string;
+  order: number;
+}
+
+export interface FlowFieldRef {
+  nodeId: string;
+  side: 'request' | 'response' | 'context';
+  rowId?: string;
+  fieldPath?: string;
+}
+
+export interface ParamMapping {
+  id: string;
+  source: FlowFieldRef;
+  target: {
+    nodeId: string;
+    side: 'request' | 'context';
+    rowId?: string;
+    fieldPath?: string;
+  };
+  transform?: string;
+  note?: string;
+}
+
+export interface FlowNode {
+  id: string;
+  type: 'start' | 'method' | 'end' | 'note';
+  position: {
+    x: number;
+    y: number;
+  };
+  label?: string;
+  description?: string;
+  actor?: string;
+  methodRef?: {
+    methodId: string;
+  };
+  noteContent?: string;
+  preconditions?: string[];
+  postconditions?: string[];
+}
+
+export interface FlowEdge {
+  id: string;
+  type: 'sequence';
+  fromNodeId: string;
+  toNodeId: string;
+  label?: string;
+  condition?: string;
+  mappings?: ParamMapping[];
+}
+
+export interface ProjectFlow {
+  id: string;
+  name: string;
+  description?: string;
+  nodes: FlowNode[];
+  edges: FlowEdge[];
+  createdAt?: string;
+  updatedAt?: string;
 }

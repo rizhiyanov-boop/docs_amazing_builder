@@ -9,6 +9,8 @@ export type WorkspaceSnapshot = {
   projectName?: string;
   methods: unknown[];
   methodGroups: unknown[];
+  projectSections?: unknown[];
+  flows?: unknown[];
   activeMethodId: string;
   selectedId: string;
 };

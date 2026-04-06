@@ -30,6 +30,7 @@ import {
   OPTIONAL_MARK
 } from './requestHeaders';
 import { renderHtmlDocument } from './renderHtml';
+import { getFlowExportFileName, renderProjectHtmlDocument, renderProjectWikiDocument } from './projectExport';
 import { editorElementToWikiText, editorHtmlToWikiText, escapeRichTextHtml, richTextToHtml } from './richText';
 import { renderWikiDocument } from './renderWiki';
 import { DEFAULT_SECTION_TITLE, resolveSectionTitle, sanitizeSections } from './sectionTitles';
@@ -45,6 +46,8 @@ import { ErrorsSectionEditor } from './components/ErrorsSectionEditor';
 import { MethodSectionSidebar } from './components/MethodSectionSidebar';
 import type { AddableBlockType } from './components/MethodSectionSidebar';
 import { ParsedSectionEditor } from './components/ParsedSectionEditor';
+import { ProjectDocsEditor } from './components/ProjectDocsEditor';
+import { ProjectFlowsEditor } from './components/ProjectFlowsEditor';
 import { WorkspaceTabs } from './components/WorkspaceTabs';
 import { useRemoteProjectAutosave } from './hooks/useRemoteProjectAutosave';
 import { useWorkspaceHistory } from './hooks/useWorkspaceHistory';
@@ -64,6 +67,8 @@ import {
 import type { OnboardingState } from './onboarding/types';
 import { applyThemeToRoot } from './theme';
 import type { ThemeName } from './theme';
+import { validateProjectFlow } from './flowValidation';
+import { buildFlowMermaid } from './flowDiagram';
 import type {
   DiagramItem,
   DiagramSection,
@@ -76,7 +81,9 @@ import type {
   ParsedSection,
   ParsedSectionType,
   ParseFormat,
+  ProjectFlow,
   ProjectData,
+  ProjectSection,
   RequestAuthType,
   RequestColumnKey,
   RequestMethod,
@@ -207,6 +214,7 @@ function isCompactLayoutViewport(): boolean {
 }
 
 type TabKey = 'editor' | 'html' | 'wiki';
+type WorkspaceScope = 'methods' | 'project-docs' | 'flows';
 type AutosaveState = 'idle' | 'saving' | 'saved' | 'error';
 type ParseTarget = 'server' | 'client';
 type JsonImportSampleType = 'request' | 'response';
@@ -273,6 +281,153 @@ type SectionClipboardState = {
   type: 'section';
   section: DocSection;
 };
+
+function createProjectSectionId(): string {
+  return `project-section-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createFlowId(): string {
+  return `flow-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createFlowNodeId(prefix = 'node'): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createDefaultProjectSections(): ProjectSection[] {
+  return [
+    {
+      id: createProjectSectionId(),
+      title: 'Overview',
+      enabled: true,
+      type: 'markdown',
+      content: '',
+      order: 0
+    },
+    {
+      id: createProjectSectionId(),
+      title: 'Business Rules',
+      enabled: true,
+      type: 'text',
+      content: '',
+      order: 1
+    }
+  ];
+}
+
+function createDefaultFlow(methodId?: string): ProjectFlow {
+  const startId = createFlowNodeId('start');
+  const methodNodeId = createFlowNodeId('method');
+  const endId = createFlowNodeId('end');
+  const nodes = [
+    {
+      id: startId,
+      type: 'start' as const,
+      position: { x: 80, y: 180 },
+      label: 'Start'
+    },
+    {
+      id: methodNodeId,
+      type: 'method' as const,
+      position: { x: 340, y: 180 },
+      label: 'Method',
+      methodRef: methodId ? { methodId } : undefined
+    },
+    {
+      id: endId,
+      type: 'end' as const,
+      position: { x: 600, y: 180 },
+      label: 'End'
+    }
+  ];
+  return {
+    id: createFlowId(),
+    name: 'Основной сценарий',
+    description: '',
+    nodes,
+    edges: [
+      {
+        id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        type: 'sequence',
+        fromNodeId: startId,
+        toNodeId: methodNodeId,
+        mappings: []
+      },
+      {
+        id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        type: 'sequence',
+        fromNodeId: methodNodeId,
+        toNodeId: endId,
+        mappings: []
+      }
+    ],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+}
+
+function sanitizeProjectSections(rawSections: ProjectSection[] | undefined): ProjectSection[] {
+  if (!Array.isArray(rawSections)) return createDefaultProjectSections();
+  const sections = rawSections
+    .filter(Boolean)
+    .map((section, index) => ({
+      id: section.id || createProjectSectionId(),
+      title: section.title?.trim() || `Раздел ${index + 1}`,
+      enabled: section.enabled ?? true,
+      type: section.type ?? 'text',
+      content: section.content ?? '',
+      order: Number.isFinite(section.order) ? section.order : index
+    }))
+    .sort((left, right) => left.order - right.order)
+    .map((section, index) => ({ ...section, order: index }));
+  return sections.length > 0 ? sections : createDefaultProjectSections();
+}
+
+function sanitizeProjectFlows(rawFlows: ProjectFlow[] | undefined, methods: MethodDocument[]): ProjectFlow[] {
+  if (!Array.isArray(rawFlows) || rawFlows.length === 0) {
+    return [createDefaultFlow(methods[0]?.id)];
+  }
+
+  const sanitized = rawFlows
+    .filter(Boolean)
+    .map((flow, index) => ({
+      id: flow.id || createFlowId(),
+      name: flow.name?.trim() || `Flow ${index + 1}`,
+      description: flow.description ?? '',
+      nodes: Array.isArray(flow.nodes)
+        ? flow.nodes.map((node, nodeIndex) => ({
+            id: node.id || createFlowNodeId(`node-${nodeIndex + 1}`),
+            type: node.type ?? 'note',
+            position: {
+              x: Number.isFinite(node.position?.x) ? node.position.x : 80 + nodeIndex * 80,
+              y: Number.isFinite(node.position?.y) ? node.position.y : 120
+            },
+            label: node.label ?? '',
+            description: node.description ?? '',
+            actor: node.actor ?? '',
+            methodRef: node.methodRef,
+            noteContent: node.noteContent ?? '',
+            preconditions: Array.isArray(node.preconditions) ? node.preconditions : [],
+            postconditions: Array.isArray(node.postconditions) ? node.postconditions : []
+          }))
+        : [],
+      edges: Array.isArray(flow.edges)
+        ? flow.edges.map((edge) => ({
+            id: edge.id || `edge-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            type: 'sequence' as const,
+            fromNodeId: edge.fromNodeId,
+            toNodeId: edge.toNodeId,
+            label: edge.label ?? '',
+            condition: edge.condition ?? '',
+            mappings: Array.isArray(edge.mappings) ? edge.mappings : []
+          }))
+        : [],
+      createdAt: flow.createdAt || new Date().toISOString(),
+      updatedAt: flow.updatedAt || new Date().toISOString()
+    }));
+
+  return sanitized.length > 0 ? sanitized : [createDefaultFlow(methods[0]?.id)];
+}
 
 type ServerProjectPayload = {
   id: string;
@@ -770,6 +925,22 @@ function getRowsRelevantToSourceFormat(rows: ParsedRow[], format: ParseFormat): 
   return rows.filter((row) => row.source !== 'header' && row.source !== 'url' && row.source !== 'query');
 }
 
+function withRowIds(rows: ParsedRow[]): ParsedRow[] {
+  return rows.map((row) => ({
+    ...row,
+    id: row.id || createSectionId('row')
+  }));
+}
+
+function withSectionRowIds(section: DocSection): DocSection {
+  if (section.kind !== 'parsed') return section;
+  return {
+    ...section,
+    rows: withRowIds(section.rows),
+    clientRows: section.clientRows ? withRowIds(section.clientRows) : section.clientRows
+  };
+}
+
 function normalizeRequestRowsForMethod(rows: ParsedRow[], method: RequestMethod | undefined): ParsedRow[] {
   const targetSource = method === 'GET' ? 'query' : 'body';
   return rows.map((row) => {
@@ -829,7 +1000,9 @@ function createWorkspaceSeed(): WorkspaceProjectData {
     updatedAt: new Date().toISOString(),
     activeMethodId: method.id,
     methods: [method],
-    groups: []
+    groups: [],
+    projectSections: createDefaultProjectSections(),
+    flows: [createDefaultFlow(method.id)]
   };
 }
 
@@ -966,12 +1139,20 @@ function createOnboardingDemoWorkspace(): WorkspaceProjectData {
     updatedAt: new Date().toISOString(),
     activeMethodId: method.id,
     methods: [method],
-    groups: []
+    groups: [],
+    projectSections: createDefaultProjectSections(),
+    flows: [createDefaultFlow(method.id)]
   };
 }
 
 function normalizeWorkspaceForMode(workspace: WorkspaceProjectData): WorkspaceProjectData {
-  if (ENABLE_MULTI_METHODS) return workspace;
+  if (ENABLE_MULTI_METHODS) {
+    return {
+      ...workspace,
+      projectSections: sanitizeProjectSections(workspace.projectSections),
+      flows: sanitizeProjectFlows(workspace.flows, workspace.methods)
+    };
+  }
 
   const resolvedMethod = workspace.methods.find((method) => method.id === workspace.activeMethodId) ?? workspace.methods[0] ?? createMethodDocument();
   return {
@@ -979,11 +1160,20 @@ function normalizeWorkspaceForMode(workspace: WorkspaceProjectData): WorkspacePr
     projectName: normalizeProjectName(workspace.projectName),
     activeMethodId: resolvedMethod.id,
     methods: [resolvedMethod],
-    groups: []
+    groups: [],
+    projectSections: sanitizeProjectSections(workspace.projectSections),
+    flows: sanitizeProjectFlows(workspace.flows, [resolvedMethod])
   };
 }
 
-function asWorkspaceProjectData(projectName: string, methods: MethodDocument[], activeMethodId: string, groups: MethodGroup[] = []): WorkspaceProjectData {
+function asWorkspaceProjectData(
+  projectName: string,
+  methods: MethodDocument[],
+  activeMethodId: string,
+  groups: MethodGroup[] = [],
+  projectSections: ProjectSection[] = createDefaultProjectSections(),
+  flows: ProjectFlow[] = [createDefaultFlow(methods[0]?.id)]
+): WorkspaceProjectData {
   const normalizedMethods = methods.length > 0 ? methods : [createMethodDocument()];
   const resolvedActiveMethodId = normalizedMethods.some((method) => method.id === activeMethodId)
     ? activeMethodId
@@ -997,9 +1187,11 @@ function asWorkspaceProjectData(projectName: string, methods: MethodDocument[], 
     methods: normalizedMethods.map((method) => ({
       ...method,
       updatedAt: method.updatedAt || new Date().toISOString(),
-      sections: sanitizeSections(method.sections)
+      sections: sanitizeSections(method.sections).map(withSectionRowIds)
     })),
-    groups
+    groups,
+    projectSections: sanitizeProjectSections(projectSections),
+    flows: sanitizeProjectFlows(flows, normalizedMethods)
   };
 
   return normalizeWorkspaceForMode(workspace);
@@ -1028,7 +1220,7 @@ function loadWorkspaceProject(): WorkspaceProjectData {
           id: method.id || createMethodId(),
           name: method.name?.trim() || `Метод ${index + 1}`,
           updatedAt: method.updatedAt || new Date().toISOString(),
-          sections: sanitizeSections(method.sections)
+          sections: sanitizeSections(method.sections).map(withSectionRowIds)
         }));
 
       if (sanitizedMethods.length === 0) return createWorkspaceSeed();
@@ -1053,7 +1245,9 @@ function loadWorkspaceProject(): WorkspaceProjectData {
         updatedAt: parsed.updatedAt || new Date().toISOString(),
         activeMethodId,
         methods: sanitizedMethods,
-        groups
+        groups,
+        projectSections: sanitizeProjectSections(parsed.projectSections),
+        flows: sanitizeProjectFlows(parsed.flows, sanitizedMethods)
       };
 
       return normalizeWorkspaceForMode(workspace);
@@ -1067,7 +1261,9 @@ function loadWorkspaceProject(): WorkspaceProjectData {
         updatedAt: parsed.updatedAt || new Date().toISOString(),
         activeMethodId: legacyMethod.id,
         methods: [legacyMethod],
-        groups: []
+        groups: [],
+        projectSections: createDefaultProjectSections(),
+        flows: [createDefaultFlow(legacyMethod.id)]
       };
     }
 
@@ -1279,12 +1475,25 @@ export default function App() {
   const previousMethodIdRef = useRef<string | null>(null);
   const initialWorkspace = useMemo(() => loadWorkspaceProject(), []);
   const initialOnboarding = useMemo(() => loadOnboardingState(), []);
+  const initialProjectSections = useMemo(
+    () => sanitizeProjectSections(initialWorkspace.projectSections),
+    [initialWorkspace]
+  );
+  const initialFlows = useMemo(
+    () => sanitizeProjectFlows(initialWorkspace.flows, initialWorkspace.methods),
+    [initialWorkspace]
+  );
   const [projectName, setProjectName] = useState<string>(() => normalizeProjectName(initialWorkspace.projectName));
   const [methods, setMethodsState] = useState<MethodDocument[]>(() => initialWorkspace.methods);
   const [methodGroups, setMethodGroups] = useState<MethodGroup[]>(() => initialWorkspace.groups);
+  const [projectSections, setProjectSections] = useState<ProjectSection[]>(() => initialProjectSections);
+  const [flows, setFlows] = useState<ProjectFlow[]>(() => initialFlows);
+  const [activeProjectSectionId, setActiveProjectSectionId] = useState<string | null>(() => initialProjectSections[0]?.id ?? null);
+  const [activeFlowId, setActiveFlowId] = useState<string | null>(() => initialFlows[0]?.id ?? null);
   const [activeMethodId, setActiveMethodId] = useState<string>(() => initialWorkspace.activeMethodId ?? initialWorkspace.methods[0]?.id ?? createMethodId());
   const [selectedId, setSelectedId] = useState<string>(() => initialWorkspace.methods[0]?.sections[0]?.id ?? createInitialSections()[0].id);
   const [tab, setTab] = useState<TabKey>('editor');
+  const [workspaceScope, setWorkspaceScope] = useState<WorkspaceScope>('methods');
   const [sectionJumpHighlightId, setSectionJumpHighlightId] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeName>(() => loadPersistedTheme());
   const [autosave, setAutosave] = useState<AutosaveInfo>({ state: 'idle' });
@@ -1527,6 +1736,8 @@ export default function App() {
     projectName,
     methods,
     methodGroups,
+    projectSections,
+    flows,
     activeMethodId,
     selectedId,
     historyLimit: HISTORY_LIMIT,
@@ -1536,10 +1747,19 @@ export default function App() {
     setProjectName,
     setMethodsState,
     setMethodGroups,
+    setProjectSections,
+    setFlows,
     setActiveMethodId,
     setSelectedId
   });
-  const buildWorkspaceProjectData = () => asWorkspaceProjectData(normalizedProjectName, methods, activeMethodId, methodGroups);
+  const buildWorkspaceProjectData = () => asWorkspaceProjectData(
+    normalizedProjectName,
+    methods,
+    activeMethodId,
+    methodGroups,
+    projectSections,
+    flows
+  );
   const saveRemoteWorkspace = (params: { projectId?: string; name: string; workspace: WorkspaceProjectData }) =>
     saveServerProjectWithFallback(params);
   const handleRemoteAutosaveSaved = (params: {
@@ -1579,6 +1799,8 @@ export default function App() {
     methods,
     activeMethodId,
     methodGroups,
+    projectSections,
+    flows,
     serverProjectId,
     remoteSaveChangeThreshold: REMOTE_SAVE_CHANGE_THRESHOLD,
     remoteSaveIdleMs: REMOTE_SAVE_IDLE_MS,
@@ -1597,6 +1819,12 @@ export default function App() {
   }, [methods, activeMethod]);
 
   const exportTitle = activeMethod ? `Экспортируется только метод "${activeMethod.name.trim() || DEFAULT_METHOD_NAME}"` : 'Выберите метод';
+  const activeFlowIssues = useMemo(() => {
+    const current = flows.find((flow) => flow.id === activeFlowId) ?? flows[0];
+    if (!current) return [];
+    return validateProjectFlow(current, methods);
+  }, [flows, activeFlowId, methods]);
+  const canRenderWorkspace = workspaceScope !== 'methods' || sections.length > 0;
 
   useEffect(() => {
     let cancelled = false;
@@ -1891,11 +2119,18 @@ export default function App() {
 
   function applyWorkspaceState(workspace: WorkspaceProjectData): void {
     const resolvedActiveMethod = workspace.methods.find((method) => method.id === workspace.activeMethodId) ?? workspace.methods[0];
+    const nextProjectSections = sanitizeProjectSections(workspace.projectSections);
+    const nextFlows = sanitizeProjectFlows(workspace.flows, workspace.methods);
     setProjectName(normalizeProjectName(workspace.projectName));
     setMethodsState(workspace.methods);
     setMethodGroups(workspace.groups);
+    setProjectSections(nextProjectSections);
+    setFlows(nextFlows);
+    setActiveProjectSectionId(nextProjectSections[0]?.id ?? null);
+    setActiveFlowId(nextFlows[0]?.id ?? null);
     setActiveMethodId(resolvedActiveMethod?.id ?? createMethodId());
     setSelectedId(resolvedActiveMethod?.sections[0]?.id ?? createInitialSections()[0].id);
+    setWorkspaceScope('methods');
     setTab('editor');
   }
 
@@ -2512,6 +2747,88 @@ export default function App() {
     setToastMessage('Создан новый пустой проект.');
   }
 
+  function createProjectDocSection(): void {
+    const nextSection: ProjectSection = {
+      id: createProjectSectionId(),
+      title: `Раздел ${projectSections.length + 1}`,
+      enabled: true,
+      type: 'text',
+      content: '',
+      order: projectSections.length
+    };
+    setProjectSections((prev) => [...prev, nextSection]);
+    setActiveProjectSectionId(nextSection.id);
+  }
+
+  function updateProjectDocSection(sectionId: string, updater: (current: ProjectSection) => ProjectSection): void {
+    setProjectSections((prev) => {
+      const next = prev.map((section) => (section.id === sectionId ? updater(section) : section));
+      return next.map((section, index) => ({ ...section, order: index }));
+    });
+  }
+
+  function moveProjectDocSection(sectionId: string, direction: 'up' | 'down'): void {
+    setProjectSections((prev) => {
+      const index = prev.findIndex((section) => section.id === sectionId);
+      if (index === -1) return prev;
+      const nextIndex = direction === 'up' ? index - 1 : index + 1;
+      if (nextIndex < 0 || nextIndex >= prev.length) return prev;
+      const next = [...prev];
+      const [section] = next.splice(index, 1);
+      next.splice(nextIndex, 0, section);
+      return next.map((item, itemIndex) => ({ ...item, order: itemIndex }));
+    });
+  }
+
+  function deleteProjectDocSection(sectionId: string): void {
+    setProjectSections((prev) => {
+      const next = prev.filter((section) => section.id !== sectionId).map((section, index) => ({ ...section, order: index }));
+      if (next.length === 0) {
+        const fallback = createDefaultProjectSections();
+        setActiveProjectSectionId(fallback[0]?.id ?? null);
+        return fallback;
+      }
+      if (activeProjectSectionId === sectionId) {
+        setActiveProjectSectionId(next[0].id);
+      }
+      return next;
+    });
+  }
+
+  function createProjectFlow(): void {
+    const next = createDefaultFlow(activeMethod?.id);
+    setFlows((prev) => [...prev, next]);
+    setActiveFlowId(next.id);
+  }
+
+  function updateProjectFlow(flowId: string, updater: (current: ProjectFlow) => ProjectFlow): void {
+    setFlows((prev) =>
+      prev.map((flow) =>
+        flow.id === flowId
+          ? {
+              ...updater(flow),
+              updatedAt: new Date().toISOString()
+            }
+          : flow
+      )
+    );
+  }
+
+  function deleteProjectFlow(flowId: string): void {
+    setFlows((prev) => {
+      const next = prev.filter((flow) => flow.id !== flowId);
+      if (next.length === 0) {
+        const fallback = [createDefaultFlow(activeMethod?.id)];
+        setActiveFlowId(fallback[0].id);
+        return fallback;
+      }
+      if (activeFlowId === flowId) {
+        setActiveFlowId(next[0].id);
+      }
+      return next;
+    });
+  }
+
   function deleteActiveMethod(): void {
     setIsDeleteEntityMenuOpen(false);
     if (!activeMethod) return;
@@ -2575,6 +2892,18 @@ export default function App() {
     if (sections.some((section) => section.id === selectedId)) return;
     setSelectedId(sections[0].id);
   }, [sections, selectedId, activeMethodId]);
+
+  useEffect(() => {
+    if (projectSections.length === 0) return;
+    if (activeProjectSectionId && projectSections.some((section) => section.id === activeProjectSectionId)) return;
+    setActiveProjectSectionId(projectSections[0].id);
+  }, [projectSections, activeProjectSectionId]);
+
+  useEffect(() => {
+    if (flows.length === 0) return;
+    if (activeFlowId && flows.some((flow) => flow.id === activeFlowId)) return;
+    setActiveFlowId(flows[0].id);
+  }, [flows, activeFlowId]);
 
   useEffect(() => {
     if (!pendingMethodNameFocus || !activeMethod || activeMethod.id !== activeMethodId || editingMethodId !== activeMethod.id) return;
@@ -3545,7 +3874,14 @@ export default function App() {
       localAutosaveTimerRef.current = null;
       localAutosaveFlushRef.current = window.setTimeout(() => {
         localAutosaveFlushRef.current = null;
-        const workspace = asWorkspaceProjectData(normalizedProjectName, methods, activeMethodId, methodGroups);
+        const workspace = asWorkspaceProjectData(
+          normalizedProjectName,
+          methods,
+          activeMethodId,
+          methodGroups,
+          projectSections,
+          flows
+        );
         if (persistLocalWorkspace(workspace)) {
           setAutosave({ state: 'saved', at: formatTime(new Date()) });
         } else {
@@ -3563,7 +3899,7 @@ export default function App() {
         localAutosaveFlushRef.current = null;
       }
     };
-  }, [normalizedProjectName, methods, activeMethodId, methodGroups]);
+  }, [normalizedProjectName, methods, activeMethodId, methodGroups, projectSections, flows]);
 
   useEffect(() => {
     const focusedElement = document.activeElement;
@@ -4220,14 +4556,9 @@ export default function App() {
   }
 
   function exportProjectJson(): void {
-    if (!activeMethod) return;
-    const methodSlug = slugifyMethodFileName(activeMethod.name);
-    const payload: ProjectData = {
-      version: 2,
-      updatedAt: new Date().toISOString(),
-      sections: sanitizeSections(sections)
-    };
-    downloadText(`${methodSlug}.project.json`, JSON.stringify(payload, null, 2));
+    const projectSlug = slugifyMethodFileName(normalizedProjectName);
+    const payload = buildWorkspaceProjectData();
+    downloadText(`${projectSlug}.project.json`, JSON.stringify(payload, null, 2));
     markOnboardingExportTouched();
   }
 
@@ -4240,7 +4571,7 @@ export default function App() {
     });
   }
 
-  async function buildEmbeddedDiagramImageMap(): Promise<Record<string, string>> {
+  async function buildEmbeddedMethodDiagramImageMap(): Promise<Record<string, string>> {
     const diagramSections = sections.filter((section): section is DiagramSection => section.kind === 'diagram');
     const imageMap: Record<string, string> = {};
 
@@ -4249,9 +4580,9 @@ export default function App() {
 
       for (let index = 0; index < diagrams.length; index += 1) {
         const diagram = diagrams[index];
-        const fileName = getDiagramExportFileName(resolveSectionTitle(section.title), section.id, diagram.title, index, 'jpeg');
+        const fileName = getDiagramExportFileName(resolveSectionTitle(section.title), section.id, diagram.title, index, 'svg');
         try {
-          const imageUrl = getDiagramImageUrl(resolveDiagramEngine(diagram.code, diagram.engine), diagram.code, 'jpeg');
+          const imageUrl = getDiagramImageUrl(resolveDiagramEngine(diagram.code, diagram.engine), diagram.code, 'svg');
           const response = await fetch(imageUrl);
           if (!response.ok) continue;
           const blob = await response.blob();
@@ -4265,10 +4596,31 @@ export default function App() {
     return imageMap;
   }
 
+  async function buildEmbeddedProjectFlowImageMap(): Promise<Record<string, string>> {
+    const imageMap: Record<string, string> = {};
+
+    for (let index = 0; index < flows.length; index += 1) {
+      const flow = flows[index];
+      const fileName = getFlowExportFileName(flow, index, 'svg');
+      const mermaid = buildFlowMermaid(flow, methods);
+      try {
+        const imageUrl = getDiagramImageUrl('mermaid', mermaid, 'svg');
+        const response = await fetch(imageUrl);
+        if (!response.ok) continue;
+        const blob = await response.blob();
+        imageMap[fileName] = await blobToDataUrl(blob);
+      } catch {
+        // Keep fallback link behavior when image embedding fails.
+      }
+    }
+
+    return imageMap;
+  }
+
   async function handleExportHtml(): Promise<void> {
     if (!activeMethod) return;
     const methodSlug = slugifyMethodFileName(activeMethod.name);
-    const diagramImageMap = await buildEmbeddedDiagramImageMap();
+    const diagramImageMap = await buildEmbeddedMethodDiagramImageMap();
     const htmlForExport = renderHtmlDocument(sections, theme, {
       interactive: true,
       diagramImageSource: 'remote',
@@ -4287,11 +4639,65 @@ export default function App() {
 
   function openHtmlPreview(): void {
     if (!activeMethod) return;
+    setWorkspaceScope('methods');
     setTab('html');
+  }
+
+  async function handleExportFullProjectHtml(): Promise<void> {
+    const projectSlug = slugifyMethodFileName(normalizedProjectName);
+    const flowImageMap = await buildEmbeddedProjectFlowImageMap();
+    const methodDiagramImageMap: Record<string, string> = {};
+    for (const method of methods) {
+      const diagramSections = method.sections.filter((section): section is DiagramSection => section.kind === 'diagram' && section.enabled);
+      for (const section of diagramSections) {
+        const diagrams = section.diagrams.filter((diagram) => diagram.code.trim());
+        for (let index = 0; index < diagrams.length; index += 1) {
+          const diagram = diagrams[index];
+          const fileName = getDiagramExportFileName(resolveSectionTitle(section.title), section.id, diagram.title, index, 'svg');
+          if (methodDiagramImageMap[fileName]) continue;
+          try {
+            const imageUrl = getDiagramImageUrl(resolveDiagramEngine(diagram.code, diagram.engine), diagram.code, 'svg');
+            const response = await fetch(imageUrl);
+            if (!response.ok) continue;
+            const blob = await response.blob();
+            methodDiagramImageMap[fileName] = await blobToDataUrl(blob);
+          } catch {
+            // Keep remote fallback if embedding fails.
+          }
+        }
+      }
+    }
+
+    const html = renderProjectHtmlDocument({
+      projectName: normalizedProjectName,
+      updatedAt: new Date().toISOString(),
+      projectSections: projectSections.filter((section) => section.enabled),
+      flows,
+      methods: methods.map((method) => ({ ...method, sections: method.sections.filter((section) => section.enabled) })),
+      theme,
+      flowImageMap,
+      methodDiagramImageMap
+    });
+    downloadText(`${projectSlug}.project.documentation.html`, html);
+    markOnboardingExportTouched();
+  }
+
+  function handleExportFullProjectWiki(): void {
+    const projectSlug = slugifyMethodFileName(normalizedProjectName);
+    const wiki = renderProjectWikiDocument({
+      projectName: normalizedProjectName,
+      updatedAt: new Date().toISOString(),
+      projectSections: projectSections.filter((section) => section.enabled),
+      flows,
+      methods: methods.map((method) => ({ ...method, sections: method.sections.filter((section) => section.enabled) }))
+    });
+    downloadText(`${projectSlug}.project.documentation.wiki.txt`, wiki);
+    markOnboardingExportTouched();
   }
 
   function openWikiPreview(): void {
     if (!activeMethod) return;
+    setWorkspaceScope('methods');
     setTab('wiki');
   }
 
@@ -4538,7 +4944,7 @@ export default function App() {
         id: method.id || createMethodId(),
         name: method.name?.trim() || `Метод ${index + 1}`,
         updatedAt: method.updatedAt || new Date().toISOString(),
-        sections: sanitizeSections(method.sections)
+        sections: sanitizeSections(method.sections).map(withSectionRowIds)
       }));
 
     if (methods.length === 0) return createWorkspaceSeed();
@@ -4558,10 +4964,13 @@ export default function App() {
 
     const workspace: WorkspaceProjectData = {
       version: 3,
+      projectName: normalizeProjectName(payload.projectName),
       updatedAt: payload.updatedAt || new Date().toISOString(),
       methods,
       groups,
-      activeMethodId
+      activeMethodId,
+      projectSections: sanitizeProjectSections(payload.projectSections),
+      flows: sanitizeProjectFlows(payload.flows, methods)
     };
 
     return normalizeWorkspaceForMode(workspace);
@@ -7150,7 +7559,14 @@ export default function App() {
   const handleManualSave = async () => {
     setAutosave({ state: 'saving' });
 
-    const workspace = asWorkspaceProjectData(normalizedProjectName, methods, activeMethodId, methodGroups);
+    const workspace = asWorkspaceProjectData(
+      normalizedProjectName,
+      methods,
+      activeMethodId,
+      methodGroups,
+      projectSections,
+      flows
+    );
     if (!persistLocalWorkspace(workspace)) {
       setAutosave({ state: 'error' });
       return;
@@ -7630,6 +8046,8 @@ export default function App() {
         onOpenProjectImport={() => openProjectImportDialog(false)}
         onImportProjectJson={(file) => importProjectJson(file)}
         onExportProjectJson={exportProjectJson}
+        onExportFullProjectHtml={() => void handleExportFullProjectHtml()}
+        onExportFullProjectWiki={handleExportFullProjectWiki}
         onOpenHtmlPreview={openHtmlPreview}
         onOpenWikiPreview={openWikiPreview}
         onUndoWorkspace={undoWorkspace}
@@ -7708,7 +8126,7 @@ export default function App() {
         className={`layout ${isSidebarHidden ? 'sidebar-hidden' : ''}`}
         style={{ '--sidebar-width': `${sidebarWidth}px` } as CSSProperties}
       >
-        {!isSidebarHidden && (
+        {!isSidebarHidden && workspaceScope === 'methods' && (
           <MethodSectionSidebar
             enableMultiMethods={ENABLE_MULTI_METHODS}
             normalizedProjectName={normalizedProjectName}
@@ -7816,13 +8234,53 @@ export default function App() {
           />
         )}
 
-        <main className="workspace" role="main">
-          {selectedSection ? (
+        <main className={`workspace ${workspaceScope === 'flows' && tab === 'editor' ? 'workspace-flow-focus' : ''}`} role="main">
+          {canRenderWorkspace ? (
             <>
               <WorkspaceTabs tab={tab} onOpenEditor={() => setTab('editor')} onOpenHtml={openHtmlPreview} onOpenWiki={openWikiPreview} />
+              {tab === 'editor' && (
+                <div className="workspace-context-tabs" role="tablist" aria-label="Контекст редактора">
+                  <button
+                    type="button"
+                    role="tab"
+                    className={`workspace-context-tab ${workspaceScope === 'methods' ? 'active' : ''}`}
+                    aria-selected={workspaceScope === 'methods'}
+                    onClick={() => {
+                      setWorkspaceScope('methods');
+                      if (isCompactLayout) setIsSidebarHidden(false);
+                    }}
+                  >
+                    Methods
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    className={`workspace-context-tab ${workspaceScope === 'project-docs' ? 'active' : ''}`}
+                    aria-selected={workspaceScope === 'project-docs'}
+                    onClick={() => {
+                      setWorkspaceScope('project-docs');
+                      setIsSidebarHidden(true);
+                    }}
+                  >
+                    Project Docs
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    className={`workspace-context-tab ${workspaceScope === 'flows' ? 'active' : ''}`}
+                    aria-selected={workspaceScope === 'flows'}
+                    onClick={() => {
+                      setWorkspaceScope('flows');
+                      setIsSidebarHidden(true);
+                    }}
+                  >
+                    Flows
+                  </button>
+                </div>
+              )}
 
               <div className="panes">
-              {tab === 'editor' && (
+              {tab === 'editor' && workspaceScope === 'methods' && (
                 <div className="editor-stream">
                   {sections.map((section) => {
                     const isActiveSection = selectedSection?.id === section.id;
@@ -8078,7 +8536,37 @@ export default function App() {
                 </div>
               )}
 
-              {tab === 'html' && (
+              {tab === 'editor' && workspaceScope === 'project-docs' && (
+                <ProjectDocsEditor
+                  sections={projectSections}
+                  activeSectionId={activeProjectSectionId}
+                  flows={flows}
+                  activeFlowId={activeFlowId}
+                  methods={methods}
+                  onSelectSection={setActiveProjectSectionId}
+                  onSelectFlow={setActiveFlowId}
+                  onOpenFlowsWorkspace={() => setWorkspaceScope('flows')}
+                  onCreateSection={createProjectDocSection}
+                  onDeleteSection={deleteProjectDocSection}
+                  onMoveSection={moveProjectDocSection}
+                  onUpdateSection={updateProjectDocSection}
+                />
+              )}
+
+              {tab === 'editor' && workspaceScope === 'flows' && (
+                <ProjectFlowsEditor
+                  methods={methods}
+                  flows={flows}
+                  activeFlowId={activeFlowId}
+                  issues={activeFlowIssues}
+                  onCreateFlow={createProjectFlow}
+                  onDeleteFlow={deleteProjectFlow}
+                  onSelectFlow={setActiveFlowId}
+                  onUpdateFlow={updateProjectFlow}
+                />
+              )}
+
+              {tab === 'html' && workspaceScope === 'methods' && (
                 <section className={tab === 'html' ? 'panel panel-html-preview' : 'panel'}>
                   <div className="panel-head">
                     <div className="panel-title">Предпросмотр HTML</div>
@@ -8095,7 +8583,7 @@ export default function App() {
                 </section>
               )}
 
-              {tab === 'wiki' && (
+              {tab === 'wiki' && workspaceScope === 'methods' && (
                 <section className="panel">
                   <div className="panel-head">
                     <div className="panel-title">Предпросмотр Wiki</div>

@@ -1210,6 +1210,8 @@ function getDynamicTextareaRows(value: string, minRows = 1, maxRows = 8): number
 export default function App() {
   const activeTextSectionIdRef = useRef<string | null>(null);
   const sectionAnchorRefs = useRef<Map<string, HTMLElement>>(new Map());
+  const inlineFieldInputRef = useRef<HTMLInputElement | null>(null);
+  const inlineRequestCellInputRef = useRef<HTMLElement | null>(null);
   const sectionVisibilityRatiosRef = useRef<Map<string, number>>(new Map());
   const suppressObserverSelectionUntilRef = useRef<number>(0);
   const observerRafRef = useRef<number | null>(null);
@@ -2619,6 +2621,48 @@ export default function App() {
     projectNameInputRef.current.select();
     setPendingProjectNameFocus(false);
   }, [pendingProjectNameFocus, editingProjectName]);
+
+  useEffect(() => {
+    if (!editingField) return;
+    const target = inlineFieldInputRef.current;
+    if (!target) return;
+
+    const focusWithoutScroll = (): void => {
+      try {
+        target.focus({ preventScroll: true });
+      } catch {
+        target.focus();
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      window.requestAnimationFrame(focusWithoutScroll);
+      return;
+    }
+
+    focusWithoutScroll();
+  }, [editingField?.sectionId, editingField?.rowKey, editingField?.target, editingField?.column]);
+
+  useEffect(() => {
+    if (!editingRequestCell) return;
+    const target = inlineRequestCellInputRef.current;
+    if (!target) return;
+
+    const focusWithoutScroll = (): void => {
+      try {
+        (target as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement).focus({ preventScroll: true });
+      } catch {
+        (target as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement).focus();
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      window.requestAnimationFrame(focusWithoutScroll);
+      return;
+    }
+
+    focusWithoutScroll();
+  }, [editingRequestCell?.sectionId, editingRequestCell?.rowKey, editingRequestCell?.column, editingRequestCell?.target]);
 
   useEffect(() => {
     if (!activeMethodId) return;
@@ -5270,13 +5314,18 @@ export default function App() {
   function startMappedClientFieldEditing(section: ParsedSection, mappedClientKey: string): void {
     if (!isDualModelSection(section)) return;
 
-    const clientRow = (section.clientRows ?? []).find((item) => getParsedRowKey(item) === mappedClientKey);
-    if (!clientRow || !clientRow.field.trim()) return;
+    const clientRows = section.clientRows ?? [];
+    const clientRow =
+      clientRows.find((item) => getParsedRowKey(item) === mappedClientKey)
+      ?? clientRows.find((item) => item.sourceField?.trim() === mappedClientKey)
+      ?? clientRows.find((item) => item.field.trim() === mappedClientKey)
+      ?? clientRows.find((item) => item.clientField?.trim() === mappedClientKey);
+    if (!clientRow) return;
 
     setEditingField({
       sectionId: section.id,
       rowKey: mappedClientKey,
-      draft: clientRow.field,
+      draft: clientRow.field ?? '',
       target: 'client',
       column: 'field'
     });
@@ -5555,10 +5604,12 @@ export default function App() {
       return (
         <div className="field-edit">
           <input
+            ref={inlineFieldInputRef}
             type="text"
-            autoFocus
             value={editingField.draft}
             onChange={(e) => setEditingField((current) => (current ? { ...current, draft: e.target.value } : current))}
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={(event) => event.stopPropagation()}
             onBlur={saveFieldEditing}
             onKeyDown={(e) => {
               if (e.key === 'Enter') saveFieldEditing();
@@ -5570,16 +5621,50 @@ export default function App() {
     }
 
     return (
-      <div className="field-display" onDoubleClick={() => allowEdit && startFieldEditing(section, row, editTarget)}>
+      <div
+        className="field-display"
+        onClick={(event) => event.stopPropagation()}
+        onDoubleClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (allowEdit) startFieldEditing(section, row, editTarget);
+        }}
+      >
         <span className="field-name-cell">{renderFieldName(row.field)}</span>
         <span className="field-actions">
           {allowEdit && (
-            <button className="icon-button" type="button" onClick={() => startFieldEditing(section, row, editTarget)} aria-label="Редактировать поле">
+            <button
+              className="icon-button"
+              type="button"
+              onMouseDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                startFieldEditing(section, row, editTarget);
+              }}
+              aria-label="Редактировать поле"
+            >
               ✎
             </button>
           )}
           {options.onDelete && (
-            <button className="icon-button danger" type="button" onClick={options.onDelete} aria-label="Удалить поле">
+            <button
+              className="icon-button danger"
+              type="button"
+              onMouseDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                options.onDelete?.();
+              }}
+              aria-label="Удалить поле"
+            >
               ×
             </button>
           )}
@@ -5602,10 +5687,12 @@ export default function App() {
       return (
         <div className="field-edit">
           <input
+            ref={inlineFieldInputRef}
             type="text"
-            autoFocus
             value={editingField.draft}
             onChange={(e) => setEditingField((current) => (current ? { ...current, draft: e.target.value } : current))}
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={(event) => event.stopPropagation()}
             onBlur={saveFieldEditing}
             onKeyDown={(e) => {
               if (e.key === 'Enter') saveFieldEditing();
@@ -5617,16 +5704,45 @@ export default function App() {
     }
 
     return (
-      <div className="field-display" onDoubleClick={() => startClientFieldEditing(section, row)}>
+      <div
+        className="field-display"
+        onClick={(event) => event.stopPropagation()}
+        onDoubleClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          startClientFieldEditing(section, row);
+        }}
+      >
         <span className="field-name-cell">{renderFieldName(row.clientField)}</span>
         <span className="field-actions">
-          <button className="icon-button" type="button" onClick={() => startClientFieldEditing(section, row)} aria-label="Редактировать client поле">
+          <button
+            className="icon-button"
+            type="button"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              startClientFieldEditing(section, row);
+            }}
+            aria-label="Редактировать client поле"
+          >
             ✎
           </button>
           <button
             className="icon-button danger"
             type="button"
-            onClick={() => deleteParsedRow(section.id, getParsedRowKey(row), 'client')}
+            onMouseDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              deleteParsedRow(section.id, getParsedRowKey(row), 'client');
+            }}
             aria-label="Удалить client поле"
           >
             ×
@@ -5651,7 +5767,7 @@ export default function App() {
         return (
           <div className="field-edit inline-edit type-edit">
             <select
-              autoFocus
+              ref={inlineRequestCellInputRef as React.RefObject<HTMLSelectElement>}
               value={editingRequestCell.draft}
               onChange={(e) => {
                 const nextValue = e.target.value;
@@ -5660,6 +5776,8 @@ export default function App() {
                   setEditingRequestCell(null);
                 }
               }}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => event.stopPropagation()}
               onBlur={cancelRequestCellEditing}
             >
               <optgroup label="Частые">
@@ -5685,7 +5803,7 @@ export default function App() {
         return (
           <div className="field-edit inline-edit">
             <select
-              autoFocus
+              ref={inlineRequestCellInputRef as React.RefObject<HTMLSelectElement>}
               value={editingRequestCell.draft}
               onChange={(e) => {
                 const nextValue = e.target.value;
@@ -5694,6 +5812,8 @@ export default function App() {
                   setEditingRequestCell(null);
                 }
               }}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => event.stopPropagation()}
               onBlur={cancelRequestCellEditing}
             >
               {REQUIRED_OPTIONS.map((option) => (
@@ -5709,9 +5829,11 @@ export default function App() {
       return (
         <div className="field-edit inline-edit">
           <textarea
-            autoFocus
+            ref={inlineRequestCellInputRef as React.RefObject<HTMLTextAreaElement>}
             value={editingRequestCell.draft}
             onChange={(e) => setEditingRequestCell((current) => (current ? { ...current, draft: e.target.value } : current))}
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={(event) => event.stopPropagation()}
             onBlur={saveRequestCellEditing}
             rows={getDynamicTextareaRows(editingRequestCell.draft, column === 'example' ? 3 : 1, column === 'example' ? 10 : 6)}
             onKeyDown={(e) => {
@@ -5727,10 +5849,31 @@ export default function App() {
     const canEdit = Boolean(getRequestCellEditTarget(section, row));
 
     return (
-      <div className="field-display" onDoubleClick={() => canEdit && startRequestCellEditing(section, row, column)}>
+      <div
+        className="field-display"
+        onClick={(event) => event.stopPropagation()}
+        onDoubleClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (canEdit) startRequestCellEditing(section, row, column);
+        }}
+      >
         <span>{value}</span>
         <span className="field-actions">
-          <button className="icon-button" type="button" onClick={() => canEdit && startRequestCellEditing(section, row, column)} aria-label="Редактировать ячейку">
+          <button
+            className="icon-button"
+            type="button"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              if (canEdit) startRequestCellEditing(section, row, column);
+            }}
+            aria-label="Редактировать ячейку"
+          >
             ✎
           </button>
         </span>
@@ -5799,10 +5942,12 @@ export default function App() {
         return (
           <div className="field-edit">
             <input
+              ref={inlineFieldInputRef}
               type="text"
-              autoFocus
               value={editingField.draft}
               onChange={(e) => setEditingField((current) => (current ? { ...current, draft: e.target.value } : current))}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => event.stopPropagation()}
               onBlur={saveFieldEditing}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') saveFieldEditing();
@@ -5821,7 +5966,15 @@ export default function App() {
               <button
                 className="icon-button"
                 type="button"
-                onClick={() => setEditingMappingCell({ sectionId: section.id, rowKey })}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setEditingMappingCell({ sectionId: section.id, rowKey });
+                }}
                 aria-label="Редактировать маппинг"
               >
                 ↔
@@ -5830,7 +5983,15 @@ export default function App() {
                 <button
                   className="icon-button"
                   type="button"
-                  onClick={() => startMappedClientFieldEditing(section, mappedValue)}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    startMappedClientFieldEditing(section, mappedValue);
+                  }}
                   aria-label="Редактировать client поле"
                 >
                   ✎
@@ -5841,14 +6002,20 @@ export default function App() {
                   className="icon-button danger"
                   type="button"
                   aria-label="Сбросить маппинг"
-                  onClick={() =>
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
                     updateSection(section.id, (current) => {
                       if (current.kind !== 'parsed' || !isDualModelSection(current)) return current;
                       const nextMappings = { ...(current.clientMappings ?? {}) };
                       delete nextMappings[rowKey];
                       return { ...current, clientMappings: nextMappings };
-                    })
-                  }
+                    });
+                  }}
                 >
                   ×
                 </button>

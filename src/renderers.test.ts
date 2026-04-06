@@ -34,4 +34,51 @@ describe('renderers', () => {
     expect(wiki).toContain('Секция заблокирована');
     expect(wiki).toContain('Ошибка парсинга');
   });
+
+  it('renders array paths as empty brackets in wiki and html', () => {
+    const sections: DocSection[] = [
+      makeRequestSection({
+        rows: [
+          {
+            field: 'items[0]',
+            sourceField: 'items[0]',
+            origin: 'parsed',
+            enabled: true,
+            type: 'array_object',
+            required: '+',
+            description: 'Items list',
+            example: '-',
+            source: 'body'
+          },
+          {
+            field: 'items[0].name',
+            sourceField: 'items[0].name',
+            origin: 'parsed',
+            enabled: true,
+            clientField: 'payload[o].name',
+            type: 'string',
+            required: '+',
+            description: 'Item name',
+            example: 'A',
+            source: 'body'
+          }
+        ]
+      })
+    ];
+
+    const wiki = renderWikiDocument(sections);
+    const html = renderHtmlDocument(sections, 'light', { interactive: false });
+
+    expect(wiki).toContain('items[]');
+    expect(wiki).toContain('items[].name');
+    expect(wiki).toContain('payload[].name');
+    expect(wiki).not.toContain('items[0]');
+    expect(wiki).not.toContain('payload[o]');
+
+    expect(html).toContain('items[]');
+    expect(html).toContain('items[].name');
+    expect(html).toContain('payload[].name');
+    expect(html).not.toContain('items[0]');
+    expect(html).not.toContain('payload[o]');
+  });
 });

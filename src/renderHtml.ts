@@ -5,6 +5,7 @@ import { resolveSectionTitle } from './sectionTitles';
 import { buildInputFromRows } from './sourceSync';
 import { getThemeTokens } from './theme';
 import { getDiagramExportFileName, getDiagramImageUrl, resolveDiagramEngine } from './diagramUtils';
+import { normalizeArrayFieldPath } from './fieldPath';
 import type { ThemeName } from './theme';
 import type { DiagramSection, DocSection, ErrorsSection, ParseFormat, ParsedRow, ParsedSection, TextSection } from './types';
 
@@ -190,7 +191,7 @@ function renderDefaultTable(rows: ParsedRow[]): string {
   const body = rows
     .map(
       (row) =>
-        `<tr><td>${renderCell(row.field)}</td><td>${renderCell(row.type)}</td><td>${renderCell(row.required)}</td><td>${renderCell(row.description)}</td><td>${renderCell(row.example)}</td></tr>`
+        `<tr><td>${renderCell(normalizeArrayFieldPath(row.field))}</td><td>${renderCell(row.type)}</td><td>${renderCell(row.required)}</td><td>${renderCell(row.description)}</td><td>${renderCell(row.example)}</td></tr>`
     )
     .join('');
 
@@ -203,8 +204,8 @@ function renderStructuredTable(rows: ParsedRow[], section: ParsedSection): strin
   const body = rows
     .map((row) => {
       const cellMap = {
-        field: row.field || '—',
-        clientField: row.clientField || '—',
+        field: normalizeArrayFieldPath(row.field) || '—',
+        clientField: normalizeArrayFieldPath(row.clientField || '') || '—',
         type: row.type || '—',
         required: row.required || '—',
         description: row.description || '—',

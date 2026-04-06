@@ -2,6 +2,7 @@
 import { getRequestAuthInfo, getRequestRows, requestHasRows, splitRequestRows } from './requestHeaders';
 import { resolveSectionTitle } from './sectionTitles';
 import { getDiagramImageUrl, resolveDiagramEngine } from './diagramUtils';
+import { normalizeArrayFieldPath } from './fieldPath';
 import type { DiagramSection, DocSection, ErrorsSection, ParsedRow, ParsedSection, TextSection } from './types';
 
 const EMPTY_WIKI_CELL = '&#160;';
@@ -165,7 +166,7 @@ function renderDefaultTable(rows: ParsedRow[]): string[] {
   const lines = ['||Поле||Тип||Обязательность||Описание||Маскирование в логах||Пример||'];
   for (const row of rows) {
     const cells = [
-      toWikiCell(row.field),
+      toWikiCell(normalizeArrayFieldPath(row.field)),
       toWikiCell(row.type),
       toWikiCell(row.required),
       toWikiCell(row.description),
@@ -184,8 +185,8 @@ function renderStructuredTable(rows: ParsedRow[], section: ParsedSection): strin
 
   for (const row of rows) {
     const cellMap = {
-      field: row.field,
-      clientField: row.clientField ?? '',
+      field: normalizeArrayFieldPath(row.field),
+      clientField: normalizeArrayFieldPath(row.clientField ?? ''),
       type: row.type,
       required: row.required,
       description: row.description,

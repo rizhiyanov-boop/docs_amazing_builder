@@ -5,6 +5,27 @@ type BuildInputOptions = {
   requestMethod?: RequestMethod;
 };
 
+function toQueryParamValue(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+function buildUrlWithQuery(baseUrl: string, queryRows: ParsedRow[]): string {
+  const trimmedBaseUrl = baseUrl.trim() || 'https://example.com';
+  const [basePath, existingQuery = ''] = trimmedBaseUrl.split('?');
+  const searchParams = new URLSearchParams(existingQuery);
+
+  for (const row of queryRows) {
+    const key = row.field.trim();
+    if (!key) continue;
+    searchParams.set(key, toQueryParamValue(parseExampleValue(row)));
+  }
+
+  const queryString = searchParams.toString();
+  return queryString ? `${basePath}?${queryString}` : basePath;
+}
+
 type JsonContainer = Record<string, unknown> | unknown[];
 
 function tokenizePath(path: string): string[] {
@@ -95,7 +116,7 @@ function setJsonPath(root: JsonContainer, path: string, value: unknown): void {
 }
 
 function buildJsonObject(rows: ParsedRow[]): unknown {
-  const bodyRows = rows.filter((row) => row.field.trim() && row.source !== 'header' && row.source !== 'url');
+  const bodyRows = rows.filter((row) => row.field.trim() && row.source !== 'header' && row.source !== 'url' && row.source !== 'query');
   const root: Record<string, unknown> = {};
 
   for (const row of bodyRows) {
@@ -106,12 +127,14 @@ function buildJsonObject(rows: ParsedRow[]): unknown {
 }
 
 function buildCurl(rows: ParsedRow[], options?: BuildInputOptions): string {
-  const url = options?.requestUrl?.trim() || rows.find((row) => row.source === 'url')?.example.trim() || 'https://example.com';
+  const baseUrl = options?.requestUrl?.trim() || rows.find((row) => row.source === 'url')?.example.trim() || 'https://example.com';
   const method = options?.requestMethod?.trim() || 'POST';
+  const queryRows = rows.filter((row) => row.source === 'query' && row.field.trim());
+  const url = buildUrlWithQuery(baseUrl, queryRows);
   const headers = rows
     .filter((row) => row.source === 'header')
     .map((row) => `-H "${row.field}: ${row.example.trim()}"`);
-  const bodyRows = rows.filter((row) => row.source !== 'header' && row.source !== 'url' && row.field.trim());
+  const bodyRows = rows.filter((row) => row.source !== 'header' && row.source !== 'url' && row.source !== 'query' && row.field.trim());
   const body = bodyRows.length > 0 ? JSON.stringify(buildJsonObject(bodyRows), null, 2) : '';
 
   return ['curl', '-X', method, `"${url}"`, ...headers, ...(body ? [`--data-raw '${body}'`] : [])].join(' ');

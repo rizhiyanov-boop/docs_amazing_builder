@@ -104,6 +104,38 @@ function parseJson(input: string): ParsedRow[] {
   return flattenJson(JSON.parse(input));
 }
 
+function inferPrimitiveType(value: string): string {
+  if (value === 'true' || value === 'false') return 'boolean';
+  if (/^-?\d+$/.test(value)) return 'int';
+  if (!Number.isNaN(Number(value))) return 'number';
+  return 'string';
+}
+
+function splitUrlAndQuery(rawUrl: string): { baseUrl: string; queryRows: ParsedRow[] } {
+  try {
+    const url = new URL(rawUrl);
+    const queryRows: ParsedRow[] = [];
+
+    for (const [key, value] of url.searchParams.entries()) {
+      queryRows.push(
+        createParsedRow({
+          field: key,
+          type: inferPrimitiveType(value),
+          required: '+',
+          description: `Query parameter ${key}`,
+          example: value,
+          source: 'query'
+        })
+      );
+    }
+
+    url.search = '';
+    return { baseUrl: url.toString(), queryRows };
+  } catch {
+    return { baseUrl: rawUrl, queryRows: [] };
+  }
+}
+
 function parseCurl(input: string): ParsedRow[] {
   const normalized = input.replace(/\r\n/g, ' ').replace(/\n/g, ' ');
   const rows: ParsedRow[] = [];
@@ -252,16 +284,18 @@ function parseCurl(input: string): ParsedRow[] {
   const urlMatch = normalized.match(/curl\s+(?:-X\s+\w+\s+)?['"]?(https?:\/\/[^'"\s]+)['"]?/i);
   if (urlMatch) {
     extractedAny = true;
+    const { baseUrl, queryRows } = splitUrlAndQuery(urlMatch[1]);
     rows.push(
       createParsedRow({
         field: 'request.url',
         type: 'string',
         required: '+',
         description: 'URL запроса',
-        example: urlMatch[1],
+        example: baseUrl,
         source: 'url'
       })
     );
+    rows.push(...queryRows);
   }
 
   if (!extractedAny) {
@@ -275,10 +309,11 @@ export function parseCurlMeta(input: string): ParsedCurlMeta {
   const normalized = input.replace(/\r\n/g, ' ').replace(/\n/g, ' ');
   const methodMatch = normalized.match(/(?:^|\s)(?:-X|--request)\s+(GET|POST|PUT|PATCH|DELETE)\b/i);
   const urlMatch = normalized.match(/curl\s+(?:-X\s+\w+\s+)?['"]?(https?:\/\/[^'"\s]+)['"]?/i);
+  const parsedUrl = urlMatch?.[1] ? splitUrlAndQuery(urlMatch[1]).baseUrl : undefined;
 
   return {
     method: (methodMatch?.[1]?.toUpperCase() as RequestMethod | undefined) ?? (urlMatch ? 'POST' : undefined),
-    url: urlMatch?.[1]
+    url: parsedUrl
   };
 }
 

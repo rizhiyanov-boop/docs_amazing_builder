@@ -85,7 +85,7 @@ describe('App integration', () => {
     const user = userEvent.setup();
     renderApp();
 
-    const navTree = screen.getByRole('tree', { name: 'Проект, методы и секции' });
+    const navTree = screen.getByRole('tree', { name: 'Проекты, методы и секции' });
     await user.click(within(navTree).getByRole('treeitem', { name: /Request/i }));
     const activeSection = document.querySelector('.editor-section-active');
     expect(activeSection).not.toBeNull();
@@ -102,7 +102,7 @@ describe('App integration', () => {
     const user = userEvent.setup();
     renderApp();
 
-    const navTree = screen.getByRole('tree', { name: 'Проект, методы и секции' });
+    const navTree = screen.getByRole('tree', { name: 'Проекты, методы и секции' });
     await user.click(within(navTree).getByRole('treeitem', { name: /Response/i }));
 
     await waitFor(() => {

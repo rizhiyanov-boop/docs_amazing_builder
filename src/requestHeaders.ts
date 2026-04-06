@@ -269,7 +269,11 @@ export function getRequestRows(section: ParsedSection): ParsedRow[] {
 
 export function getEditorRequestRows(section: ParsedSection): ParsedRow[] {
   if (!isDualModelSection(section)) return section.rows;
-  return mergeRequestRows(section).filter((row) => row.source !== 'header' && row.source !== 'url');
+  const mergedRows = mergeRequestRows(section).filter((row) => row.source !== 'header' && row.source !== 'url');
+  if (section.sectionType === 'request' && section.requestMethod === 'GET') {
+    return mergedRows.filter((row) => row.source === 'query');
+  }
+  return mergedRows.filter((row) => row.source !== 'query');
 }
 
 export function getRequestHeaderRows(section: ParsedSection): ParsedRow[] {

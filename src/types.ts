@@ -30,7 +30,7 @@ export interface ParsedRow {
   description: string;
   maskInLogs?: boolean;
   example: string;
-  source?: 'header' | 'body' | 'url' | 'parsed';
+  source?: 'header' | 'body' | 'query' | 'url' | 'parsed';
 }
 
 export interface BaseSection {

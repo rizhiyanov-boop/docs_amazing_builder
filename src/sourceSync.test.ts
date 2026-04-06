@@ -27,6 +27,7 @@ describe('sourceSync', () => {
     const rows = [
       makeParsedRow({ field: 'request.url', source: 'url', example: 'https://api.example.com' }),
       makeParsedRow({ field: 'X-Trace-Id', source: 'header', example: 'abc-123' }),
+      makeParsedRow({ field: 'search', source: 'query', example: 'invoice-1' }),
       makeParsedRow({ field: 'payload.id', source: 'parsed', type: 'int', example: '7' })
     ];
 
@@ -50,6 +51,23 @@ describe('sourceSync', () => {
     expect(curl).toContain('"https://api.example.com/override"');
     expect(curl).toContain('-H "X-Trace-Id: abc-123"');
     expect(curl).toContain('--data-raw');
+  });
+
+  it('builds get curl with query params in url and without body', () => {
+    const rows = [
+      makeParsedRow({ field: 'request.url', source: 'url', example: 'https://api.example.com/items', type: 'string' }),
+      makeParsedRow({ field: 'page', source: 'query', type: 'int', example: '2' }),
+      makeParsedRow({ field: 'search', source: 'query', type: 'string', example: 'invoice' })
+    ];
+
+    const curl = buildInputFromRows('curl', rows, {
+      requestMethod: 'GET',
+      requestUrl: 'https://api.example.com/items'
+    });
+
+    expect(curl).toContain('curl -X GET');
+    expect(curl).toContain('"https://api.example.com/items?page=2&search=invoice"');
+    expect(curl).not.toContain('--data-raw');
   });
 
   it('uses default curl url when url is missing', () => {

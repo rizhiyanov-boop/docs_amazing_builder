@@ -46,6 +46,18 @@ describe('parsers', () => {
     expect(meta.url).toBe('https://example.com/v1/user/42');
   });
 
+  it('extracts query params from get curl url', () => {
+    const curl = 'curl -X GET "https://example.com/v1/items?page=2&search=invoice"';
+    const rows = parseToRows('curl', curl);
+    const meta = parseCurlMeta(curl);
+
+    expect(meta.method).toBe('GET');
+    expect(meta.url).toBe('https://example.com/v1/items');
+    expect(rows.some((row) => row.source === 'url' && row.example === 'https://example.com/v1/items')).toBe(true);
+    expect(rows.some((row) => row.source === 'query' && row.field === 'page' && row.example === '2')).toBe(true);
+    expect(rows.some((row) => row.source === 'query' && row.field === 'search' && row.example === 'invoice')).toBe(true);
+  });
+
   it('throws when input is empty', () => {
     expect(() => parseToRows('json', '   ')).toThrow('Поле ввода пустое');
   });

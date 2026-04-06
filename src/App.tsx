@@ -46,6 +46,8 @@ import { MethodSectionSidebar } from './components/MethodSectionSidebar';
 import type { AddableBlockType } from './components/MethodSectionSidebar';
 import { ParsedSectionEditor } from './components/ParsedSectionEditor';
 import { WorkspaceTabs } from './components/WorkspaceTabs';
+import { useRemoteProjectAutosave } from './hooks/useRemoteProjectAutosave';
+import { useWorkspaceHistory } from './hooks/useWorkspaceHistory';
 import {
   fetchCurrentUser,
   loginWithPassword,
@@ -270,13 +272,6 @@ type DeletedRowUndoState = {
 type SectionClipboardState = {
   type: 'section';
   section: DocSection;
-};
-type WorkspaceSnapshot = {
-  projectName: string;
-  methods: MethodDocument[];
-  methodGroups: MethodGroup[];
-  activeMethodId: string;
-  selectedId: string;
 };
 
 type ServerProjectPayload = {
@@ -772,7 +767,15 @@ function normalizeParsedRowsForSection(section: ParsedSection, rows: ParsedRow[]
 
 function getRowsRelevantToSourceFormat(rows: ParsedRow[], format: ParseFormat): ParsedRow[] {
   if (format !== 'json') return rows;
-  return rows.filter((row) => row.source !== 'header' && row.source !== 'url');
+  return rows.filter((row) => row.source !== 'header' && row.source !== 'url' && row.source !== 'query');
+}
+
+function normalizeRequestRowsForMethod(rows: ParsedRow[], method: RequestMethod | undefined): ParsedRow[] {
+  const targetSource = method === 'GET' ? 'query' : 'body';
+  return rows.map((row) => {
+    if (row.source === 'header' || row.source === 'url') return row;
+    return { ...row, source: targetSource };
+  });
 }
 
 function validateSection(section: DocSection): string {
@@ -1325,8 +1328,6 @@ export default function App() {
   const [openSectionActionsMenuId, setOpenSectionActionsMenuId] = useState<string | null>(null);
   const [expandedProjectIds, setExpandedProjectIds] = useState<Record<string, true>>({});
   const [expandedMethodId, setExpandedMethodId] = useState<string | null>(() => initialWorkspace.activeMethodId ?? initialWorkspace.methods[0]?.id ?? null);
-  const [canUndo, setCanUndo] = useState(false);
-  const [canRedo, setCanRedo] = useState(false);
   const [isSectionPanelPulse, setIsSectionPanelPulse] = useState(false);
   const [onboardingState, setOnboardingState] = useState<OnboardingState>(() => initialOnboarding);
   const [suppressOnboardingEntry, setSuppressOnboardingEntry] = useState<boolean>(() => loadOnboardingEntrySuppressed());
@@ -1504,20 +1505,9 @@ export default function App() {
   const onboardingSpotlightTimerRef = useRef<number | null>(null);
   const onboardingSpotlightNodeRef = useRef<HTMLElement | null>(null);
   const deletedRowUndoTimerRef = useRef<number | null>(null);
-  const undoStackRef = useRef<WorkspaceSnapshot[]>([]);
-  const redoStackRef = useRef<WorkspaceSnapshot[]>([]);
   const deleteProjectCancelButtonRef = useRef<HTMLButtonElement | null>(null);
   const deleteProjectDialogRef = useRef<HTMLDivElement | null>(null);
-  const historySuspendRef = useRef(false);
-  const historyLastSnapshotRef = useRef<WorkspaceSnapshot | null>(null);
-  const historyLastHashRef = useRef('');
-  const historyLastPushAtRef = useRef(0);
   const remoteHydratedRef = useRef(false);
-  const remoteSaveTimerRef = useRef<number | null>(null);
-  const remoteSaveInFlightRef = useRef(false);
-  const remotePendingChangesRef = useRef(0);
-  const remoteLastObservedHashRef = useRef('');
-  const remoteLastSavedHashRef = useRef('');
   const projectCacheRef = useRef<Map<string, CachedServerProjectData>>(new Map());
   const preloadInFlightRef = useRef<Set<string>>(new Set());
   const preloadQueueTimerRef = useRef<number | null>(null);
@@ -1526,6 +1516,77 @@ export default function App() {
   const normalizedProjectName = projectName.trim() || DEFAULT_PROJECT_NAME;
   const activeMethod = methods.find((method) => method.id === activeMethodId) ?? methods[0];
   const sections = useMemo(() => activeMethod?.sections ?? EMPTY_SECTIONS, [activeMethod]);
+  const {
+    canUndo,
+    canRedo,
+    undoWorkspace,
+    redoWorkspace,
+    getPersistedHistoryState,
+    applyPersistedHistoryState
+  } = useWorkspaceHistory({
+    projectName,
+    methods,
+    methodGroups,
+    activeMethodId,
+    selectedId,
+    historyLimit: HISTORY_LIMIT,
+    historyCoalesceMs: HISTORY_COALESCE_MS,
+    normalizeProjectName,
+    deepClone,
+    setProjectName,
+    setMethodsState,
+    setMethodGroups,
+    setActiveMethodId,
+    setSelectedId
+  });
+  const buildWorkspaceProjectData = () => asWorkspaceProjectData(normalizedProjectName, methods, activeMethodId, methodGroups);
+  const saveRemoteWorkspace = (params: { projectId?: string; name: string; workspace: WorkspaceProjectData }) =>
+    saveServerProjectWithFallback(params);
+  const handleRemoteAutosaveSaved = (params: {
+    saved: { id: string; updatedAt: string };
+    workspace: WorkspaceProjectData;
+    projectName: string;
+    workspaceHash: string;
+  }) => {
+    setServerProjectId(params.saved.id);
+    setProjectMethodCounts((current) => ({
+      ...current,
+      [params.saved.id]: params.workspace.methods.length
+    }));
+    upsertProjectCache(params.saved.id, {
+      workspace: deepClone(params.workspace),
+      history: null,
+      loadedAt: Date.now()
+    });
+    setServerSyncError('');
+    upsertServerProjectListEntry({ id: params.saved.id, name: params.projectName, updatedAt: params.saved.updatedAt });
+    remoteLastSavedHashRef.current = params.workspaceHash;
+  };
+  const handleRemoteAutosaveError = (message: string) => {
+    setServerSyncError(message);
+  };
+  const {
+    remoteSaveInFlightRef,
+    remotePendingChangesRef,
+    remoteLastObservedHashRef,
+    remoteLastSavedHashRef,
+    cancelPendingRemoteSave,
+    resetRemoteTracking
+  } = useRemoteProjectAutosave({
+    authUser,
+    remoteHydratedRef,
+    normalizedProjectName,
+    methods,
+    activeMethodId,
+    methodGroups,
+    serverProjectId,
+    remoteSaveChangeThreshold: REMOTE_SAVE_CHANGE_THRESHOLD,
+    remoteSaveIdleMs: REMOTE_SAVE_IDLE_MS,
+    buildWorkspace: buildWorkspaceProjectData,
+    saveWorkspace: saveRemoteWorkspace,
+    onSaved: handleRemoteAutosaveSaved,
+    onError: handleRemoteAutosaveError
+  });
   const methodNameWarning = useMemo(() => {
     if (!activeMethod) return '';
     const trimmed = activeMethod.name.trim();
@@ -1536,119 +1597,6 @@ export default function App() {
   }, [methods, activeMethod]);
 
   const exportTitle = activeMethod ? `Экспортируется только метод "${activeMethod.name.trim() || DEFAULT_METHOD_NAME}"` : 'Выберите метод';
-
-  function cloneSnapshot(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
-    return {
-      projectName: snapshot.projectName,
-      methods: deepClone(snapshot.methods),
-      methodGroups: deepClone(snapshot.methodGroups),
-      activeMethodId: snapshot.activeMethodId,
-      selectedId: snapshot.selectedId
-    };
-  }
-
-  function getWorkspaceSnapshot(): WorkspaceSnapshot {
-    return {
-      projectName: normalizedProjectName,
-      methods,
-      methodGroups,
-      activeMethodId,
-      selectedId
-    };
-  }
-
-  function applyWorkspaceSnapshot(snapshot: WorkspaceSnapshot): void {
-    historySuspendRef.current = true;
-    setProjectName(snapshot.projectName);
-    setMethodsState(snapshot.methods);
-    setMethodGroups(snapshot.methodGroups);
-    setActiveMethodId(snapshot.activeMethodId);
-    setSelectedId(snapshot.selectedId);
-    window.setTimeout(() => {
-      historySuspendRef.current = false;
-    }, 0);
-  }
-
-  function canUndoWorkspace(): boolean {
-    return undoStackRef.current.length > 0;
-  }
-
-  function canRedoWorkspace(): boolean {
-    return redoStackRef.current.length > 0;
-  }
-
-  function undoWorkspace(): void {
-    if (!canUndoWorkspace()) return;
-    const current = cloneSnapshot(getWorkspaceSnapshot());
-    const previous = undoStackRef.current.pop();
-    if (!previous) return;
-    redoStackRef.current.push(current);
-    applyWorkspaceSnapshot(cloneSnapshot(previous));
-    setCanUndo(undoStackRef.current.length > 0);
-    setCanRedo(redoStackRef.current.length > 0);
-  }
-
-  function redoWorkspace(): void {
-    if (!canRedoWorkspace()) return;
-    const current = cloneSnapshot(getWorkspaceSnapshot());
-    const next = redoStackRef.current.pop();
-    if (!next) return;
-    undoStackRef.current.push(current);
-    applyWorkspaceSnapshot(cloneSnapshot(next));
-    setCanUndo(undoStackRef.current.length > 0);
-    setCanRedo(redoStackRef.current.length > 0);
-  }
-
-  function toPersistedHistorySnapshot(snapshot: WorkspaceSnapshot): PersistedHistoryState['undoStack'][number] {
-    return {
-      projectName: snapshot.projectName,
-      methods: deepClone(snapshot.methods) as unknown[],
-      methodGroups: deepClone(snapshot.methodGroups) as unknown[],
-      activeMethodId: snapshot.activeMethodId,
-      selectedId: snapshot.selectedId
-    };
-  }
-
-  function fromPersistedHistorySnapshot(snapshot: PersistedHistoryState['undoStack'][number]): WorkspaceSnapshot {
-    return {
-      projectName: normalizeProjectName((snapshot as WorkspaceSnapshot).projectName),
-      methods: deepClone(snapshot.methods) as MethodDocument[],
-      methodGroups: deepClone(snapshot.methodGroups) as MethodGroup[],
-      activeMethodId: snapshot.activeMethodId,
-      selectedId: snapshot.selectedId
-    };
-  }
-
-  function getPersistedHistoryState(): PersistedHistoryState {
-    return {
-      undoStack: undoStackRef.current.map((item) => toPersistedHistorySnapshot(item)),
-      redoStack: redoStackRef.current.map((item) => toPersistedHistorySnapshot(item)),
-      lastSnapshot: historyLastSnapshotRef.current ? toPersistedHistorySnapshot(historyLastSnapshotRef.current) : null,
-      lastHash: historyLastHashRef.current,
-      lastPushAt: historyLastPushAtRef.current
-    };
-  }
-
-  function applyPersistedHistoryState(history: PersistedHistoryState | null): void {
-    if (!history) {
-      undoStackRef.current = [];
-      redoStackRef.current = [];
-      historyLastSnapshotRef.current = null;
-      historyLastHashRef.current = '';
-      historyLastPushAtRef.current = 0;
-      setCanUndo(false);
-      setCanRedo(false);
-      return;
-    }
-
-    undoStackRef.current = history.undoStack.map((item) => fromPersistedHistorySnapshot(item));
-    redoStackRef.current = history.redoStack.map((item) => fromPersistedHistorySnapshot(item));
-    historyLastSnapshotRef.current = history.lastSnapshot ? fromPersistedHistorySnapshot(history.lastSnapshot) : null;
-    historyLastHashRef.current = history.lastHash;
-    historyLastPushAtRef.current = history.lastPushAt;
-    setCanUndo(undoStackRef.current.length > 0);
-    setCanRedo(redoStackRef.current.length > 0);
-  }
 
   useEffect(() => {
     let cancelled = false;
@@ -1876,44 +1824,6 @@ export default function App() {
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [showDeleteProjectDialog]);
-
-  useEffect(() => {
-    const snapshot = getWorkspaceSnapshot();
-    const hash = JSON.stringify(snapshot);
-
-    if (!historyLastSnapshotRef.current) {
-      historyLastSnapshotRef.current = cloneSnapshot(snapshot);
-      historyLastHashRef.current = hash;
-      setCanUndo(undoStackRef.current.length > 0);
-      setCanRedo(redoStackRef.current.length > 0);
-      return;
-    }
-
-    if (hash === historyLastHashRef.current) {
-      return;
-    }
-
-    const previousSnapshot = historyLastSnapshotRef.current;
-    historyLastSnapshotRef.current = cloneSnapshot(snapshot);
-    historyLastHashRef.current = hash;
-
-    if (historySuspendRef.current) {
-      return;
-    }
-
-    const now = Date.now();
-    const shouldPush = now - historyLastPushAtRef.current > HISTORY_COALESCE_MS;
-    if (shouldPush) {
-      undoStackRef.current.push(cloneSnapshot(previousSnapshot));
-      if (undoStackRef.current.length > HISTORY_LIMIT) {
-        undoStackRef.current.shift();
-      }
-      redoStackRef.current = [];
-      historyLastPushAtRef.current = now;
-      setCanUndo(undoStackRef.current.length > 0);
-      setCanRedo(redoStackRef.current.length > 0);
-    }
-  }, [projectName, methods, methodGroups, activeMethodId, selectedId]);
 
   useEffect(() => {
     setMethodsState((prev) => {
@@ -2394,13 +2304,7 @@ export default function App() {
       setServerProjects([]);
       setServerSyncError((current) => (serverLogoutFailed ? current : ''));
       applyPersistedHistoryState(null);
-      remotePendingChangesRef.current = 0;
-      remoteLastObservedHashRef.current = '';
-      remoteLastSavedHashRef.current = '';
-      if (remoteSaveTimerRef.current) {
-        window.clearTimeout(remoteSaveTimerRef.current);
-        remoteSaveTimerRef.current = null;
-      }
+      resetRemoteTracking();
       setToastMessage(
         serverLogoutFailed
           ? 'Серверная сессия не завершена. Локальные данные сохранены.'
@@ -3433,6 +3337,20 @@ export default function App() {
           </button>
           {isMenuOpen && (
             <div className="add-block-popover section-action-popover" role="menu" aria-label="Действия секции">
+              {hasClipboardSection && (
+                <button
+                  className="add-block-option"
+                  type="button"
+                  role="menuitem"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    pasteSectionRelative(section.id, 'below');
+                    setOpenSectionActionsMenuId(null);
+                  }}
+                >
+                  <span className="add-block-option-title">Вставить копию ниже</span>
+                </button>
+              )}
               <button
                 className="add-block-option"
                 type="button"
@@ -3646,81 +3564,6 @@ export default function App() {
       }
     };
   }, [normalizedProjectName, methods, activeMethodId, methodGroups]);
-
-  useEffect(() => {
-    if (!authUser || !remoteHydratedRef.current) return;
-
-    const workspace = asWorkspaceProjectData(normalizedProjectName, methods, activeMethodId, methodGroups);
-    const currentHash = JSON.stringify(workspace);
-
-    if (currentHash === remoteLastObservedHashRef.current) {
-      return;
-    }
-
-    remoteLastObservedHashRef.current = currentHash;
-    remotePendingChangesRef.current += 1;
-
-    const flushRemoteSave = async (): Promise<void> => {
-      if (!authUser || !remoteHydratedRef.current) return;
-      if (remoteSaveInFlightRef.current) return;
-      if (remotePendingChangesRef.current <= 0) return;
-
-      remoteSaveInFlightRef.current = true;
-      if (remoteSaveTimerRef.current) {
-        window.clearTimeout(remoteSaveTimerRef.current);
-        remoteSaveTimerRef.current = null;
-      }
-
-      const latestWorkspace = asWorkspaceProjectData(normalizedProjectName, methods, activeMethodId, methodGroups);
-      const nextProjectName = normalizedProjectName;
-      const latestHash = JSON.stringify(latestWorkspace);
-
-      try {
-        const saved = await saveServerProjectWithFallback({
-          projectId: serverProjectId ?? undefined,
-          name: nextProjectName,
-          workspace: latestWorkspace
-        });
-        setServerProjectId(saved.id);
-        setProjectMethodCounts((current) => ({
-          ...current,
-          [saved.id]: latestWorkspace.methods.length
-        }));
-        upsertProjectCache(saved.id, {
-          workspace: deepClone(latestWorkspace),
-          history: null,
-          loadedAt: Date.now()
-        });
-        setServerSyncError('');
-        upsertServerProjectListEntry({ id: saved.id, name: nextProjectName, updatedAt: saved.updatedAt });
-        remoteLastSavedHashRef.current = latestHash;
-        remotePendingChangesRef.current = 0;
-      } catch (error) {
-        setServerSyncError(error instanceof Error ? error.message : 'Ошибка сохранения на сервер');
-      } finally {
-        remoteSaveInFlightRef.current = false;
-      }
-    };
-
-    if (!serverProjectId || remotePendingChangesRef.current >= REMOTE_SAVE_CHANGE_THRESHOLD) {
-      void flushRemoteSave();
-      return;
-    }
-
-    if (remoteSaveTimerRef.current) {
-      window.clearTimeout(remoteSaveTimerRef.current);
-    }
-    remoteSaveTimerRef.current = window.setTimeout(() => {
-      void flushRemoteSave();
-    }, REMOTE_SAVE_IDLE_MS);
-
-    return () => {
-      if (remoteSaveTimerRef.current) {
-        window.clearTimeout(remoteSaveTimerRef.current);
-        remoteSaveTimerRef.current = null;
-      }
-    };
-  }, [authUser, methods, activeMethodId, methodGroups, serverProjectId, activeMethod]);
 
   useEffect(() => {
     const focusedElement = document.activeElement;
@@ -5079,6 +4922,7 @@ export default function App() {
 
   function addManualRow(section: ParsedSection, target: ParseTarget = 'server'): void {
     const nextField = `newField${Date.now()}`;
+    const requestMethod = target === 'client' ? section.externalRequestMethod : section.requestMethod;
     const manualRow: ParsedRow = {
       field: nextField,
       sourceField: nextField,
@@ -5087,7 +4931,7 @@ export default function App() {
       required: '+',
       description: '',
       example: '',
-      source: isDualModelSection(section) ? 'body' : 'parsed'
+      source: isDualModelSection(section) ? (requestMethod === 'GET' ? 'query' : 'body') : 'parsed'
     };
 
     updateSection(section.id, (current) => {
@@ -6920,27 +6764,36 @@ export default function App() {
         if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
 
         const next = { ...current, ...patch };
+        const nextRequestMethod = next.requestMethod;
+        const nextExternalRequestMethod = next.externalRequestMethod;
+        const normalizedServerRows = normalizeRequestRowsForMethod(next.rows, nextRequestMethod);
+        const normalizedClientRows = normalizeRequestRowsForMethod(next.clientRows ?? [], nextExternalRequestMethod);
+        const normalizedNext = {
+          ...next,
+          rows: normalizedServerRows,
+          clientRows: normalizedClientRows
+        };
         const targetFormat = isExternal ? next.clientFormat ?? 'json' : next.format;
-        if (targetFormat !== 'curl') return next;
+        if (targetFormat !== 'curl') return normalizedNext;
 
         const syncRows = isExternal
-          ? next.clientRows ?? []
-          : [...getRequestHeaderRowsForEditor(next).filter((row) => row.enabled !== false), ...next.rows.filter((row) => row.source !== 'header')];
+          ? normalizedNext.clientRows ?? []
+          : [...getRequestHeaderRowsForEditor(normalizedNext).filter((row) => row.enabled !== false), ...normalizedNext.rows.filter((row) => row.source !== 'header')];
 
         return {
-          ...next,
+          ...normalizedNext,
           ...(isExternal
             ? {
-                clientInput: buildInputFromRows(targetFormat, getExternalSourceRows(next), {
-                  requestUrl: next.externalRequestUrl,
-                  requestMethod: next.externalRequestMethod
+                clientInput: buildInputFromRows(targetFormat, getExternalSourceRows(normalizedNext), {
+                  requestUrl: normalizedNext.externalRequestUrl,
+                  requestMethod: normalizedNext.externalRequestMethod
                 }),
                 clientLastSyncedFormat: targetFormat
               }
             : {
                 input: buildInputFromRows(targetFormat, syncRows, {
-                  requestUrl: next.requestUrl,
-                  requestMethod: next.requestMethod
+                  requestUrl: normalizedNext.requestUrl,
+                  requestMethod: normalizedNext.requestMethod
                 }),
                 lastSyncedFormat: targetFormat
               })
@@ -7304,10 +7157,7 @@ export default function App() {
     }
 
     if (authUser && remoteHydratedRef.current) {
-      if (remoteSaveTimerRef.current) {
-        window.clearTimeout(remoteSaveTimerRef.current);
-        remoteSaveTimerRef.current = null;
-      }
+      cancelPendingRemoteSave();
 
       if (!remoteSaveInFlightRef.current) {
         remoteSaveInFlightRef.current = true;
@@ -7354,8 +7204,6 @@ export default function App() {
     ONBOARDING_FEATURES.onboardingV1
     && ONBOARDING_FEATURES.onboardingGuidedMode
     && !showOnboardingEntry;
-  const sidebarProjectSwitchProps = { isProjectSwitching, switchingProjectId } as const;
-
   const toggleOnboardingHeaderNavigation = () => {
     setIsOnboardingNavVisible((current) => !current);
   };
@@ -7862,7 +7710,6 @@ export default function App() {
       >
         {!isSidebarHidden && (
           <MethodSectionSidebar
-            {...(sidebarProjectSwitchProps as any)}
             enableMultiMethods={ENABLE_MULTI_METHODS}
             normalizedProjectName={normalizedProjectName}
             editingProjectName={editingProjectName}
@@ -7888,6 +7735,8 @@ export default function App() {
             isSectionPanelPulse={isSectionPanelPulse}
             isAddEntityMenuOpen={isAddEntityMenuOpen}
             isDeleteEntityMenuOpen={isDeleteEntityMenuOpen}
+            isProjectSwitching={isProjectSwitching}
+            switchingProjectId={switchingProjectId}
             onCreateProject={createProject}
             onSelectProject={(projectId) => {
               if (!projectId) return;

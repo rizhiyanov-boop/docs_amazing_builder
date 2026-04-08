@@ -13,12 +13,43 @@ type VercelResponse = {
   setHeader: (name: string, value: string) => void;
 };
 
-type RequestTask = 'repair-json' | 'fill-descriptions' | 'suggest-mappings' | 'mask-fields';
+type RequestTask = 'repair-json' | 'fill-descriptions' | 'suggest-mappings' | 'mask-fields' | 'build-validation-rules';
 
 type RequestBody = {
   task?: RequestTask;
   payload?: Record<string, unknown>;
 };
+
+const ALLOWED_VALIDATION_CASES = new Set([
+  'NotNull',
+  'NotBlank',
+  'NotEmpty',
+  'Size',
+  'Positive',
+  'Negative',
+  'Past',
+  'Future',
+  'PastOrPresent',
+  'FutureOrPresent',
+  'Pattern',
+  'Digits',
+  'Custom'
+]);
+
+const ARRAY_SEGMENT_PATTERN = /\[(?:\d+|[oO])\]/g;
+
+function normalizeArrayFieldPath(path: string): string {
+  if (!path) return path;
+  return path.replace(ARRAY_SEGMENT_PATTERN, '[]');
+}
+
+function formatConditionBrackets(value: string): string {
+  return value.replace(/\[\s*([^\]]*?)\s*\]/g, (_match, inner: string) => {
+    const normalizedInner = inner.trim();
+    if (!normalizedInner) return '[]';
+    return `( ${normalizedInner} )`;
+  });
+}
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 
@@ -68,6 +99,22 @@ function buildTaskPrompt(task: RequestTask, payload: Record<string, unknown>): s
       'Ответь строго JSON-объектом вида {"fields":[{"field":"...","reason":"..."}]}.',
       `SECTION_TYPE: ${String(payload.sectionType ?? 'generic')}`,
       `ROWS: ${JSON.stringify(payload.rows ?? [])}`
+    ].join('\n');
+  }
+
+  if (task === 'build-validation-rules') {
+    return [
+      'Ты анализируешь JSON Schema и формируешь строки таблицы валидации API.',
+      'Работай строго по переданной схеме, не выдумывай поля.',
+      'Для validationCase используй только значения из allowedValidationCases.',
+      'condition пиши на русском, человекочитаемо.',
+      'Если есть regex, расшифруй его словами и не выводи сырой regex в condition.',
+      'Для нетипичных правил формируй осмысленный cause на английском в стиле ошибок валидации.',
+      'Возвращай только непустые parameter, validationCase, condition, cause.',
+      'Сгруппируй результат так, чтобы правила одного parameter шли подряд.',
+      'Ответь строго JSON-объектом вида {"rules":[{"parameter":"...","validationCase":"...","condition":"...","cause":"..."}]}.',
+      `ALLOWED_CASES: ${JSON.stringify(payload.allowedValidationCases ?? [])}`,
+      `SCHEMA_JSON: ${String(payload.schemaInput ?? '')}`
     ].join('\n');
   }
 
@@ -177,6 +224,82 @@ function normalizeMaskFieldsResult(raw: unknown): { fields: Array<{ field: strin
   return { fields };
 }
 
+function normalizeValidationCase(value: string): string {
+  const compact = value.replaceAll(/[^a-z]/gi, '').toLowerCase();
+  switch (compact) {
+    case 'notnull': return 'NotNull';
+    case 'notblank': return 'NotBlank';
+    case 'notempty': return 'NotEmpty';
+    case 'size': return 'Size';
+    case 'positive': return 'Positive';
+    case 'negative': return 'Negative';
+    case 'past': return 'Past';
+    case 'future': return 'Future';
+    case 'pastorpresent': return 'PastOrPresent';
+    case 'futureorpresent': return 'FutureOrPresent';
+    case 'pattern': return 'Pattern';
+    case 'digits': return 'Digits';
+    case 'custom': return 'Custom';
+    default: return value.trim();
+  }
+}
+
+function normalizeValidationRulesResult(raw: unknown): {
+  rules: Array<{ parameter: string; validationCase: string; condition: string; cause: string }>;
+} {
+  const value = raw as {
+    rules?: Array<{
+      parameter?: unknown;
+      validationCase?: unknown;
+      condition?: unknown;
+      cause?: unknown;
+    }>;
+  };
+
+  const dedupe = new Set<string>();
+  const grouped = new Map<string, Array<{ parameter: string; validationCase: string; condition: string; cause: string }>>();
+
+  const rules = Array.isArray(value.rules)
+    ? value.rules
+      .map((row) => {
+        if (!row || typeof row !== 'object') return null;
+        const source = row as Record<string, unknown>;
+        const parameter = source.parameter ?? source.field ?? source.path;
+        const validationCase = source.validationCase ?? source.validationType ?? source.case ?? source.type;
+        const condition = source.condition ?? source.rule ?? source.description;
+        const cause = source.cause ?? source.reason ?? source.message;
+
+        if (typeof parameter !== 'string') return null;
+        if (typeof validationCase !== 'string') return null;
+        if (typeof condition !== 'string') return null;
+        if (typeof cause !== 'string') return null;
+
+        return {
+          parameter: parameter.trim(),
+          validationCase: normalizeValidationCase(validationCase),
+          condition: formatConditionBrackets(condition.trim()),
+          cause: normalizeArrayFieldPath(cause.trim())
+        };
+      })
+      .filter((row): row is { parameter: string; validationCase: string; condition: string; cause: string } => Boolean(row))
+      .filter((row) => row.parameter && row.condition && row.cause && ALLOWED_VALIDATION_CASES.has(row.validationCase))
+      .filter((row) => {
+        const key = `${row.parameter.toLowerCase()}|${row.validationCase}|${row.condition.toLowerCase()}`;
+        if (dedupe.has(key)) return false;
+        dedupe.add(key);
+        return true;
+      })
+    : [];
+
+  for (const row of rules) {
+    const bucket = grouped.get(row.parameter);
+    if (bucket) bucket.push(row);
+    else grouped.set(row.parameter, [row]);
+  }
+
+  return { rules: Array.from(grouped.values()).flat() };
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   res.setHeader('Cache-Control', 'no-store');
 
@@ -187,7 +310,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       provider: 'openai',
       model: process.env.OPENAI_MODEL?.trim() || 'gpt-4.1-nano',
       message: 'Use POST with JSON body: { task, payload }',
-      tasks: ['repair-json', 'fill-descriptions', 'suggest-mappings', 'mask-fields']
+      tasks: ['repair-json', 'fill-descriptions', 'suggest-mappings', 'mask-fields', 'build-validation-rules']
     });
     return;
   }
@@ -202,7 +325,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const task = body.task;
     const payload = body.payload ?? {};
 
-    if (!task || !['repair-json', 'fill-descriptions', 'suggest-mappings', 'mask-fields'].includes(task)) {
+    if (!task || !['repair-json', 'fill-descriptions', 'suggest-mappings', 'mask-fields', 'build-validation-rules'].includes(task)) {
       res.status(400).json({ error: 'Некорректный task' });
       return;
     }
@@ -222,6 +345,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
     if (task === 'mask-fields') {
       res.status(200).json({ data: normalizeMaskFieldsResult(raw) });
+      return;
+    }
+
+    if (task === 'build-validation-rules') {
+      res.status(200).json({ data: normalizeValidationRulesResult(raw) });
       return;
     }
 

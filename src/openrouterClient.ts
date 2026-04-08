@@ -1,3 +1,5 @@
+import type { ValidationRuleRow } from './types';
+
 type RepairJsonResponse = {
   fixedJson: string;
 };
@@ -30,7 +32,11 @@ type MaskFieldsResponse = {
   fields: MaskFieldSuggestion[];
 };
 
-type ApiTask = 'repair-json' | 'fill-descriptions' | 'suggest-mappings' | 'mask-fields';
+type BuildValidationRulesResponse = {
+  rules: ValidationRuleRow[];
+};
+
+type ApiTask = 'repair-json' | 'fill-descriptions' | 'suggest-mappings' | 'mask-fields' | 'build-validation-rules';
 
 type ApiRequestBody = {
   task: ApiTask;
@@ -161,4 +167,12 @@ export async function suggestMaskFieldsWithAi(payload: {
 }): Promise<MaskFieldSuggestion[]> {
   const result = await callAiApi<MaskFieldsResponse>('mask-fields', payload);
   return result.fields;
+}
+
+export async function buildValidationRulesWithAi(payload: {
+  schemaInput: string;
+  allowedValidationCases: string[];
+}): Promise<ValidationRuleRow[]> {
+  const result = await callAiApi<BuildValidationRulesResponse>('build-validation-rules', payload);
+  return result.rules;
 }

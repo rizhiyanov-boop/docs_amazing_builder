@@ -6,11 +6,12 @@ import Highlight from '@tiptap/extension-highlight';
 import { liftListItem, sinkListItem } from '@tiptap/pm/schema-list';
 import './tokens.css';
 import './App.css';
-import { parseCurlMeta, parseToRows } from './parsers';
+import { parseCurlMeta, parseJsonSchemaToRows, parseToRows } from './parsers';
 import { getDiagramExportFileName, getDiagramImageUrl, resolveDiagramEngine } from './diagramUtils';
 import { ERROR_CATALOG_BY_CODE } from './errorCatalog';
 import { buildServerErrorResponseTemplate } from './errorResponseTemplate';
 import { getRequestColumnLabel, getRequestColumnOrder, moveRequestColumn } from './requestColumns';
+import { buildMockServicePayload } from './mockServiceExport';
 import {
   DEFAULT_API_KEY_EXAMPLE,
   DEFAULT_API_KEY_HEADER,
@@ -33,13 +34,14 @@ import { renderHtmlDocument } from './renderHtml';
 import { getFlowExportFileName, renderProjectHtmlDocument, renderProjectWikiDocument } from './projectExport';
 import { editorElementToWikiText, editorHtmlToWikiText, escapeRichTextHtml, richTextToHtml } from './richText';
 import { renderWikiDocument } from './renderWiki';
+import { buildValidationRulesFromSchemaInput } from './schemaValidationRules';
 import { DEFAULT_SECTION_TITLE, resolveSectionTitle, sanitizeSections } from './sectionTitles';
 import { buildInputFromRows } from './sourceSync';
 import { ONBOARDING_FEATURES } from './onboarding/featureFlags';
 import { ONBOARDING_STEPS, evaluateOnboardingProgress, resolveOnboardingStep, type OnboardingStepId } from './onboarding/steps';
 import { loadOnboardingState, markOnboardingCompleted, markOnboardingStarted, saveOnboardingState } from './onboarding/storage';
 import { emitOnboardingEvent } from './onboarding/telemetry';
-import { fillDescriptionsWithAi, repairJsonWithAi, suggestMappingsWithAi, suggestMaskFieldsWithAi } from './openrouterClient';
+import { buildValidationRulesWithAi, fillDescriptionsWithAi, repairJsonWithAi, suggestMappingsWithAi, suggestMaskFieldsWithAi } from './openrouterClient';
 import { AppTopbar } from './components/AppTopbar';
 import { DiagramSectionEditor } from './components/DiagramSectionEditor';
 import { ErrorsSectionEditor } from './components/ErrorsSectionEditor';
@@ -249,6 +251,11 @@ type EditableMappingCellState = {
   rowKey: string;
 };
 type EditableSourceState = {
+  sectionId: string;
+  target: ParseTarget;
+  draft: string;
+};
+type EditableSchemaState = {
   sectionId: string;
   target: ParseTarget;
   draft: string;
@@ -570,22 +577,7 @@ const VALIDATION_CASE_OPTIONS = [
   'FutureOrPresent',
   'Pattern',
   'Digits',
-  'Custom',
-  'Отсутствует обязательное поле',
-  'Поле не должно быть пустым',
-  'Некорректный тип данных',
-  'Неверный формат значения (regex)',
-  'Длина строки вне допустимого диапазона',
-  'Числовое значение вне допустимого диапазона',
-  'Значение не входит в допустимый список',
-  'Значение должно быть уникальным',
-  'Некорректный формат даты/времени',
-  'Неверный диапазон даты/времени',
-  'Нарушена межпараметрическая валидация',
-  'Нарушено бизнес-правило',
-  'Неподдерживаемое значение',
-  'Некорректная структура payload',
-  'Ошибка проверки контрольной суммы/подписи'
+  'Custom'
 ];
 
 const RICH_TEXT_HIGHLIGHT_OPTIONS = [
@@ -612,12 +604,14 @@ function createParsedSection(sectionType: ParsedSectionType, id = `custom-${sect
     format: isRequest ? 'curl' : 'json',
     lastSyncedFormat: isRequest ? 'curl' : 'json',
     input: '',
+    schemaInput: '',
     rows: [],
     error: '',
     domainModelEnabled: sectionType !== 'generic' ? false : undefined,
     clientFormat: sectionType !== 'generic' ? 'json' : undefined,
     clientLastSyncedFormat: sectionType !== 'generic' ? 'json' : undefined,
     clientInput: sectionType !== 'generic' ? '' : undefined,
+    clientSchemaInput: sectionType !== 'generic' ? '' : undefined,
     clientRows: sectionType !== 'generic' ? [] : undefined,
     clientError: sectionType !== 'generic' ? '' : undefined,
     clientMappings: sectionType !== 'generic' ? {} : undefined,
@@ -682,6 +676,15 @@ function createValidationRuleRow(): ValidationRuleRow {
     condition: '',
     cause: ''
   };
+}
+
+function getValidationCaseOptionsForSection(section: ErrorsSection): string[] {
+  const options = new Set<string>(VALIDATION_CASE_OPTIONS);
+  for (const rule of section.validationRules) {
+    const value = rule.validationCase.trim();
+    if (value) options.add(value);
+  }
+  return Array.from(options);
 }
 
 function createErrorsSection(id = 'errors', title = 'Ошибки'): ErrorsSection {
@@ -964,16 +967,18 @@ function validateSection(section: DocSection): string {
 
   if (isDualModelSection(section)) {
     const hasServerInput = Boolean(section.input.trim());
+    const hasServerSchema = Boolean((section.schemaInput ?? '').trim());
     const hasClientInput = section.domainModelEnabled ? Boolean(section.clientInput?.trim()) : false;
+    const hasClientSchema = section.domainModelEnabled ? Boolean((section.clientSchemaInput ?? '').trim()) : false;
 
     if (section.error) return `Секция заблокирована: ${section.error}`;
     if (section.clientError) return `${getSectionSideLabel(section, 'client')} заблокирован: ${section.clientError}`;
-    if (!hasServerInput && !hasClientInput && getSectionRows(section).length === 0) return '';
+    if (!hasServerInput && !hasServerSchema && !hasClientInput && !hasClientSchema && getSectionRows(section).length === 0) return '';
     if (getSectionRows(section).length === 0) return 'Нет распарсенных строк';
     return '';
   }
 
-  if (!section.input.trim()) return 'Введите исходные данные для парсинга';
+  if (!section.input.trim() && !(section.schemaInput ?? '').trim()) return 'Введите исходные данные или JSON Schema для парсинга';
   if (section.error) return `Секция заблокирована: ${section.error}`;
   if (section.rows.length === 0) return 'Нет распарсенных строк';
   return '';
@@ -1513,6 +1518,7 @@ export default function App() {
   const [editingProjectName, setEditingProjectName] = useState(false);
   const [editingProjectNameDraft, setEditingProjectNameDraft] = useState('');
   const [editingSource, setEditingSource] = useState<EditableSourceState | null>(null);
+  const [editingSchema, setEditingSchema] = useState<EditableSchemaState | null>(null);
   const [sourceEditorError, setSourceEditorError] = useState('');
   const [requestCellError, setRequestCellError] = useState('');
   const [aiErrorMessage, setAiErrorMessage] = useState('');
@@ -3115,7 +3121,7 @@ export default function App() {
 
   useEffect(() => {
     if (tab !== 'editor') return;
-    if (editingField || editingRequestCell || editingHeaderCell || editingTitle || editingSource || editingMappingCell) return;
+    if (editingField || editingRequestCell || editingHeaderCell || editingTitle || editingSource || editingSchema || editingMappingCell) return;
     if (typeof window === 'undefined' || typeof window.IntersectionObserver !== 'function') return;
 
     const anchors = sections
@@ -3179,7 +3185,7 @@ export default function App() {
       }
       sectionVisibilityRatiosRef.current.clear();
     };
-  }, [tab, sections, selectedId, editingField, editingRequestCell, editingHeaderCell, editingTitle, editingSource, editingMappingCell]);
+  }, [tab, sections, selectedId, editingField, editingRequestCell, editingHeaderCell, editingTitle, editingSource, editingSchema, editingMappingCell]);
 
   function isSelectionInsideListItem(): boolean {
     if (!textEditor) return false;
@@ -3531,7 +3537,7 @@ export default function App() {
     if (onboardingNavStep === 'prepare-source') {
       return {
         title: 'Добавьте источник данных',
-        description: 'Откройте request/response и вставьте JSON или cURL в Source-блок, чтобы начать парсинг.',
+        description: 'Откройте request/response и вставьте source (для request: JSON/cURL, для response: JSON), чтобы начать парсинг.',
         actionLabel: 'Открыть source'
       };
     }
@@ -4128,6 +4134,137 @@ export default function App() {
     });
   }
 
+  async function autofillValidationRulesFromRequestSchema(errorsSectionId: string): Promise<void> {
+    const busyKey = `build-validation-rules:${errorsSectionId}`;
+    if (aiBusyKey) return;
+
+    const requestSection = sections.find((item): item is ParsedSection => item.kind === 'parsed' && item.sectionType === 'request');
+    if (!requestSection) {
+      setToastMessage('Request секция не найдена');
+      return;
+    }
+
+    const schemaInput = (requestSection.schemaInput ?? '').trim();
+    if (!schemaInput) {
+      setToastMessage('Для автозаполнения добавьте JSON Schema в Server request');
+      return;
+    }
+
+    let normalizedSchemaInput = '';
+    try {
+      const parsedSchema = JSON.parse(schemaInput) as unknown;
+      if (!parsedSchema || typeof parsedSchema !== 'object' || Array.isArray(parsedSchema)) {
+        throw new Error('JSON Schema должен быть объектом');
+      }
+      normalizedSchemaInput = JSON.stringify(parsedSchema);
+    } catch (error) {
+      setToastMessage(error instanceof Error ? error.message : 'Не удалось разобрать JSON Schema');
+      return;
+    }
+
+    setAiErrorMessage('');
+    startAiRequestStatus('AI: формирую таблицу валидации...');
+    setAiBusyKey(busyKey);
+
+    let generatedRules: ValidationRuleRow[];
+    try {
+      generatedRules = await buildValidationRulesWithAi({
+        schemaInput: normalizedSchemaInput,
+        allowedValidationCases: [...VALIDATION_CASE_OPTIONS]
+      });
+    } catch (error) {
+      setAiRequestStatus(null);
+      setAiErrorMessage(error instanceof Error ? error.message : 'Не удалось сгенерировать правила валидации через AI');
+      setAiBusyKey(null);
+      return;
+    }
+
+    let usedFallback = false;
+    if (generatedRules.length === 0) {
+      try {
+        generatedRules = buildValidationRulesFromSchemaInput(normalizedSchemaInput);
+        usedFallback = generatedRules.length > 0;
+      } catch {
+        // Keep empty result and show original message below.
+      }
+
+      if (generatedRules.length === 0) {
+        setAiRequestStatus(null);
+        setAiBusyKey(null);
+        setToastMessage('В JSON Schema не найдено условий для таблицы валидации');
+        return;
+      }
+    }
+
+    const preset = ERROR_CATALOG_BY_CODE.get('100101');
+    updateSection(errorsSectionId, (section) => {
+      if (section.kind !== 'errors') return section;
+
+      const hasValidationErrorRow = section.rows.some((row) => row.internalCode === '100101' || row.trigger.trim() === 'Ошибка валидации');
+      if (hasValidationErrorRow) {
+        return {
+          ...section,
+          validationRules: generatedRules,
+          rows: section.rows.map((row) =>
+            row.internalCode === '100101' || row.trigger.trim() === 'Ошибка валидации'
+              ? {
+                  ...row,
+                  trigger: row.trigger.trim() || 'Ошибка валидации',
+                  message: preset?.message ?? row.message,
+                  responseCode: buildServerErrorResponseTemplate({
+                    code: '100101',
+                    message: preset?.message ?? row.message ?? 'Bad request sent to the system'
+                  })
+                }
+              : row
+          )
+        };
+      }
+
+      const validationErrorRow: ErrorRow = {
+        clientHttpStatus: '-',
+        clientResponse: '',
+        clientResponseCode: '',
+        trigger: 'Ошибка валидации',
+        errorType: 'BusinessException',
+        serverHttpStatus: preset?.httpStatus ?? '400',
+        internalCode: '100101',
+        message: preset?.message ?? 'Bad request sent to the system',
+        responseCode: buildServerErrorResponseTemplate({
+          code: '100101',
+          message: preset?.message ?? 'Bad request sent to the system'
+        })
+      };
+
+      const isSingleEmptyRow =
+        section.rows.length === 1
+        && !section.rows[0].clientHttpStatus.trim()
+        && !section.rows[0].clientResponse.trim()
+        && !(section.rows[0].clientResponseCode ?? '').trim()
+        && !section.rows[0].trigger.trim()
+        && section.rows[0].errorType === '-'
+        && !section.rows[0].serverHttpStatus.trim()
+        && !section.rows[0].internalCode.trim()
+        && !section.rows[0].message.trim()
+        && !section.rows[0].responseCode.trim();
+
+      return {
+        ...section,
+        validationRules: generatedRules,
+        rows: isSingleEmptyRow ? [validationErrorRow] : [...section.rows, validationErrorRow]
+      };
+    });
+
+    if (usedFallback) {
+      setToastMessage(`AI вернул пустой ответ, применен fallback-генератор: ${generatedRules.length} правил`);
+      completeAiRequestStatus('AI: применен fallback для таблицы валидации');
+    } else {
+      setToastMessage(`Таблица валидации заполнена из JSON Schema: ${generatedRules.length} правил`);
+      completeAiRequestStatus('AI: таблица валидации заполнена');
+    }
+    setAiBusyKey(null);
+  }
+
   function applyInternalCode(sectionId: string, rowIndex: number, internalCode: string): void {
     updateErrorRow(sectionId, rowIndex, (row) => {
       const normalizedCode = internalCode.trim();
@@ -4186,17 +4323,20 @@ export default function App() {
       && editingSource?.sectionId === section.id
       && editingSource.target === target;
 
-    const persistedFormat = target === 'client' ? section.clientFormat ?? 'json' : section.format;
+    const persistedFormat = getSourceFormat(section, target);
     const persistedInput = target === 'client' ? section.clientInput ?? '' : section.input;
+    const schemaInput = target === 'client' ? (section.clientSchemaInput ?? '') : (section.schemaInput ?? '');
     const draftInput = isEditingCurrentTarget ? editingSource?.draft ?? persistedInput : persistedInput;
-    const detectedDraftFormat = detectSourceFormat(draftInput);
+    const detectedDraftFormat = detectSourceFormat(draftInput, isRequestSection(section));
     const format = detectedDraftFormat ?? persistedFormat;
     const input = draftInput;
+    const normalizedSchema = schemaInput.trim();
+    const useSchemaPriority = Boolean(normalizedSchema);
 
     try {
-      const parsedRows = parseToRows(format, input);
+      const parsedRows = useSchemaPriority ? parseJsonSchemaToRows(normalizedSchema) : parseToRows(format, input);
       const rows = normalizeParsedRowsForSection(section, parsedRows);
-      const curlMeta = isRequestSection(section) && format === 'curl' ? parseCurlMeta(input) : null;
+      const curlMeta = isRequestSection(section) && !useSchemaPriority && format === 'curl' ? parseCurlMeta(input) : null;
       updateSection(section.id, (current) => {
         if (current.kind !== 'parsed') return current;
         if (target === 'client' && isDualModelSection(current)) {
@@ -4265,7 +4405,7 @@ export default function App() {
     if (aiBusyKey) return;
 
     const draft = getLiveSourceDraft(section, target);
-    const format = detectSourceFormat(draft) ?? getSourceFormat(section, target);
+    const format = detectSourceFormat(draft, isRequestSection(section)) ?? getSourceFormat(section, target);
 
     if (format !== 'json') {
       setAiRequestStatus(null);
@@ -4559,6 +4699,14 @@ export default function App() {
     const projectSlug = slugifyMethodFileName(normalizedProjectName);
     const payload = buildWorkspaceProjectData();
     downloadText(`${projectSlug}.project.json`, JSON.stringify(payload, null, 2));
+    markOnboardingExportTouched();
+  }
+
+  function exportMockServiceJson(): void {
+    if (!activeMethod) return;
+    const methodSlug = slugifyMethodFileName(activeMethod.name);
+    const payload = buildMockServicePayload(activeMethod);
+    downloadText(`${methodSlug}.mock-service.json`, JSON.stringify(payload, null, 2));
     markOnboardingExportTouched();
   }
 
@@ -5548,14 +5696,16 @@ export default function App() {
   }
 
   function getSourceFormat(section: ParsedSection, target: ParseTarget): ParseFormat {
-    return target === 'client' && isDualModelSection(section) ? section.clientFormat ?? 'json' : section.format;
+    const format = target === 'client' && isDualModelSection(section) ? section.clientFormat ?? 'json' : section.format;
+    if (isResponseSection(section) && format === 'curl') return 'json';
+    return format;
   }
 
-  function detectSourceFormat(draft: string): ParseFormat | null {
+  function detectSourceFormat(draft: string, allowCurl = true): ParseFormat | null {
     const trimmed = draft.trim();
     if (!trimmed) return null;
 
-    if (/^curl(?:\s|$)/i.test(trimmed)) return 'curl';
+    if (allowCurl && /^curl(?:\s|$)/i.test(trimmed)) return 'curl';
 
     // Treat JSON-like input as JSON even if draft is not yet valid,
     // so Request source does not fall back to persisted cURL format.
@@ -5565,7 +5715,9 @@ export default function App() {
   }
 
   function applyDetectedSourceFormat(sectionId: string, target: ParseTarget, draft: string, currentFormat: ParseFormat): ParseFormat {
-    const detectedFormat = detectSourceFormat(draft);
+    const section = sections.find((item): item is ParsedSection => item.kind === 'parsed' && item.id === sectionId);
+    const allowCurl = Boolean(section && isRequestSection(section));
+    const detectedFormat = detectSourceFormat(draft, allowCurl);
     if (!detectedFormat || detectedFormat === currentFormat) return currentFormat;
 
     updateSection(sectionId, (current) => {
@@ -7249,8 +7401,12 @@ export default function App() {
   function renderSourceEditor(section: ParsedSection, target: ParseTarget, title = 'Исходные данные'): ReactNode {
     const format = getSourceFormat(section, target);
     const value = getSourceValue(section, target);
+    const schemaValue = target === 'client' ? (section.clientSchemaInput ?? '') : (section.schemaInput ?? '');
     const isEditing = editingSource?.sectionId === section.id && editingSource.target === target;
+    const isSchemaEditing = editingSchema?.sectionId === section.id && editingSchema.target === target;
+    const currentSchemaValue = isSchemaEditing ? editingSchema.draft : schemaValue;
     const currentValue = isEditing ? editingSource.draft : value;
+    const sourcePlaceholder = isRequestSection(section) ? 'Вставьте JSON или cURL' : 'Вставьте JSON';
     const shouldOpenEmptyInput = !value.trim() && !isEditing;
     const hasSourceValue = Boolean(currentValue.trim());
     const fixJsonBusy = aiBusyKey === `fix-json:${section.id}:${target}`;
@@ -7400,7 +7556,7 @@ export default function App() {
                 onKeyDown={(e) => {
                   if (e.key === 'Escape') cancelSourceEditing();
                 }}
-                placeholder="Вставьте JSON или cURL"
+                placeholder={sourcePlaceholder}
                 autoFocus
               />
             </div>
@@ -7433,19 +7589,152 @@ export default function App() {
                   if (e.key === 'Escape') cancelSourceEditing();
                   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) saveSourceEditing();
                 }}
-                placeholder="Вставьте JSON или cURL"
+                placeholder={sourcePlaceholder}
                 autoFocus
               />
               {sourceEditorError && <div className="inline-error">{sourceEditorError}</div>}
             </div>
           )}
 
+          <div className="source-edit-wrap">
+            <div className="label" style={{ marginBottom: 6 }}>JSON Schema (приоритет при парсинге)</div>
+            <div className="field-actions visible" style={{ marginTop: 8 }}>
+              {!isSchemaEditing && (
+                <button
+                  className="icon-button"
+                  type="button"
+                  title="Редактировать JSON Schema"
+                  aria-label="Редактировать JSON Schema"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    setEditingSchema({ sectionId: section.id, target, draft: schemaValue });
+                    setSourceEditorError('');
+                  }}
+                >
+                  ✎
+                </button>
+              )}
+              {isSchemaEditing && (
+                <>
+                  <button
+                    className="icon-button"
+                    type="button"
+                    title="Форматировать JSON Schema"
+                    aria-label="Форматировать JSON Schema"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      try {
+                        const pretty = JSON.stringify(JSON.parse(currentSchemaValue || '{}'), null, 2);
+                        setEditingSchema((current) => (current ? { ...current, draft: pretty } : current));
+                        setSourceEditorError('');
+                      } catch (error) {
+                        setSourceEditorError(error instanceof Error ? error.message : 'Некорректный JSON Schema');
+                      }
+                    }}
+                  >
+                    ✨
+                  </button>
+                  <button
+                    className="icon-button"
+                    type="button"
+                    title="Сохранить JSON Schema"
+                    aria-label="Сохранить JSON Schema"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      const trimmedSchema = currentSchemaValue.trim();
+
+                      let nextSchema = '';
+                      if (trimmedSchema) {
+                        try {
+                          nextSchema = JSON.stringify(JSON.parse(trimmedSchema), null, 2);
+                        } catch (error) {
+                          setSourceEditorError(error instanceof Error ? error.message : 'Некорректный JSON Schema');
+                          return;
+                        }
+                      }
+
+                      updateSection(section.id, (current) => {
+                        if (current.kind !== 'parsed') return current;
+                        if (target === 'client' && isDualModelSection(current)) {
+                          return { ...current, clientSchemaInput: nextSchema };
+                        }
+                        return { ...current, schemaInput: nextSchema };
+                      });
+
+                      setEditingSchema(null);
+                      setSourceEditorError('');
+                      const persisted = persistLocalWorkspace(buildWorkspaceProjectData());
+                      setToastMessage(persisted ? 'JSON Schema сохранена без парсинга' : 'Не удалось сохранить JSON Schema');
+                    }}
+                  >
+                    ✓
+                  </button>
+                  <button
+                    className="icon-button danger"
+                    type="button"
+                    title="Отменить"
+                    aria-label="Отменить"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      setEditingSchema(null);
+                      setSourceEditorError('');
+                    }}
+                  >
+                    ✕
+                  </button>
+                </>
+              )}
+            </div>
+
+            {isSchemaEditing ? (
+              <textarea
+                className="source-edit"
+                rows={8}
+                value={currentSchemaValue}
+                onChange={(e) => {
+                  const nextSchema = e.target.value;
+                  setEditingSchema((current) => (current ? { ...current, draft: nextSchema } : current));
+                  if (!nextSchema.trim()) {
+                    setSourceEditorError('');
+                    return;
+                  }
+                  try {
+                    JSON.parse(nextSchema);
+                    setSourceEditorError('');
+                  } catch (error) {
+                    setSourceEditorError(error instanceof Error ? error.message : 'Некорректный JSON Schema');
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    setEditingSchema(null);
+                    setSourceEditorError('');
+                  }
+                }}
+                placeholder="Вставьте JSON Schema. Если заполнено, парсинг идет по схеме"
+                autoFocus
+              />
+            ) : currentSchemaValue.trim() ? (
+              <div className="source-code source-code-display language-json" style={{ marginTop: 10 }}>
+                <div className="source-code" onDoubleClick={() => setEditingSchema({ sectionId: section.id, target, draft: currentSchemaValue })}>
+                <pre className="source-code language-json">
+                  <code dangerouslySetInnerHTML={{ __html: highlightCode('json', currentSchemaValue) }} />
+                </pre>
+                </div>
+              </div>
+            ) : (
+              <div className="source-code source-code-display language-json" style={{ marginTop: 10 }} onDoubleClick={() => setEditingSchema({ sectionId: section.id, target, draft: '' })}>
+                <pre className="source-code language-json"><code>&nbsp;</code></pre>
+              </div>
+            )}
+          </div>
+
           <button
             className="source-parse-fab"
             type="button"
             data-onboarding-anchor={target === 'server' ? 'run-parse' : undefined}
             onClick={() => runParser(section, target)}
-            disabled={!currentValue.trim()}
+            disabled={!currentValue.trim() && !schemaValue.trim()}
             title="Запустить парсер"
           >
             Парсить
@@ -7989,8 +8278,16 @@ export default function App() {
       {sourceTextImport && (
         <div className="import-routing-backdrop" role="dialog" aria-modal="true" aria-label="Импорт source текста">
           <div className="import-routing-card">
+            {(() => {
+              const sourceSection = sections.find(
+                (item): item is ParsedSection => item.kind === 'parsed' && item.id === sourceTextImport.sectionId
+              );
+              const sourceImportAllowsCurl = Boolean(sourceSection && isRequestSection(sourceSection));
+
+              return (
+                <>
             <h2>Импорт в Source</h2>
-            <p className="import-routing-file">Поддерживается JSON и cURL</p>
+            <p className="import-routing-file">{sourceImportAllowsCurl ? 'Поддерживается JSON и cURL' : 'Поддерживается только JSON'}</p>
 
             <label className="field">
               <div className="label">Текст source</div>
@@ -8008,7 +8305,7 @@ export default function App() {
                       : current
                   )
                 }
-                placeholder="Вставьте JSON или cURL"
+                placeholder={sourceImportAllowsCurl ? 'Вставьте JSON или cURL' : 'Вставьте JSON'}
               />
             </label>
 
@@ -8018,6 +8315,9 @@ export default function App() {
                 Импортировать текст
               </button>
             </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -8046,6 +8346,7 @@ export default function App() {
         onOpenProjectImport={() => openProjectImportDialog(false)}
         onImportProjectJson={(file) => importProjectJson(file)}
         onExportProjectJson={exportProjectJson}
+        onExportMockServiceJson={exportMockServiceJson}
         onExportFullProjectHtml={() => void handleExportFullProjectHtml()}
         onExportFullProjectWiki={handleExportFullProjectWiki}
         onOpenHtmlPreview={openHtmlPreview}
@@ -8507,7 +8808,7 @@ export default function App() {
                           <ErrorsSectionEditor
                             section={section}
                             sections={sections}
-                            validationCaseOptions={VALIDATION_CASE_OPTIONS}
+                            validationCaseOptions={getValidationCaseOptionsForSection(section)}
                             openInternalCodeKey={openInternalCodeKey}
                             highlightedInternalCodeIndex={highlightedInternalCodeIndex}
                             internalCodePopoverState={internalCodePopoverState}
@@ -8524,6 +8825,7 @@ export default function App() {
                             updateValidationRuleRow={updateValidationRuleRow}
                             deleteValidationRuleRow={deleteValidationRuleRow}
                             addValidationRuleRow={addValidationRuleRow}
+                            autofillValidationRulesFromRequestSchema={autofillValidationRulesFromRequestSchema}
                             getSectionRows={getSectionRows}
                             getDynamicTextareaRows={getDynamicTextareaRows}
                             validateJsonDraft={validateJsonDraft}

@@ -1,5 +1,6 @@
 ﻿import { getRequestColumnLabel, getRequestColumnOrder } from './requestColumns';
 import { getRequestAuthInfo, getRequestRows, requestHasRows, splitRequestRows } from './requestHeaders';
+import { buildInputFromRows } from './sourceSync';
 import { resolveSectionTitle } from './sectionTitles';
 import { getDiagramImageUrl, resolveDiagramEngine } from './diagramUtils';
 import { normalizeArrayFieldPath } from './fieldPath';
@@ -69,6 +70,136 @@ function toWikiSourceCodeBlock(value: string, format: 'json' | 'curl'): string[]
   return [`{code:${codeLanguage}}`, ...payload.split('\n').map((line) => escapeWiki(line)), '{code}'];
 }
 
+type JsonSchemaNode = {
+  type?: string | string[];
+  properties?: Record<string, JsonSchemaNode>;
+  required?: string[];
+  items?: JsonSchemaNode;
+  enum?: unknown[];
+  format?: string;
+  pattern?: string;
+  minLength?: number;
+  maxLength?: number;
+  minimum?: number;
+  maximum?: number;
+  minItems?: number;
+  maxItems?: number;
+  oneOf?: JsonSchemaNode[];
+  anyOf?: JsonSchemaNode[];
+  allOf?: JsonSchemaNode[];
+};
+
+function resolveSchemaType(schema: JsonSchemaNode): string | undefined {
+  if (Array.isArray(schema.type)) {
+    return schema.type.find((item) => item !== 'null');
+  }
+  return schema.type;
+}
+
+function toZodRegex(pattern: string): string {
+  return `new RegExp(${JSON.stringify(pattern)})`;
+}
+
+function schemaNodeToZod(node: JsonSchemaNode): string {
+  const nullable = Array.isArray(node.type) && node.type.includes('null');
+  const nodeType = resolveSchemaType(node);
+
+  let expression = 'z.any()';
+
+  const oneOf = Array.isArray(node.oneOf) ? node.oneOf : [];
+  const anyOf = Array.isArray(node.anyOf) ? node.anyOf : [];
+  const allOf = Array.isArray(node.allOf) ? node.allOf : [];
+
+  if (Array.isArray(node.enum) && node.enum.length > 0) {
+    const enumValues = node.enum;
+    if (enumValues.every((item) => typeof item === 'string')) {
+      expression = `z.enum([${enumValues.map((item) => JSON.stringify(item)).join(', ')}])`;
+    } else {
+      expression = `z.union([${enumValues.map((item) => `z.literal(${JSON.stringify(item)})`).join(', ')}])`;
+    }
+  } else if (oneOf.length > 0 || anyOf.length > 0) {
+    const variants = (oneOf.length > 0 ? oneOf : anyOf).map((item) => schemaNodeToZod(item));
+    expression = variants.length > 1 ? `z.union([${variants.join(', ')}])` : (variants[0] ?? 'z.any()');
+  } else if (allOf.length > 0) {
+    const variants = allOf.map((item) => schemaNodeToZod(item));
+    expression = variants.reduce((acc, current) => (acc ? `z.intersection(${acc}, ${current})` : current), '');
+    if (!expression) expression = 'z.any()';
+  } else if (nodeType === 'object' || node.properties) {
+    const properties = node.properties ?? {};
+    const required = new Set(node.required ?? []);
+    const entries = Object.entries(properties).map(([key, value]) => {
+      let child = schemaNodeToZod(value);
+      if (!required.has(key)) child = `${child}.optional()`;
+      return `${JSON.stringify(key)}: ${child}`;
+    });
+    expression = `z.object({${entries.length > 0 ? `\n  ${entries.join(',\n  ')}\n` : ''}})`;
+  } else if (nodeType === 'array') {
+    const itemSchema = node.items ? schemaNodeToZod(node.items) : 'z.any()';
+    expression = `z.array(${itemSchema})`;
+    if (typeof node.minItems === 'number') expression += `.min(${node.minItems})`;
+    if (typeof node.maxItems === 'number') expression += `.max(${node.maxItems})`;
+  } else if (nodeType === 'string' || !nodeType) {
+    expression = 'z.string()';
+    if (typeof node.minLength === 'number') expression += `.min(${node.minLength})`;
+    if (typeof node.maxLength === 'number') expression += `.max(${node.maxLength})`;
+    if (node.format === 'email') expression += '.email()';
+    else if (node.format === 'uuid') expression += '.uuid()';
+    else if (node.format === 'uri' || node.format === 'url') expression += '.url()';
+    else if (typeof node.format === 'string') expression += `.describe(${JSON.stringify(`format:${node.format}`)})`;
+    if (typeof node.pattern === 'string' && node.pattern.trim()) expression += `.regex(${toZodRegex(node.pattern)})`;
+  } else if (nodeType === 'integer') {
+    expression = 'z.number().int()';
+    if (typeof node.minimum === 'number') expression += `.min(${node.minimum})`;
+    if (typeof node.maximum === 'number') expression += `.max(${node.maximum})`;
+  } else if (nodeType === 'number') {
+    expression = 'z.number()';
+    if (typeof node.minimum === 'number') expression += `.min(${node.minimum})`;
+    if (typeof node.maximum === 'number') expression += `.max(${node.maximum})`;
+  } else if (nodeType === 'boolean') {
+    expression = 'z.boolean()';
+  } else if (nodeType === 'null') {
+    expression = 'z.null()';
+  }
+
+  if (nullable && expression !== 'z.null()') {
+    expression += '.nullable()';
+  }
+
+  return expression;
+}
+
+function convertJsonSchemaToZodSource(schemaInput: string, schemaName: string): string {
+  const parsed = JSON.parse(schemaInput) as JsonSchemaNode;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('JSON Schema must be an object');
+  }
+
+  const rootExpression = schemaNodeToZod(parsed);
+  return [
+    "import { z } from 'zod';",
+    '',
+    `export const ${schemaName} = ${rootExpression};`
+  ].join('\n');
+}
+
+function toWikiZodSchemaCodeBlock(schemaInput: string, schemaName: string): string[] {
+  try {
+    const source = convertJsonSchemaToZodSource(schemaInput, schemaName);
+    return toWikiSourceCodeBlock(source, 'curl').map((line) => {
+      if (line === '{code:bash}') return '{code:typescript}';
+      return line;
+    });
+  } catch {
+    return [
+      '{code:typescript}',
+      `// Failed to convert JSON Schema to Zod.`,
+      "import { z } from 'zod';",
+      `export const ${schemaName} = z.any();`,
+      '{code}'
+    ];
+  }
+}
+
 function toWikiInlineCodeMacro(value: string, format: 'json' | 'curl' = 'json'): string {
   const normalized = value
     .replaceAll('\r\n', '\n')
@@ -80,13 +211,64 @@ function toWikiInlineCodeMacro(value: string, format: 'json' | 'curl' = 'json'):
   let payload = normalized;
   if (format === 'json') {
     try {
-      payload = JSON.stringify(JSON.parse(normalized));
+      payload = JSON.stringify(JSON.parse(normalized), null, 2);
     } catch {
-      payload = normalized.replaceAll('\n', '\\n');
+      payload = normalized;
     }
   }
 
-  return `{code:${format === 'json' ? 'json' : 'bash'}}${escapeWiki(payload)}{code}`;
+  if (format === 'json') {
+    return [`{code:json}`, ...payload.split('\n').map((line) => escapeWiki(line)), '{code}'].join('\n');
+  }
+
+  return `{code:bash}${escapeWiki(payload)}{code}`;
+}
+
+function buildExternalAuthHeaderRows(section: ParsedSection): ParsedRow[] {
+  if (section.externalAuthType === 'bearer') {
+    return [{
+      field: 'Authorization',
+      sourceField: 'Authorization',
+      origin: 'generated',
+      enabled: true,
+      type: 'string',
+      required: '+',
+      description: 'Авторизация: Bearer token',
+      example: `Bearer ${section.externalAuthTokenExample?.trim() || 'token'}`,
+      source: 'header'
+    }];
+  }
+
+  if (section.externalAuthType === 'basic') {
+    return [{
+      field: 'Authorization',
+      sourceField: 'Authorization',
+      origin: 'generated',
+      enabled: true,
+      type: 'string',
+      required: '+',
+      description: 'Авторизация: Basic auth',
+      example: 'Basic <base64(username:password)>',
+      source: 'header'
+    }];
+  }
+
+  if (section.externalAuthType === 'api-key') {
+    const headerName = section.externalAuthHeaderName?.trim() || 'X-API-Key';
+    return [{
+      field: headerName,
+      sourceField: headerName,
+      origin: 'generated',
+      enabled: true,
+      type: 'string',
+      required: '+',
+      description: 'Авторизация: API key',
+      example: section.externalAuthApiKeyExample?.trim() || '',
+      source: 'header'
+    }];
+  }
+
+  return [];
 }
 
 function renderErrorResponseCell(text: string, responseCode: string): string {
@@ -101,11 +283,40 @@ function renderErrorResponseCell(text: string, responseCode: string): string {
 
 function renderParsedSourceExamples(section: ParsedSection): string[] {
   const lines: string[] = [];
+  const isRequest = section.sectionType === 'request';
   const serverInput = section.input.trim();
+  const serverSchema = (section.schemaInput ?? '').trim();
   const clientInput = section.domainModelEnabled ? (section.clientInput ?? '').trim() : '';
+  const clientSchema = section.domainModelEnabled ? (section.clientSchemaInput ?? '').trim() : '';
   const sectionLabel = section.sectionType === 'response' ? 'response' : 'request';
   const serverFormat = section.format;
   const clientFormat = section.clientFormat ?? 'json';
+  const serverCurl = isRequest
+    ? buildInputFromRows(
+      'curl',
+      [...splitRequestRows(getRequestRows(section)).headers.filter((row) => row.enabled !== false), ...(section.rows.filter((row) => row.source !== 'header'))],
+      {
+        requestUrl: section.requestUrl?.trim() || '',
+        requestMethod: section.requestMethod,
+        bodyJson: section.format === 'json' ? section.input : undefined
+      }
+    )
+    : '';
+  const clientCurl = isRequest && section.domainModelEnabled
+    ? buildInputFromRows(
+      'curl',
+      [
+        ...buildExternalAuthHeaderRows(section),
+        ...((section.clientRows ?? []).filter((row) => row.source === 'header' && row.enabled !== false)),
+        ...((section.clientRows ?? []).filter((row) => row.source !== 'header'))
+      ],
+      {
+        requestUrl: section.externalRequestUrl?.trim() || '',
+        requestMethod: section.externalRequestMethod,
+        bodyJson: section.clientFormat === 'json' ? (section.clientInput ?? '') : undefined
+      }
+    )
+    : '';
 
   const serverFormatLabel = serverFormat === 'curl' ? 'cURL' : 'JSON';
   const clientFormatLabel = clientFormat === 'curl' ? 'cURL' : 'JSON';
@@ -117,6 +328,13 @@ function renderParsedSourceExamples(section: ParsedSection): string[] {
     lines.push('{expand}');
   }
 
+  if (serverCurl) {
+    lines.push('');
+    lines.push('{expand:title=Server cURL}');
+    lines.push(...toWikiSourceCodeBlock(serverCurl, 'curl'));
+    lines.push('{expand}');
+  }
+
   if (clientInput) {
     lines.push('');
     lines.push(`{expand:title=Пример ${clientFormatLabel} (Client ${sectionLabel})}`);
@@ -124,11 +342,35 @@ function renderParsedSourceExamples(section: ParsedSection): string[] {
     lines.push('{expand}');
   }
 
+  if (clientCurl) {
+    lines.push('');
+    lines.push('{expand:title=Client cURL}');
+    lines.push(...toWikiSourceCodeBlock(clientCurl, 'curl'));
+    lines.push('{expand}');
+  }
+
+  if (serverSchema) {
+    lines.push('');
+    lines.push(`{expand:title=Zod Schema (Server ${sectionLabel})}`);
+    lines.push(...toWikiZodSchemaCodeBlock(serverSchema, `server${sectionLabel === 'response' ? 'Response' : 'Request'}Schema`));
+    lines.push('{expand}');
+  }
+
+  if (clientSchema) {
+    lines.push('');
+    lines.push(`{expand:title=Zod Schema (Client ${sectionLabel})}`);
+    lines.push(...toWikiZodSchemaCodeBlock(clientSchema, `client${sectionLabel === 'response' ? 'Response' : 'Request'}Schema`));
+    lines.push('{expand}');
+  }
+
   return lines;
 }
 
 function hasParsedSourceExample(section: ParsedSection): boolean {
-  return Boolean(section.input.trim()) || Boolean(section.domainModelEnabled && (section.clientInput ?? '').trim());
+  return Boolean(section.input.trim())
+    || Boolean((section.schemaInput ?? '').trim())
+    || Boolean(section.domainModelEnabled && (section.clientInput ?? '').trim())
+    || Boolean(section.domainModelEnabled && (section.clientSchemaInput ?? '').trim());
 }
 
 function toWikiTextBlock(value: string): string[] {
@@ -137,6 +379,22 @@ function toWikiTextBlock(value: string): string[] {
     .replaceAll('\r', '\n')
     .split('\n')
     .map((line) => escapeWikiTableText(line));
+}
+
+function normalizeValidationConditionForWiki(value: string): string {
+  return value.replace(/\[\s*([^\]]*?)\s*\]/g, (_match, inner: string) => {
+    const normalizedInner = inner.trim();
+    if (!normalizedInner) return '[]';
+    return `( ${normalizedInner} )`;
+  });
+}
+
+function normalizeValidationCauseForWiki(value: string): string {
+  return normalizeArrayFieldPath(value);
+}
+
+function wrapWikiTable(tableLines: string[]): string[] {
+  return tableLines;
 }
 
 function shouldRenderTextSection(section: TextSection): boolean {
@@ -175,7 +433,7 @@ function renderDefaultTable(rows: ParsedRow[]): string[] {
     ];
     lines.push(`|${cells.join('|')}|`);
   }
-  return lines;
+  return wrapWikiTable(lines);
 }
 
 function renderStructuredTable(rows: ParsedRow[], section: ParsedSection): string[] {
@@ -204,7 +462,7 @@ function renderStructuredTable(rows: ParsedRow[], section: ParsedSection): strin
     lines.push(`|${cells.join('|')}|`);
   }
 
-  return lines;
+  return wrapWikiTable(lines);
 }
 
 function renderTextSection(section: TextSection): string[] {
@@ -368,48 +626,61 @@ function renderErrorsSection(section: ErrorsSection): string[] {
 
   if (section.rows.length > 0) {
     lines.push('');
-    lines.push('||№||Client HTTP Status||Client Response||Trigger (условия возникновения)||Error Type||Server HTTP Status||Полный internalCode||Server Response||');
-
+    const tableLines = ['||№||Client HTTP Status||Client Response||Trigger (условия возникновения)||Error Type||Server HTTP Status||Полный internalCode||Server Response||'];
     section.rows.forEach((row, index) => {
-      lines.push(
+      tableLines.push(
         `|${toWikiCell(String(index + 1))}|${toWikiCell(row.clientHttpStatus)}|${renderErrorResponseCell(row.clientResponse, row.clientResponseCode)}|${toWikiCell(row.trigger)}|${toWikiCell(row.errorType)}|${toWikiCell(row.serverHttpStatus)}|${toWikiCell(row.internalCode)}|${renderErrorResponseCell(row.message, row.responseCode)}|`
       );
     });
+    lines.push(...wrapWikiTable(tableLines));
   }
 
   if (section.validationRules.length > 0) {
     lines.push('');
     lines.push('h3. Правила валидации');
-    lines.push('||№||Параметр (server request)||Кейс валидации||Условие возникновения||cause||');
+    const tableLines = ['||№||Параметр (server request)||Кейс валидации||Условие возникновения||cause||'];
 
     section.validationRules.forEach((row, index) => {
-      lines.push(
-        `|${toWikiCell(String(index + 1))}|${toWikiCell(row.parameter)}|${toWikiCell(row.validationCase)}|${toWikiCell(row.condition)}|${toWikiCell(row.cause)}|`
+      tableLines.push(
+        `|${toWikiCell(String(index + 1))}|${toWikiCell(normalizeArrayFieldPath(row.parameter))}|${toWikiCell(row.validationCase)}|${toWikiCell(normalizeValidationConditionForWiki(row.condition))}|${toWikiCell(normalizeValidationCauseForWiki(row.cause))}|`
       );
     });
+    lines.push(...wrapWikiTable(tableLines));
   }
 
   return lines;
 }
 
 function renderWikiTemplateIntro(): string[] {
-  return [
-    'h2. История изменений',
-    '',
+  const historyTable = wrapWikiTable([
     '||Версия||Описание||Исполнитель||Дата||Jira||',
-    `|v.1|Создание документа|${EMPTY_WIKI_CELL}|${EMPTY_WIKI_CELL}|${EMPTY_WIKI_CELL}|`,
-    '',
-    'h2. Постановка задачи',
-    '',
+    `|v.1|Создание документа|${EMPTY_WIKI_CELL}|${EMPTY_WIKI_CELL}|${EMPTY_WIKI_CELL}|`
+  ]);
+
+  const taskTable = wrapWikiTable([
     `|Epic|${EMPTY_WIKI_CELL}|`,
     `|Цель|${EMPTY_WIKI_CELL}|`,
     `|Инициаторы|${EMPTY_WIKI_CELL}|`,
-    `|Ответственный разработчик / модуль|${EMPTY_WIKI_CELL}|`,
+    `|Ответственный разработчик / модуль|${EMPTY_WIKI_CELL}|`
+  ]);
+
+  const commonInfoTable = wrapWikiTable([
+    `|Метод|${EMPTY_WIKI_CELL}|`,
+    `|Внешний URL|${EMPTY_WIKI_CELL}|`
+  ]);
+
+  return [
+    'h2. История изменений',
+    '',
+    ...historyTable,
+    '',
+    'h2. Постановка задачи',
+    '',
+    ...taskTable,
     '',
     'h2. Общая информация',
     '',
-    `|Метод|${EMPTY_WIKI_CELL}|`,
-    `|Внешний URL|${EMPTY_WIKI_CELL}|`
+    ...commonInfoTable
   ];
 }
 

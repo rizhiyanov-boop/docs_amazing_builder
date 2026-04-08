@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseCurlMeta, parseToRows } from './parsers';
+import { parseCurlMeta, parseJsonSchemaToRows, parseToRows } from './parsers';
 
 describe('parsers', () => {
   it('parses nested json to flattened rows', () => {
@@ -71,5 +71,35 @@ describe('parsers', () => {
     const rows = parseToRows('json', JSON.stringify(largeObject));
     expect(rows.length).toBe(1200);
     expect(rows[0].origin).toBe('parsed');
+  });
+
+  it('parses json schema to flattened rows', () => {
+    const schema = JSON.stringify({
+      type: 'object',
+      required: ['globId', 'items'],
+      properties: {
+        globId: { type: 'string', description: 'Global ID' },
+        amount: { type: 'number' },
+        items: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['id'],
+            properties: {
+              id: { type: 'integer' },
+              active: { type: 'boolean' }
+            }
+          }
+        }
+      }
+    });
+
+    const rows = parseJsonSchemaToRows(schema);
+
+    expect(rows.some((row) => row.field === 'globId' && row.type === 'string' && row.required === '+')).toBe(true);
+    expect(rows.some((row) => row.field === 'amount' && row.type === 'number')).toBe(true);
+    expect(rows.some((row) => row.field === 'items' && row.type === 'array_object')).toBe(true);
+    expect(rows.some((row) => row.field === 'items[0].id' && row.type === 'int')).toBe(true);
+    expect(rows.some((row) => row.field === 'items[0].active' && row.type === 'boolean')).toBe(true);
   });
 });

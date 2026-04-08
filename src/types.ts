@@ -53,12 +53,14 @@ export interface ParsedSection extends BaseSection {
   format: ParseFormat;
   lastSyncedFormat?: ParseFormat;
   input: string;
+  schemaInput?: string;
   rows: ParsedRow[];
   error: string;
   domainModelEnabled?: boolean;
   clientFormat?: ParseFormat;
   clientLastSyncedFormat?: ParseFormat;
   clientInput?: string;
+  clientSchemaInput?: string;
   clientRows?: ParsedRow[];
   clientError?: string;
   clientMappings?: Record<string, string>;

@@ -6,6 +6,7 @@ export type ParsedCurlMeta = {
 };
 
 const STRUCTURED_EXAMPLE_PLACEHOLDER = '-';
+const OPTIONAL_MARK = '\u00B1';
 
 function createParsedRow(row: Omit<ParsedRow, 'sourceField' | 'origin'>): ParsedRow {
   return {
@@ -102,6 +103,115 @@ function flattenJson(value: unknown, basePath = ''): ParsedRow[] {
 
 function parseJson(input: string): ParsedRow[] {
   return flattenJson(JSON.parse(input));
+}
+
+type JsonSchema = {
+  type?: string | string[];
+  properties?: Record<string, JsonSchema>;
+  required?: string[];
+  items?: JsonSchema;
+  enum?: unknown[];
+  example?: unknown;
+  default?: unknown;
+  format?: string;
+  description?: string;
+};
+
+function normalizeSchemaType(schema: JsonSchema): string {
+  const schemaType = Array.isArray(schema.type) ? schema.type[0] : schema.type;
+
+  if (!schemaType) {
+    if (schema.properties && typeof schema.properties === 'object') return 'object';
+    if (schema.items) return 'array';
+    return 'string';
+  }
+
+  if (schemaType === 'integer') return 'int';
+  if (schemaType === 'number') return 'number';
+  if (schemaType === 'boolean') return 'boolean';
+  if (schemaType === 'object') return 'object';
+  if (schemaType === 'array') return 'array';
+  if (schemaType === 'string') {
+    if (schema.format === 'date-time') return 'datetime';
+    if (schema.format === 'date') return 'date';
+    return 'string';
+  }
+
+  return 'string';
+}
+
+function schemaExample(schema: JsonSchema, resolvedType: string): string {
+  const explicit = schema.example ?? schema.default ?? (Array.isArray(schema.enum) ? schema.enum[0] : undefined);
+
+  if (explicit !== undefined) {
+    if (typeof explicit === 'string') return explicit;
+    if (typeof explicit === 'number' || typeof explicit === 'boolean') return String(explicit);
+    try {
+      return JSON.stringify(explicit);
+    } catch {
+      return STRUCTURED_EXAMPLE_PLACEHOLDER;
+    }
+  }
+
+  if (resolvedType === 'array' || resolvedType === 'array_object' || resolvedType === 'object') return STRUCTURED_EXAMPLE_PLACEHOLDER;
+  return '';
+}
+
+function flattenJsonSchemaNode(schema: JsonSchema, basePath: string, required: boolean): ParsedRow[] {
+  const rows: ParsedRow[] = [];
+  const normalizedType = normalizeSchemaType(schema);
+  const requiredMark = required ? '+' : OPTIONAL_MARK;
+
+  if (normalizedType === 'array') {
+    const itemType = schema.items ? normalizeSchemaType(schema.items) : 'string';
+    rows.push(
+      createParsedRow({
+        field: basePath || '$',
+        type: itemType === 'object' ? 'array_object' : 'array',
+        required: requiredMark,
+        description: schema.description ?? '',
+        example: schemaExample(schema, itemType === 'object' ? 'array_object' : 'array')
+      })
+    );
+
+    if (schema.items) {
+      rows.push(...flattenJsonSchemaNode(schema.items, `${basePath || '$'}[0]`, true));
+    }
+    return rows;
+  }
+
+  if (normalizedType === 'object') {
+    const requiredProps = new Set(schema.required ?? []);
+    const properties = schema.properties ?? {};
+
+    for (const [key, childSchema] of Object.entries(properties)) {
+      const childPath = basePath ? `${basePath}.${key}` : key;
+      rows.push(...flattenJsonSchemaNode(childSchema, childPath, requiredProps.has(key)));
+    }
+
+    return rows;
+  }
+
+  rows.push(
+    createParsedRow({
+      field: basePath || '$',
+      type: normalizedType,
+      required: requiredMark,
+      description: schema.description ?? '',
+      example: schemaExample(schema, normalizedType)
+    })
+  );
+
+  return rows;
+}
+
+export function parseJsonSchemaToRows(input: string): ParsedRow[] {
+  const parsed = JSON.parse(input) as JsonSchema;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('JSON Schema должен быть объектом');
+  }
+
+  return flattenJsonSchemaNode(parsed, '', true);
 }
 
 function inferPrimitiveType(value: string): string {

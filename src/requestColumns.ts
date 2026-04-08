@@ -34,7 +34,11 @@ export function getRequestColumnOrder(section: ParsedSection, rows: ParsedRow[])
   }
 
   const hasClientField = rows.some((row) => Boolean(row.clientField?.trim()));
-  const allowed = DEFAULT_REQUEST_COLUMN_ORDER.filter((column) => hasClientField || column !== 'clientField');
+  const allowed = DEFAULT_REQUEST_COLUMN_ORDER.filter((column) => {
+    if (!hasClientField && column === 'clientField') return false;
+    if (section.sectionType === 'response' && column === 'required') return false;
+    return true;
+  });
   const current = section.requestColumnOrder ?? DEFAULT_REQUEST_COLUMN_ORDER;
   const normalized = current.filter((column): column is RequestColumnKey => allowed.includes(column));
 

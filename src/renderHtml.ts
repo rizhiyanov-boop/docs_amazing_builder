@@ -35,8 +35,10 @@ function shouldRenderTextSection(section: TextSection): boolean {
 
 function hasParsedSourceExample(section: ParsedSection): boolean {
   const hasServerInput = Boolean(section.input.trim());
+  const hasServerSchema = Boolean((section.schemaInput ?? '').trim());
   const hasClientInput = Boolean(section.domainModelEnabled && (section.clientInput ?? '').trim());
-  return hasServerInput || hasClientInput;
+  const hasClientSchema = Boolean(section.domainModelEnabled && (section.clientSchemaInput ?? '').trim());
+  return hasServerInput || hasServerSchema || hasClientInput || hasClientSchema;
 }
 
 function shouldRenderParsedSection(section: ParsedSection): boolean {
@@ -300,11 +302,19 @@ function renderRequestSection(section: ParsedSection, interactive = true): strin
   const serverCurl = buildInputFromRows(
     'curl',
     [...getRequestHeaderRows(section).filter((row) => row.enabled !== false), ...section.rows.filter((row) => row.source !== 'header')],
-    { requestUrl, requestMethod: section.requestMethod }
+    {
+      requestUrl,
+      requestMethod: section.requestMethod,
+      bodyJson: section.format === 'json' ? section.input : undefined
+    }
   );
   const clientCurl =
     section.domainModelEnabled && (section.clientRows?.length ?? 0) > 0
-      ? buildInputFromRows('curl', externalHeaders.concat((section.clientRows ?? []).filter((row) => row.source !== 'header')), { requestUrl: externalRequestUrl, requestMethod: section.externalRequestMethod })
+      ? buildInputFromRows('curl', externalHeaders.concat((section.clientRows ?? []).filter((row) => row.source !== 'header')), {
+        requestUrl: externalRequestUrl,
+        requestMethod: section.externalRequestMethod,
+        bodyJson: section.clientFormat === 'json' ? (section.clientInput ?? '') : undefined
+      })
       : '';
   const meta = [renderTag(requestMethod), renderTag(requestProtocol), renderTag(section.format.toUpperCase())].join(' ');
   const body = [
@@ -320,6 +330,7 @@ function renderRequestSection(section: ParsedSection, interactive = true): strin
       ? `<details open><summary>Request schema <span class="sumhint">${section.format.toUpperCase()}</span></summary>${renderStructuredTable(otherRows, section)}</details>`
       : '',
     renderCodeBlock(`${section.id}-server-example`, 'Server request example', section.input, interactive, section.format),
+    renderCodeBlock(`${section.id}-server-schema`, 'Server request JSON Schema', section.schemaInput ?? '', interactive, 'json'),
     renderCodeBlock(`${section.id}-server-curl`, 'Server cURL', serverCurl, interactive),
     section.domainModelEnabled
       ? `<details open><summary>Внешний вызов <span class="sumhint">${escapeHtml(requestProtocol)}</span></summary><div class="table-shell"><table><tbody><tr><td>Внешний URL</td><td>${renderCell(
@@ -334,6 +345,9 @@ function renderRequestSection(section: ParsedSection, interactive = true): strin
       : '',
     section.domainModelEnabled
       ? renderCodeBlock(`${section.id}-client-example`, 'Client request example', section.clientInput ?? '', interactive, section.clientFormat ?? 'json')
+      : '',
+    section.domainModelEnabled
+      ? renderCodeBlock(`${section.id}-client-schema`, 'Client request JSON Schema', section.clientSchemaInput ?? '', interactive, 'json')
       : '',
     section.domainModelEnabled ? renderCodeBlock(`${section.id}-client-curl`, 'Client cURL', clientCurl, interactive) : '',
     requestError ? `<div class="note bad"><b>Ошибка секции</b><br/>${escapeHtml(requestError)}</div>` : ''
@@ -359,8 +373,12 @@ function renderResponseSection(section: ParsedSection, interactive = true): stri
       ? `<details open><summary>Response schema <span class="sumhint">${rows.length} rows</span></summary>${renderStructuredTable(rows, section)}</details>`
       : '',
     renderCodeBlock(`${section.id}-server-example`, 'Server response example', section.input, interactive, section.format),
+    renderCodeBlock(`${section.id}-server-schema`, 'Server response JSON Schema', section.schemaInput ?? '', interactive, 'json'),
     section.domainModelEnabled
       ? renderCodeBlock(`${section.id}-client-example`, 'Client response example', section.clientInput ?? '', interactive, section.clientFormat ?? 'json')
+      : '',
+    section.domainModelEnabled
+      ? renderCodeBlock(`${section.id}-client-schema`, 'Client response JSON Schema', section.clientSchemaInput ?? '', interactive, 'json')
       : '',
     responseError ? `<div class="note bad"><b>Ошибка секции</b><br/>${escapeHtml(responseError)}</div>` : ''
   ]
@@ -380,6 +398,7 @@ function renderGenericParsedSection(section: ParsedSection, interactive = true):
   const body = [
     `<details open><summary>Schema <span class="sumhint">${section.rows.length} rows</span></summary>${renderDefaultTable(section.rows)}</details>`,
     renderCodeBlock(`${section.id}-example`, `${title} example`, section.input, interactive, section.format),
+    renderCodeBlock(`${section.id}-schema`, `${title} JSON Schema`, section.schemaInput ?? '', interactive, 'json'),
     section.error ? `<div class="note bad"><b>Ошибка секции</b><br/>${escapeHtml(section.error)}</div>` : ''
   ]
     .filter(Boolean)

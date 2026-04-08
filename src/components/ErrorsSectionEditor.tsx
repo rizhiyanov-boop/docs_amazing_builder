@@ -32,6 +32,7 @@ type ErrorsSectionEditorProps = {
   updateValidationRuleRow: (sectionId: string, rowIndex: number, updater: (row: ValidationRuleRow) => ValidationRuleRow) => void;
   deleteValidationRuleRow: (sectionId: string, rowIndex: number) => void;
   addValidationRuleRow: (sectionId: string) => void;
+  autofillValidationRulesFromRequestSchema: (sectionId: string) => void;
   getSectionRows: (section: ParsedSection) => ParsedRow[];
   getDynamicTextareaRows: (value: string, minRows?: number, maxRows?: number) => number;
   validateJsonDraft: (value: string) => string;
@@ -58,6 +59,7 @@ export function ErrorsSectionEditor({
   updateValidationRuleRow,
   deleteValidationRuleRow,
   addValidationRuleRow,
+  autofillValidationRulesFromRequestSchema,
   getSectionRows,
   getDynamicTextareaRows,
   validateJsonDraft,
@@ -426,6 +428,14 @@ export function ErrorsSectionEditor({
           </tbody>
         </table>
         <div className="table-actions">
+          <button
+            className="ghost small"
+            type="button"
+            onClick={() => autofillValidationRulesFromRequestSchema(section.id)}
+            title="Заполнить таблицу по Server Request JSON Schema"
+          >
+            Заполнить из JSON Schema
+          </button>
           <button className="ghost small table-action-icon" type="button" onClick={() => addValidationRuleRow(section.id)} aria-label="Добавить правило валидации" title="Добавить правило валидации">
             <span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>
           </button>

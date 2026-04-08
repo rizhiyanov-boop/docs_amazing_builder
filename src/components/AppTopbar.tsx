@@ -33,6 +33,7 @@ type AppTopbarProps = {
   onOpenProjectImport: () => void;
   onImportProjectJson: (file: File | undefined) => void;
   onExportProjectJson: () => void;
+  onExportMockServiceJson: () => void;
   onExportFullProjectHtml: () => void;
   onExportFullProjectWiki: () => void;
   onOpenHtmlPreview: () => void;
@@ -76,6 +77,7 @@ export function AppTopbar({
   onOpenProjectImport,
   onImportProjectJson,
   onExportProjectJson,
+  onExportMockServiceJson,
   onExportFullProjectHtml,
   onExportFullProjectWiki,
   onOpenHtmlPreview,
@@ -131,6 +133,15 @@ export function AppTopbar({
             aria-label="Скачать JSON"
           >
             <span className="ui-icon export-format-icon" data-format="JSON" aria-hidden>{renderUiIcon('download')}</span>
+          </button>
+          <button
+            className="ghost topbar-action topbar-format-btn"
+            onClick={onExportMockServiceJson}
+            disabled={!canExport}
+            title={canExport ? `Скачать mock-service JSON. ${exportTitle}` : exportTitle}
+            aria-label="Скачать mock-service JSON"
+          >
+            <span className="ui-icon export-format-icon" data-format="MOCK" aria-hidden>{renderUiIcon('download')}</span>
           </button>
           <button
             className="primary topbar-action topbar-format-btn"

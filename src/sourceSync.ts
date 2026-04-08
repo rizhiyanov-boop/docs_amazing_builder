@@ -3,6 +3,7 @@ import type { ParseFormat, ParsedRow, RequestMethod } from './types';
 type BuildInputOptions = {
   requestUrl?: string;
   requestMethod?: RequestMethod;
+  bodyJson?: string;
 };
 
 function toQueryParamValue(value: unknown): string {
@@ -135,7 +136,18 @@ function buildCurl(rows: ParsedRow[], options?: BuildInputOptions): string {
     .filter((row) => row.source === 'header')
     .map((row) => `-H "${row.field}: ${row.example.trim()}"`);
   const bodyRows = rows.filter((row) => row.source !== 'header' && row.source !== 'url' && row.source !== 'query' && row.field.trim());
-  const body = bodyRows.length > 0 ? JSON.stringify(buildJsonObject(bodyRows), null, 2) : '';
+  const bodyFromExample = options?.bodyJson?.trim() ?? '';
+  let body = '';
+
+  if (bodyFromExample) {
+    try {
+      body = JSON.stringify(JSON.parse(bodyFromExample), null, 2);
+    } catch {
+      body = bodyFromExample;
+    }
+  } else {
+    body = bodyRows.length > 0 ? JSON.stringify(buildJsonObject(bodyRows), null, 2) : '';
+  }
 
   return ['curl', '-X', method, `"${url}"`, ...headers, ...(body ? [`--data-raw '${body}'`] : [])].join(' ');
 }

@@ -4,6 +4,7 @@ import { buildInputFromRows } from './sourceSync';
 import { resolveSectionTitle } from './sectionTitles';
 import { getDiagramImageUrl, resolveDiagramEngine } from './diagramUtils';
 import { normalizeArrayFieldPath } from './fieldPath';
+import { wrapNonDomainResponseJson } from './parsers';
 import type { DiagramSection, DocSection, ErrorsSection, ParsedRow, ParsedSection, TextSection } from './types';
 
 const EMPTY_WIKI_CELL = '&#160;';
@@ -284,7 +285,7 @@ function renderErrorResponseCell(text: string, responseCode: string): string {
 function renderParsedSourceExamples(section: ParsedSection): string[] {
   const lines: string[] = [];
   const isRequest = section.sectionType === 'request';
-  const serverInput = section.input.trim();
+  const serverInput = section.domainModelEnabled || isRequest ? section.input.trim() : wrapNonDomainResponseJson(section.input.trim());
   const serverSchema = (section.schemaInput ?? '').trim();
   const clientInput = section.domainModelEnabled ? (section.clientInput ?? '').trim() : '';
   const clientSchema = section.domainModelEnabled ? (section.clientSchemaInput ?? '').trim() : '';

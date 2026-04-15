@@ -3,6 +3,7 @@ import { getRequestAuthInfo, getRequestHeaderRows, getRequestRows, requestHasRow
 import { richTextToHtml } from './richText';
 import { resolveSectionTitle } from './sectionTitles';
 import { buildInputFromRows } from './sourceSync';
+import { wrapNonDomainResponseJson } from './parsers';
 import { getThemeTokens } from './theme';
 import { getDiagramExportFileName, getDiagramImageUrl, resolveDiagramEngine } from './diagramUtils';
 import { normalizeArrayFieldPath } from './fieldPath';
@@ -367,12 +368,13 @@ function renderResponseSection(section: ParsedSection, interactive = true): stri
   const rows = getRequestRows(section);
   const responseError = section.error || section.clientError;
   const meta = renderTag(section.format.toUpperCase());
+  const serverResponseInput = section.domainModelEnabled ? section.input : wrapNonDomainResponseJson(section.input);
   const body = [
     renderInfoNote('Назначение', title),
     rows.length > 0
       ? `<details open><summary>Response schema <span class="sumhint">${rows.length} rows</span></summary>${renderStructuredTable(rows, section)}</details>`
       : '',
-    renderCodeBlock(`${section.id}-server-example`, 'Server response example', section.input, interactive, section.format),
+    renderCodeBlock(`${section.id}-server-example`, 'Server response example', serverResponseInput, interactive, section.format),
     renderCodeBlock(`${section.id}-server-schema`, 'Server response JSON Schema', section.schemaInput ?? '', interactive, 'json'),
     section.domainModelEnabled
       ? renderCodeBlock(`${section.id}-client-example`, 'Client response example', section.clientInput ?? '', interactive, section.clientFormat ?? 'json')

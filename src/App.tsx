@@ -6,7 +6,7 @@ import Highlight from '@tiptap/extension-highlight';
 import { liftListItem, sinkListItem } from '@tiptap/pm/schema-list';
 import './tokens.css';
 import './App.css';
-import { parseCurlMeta, parseJsonSchemaToRows, parseToRows } from './parsers';
+import { parseCurlMeta, parseJsonSchemaToRows, parseToRows, wrapNonDomainResponseJson } from './parsers';
 import { getDiagramExportFileName, getDiagramImageUrl, resolveDiagramEngine } from './diagramUtils';
 import { ERROR_CATALOG_BY_CODE } from './errorCatalog';
 import { buildServerErrorResponseTemplate } from './errorResponseTemplate';
@@ -782,7 +782,7 @@ function normalizeLegacyErrorRowsInSections(sections: DocSection[]): DocSection[
       return {
         ...nextRow,
         internalCode: normalizedInternalCode,
-        serverHttpStatus: preset?.httpStatus ?? nextRow.serverHttpStatus,
+        serverHttpStatus: nextRow.errorType === 'BusinessException' ? '422' : (preset?.httpStatus ?? nextRow.serverHttpStatus),
         message: preset?.message ?? nextRow.message
       };
     });
@@ -1072,12 +1072,13 @@ function createOnboardingDemoWorkspace(): WorkspaceProjectData {
     }
 
     if (section.kind === 'parsed' && section.sectionType === 'response') {
-      const serverRows = parseToRows('json', demoResponseInput);
+      const wrappedInput = section.domainModelEnabled ? demoResponseInput : wrapNonDomainResponseJson(demoResponseInput);
+      const serverRows = parseToRows('json', wrappedInput);
       return {
         ...section,
         format: 'json' as const,
         lastSyncedFormat: 'json' as const,
-        input: demoResponseInput,
+        input: wrappedInput,
         rows: serverRows,
         error: ''
       };
@@ -1117,7 +1118,7 @@ function createOnboardingDemoWorkspace(): WorkspaceProjectData {
             clientResponseCode: '{"code":"VAL_001","message":"Invalid amount"}',
             trigger: 'Сумма <= 0 или превышен лимит клиента',
             errorType: 'BusinessException',
-            serverHttpStatus: '400',
+            serverHttpStatus: '422',
             internalCode: '100101',
             message: ERROR_CATALOG_BY_CODE.get('100101')?.message ?? 'Bad request sent to the system',
             responseCode: '{"code":"100101","message":"Bad request sent to the system"}'
@@ -2584,7 +2585,9 @@ export default function App() {
         let parsedRows: ParsedRow[] = [];
         let parseError = '';
         try {
-          parsedRows = normalizeParsedRowsForSection(section, parseToRows('json', jsonImportRouting.rawText));
+          const shouldWrap = section.sectionType === 'response' && !section.domainModelEnabled;
+          const inputToParse = shouldWrap ? wrapNonDomainResponseJson(jsonImportRouting.rawText) : jsonImportRouting.rawText;
+          parsedRows = normalizeParsedRowsForSection(section, parseToRows('json', inputToParse));
         } catch (error) {
           parseError = error instanceof Error ? error.message : 'Ошибка парсинга';
         }
@@ -4097,7 +4100,7 @@ export default function App() {
         clientResponseCode: '',
         trigger: 'Ошибка валидации',
         errorType: 'BusinessException',
-        serverHttpStatus: preset?.httpStatus ?? '400',
+        serverHttpStatus: '422',
         internalCode: '100101',
         message: preset?.message ?? 'Bad request sent to the system',
         responseCode: buildServerErrorResponseTemplate({
@@ -4227,7 +4230,7 @@ export default function App() {
         clientResponseCode: '',
         trigger: 'Ошибка валидации',
         errorType: 'BusinessException',
-        serverHttpStatus: preset?.httpStatus ?? '400',
+        serverHttpStatus: '422',
         internalCode: '100101',
         message: preset?.message ?? 'Bad request sent to the system',
         responseCode: buildServerErrorResponseTemplate({
@@ -4273,7 +4276,7 @@ export default function App() {
         return {
           ...row,
           internalCode: normalizedCode,
-          serverHttpStatus: '',
+          serverHttpStatus: row.errorType === 'BusinessException' ? '422' : '',
           message: '',
           responseCode: ''
         };
@@ -4281,7 +4284,7 @@ export default function App() {
       return {
         ...row,
         internalCode: normalizedCode,
-        serverHttpStatus: preset.httpStatus,
+        serverHttpStatus: row.errorType === 'BusinessException' ? '422' : preset.httpStatus,
         message: preset.message,
         responseCode: buildServerErrorResponseTemplate({
           code: normalizedCode,
@@ -4334,7 +4337,9 @@ export default function App() {
     const useSchemaPriority = Boolean(normalizedSchema);
 
     try {
-      const parsedRows = useSchemaPriority ? parseJsonSchemaToRows(normalizedSchema) : parseToRows(format, input);
+      const shouldWrap = section.sectionType === 'response' && !section.domainModelEnabled && !useSchemaPriority && format === 'json';
+      const inputToParse = shouldWrap ? wrapNonDomainResponseJson(input) : input;
+      const parsedRows = useSchemaPriority ? parseJsonSchemaToRows(normalizedSchema) : parseToRows(format, inputToParse);
       const rows = normalizeParsedRowsForSection(section, parsedRows);
       const curlMeta = isRequestSection(section) && !useSchemaPriority && format === 'curl' ? parseCurlMeta(input) : null;
       updateSection(section.id, (current) => {
@@ -4427,7 +4432,9 @@ export default function App() {
     try {
       const fixed = await repairJsonWithAi(draft);
       const normalized = JSON.stringify(JSON.parse(fixed), null, 2);
-      const parsedRows = parseToRows('json', normalized);
+      const shouldWrap = section.sectionType === 'response' && !section.domainModelEnabled;
+      const inputToParse = shouldWrap ? wrapNonDomainResponseJson(normalized) : normalized;
+      const parsedRows = parseToRows('json', inputToParse);
       const rows = normalizeParsedRowsForSection(section, parsedRows);
 
       if (editingSource?.sectionId === section.id && editingSource.target === target) {

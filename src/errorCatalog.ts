@@ -13,6 +13,7 @@ export const POPULAR_HTTP_STATUS_CODES = [
   '409',
   '413',
   '415',
+  '422',
   '423',
   '429',
   '500',

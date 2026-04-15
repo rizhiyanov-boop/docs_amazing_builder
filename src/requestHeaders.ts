@@ -1,6 +1,6 @@
 ﻿import type { ParsedRow, ParsedSection } from './types';
 
-export const OPTIONAL_MARK = '\u00B1';
+export const OPTIONAL_MARK = '-';
 
 export type RequestAuthInfo = {
   schemeLabel: string;
@@ -16,12 +16,12 @@ export const DEFAULT_API_KEY_HEADER = 'X-API-Key';
 export const DEFAULT_API_KEY_EXAMPLE = 'sk_live_51QExampleKey';
 
 export const DEFAULT_REQUEST_HEADERS: ParsedRow[] = [
-  { field: 'X-CLIENT-ID', sourceField: 'X-CLIENT-ID', origin: 'generated', enabled: true, type: 'string', required: '+', description: 'ID клиента', example: '', source: 'header' },
-  { field: 'X-USER-ID', sourceField: 'X-USER-ID', origin: 'generated', enabled: true, type: 'string', required: '+', description: 'ID пользователя', example: '', source: 'header' },
-  { field: 'X-SOURCE-SYSTEM', sourceField: 'X-SOURCE-SYSTEM', origin: 'generated', enabled: true, type: 'string', required: '+', description: 'Система-инициатор', example: '', source: 'header' },
-  { field: 'X-BP-ID', sourceField: 'X-BP-ID', origin: 'generated', enabled: true, type: 'string', required: '+', description: 'ID бизнес-процесса', example: '', source: 'header' },
-  { field: 'X-BP-NAME', sourceField: 'X-BP-NAME', origin: 'generated', enabled: true, type: 'string', required: '+', description: 'Название бизнес-процесса', example: '', source: 'header' },
-  { field: 'traceparent', sourceField: 'traceparent', origin: 'generated', enabled: true, type: 'string', required: '+', description: 'TraceParent для распределенного трейсинга', example: '', source: 'header' }
+  { field: 'X-CLIENT-ID', sourceField: 'X-CLIENT-ID', origin: 'generated', enabled: true, type: 'string', required: '-', description: 'ID клиента', example: '', source: 'header' },
+  { field: 'X-USER-ID', sourceField: 'X-USER-ID', origin: 'generated', enabled: true, type: 'string', required: '-', description: 'ID пользователя', example: '', source: 'header' },
+  { field: 'X-SOURCE-SYSTEM', sourceField: 'X-SOURCE-SYSTEM', origin: 'generated', enabled: true, type: 'string', required: '-', description: 'Система-инициатор', example: '', source: 'header' },
+  { field: 'X-BP-ID', sourceField: 'X-BP-ID', origin: 'generated', enabled: true, type: 'string', required: '-', description: 'ID бизнес-процесса', example: '', source: 'header' },
+  { field: 'X-BP-NAME', sourceField: 'X-BP-NAME', origin: 'generated', enabled: true, type: 'string', required: '-', description: 'Название бизнес-процесса', example: '', source: 'header' },
+  { field: 'traceparent', sourceField: 'traceparent', origin: 'generated', enabled: true, type: 'string', required: '-', description: 'TraceParent для распределенного трейсинга', example: '', source: 'header' }
 ];
 
 const REQUEST_HEADER_ORDER = new Map(DEFAULT_REQUEST_HEADERS.map((header, index) => [header.field.toLowerCase(), index]));

@@ -6,7 +6,7 @@ export type ParsedCurlMeta = {
 };
 
 const STRUCTURED_EXAMPLE_PLACEHOLDER = '-';
-const OPTIONAL_MARK = '\u00B1';
+const OPTIONAL_MARK = '-';
 
 function createParsedRow(row: Omit<ParsedRow, 'sourceField' | 'origin'>): ParsedRow {
   return {
@@ -232,7 +232,7 @@ function splitUrlAndQuery(rawUrl: string): { baseUrl: string; queryRows: ParsedR
           field: key,
           type: inferPrimitiveType(value),
           required: '+',
-          description: `Query parameter ${key}`,
+          description: '',
           example: value,
           source: 'query'
         })
@@ -263,7 +263,7 @@ function parseCurl(input: string): ParsedRow[] {
       rows.push(
         ...payloadRows.map((row) => ({
           ...row,
-          description: row.description || 'Тело запроса из cURL (JSON)',
+          description: '',
           source: 'body' as const
         }))
       );
@@ -273,7 +273,7 @@ function parseCurl(input: string): ParsedRow[] {
           field: 'body',
           type: 'string',
           required: '+',
-          description: 'Тело запроса из cURL (не JSON)',
+          description: '',
           example: bodyPayload.slice(0, 120),
           source: 'body'
         })
@@ -307,7 +307,7 @@ function parseCurl(input: string): ParsedRow[] {
             rows.push(
               ...nested.map((row) => ({
                 ...row,
-                description: `Заголовок ${name} (распарсено)`,
+                description: '',
                 source: 'header' as const
               }))
             );
@@ -326,7 +326,7 @@ function parseCurl(input: string): ParsedRow[] {
               field: name,
               type: 'boolean',
               required: '+',
-              description: `Заголовок ${name}`,
+              description: '',
               example: lowerValue,
               source: 'header'
             })
@@ -342,7 +342,7 @@ function parseCurl(input: string): ParsedRow[] {
                 field: name,
                 type: bigIntValue >= min && bigIntValue <= max ? 'int' : 'long',
                 required: '+',
-                description: `Заголовок ${name}`,
+                description: '',
                 example: value,
                 source: 'header'
               })
@@ -354,7 +354,7 @@ function parseCurl(input: string): ParsedRow[] {
                 field: name,
                 type: 'long',
                 required: '+',
-                description: `Заголовок ${name}`,
+                description: '',
                 example: value,
                 source: 'header'
               })
@@ -367,7 +367,7 @@ function parseCurl(input: string): ParsedRow[] {
               field: name,
               type: 'number',
               required: '+',
-              description: `Заголовок ${name}`,
+              description: '',
               example: value,
               source: 'header'
             })
@@ -383,7 +383,7 @@ function parseCurl(input: string): ParsedRow[] {
           field: name,
           type: 'string',
           required: '+',
-          description: `Заголовок ${name}`,
+          description: '',
           example: value,
           source: 'header'
         })
@@ -400,7 +400,7 @@ function parseCurl(input: string): ParsedRow[] {
         field: 'request.url',
         type: 'string',
         required: '+',
-        description: 'URL запроса',
+        description: '',
         example: baseUrl,
         source: 'url'
       })
@@ -425,6 +425,31 @@ export function parseCurlMeta(input: string): ParsedCurlMeta {
     method: (methodMatch?.[1]?.toUpperCase() as RequestMethod | undefined) ?? (urlMatch ? 'POST' : undefined),
     url: parsedUrl
   };
+}
+
+export function wrapNonDomainResponseJson(input: string): string {
+  try {
+    const parsed = JSON.parse(input);
+    return JSON.stringify({
+      data: parsed,
+      techData: {
+        traceId: '95892214c3ad0ab7897f802847358a92',
+        spanId: 'c8603abc45ca02e6',
+        appVersion: '1.2.0',
+        appTag: '3'
+      },
+      warnings: {
+        clientId: 'X-CLIENT-ID is missing in the request headers',
+        bpName: 'X-BP-NAME is missing in the request headers',
+        sourceSystem: 'X-SOURCE-SYSTEM is missing in the request headers',
+        bpId: 'X-BP-ID is missing in the request headers',
+        traceparent: 'traceparent is missing in the request headers',
+        userId: 'X-USER-ID is missing in the request headers'
+      }
+    }, null, 2);
+  } catch {
+    return input;
+  }
 }
 
 export function parseToRows(format: ParseFormat, input: string): ParsedRow[] {

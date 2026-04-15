@@ -71,7 +71,7 @@ export function sanitizeSections(sections: DocSection[]): DocSection[] {
             clientResponseCode: useLegacyClientResponseAsCode ? legacyClientResponse : normalizedClientResponseCode,
             trigger: row.trigger ?? '',
             errorType: row.errorType ?? '-',
-            serverHttpStatus: preset?.httpStatus ?? row.serverHttpStatus ?? '',
+            serverHttpStatus: row.errorType === 'BusinessException' ? '422' : (preset?.httpStatus ?? row.serverHttpStatus ?? ''),
             internalCode: normalizedInternalCode,
             message: preset?.message ?? row.message ?? '',
             responseCode: row.responseCode ?? ''

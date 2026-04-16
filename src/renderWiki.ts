@@ -1,5 +1,5 @@
 ﻿import { getRequestColumnLabel, getRequestColumnOrder } from './requestColumns';
-import { getRequestAuthInfo, getRequestRows, requestHasRows, splitRequestRows } from './requestHeaders';
+import { getRequestRows, requestHasRows, splitRequestRows } from './requestHeaders';
 import { buildInputFromRows } from './sourceSync';
 import { resolveSectionTitle } from './sectionTitles';
 import { getDiagramImageUrl, resolveDiagramEngine } from './diagramUtils';
@@ -276,9 +276,9 @@ function renderErrorResponseCell(text: string, responseCode: string): string {
   const messageText = text.trim();
   const codeMacro = toWikiInlineCodeMacro(responseCode, 'json');
 
-  if (messageText && codeMacro) return `${toWikiCell(messageText)}<br/><br/>${codeMacro}`;
+  if (messageText && codeMacro) return `${toWikiCell(messageText)}{expand:title=example}${codeMacro}{expand}`;
   if (messageText) return toWikiCell(messageText);
-  if (codeMacro) return codeMacro;
+  if (codeMacro) return `{expand:title=example}${codeMacro}{expand}`;
   return EMPTY_WIKI_CELL;
 }
 
@@ -482,54 +482,14 @@ function renderRequestSection(section: ParsedSection): string[] {
     return lines;
   }
 
-  const { headers, otherRows, urlRow } = splitRequestRows(getRequestRows(section));
+  const { headers, otherRows } = splitRequestRows(getRequestRows(section));
   const requestError = section.error || section.clientError;
-  const authInfo = getRequestAuthInfo(section);
-  const requestUrl = section.requestUrl?.trim() || (urlRow?.example ?? '');
-  const requestMethod = section.requestMethod?.trim() || section.format.toUpperCase();
-  const requestProtocol = section.requestProtocol?.trim() || 'REST';
-  const externalRequestUrl = section.externalRequestUrl?.trim() || '';
-  const externalRequestMethod = section.externalRequestMethod?.trim() || 'POST';
-  const externalHeaders = (section.clientRows ?? []).filter((row) => row.source === 'header' && row.enabled !== false);
 
-  lines.push('');
-  lines.push('h3. Общее описание метода');
-  lines.push('');
-  if (requestUrl) {
-    lines.push(`*URL:* ${toWikiCell(requestUrl)}`);
-  }
-  lines.push(`*Метод:* ${toWikiCell(requestMethod)}`);
-  lines.push(`*Протокол:* ${toWikiCell(requestProtocol)}`);
-
-  if (authInfo) {
-    lines.push('');
-    lines.push('h3. Authorization');
-    lines.push('');
-    for (const detail of authInfo.details) {
-      lines.push(`*${escapeWiki(detail.label)}:* ${toWikiCell(detail.value)}`);
-    }
-  }
   if (headers.length > 0) {
     lines.push('');
     lines.push('h3. Headers');
     lines.push('');
     lines.push(...renderStructuredTable(headers, section));
-  }
-  if (section.domainModelEnabled) {
-    lines.push('');
-    lines.push('h3. Внешний вызов');
-    lines.push('');
-    if (externalRequestUrl) {
-      lines.push(`*Внешний URL:* ${toWikiCell(externalRequestUrl)}`);
-    }
-    lines.push(`*Метод:* ${toWikiCell(externalRequestMethod)}`);
-    lines.push(`*Протокол:* ${toWikiCell(requestProtocol)}`);
-  }
-  if (externalHeaders.length > 0) {
-    lines.push('');
-    lines.push('h3. Внешние headers');
-    lines.push('');
-    lines.push(...renderStructuredTable(externalHeaders, section));
   }
   if (requestError) {
     lines.push('');
@@ -652,7 +612,7 @@ function renderErrorsSection(section: ErrorsSection): string[] {
   return lines;
 }
 
-function renderWikiTemplateIntro(): string[] {
+function renderWikiTemplateIntro(sections: DocSection[]): string[] {
   const historyTable = wrapWikiTable([
     '||Версия||Описание||Исполнитель||Дата||Jira||',
     `|v.1|Создание документа|${EMPTY_WIKI_CELL}|${EMPTY_WIKI_CELL}|${EMPTY_WIKI_CELL}|`
@@ -665,9 +625,21 @@ function renderWikiTemplateIntro(): string[] {
     `|Ответственный разработчик / модуль|${EMPTY_WIKI_CELL}|`
   ]);
 
+  const requestSection = sections.find(
+    (s): s is Extract<DocSection, { kind: 'parsed' }> => s.kind === 'parsed' && s.sectionType === 'request'
+  );
+
+  const serverMethod = requestSection?.requestMethod ?? EMPTY_WIKI_CELL;
+  const serverUrl = requestSection?.requestUrl ?? EMPTY_WIKI_CELL;
+  const serverValue = serverMethod !== EMPTY_WIKI_CELL && serverUrl !== EMPTY_WIKI_CELL ? `${serverMethod} ${serverUrl}` : EMPTY_WIKI_CELL;
+
+  const clientMethod = requestSection?.domainModelEnabled ? (requestSection?.externalRequestMethod ?? EMPTY_WIKI_CELL) : EMPTY_WIKI_CELL;
+  const clientUrl = requestSection?.domainModelEnabled ? (requestSection?.externalRequestUrl ?? EMPTY_WIKI_CELL) : EMPTY_WIKI_CELL;
+  const clientValue = clientMethod !== EMPTY_WIKI_CELL && clientUrl !== EMPTY_WIKI_CELL ? `${clientMethod} ${clientUrl}` : EMPTY_WIKI_CELL;
+
   const commonInfoTable = wrapWikiTable([
-    `|Метод|${EMPTY_WIKI_CELL}|`,
-    `|Внешний URL|${EMPTY_WIKI_CELL}|`
+    `|Метод|${toWikiCell(serverValue)}|`,
+    `|Внешний URL|${toWikiCell(clientValue)}|`
   ]);
 
   return [
@@ -686,7 +658,7 @@ function renderWikiTemplateIntro(): string[] {
 }
 
 export function renderWikiDocument(sections: DocSection[]): string {
-  const lines: string[] = ['{toc}', '', ...renderWikiTemplateIntro()];
+  const lines: string[] = ['{toc}', '', ...renderWikiTemplateIntro(sections)];
 
   for (const section of sections) {
     const rendered =

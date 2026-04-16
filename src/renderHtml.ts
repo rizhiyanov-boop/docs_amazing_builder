@@ -1,5 +1,5 @@
 ﻿import { getRequestColumnLabel, getRequestColumnOrder } from './requestColumns';
-import { getRequestAuthInfo, getRequestHeaderRows, getRequestRows, requestHasRows, splitRequestRows } from './requestHeaders';
+import { getRequestHeaderRows, getRequestRows, requestHasRows, splitRequestRows } from './requestHeaders';
 import { richTextToHtml } from './richText';
 import { resolveSectionTitle } from './sectionTitles';
 import { buildInputFromRows } from './sourceSync';
@@ -251,23 +251,6 @@ function renderInfoNote(label: string, value: string): string {
   return `<div class="note"><b>${escapeHtml(label)}</b><br/>${renderTextValue(value)}</div>`;
 }
 
-function renderAuthDetails(section: ParsedSection): string {
-  const authInfo = getRequestAuthInfo(section);
-  if (!authInfo) return '';
-
-  return [
-    '<details open>',
-    `<summary>Authorization <span class="sumhint">${escapeHtml(authInfo.schemeLabel)}</span></summary>`,
-    '<div class="table-shell"><table>',
-    '<thead><tr><th>Параметр</th><th>Значение</th></tr></thead>',
-    '<tbody>',
-    ...authInfo.details.map((detail) => `<tr><td>${escapeHtml(detail.label)}</td><td>${renderCell(detail.value)}</td></tr>`),
-    '</tbody>',
-    '</table></div>',
-    '</details>'
-  ].join('');
-}
-
 function renderRequestSection(section: ParsedSection, interactive = true): string {
   const title = resolveSectionTitle(section.title);
   if (!section.enabled) {
@@ -281,7 +264,6 @@ function renderRequestSection(section: ParsedSection, interactive = true): strin
   const requestMethod = section.requestMethod?.trim() || section.format.toUpperCase();
   const requestProtocol = section.requestProtocol?.trim() || 'REST';
   const externalRequestUrl = section.externalRequestUrl?.trim() || '';
-  const externalRequestMethod = section.externalRequestMethod?.trim() || 'POST';
   const externalAuthHeader =
     section.externalAuthType === 'bearer'
       ? [{ field: 'Authorization', type: 'string', required: '+', description: 'Авторизация: Bearer token', example: `Bearer ${section.externalAuthTokenExample?.trim() || 'token'}` }]
@@ -320,10 +302,6 @@ function renderRequestSection(section: ParsedSection, interactive = true): strin
   const meta = [renderTag(requestMethod), renderTag(requestProtocol), renderTag(section.format.toUpperCase())].join(' ');
   const body = [
     renderInfoNote('Назначение', title),
-    `<details open><summary>Общее описание метода <span class="sumhint">${escapeHtml(requestProtocol)}</span></summary><div class="table-shell"><table><tbody><tr><td>URL</td><td>${renderCell(
-      requestUrl
-    )}</td></tr><tr><td>Метод</td><td>${renderCell(requestMethod)}</td></tr><tr><td>Протокол</td><td>${renderCell(requestProtocol)}</td></tr></tbody></table></div></details>`,
-    renderAuthDetails(section),
     headers.length > 0
       ? `<details open><summary>Headers <span class="sumhint">${headers.length} headers</span></summary>${renderStructuredTable(headers, section)}</details>`
       : '',
@@ -333,17 +311,6 @@ function renderRequestSection(section: ParsedSection, interactive = true): strin
     renderCodeBlock(`${section.id}-server-example`, 'Server request example', section.input, interactive, section.format),
     renderCodeBlock(`${section.id}-server-schema`, 'Server request JSON Schema', section.schemaInput ?? '', interactive, 'json'),
     renderCodeBlock(`${section.id}-server-curl`, 'Server cURL', serverCurl, interactive),
-    section.domainModelEnabled
-      ? `<details open><summary>Внешний вызов <span class="sumhint">${escapeHtml(requestProtocol)}</span></summary><div class="table-shell"><table><tbody><tr><td>Внешний URL</td><td>${renderCell(
-          externalRequestUrl
-        )}</td></tr><tr><td>Метод</td><td>${renderCell(externalRequestMethod)}</td></tr><tr><td>Протокол</td><td>${renderCell(requestProtocol)}</td></tr></tbody></table></div></details>`
-      : '',
-    section.domainModelEnabled && externalHeaders.length > 0
-      ? `<details open><summary>Внешние headers <span class="sumhint">${externalHeaders.length} headers</span></summary>${renderStructuredTable(
-          externalHeaders,
-          section
-        )}</details>`
-      : '',
     section.domainModelEnabled
       ? renderCodeBlock(`${section.id}-client-example`, 'Client request example', section.clientInput ?? '', interactive, section.clientFormat ?? 'json')
       : '',

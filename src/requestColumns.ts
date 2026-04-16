@@ -25,6 +25,10 @@ export function getRequestColumnLabel(section: ParsedSection, column: RequestCol
     return section.sectionType === 'response' ? 'Client response' : 'Client request';
   }
 
+  if (column === 'field' && (section.sectionType === 'request' || section.sectionType === 'response')) {
+    return section.sectionType === 'response' ? 'Server response' : 'Server request';
+  }
+
   return BASE_COLUMN_LABELS[column];
 }
 

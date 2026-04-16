@@ -70,6 +70,17 @@ function flattenJson(value: unknown, basePath = ''): ParsedRow[] {
 
   if (typeof value === 'object') {
     const rows: ParsedRow[] = [];
+    if (basePath) {
+      rows.push(
+        createParsedRow({
+          field: basePath,
+          type: 'object',
+          required: '+',
+          description: '',
+          example: STRUCTURED_EXAMPLE_PLACEHOLDER
+        })
+      );
+    }
     const entries = Object.entries(value as Record<string, unknown>);
     for (const [key, nested] of entries) {
       const nextPath = basePath ? `${basePath}.${key}` : key;
@@ -181,6 +192,18 @@ function flattenJsonSchemaNode(schema: JsonSchema, basePath: string, required: b
   }
 
   if (normalizedType === 'object') {
+    if (basePath) {
+      rows.push(
+        createParsedRow({
+          field: basePath,
+          type: 'object',
+          required: requiredMark,
+          description: schema.description ?? '',
+          example: schemaExample(schema, 'object')
+        })
+      );
+    }
+
     const requiredProps = new Set(schema.required ?? []);
     const properties = schema.properties ?? {};
 

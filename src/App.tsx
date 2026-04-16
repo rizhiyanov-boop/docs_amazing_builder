@@ -18,25 +18,76 @@ import {
   DEFAULT_BASIC_PASSWORD,
   DEFAULT_BASIC_USERNAME,
   DEFAULT_BEARER_TOKEN_EXAMPLE,
-  getEditorRequestRows,
   getInputDriftRows,
   getMappedClientField,
   getMappingOptions,
   getParsedRowKey,
-  getRequestHeaderRows,
   getPreviouslyUsedClientKeys,
   isAuthHeader,
   isDefaultRequestHeader,
-  isRequestMappingRow,
-  OPTIONAL_MARK
+  isRequestMappingRow
 } from './requestHeaders';
 import { renderHtmlDocument } from './renderHtml';
 import { getFlowExportFileName, renderProjectHtmlDocument, renderProjectWikiDocument } from './projectExport';
 import { editorElementToWikiText, editorHtmlToWikiText, escapeRichTextHtml, richTextToHtml } from './richText';
 import { renderWikiDocument } from './renderWiki';
 import { buildValidationRulesFromSchemaInput } from './schemaValidationRules';
-import { DEFAULT_SECTION_TITLE, resolveSectionTitle, sanitizeSections } from './sectionTitles';
+import {
+  getExternalRequestHeaderRowsForEditor,
+  getExternalSourceRows,
+  getRequestHeaderRowsForEditor,
+  getRowsRelevantToSourceFormat,
+  getSectionRows,
+  getSectionSideLabel,
+  isDualModelSection,
+  isRequestSection,
+  isResponseSection,
+  normalizeParsedRowsForSection,
+  normalizeRequestRowsForMethod,
+  validateSection,
+  withSectionRowIds
+} from './sectionHelpers';
+import { resolveSectionTitle, sanitizeSections } from './sectionTitles';
 import { buildInputFromRows } from './sourceSync';
+import {
+  getDuplicateValueSet,
+  getDynamicTextareaRows,
+  highlightCode,
+  STRUCTURED_EXAMPLE_PLACEHOLDER,
+  usesStructuredPlaceholder,
+  validateExampleValue,
+  validateJsonDraft
+} from './editorValueUtils';
+import {
+  cloneSectionForPaste,
+  createDiagramItem,
+  createErrorRow,
+  createInitialSections,
+  createParsedSection,
+  createSectionFromBlockType,
+  createValidationRuleRow,
+  getValidationCaseOptionsForSection,
+  normalizeLegacyErrorRowsInSections,
+  REQUIRED_OPTIONS,
+  RICH_TEXT_HIGHLIGHT_OPTIONS,
+  TYPE_OPTIONS_COMMON,
+  TYPE_OPTIONS_EXTENDED,
+  VALIDATION_CASE_OPTIONS
+} from './sectionFactories';
+import {
+  asWorkspaceProjectData as asWorkspaceProjectDataCore,
+  createDefaultFlow,
+  createDefaultProjectSections,
+  createMethodDocument,
+  createMethodId,
+  createOnboardingDemoWorkspace,
+  createProjectSectionId,
+  createWorkspaceSeed,
+  loadWorkspaceProject as loadWorkspaceProjectCore,
+  normalizeWorkspaceForMode as normalizeWorkspaceForModeCore,
+  sanitizeProjectFlows,
+  sanitizeProjectSections
+} from './workspaceBootstrap';
 import { ONBOARDING_FEATURES } from './onboarding/featureFlags';
 import { ONBOARDING_STEPS, evaluateOnboardingProgress, resolveOnboardingStep, type OnboardingStepId } from './onboarding/steps';
 import { loadOnboardingState, markOnboardingCompleted, markOnboardingStarted, saveOnboardingState } from './onboarding/storage';
@@ -76,12 +127,10 @@ import type {
   DiagramSection,
   DocSection,
   ErrorRow,
-  ErrorsSection,
   MethodDocument,
   MethodGroup,
   ParsedRow,
   ParsedSection,
-  ParsedSectionType,
   ParseFormat,
   ProjectFlow,
   ProjectData,
@@ -289,153 +338,6 @@ type SectionClipboardState = {
   section: DocSection;
 };
 
-function createProjectSectionId(): string {
-  return `project-section-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function createFlowId(): string {
-  return `flow-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function createFlowNodeId(prefix = 'node'): string {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function createDefaultProjectSections(): ProjectSection[] {
-  return [
-    {
-      id: createProjectSectionId(),
-      title: 'Overview',
-      enabled: true,
-      type: 'markdown',
-      content: '',
-      order: 0
-    },
-    {
-      id: createProjectSectionId(),
-      title: 'Business Rules',
-      enabled: true,
-      type: 'text',
-      content: '',
-      order: 1
-    }
-  ];
-}
-
-function createDefaultFlow(methodId?: string): ProjectFlow {
-  const startId = createFlowNodeId('start');
-  const methodNodeId = createFlowNodeId('method');
-  const endId = createFlowNodeId('end');
-  const nodes = [
-    {
-      id: startId,
-      type: 'start' as const,
-      position: { x: 80, y: 180 },
-      label: 'Start'
-    },
-    {
-      id: methodNodeId,
-      type: 'method' as const,
-      position: { x: 340, y: 180 },
-      label: 'Method',
-      methodRef: methodId ? { methodId } : undefined
-    },
-    {
-      id: endId,
-      type: 'end' as const,
-      position: { x: 600, y: 180 },
-      label: 'End'
-    }
-  ];
-  return {
-    id: createFlowId(),
-    name: 'Основной сценарий',
-    description: '',
-    nodes,
-    edges: [
-      {
-        id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        type: 'sequence',
-        fromNodeId: startId,
-        toNodeId: methodNodeId,
-        mappings: []
-      },
-      {
-        id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        type: 'sequence',
-        fromNodeId: methodNodeId,
-        toNodeId: endId,
-        mappings: []
-      }
-    ],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
-}
-
-function sanitizeProjectSections(rawSections: ProjectSection[] | undefined): ProjectSection[] {
-  if (!Array.isArray(rawSections)) return createDefaultProjectSections();
-  const sections = rawSections
-    .filter(Boolean)
-    .map((section, index) => ({
-      id: section.id || createProjectSectionId(),
-      title: section.title?.trim() || `Раздел ${index + 1}`,
-      enabled: section.enabled ?? true,
-      type: section.type ?? 'text',
-      content: section.content ?? '',
-      order: Number.isFinite(section.order) ? section.order : index
-    }))
-    .sort((left, right) => left.order - right.order)
-    .map((section, index) => ({ ...section, order: index }));
-  return sections.length > 0 ? sections : createDefaultProjectSections();
-}
-
-function sanitizeProjectFlows(rawFlows: ProjectFlow[] | undefined, methods: MethodDocument[]): ProjectFlow[] {
-  if (!Array.isArray(rawFlows) || rawFlows.length === 0) {
-    return [createDefaultFlow(methods[0]?.id)];
-  }
-
-  const sanitized = rawFlows
-    .filter(Boolean)
-    .map((flow, index) => ({
-      id: flow.id || createFlowId(),
-      name: flow.name?.trim() || `Flow ${index + 1}`,
-      description: flow.description ?? '',
-      nodes: Array.isArray(flow.nodes)
-        ? flow.nodes.map((node, nodeIndex) => ({
-            id: node.id || createFlowNodeId(`node-${nodeIndex + 1}`),
-            type: node.type ?? 'note',
-            position: {
-              x: Number.isFinite(node.position?.x) ? node.position.x : 80 + nodeIndex * 80,
-              y: Number.isFinite(node.position?.y) ? node.position.y : 120
-            },
-            label: node.label ?? '',
-            description: node.description ?? '',
-            actor: node.actor ?? '',
-            methodRef: node.methodRef,
-            noteContent: node.noteContent ?? '',
-            preconditions: Array.isArray(node.preconditions) ? node.preconditions : [],
-            postconditions: Array.isArray(node.postconditions) ? node.postconditions : []
-          }))
-        : [],
-      edges: Array.isArray(flow.edges)
-        ? flow.edges.map((edge) => ({
-            id: edge.id || `edge-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            type: 'sequence' as const,
-            fromNodeId: edge.fromNodeId,
-            toNodeId: edge.toNodeId,
-            label: edge.label ?? '',
-            condition: edge.condition ?? '',
-            mappings: Array.isArray(edge.mappings) ? edge.mappings : []
-          }))
-        : [],
-      createdAt: flow.createdAt || new Date().toISOString(),
-      updatedAt: flow.updatedAt || new Date().toISOString()
-    }));
-
-  return sanitized.length > 0 ? sanitized : [createDefaultFlow(methods[0]?.id)];
-}
-
 type ServerProjectPayload = {
   id: string;
   name: string;
@@ -540,636 +442,8 @@ function guessJsonSampleType(value: unknown): JsonImportSampleType {
   return 'request';
 }
 
-const TYPE_OPTIONS_COMMON = ['string', 'int', 'long', 'boolean', 'number', 'object', 'array', 'array_object', 'null'];
-const TYPE_OPTIONS_EXTENDED = [
-  'short',
-  'float',
-  'double',
-  'decimal',
-  'date',
-  'datetime',
-  'timestamp',
-  'uuid',
-  'enum',
-  'map',
-  'binary',
-  'file',
-  'array_string',
-  'array_int',
-  'array_long',
-  'array_number',
-  'array_boolean',
-  'array_array',
-  'array_null'
-];
-const REQUIRED_OPTIONS = ['+', OPTIONAL_MARK, '-'];
-const STRUCTURED_EXAMPLE_PLACEHOLDER = '-';
-const VALIDATION_CASE_OPTIONS = [
-  'NotNull',
-  'NotBlank',
-  'NotEmpty',
-  'Size',
-  'Positive',
-  'Negative',
-  'Past',
-  'Future',
-  'PastOrPresent',
-  'FutureOrPresent',
-  'Pattern',
-  'Digits',
-  'Custom'
-];
-
-const RICH_TEXT_HIGHLIGHT_OPTIONS = [
-  { value: '#fef08a', label: 'Желтый' },
-  { value: '#bbf7d0', label: 'Зеленый' },
-  { value: '#fde68a', label: 'Песочный' },
-  { value: '#fecdd3', label: 'Розовый' },
-  { value: '#bfdbfe', label: 'Синий' }
-] as const;
-
-function usesStructuredPlaceholder(type: string): boolean {
-  return ['object', 'array', 'array_object'].includes(type);
-}
-
-function createParsedSection(sectionType: ParsedSectionType, id = `custom-${sectionType}-${Date.now()}`): ParsedSection {
-  const isRequest = sectionType === 'request';
-
-  return {
-    id,
-    title: sectionType === 'request' ? 'Request' : sectionType === 'response' ? 'Response' : DEFAULT_SECTION_TITLE,
-    enabled: true,
-    kind: 'parsed',
-    sectionType,
-    format: isRequest ? 'curl' : 'json',
-    lastSyncedFormat: isRequest ? 'curl' : 'json',
-    input: '',
-    schemaInput: '',
-    rows: [],
-    error: '',
-    domainModelEnabled: sectionType !== 'generic' ? false : undefined,
-    clientFormat: sectionType !== 'generic' ? 'json' : undefined,
-    clientLastSyncedFormat: sectionType !== 'generic' ? 'json' : undefined,
-    clientInput: sectionType !== 'generic' ? '' : undefined,
-    clientSchemaInput: sectionType !== 'generic' ? '' : undefined,
-    clientRows: sectionType !== 'generic' ? [] : undefined,
-    clientError: sectionType !== 'generic' ? '' : undefined,
-    clientMappings: sectionType !== 'generic' ? {} : undefined,
-    authType: isRequest ? 'none' : undefined,
-    authHeaderName: isRequest ? DEFAULT_API_KEY_HEADER : undefined,
-    authTokenExample: isRequest ? DEFAULT_BEARER_TOKEN_EXAMPLE : undefined,
-    authUsername: isRequest ? DEFAULT_BASIC_USERNAME : undefined,
-    authPassword: isRequest ? DEFAULT_BASIC_PASSWORD : undefined,
-    authApiKeyExample: isRequest ? DEFAULT_API_KEY_EXAMPLE : undefined,
-    requestUrl: isRequest ? '' : undefined,
-    requestMethod: isRequest ? 'POST' : undefined,
-    requestProtocol: isRequest ? 'REST' : undefined,
-    externalRequestUrl: isRequest ? '' : undefined,
-    externalRequestMethod: isRequest ? 'POST' : undefined,
-    externalAuthType: isRequest ? 'none' : undefined,
-    externalAuthHeaderName: isRequest ? DEFAULT_API_KEY_HEADER : undefined,
-    externalAuthTokenExample: isRequest ? DEFAULT_BEARER_TOKEN_EXAMPLE : undefined,
-    externalAuthUsername: isRequest ? DEFAULT_BASIC_USERNAME : undefined,
-    externalAuthPassword: isRequest ? DEFAULT_BASIC_PASSWORD : undefined,
-    externalAuthApiKeyExample: isRequest ? DEFAULT_API_KEY_EXAMPLE : undefined
-  };
-}
-
-function createDiagramItem(id = `diagram-item-${Date.now()}`): DiagramItem {
-  return {
-    id,
-    title: '',
-    engine: 'mermaid',
-    code: '',
-    description: ''
-  };
-}
-
-function createDiagramSection(id = `custom-diagram-${Date.now()}`): DiagramSection {
-  return {
-    id,
-    title: 'Диаграмма',
-    enabled: true,
-    kind: 'diagram',
-    diagrams: [createDiagramItem()]
-  };
-}
-
-function createErrorRow(): ErrorRow {
-  return {
-    clientHttpStatus: '',
-    clientResponse: '',
-    clientResponseCode: '',
-    trigger: '',
-    errorType: '-',
-    serverHttpStatus: '',
-    internalCode: '',
-    message: '',
-    responseCode: ''
-  };
-}
-
-function createValidationRuleRow(): ValidationRuleRow {
-  return {
-    parameter: '',
-    validationCase: VALIDATION_CASE_OPTIONS[0],
-    condition: '',
-    cause: ''
-  };
-}
-
-function getValidationCaseOptionsForSection(section: ErrorsSection): string[] {
-  const options = new Set<string>(VALIDATION_CASE_OPTIONS);
-  for (const rule of section.validationRules) {
-    const value = rule.validationCase.trim();
-    if (value) options.add(value);
-  }
-  return Array.from(options);
-}
-
-function createErrorsSection(id = 'errors', title = 'Ошибки'): ErrorsSection {
-  return {
-    id,
-    title,
-    enabled: true,
-    kind: 'errors',
-    rows: [createErrorRow()],
-    validationRules: [createValidationRuleRow()]
-  };
-}
-
-function createSectionId(prefix = 'section'): string {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function cloneSectionForPaste(section: DocSection): DocSection {
-  const cloned = deepClone(section);
-  const nextSectionId = createSectionId(cloned.kind);
-
-  if (cloned.kind === 'diagram') {
-    return {
-      ...cloned,
-      id: nextSectionId,
-      diagrams: cloned.diagrams.map((diagram) => ({
-        ...diagram,
-        id: createSectionId('diagram-item')
-      }))
-    };
-  }
-
-  return {
-    ...cloned,
-    id: nextSectionId
-  };
-}
-
-function createSectionFromBlockType(blockType: AddableBlockType): DocSection {
-  if (blockType === 'request') {
-    return createParsedSection('request', createSectionId('request'));
-  }
-  if (blockType === 'response') {
-    return createParsedSection('response', createSectionId('response'));
-  }
-  if (blockType === 'error-logic') {
-    return createErrorsSection(createSectionId('errors'), 'Ошибки');
-  }
-  if (blockType === 'diagram') {
-    return createDiagramSection(createSectionId('diagram'));
-  }
-
-  return {
-    id: createSectionId('text'),
-    title: 'Новый раздел',
-    enabled: true,
-    kind: 'text',
-    value: ''
-  };
-}
-
-function normalizeLegacyErrorRowsInSections(sections: DocSection[]): DocSection[] {
-  let changed = false;
-
-  const nextSections = sections.map((section) => {
-    if (section.kind !== 'errors') return section;
-
-    let sectionChanged = false;
-    const nextRows = section.rows.map((row) => {
-      let nextRow = row;
-
-      if (!(row.clientResponseCode ?? '').trim()) {
-        const trimmedClientResponse = row.clientResponse.trim();
-        const looksLikeJson =
-          (trimmedClientResponse.startsWith('{') && trimmedClientResponse.endsWith('}'))
-          || (trimmedClientResponse.startsWith('[') && trimmedClientResponse.endsWith(']'));
-
-        if (looksLikeJson) {
-          nextRow = {
-            ...nextRow,
-            clientResponse: '',
-            clientResponseCode: row.clientResponse
-          };
-          sectionChanged = true;
-        }
-      }
-
-      const legacyCode = row.internalCode.trim();
-      if (legacyCode !== 'payments.transfer.validation.amount.invalid') return nextRow;
-
-      sectionChanged = true;
-      const normalizedInternalCode = '100101';
-      const preset = ERROR_CATALOG_BY_CODE.get(normalizedInternalCode);
-
-      return {
-        ...nextRow,
-        internalCode: normalizedInternalCode,
-        serverHttpStatus: nextRow.errorType === 'BusinessException' ? '422' : (preset?.httpStatus ?? nextRow.serverHttpStatus),
-        message: preset?.message ?? nextRow.message
-      };
-    });
-
-    if (!sectionChanged) return section;
-    changed = true;
-    return {
-      ...section,
-      rows: nextRows
-    };
-  });
-
-  return changed ? nextSections : sections;
-}
-
-function createInitialSections(): DocSection[] {
-  const processDiagramSection = createDiagramSection('process-diagram');
-  processDiagramSection.title = 'Диаграмма процесса';
-
-  return [
-    { id: 'goal', title: 'Цель', enabled: true, kind: 'text', value: '', required: true },
-    { id: 'functional', title: 'Функциональные требования', enabled: true, kind: 'text', value: '' },
-    processDiagramSection,
-    createParsedSection('request', 'request'),
-    createParsedSection('response', 'response'),
-    createErrorsSection('errors', 'Ошибки'),
-    { id: 'non-functional', title: 'Нефункциональные требования', enabled: true, kind: 'text', value: '' }
-  ];
-}
-
-function isRequestSection(section: ParsedSection): boolean {
-  return section.sectionType === 'request';
-}
-
-function isResponseSection(section: ParsedSection): boolean {
-  return section.sectionType === 'response';
-}
-
-function isDualModelSection(section: ParsedSection): boolean {
-  return isRequestSection(section) || isResponseSection(section);
-}
-
-function getSectionSideLabel(section: ParsedSection, target: ParseTarget): string {
-  const kind = isResponseSection(section) ? 'response' : 'request';
-  return `${target === 'client' ? 'Client' : 'Server'} ${kind}`;
-}
-
-function getSectionRows(section: ParsedSection): ParsedRow[] {
-  return isDualModelSection(section) ? getEditorRequestRows(section) : section.rows;
-}
-
-function getRequestHeaderRowsForEditor(section: ParsedSection): ParsedRow[] {
-  return isRequestSection(section) ? getRequestHeaderRows(section) : [];
-}
-
-function getExternalRequestHeaderRowsForEditor(section: ParsedSection): ParsedRow[] {
-  if (!isRequestSection(section)) return [];
-  return [...(section.clientRows ?? []).filter((row) => row.source === 'header')].sort((left, right) => left.field.localeCompare(right.field));
-}
-
-function getExternalAuthHeaderRows(section: ParsedSection): ParsedRow[] {
-  if (!isRequestSection(section)) return [];
-
-  if (section.externalAuthType === 'bearer') {
-    const tokenExample = section.externalAuthTokenExample?.trim() || DEFAULT_BEARER_TOKEN_EXAMPLE;
-    return [{
-      field: 'Authorization',
-      sourceField: 'Authorization',
-      origin: 'generated',
-      enabled: true,
-      type: 'string',
-      required: '+',
-      description: 'Авторизация: Bearer token',
-      example: `Bearer ${tokenExample}`,
-      source: 'header'
-    }];
-  }
-
-  if (section.externalAuthType === 'basic') {
-    return [{
-      field: 'Authorization',
-      sourceField: 'Authorization',
-      origin: 'generated',
-      enabled: true,
-      type: 'string',
-      required: '+',
-      description: 'Авторизация: Basic auth',
-      example: 'Basic <base64(username:password)>',
-      source: 'header'
-    }];
-  }
-
-  if (section.externalAuthType === 'api-key') {
-    const headerName = section.externalAuthHeaderName?.trim() || DEFAULT_API_KEY_HEADER;
-    const apiKeyExample = section.externalAuthApiKeyExample?.trim() || DEFAULT_API_KEY_EXAMPLE;
-    return [{
-      field: headerName,
-      sourceField: headerName,
-      origin: 'generated',
-      enabled: true,
-      type: 'string',
-      required: '+',
-      description: 'Авторизация: API key',
-      example: apiKeyExample,
-      source: 'header'
-    }];
-  }
-
-  return [];
-}
-
-function getExternalSourceRows(section: ParsedSection): ParsedRow[] {
-  const clientRows = section.clientRows ?? [];
-  const authRows = getExternalAuthHeaderRows(section);
-  const existingHeaderNames = new Set(clientRows.filter((row) => row.source === 'header').map((row) => row.field.trim().toLowerCase()));
-  const nextRows = [...clientRows];
-
-  for (const authRow of authRows) {
-    if (!existingHeaderNames.has(authRow.field.trim().toLowerCase())) {
-      nextRows.unshift(authRow);
-    }
-  }
-
-  return nextRows;
-}
-
-function normalizeParsedRowsForSection(section: ParsedSection, rows: ParsedRow[]): ParsedRow[] {
-  if (isDualModelSection(section)) {
-    return rows.map((row) => ({
-      ...row,
-      source: row.source ?? 'body'
-    }));
-  }
-
-  return rows.map((row) => ({
-    ...row,
-    source: row.source ?? 'parsed'
-  }));
-}
-
-function getRowsRelevantToSourceFormat(rows: ParsedRow[], format: ParseFormat): ParsedRow[] {
-  if (format !== 'json') return rows;
-  return rows.filter((row) => row.source !== 'header' && row.source !== 'url' && row.source !== 'query');
-}
-
-function withRowIds(rows: ParsedRow[]): ParsedRow[] {
-  return rows.map((row) => ({
-    ...row,
-    id: row.id || createSectionId('row')
-  }));
-}
-
-function withSectionRowIds(section: DocSection): DocSection {
-  if (section.kind !== 'parsed') return section;
-  return {
-    ...section,
-    rows: withRowIds(section.rows),
-    clientRows: section.clientRows ? withRowIds(section.clientRows) : section.clientRows
-  };
-}
-
-function normalizeRequestRowsForMethod(rows: ParsedRow[], method: RequestMethod | undefined): ParsedRow[] {
-  const targetSource = method === 'GET' ? 'query' : 'body';
-  return rows.map((row) => {
-    if (row.source === 'header' || row.source === 'url') return row;
-    return { ...row, source: targetSource };
-  });
-}
-
-function validateSection(section: DocSection): string {
-  if (section.kind === 'errors') return '';
-
-  if (section.kind === 'diagram') {
-    const hasContent = section.diagrams.some((diagram) => diagram.code.trim());
-    if (!hasContent) return '';
-    const invalid = section.diagrams.find((diagram) => !diagram.code.trim());
-    if (invalid) return 'Заполните код всех добавленных диаграмм или удалите пустые';
-    return '';
-  }
-
-  if (section.kind !== 'parsed') return '';
-
-  if (isDualModelSection(section)) {
-    const hasServerInput = Boolean(section.input.trim());
-    const hasServerSchema = Boolean((section.schemaInput ?? '').trim());
-    const hasClientInput = section.domainModelEnabled ? Boolean(section.clientInput?.trim()) : false;
-    const hasClientSchema = section.domainModelEnabled ? Boolean((section.clientSchemaInput ?? '').trim()) : false;
-
-    if (section.error) return `Секция заблокирована: ${section.error}`;
-    if (section.clientError) return `${getSectionSideLabel(section, 'client')} заблокирован: ${section.clientError}`;
-    if (!hasServerInput && !hasServerSchema && !hasClientInput && !hasClientSchema && getSectionRows(section).length === 0) return '';
-    if (getSectionRows(section).length === 0) return 'Нет распарсенных строк';
-    return '';
-  }
-
-  if (!section.input.trim() && !(section.schemaInput ?? '').trim()) return 'Введите исходные данные или JSON Schema для парсинга';
-  if (section.error) return `Секция заблокирована: ${section.error}`;
-  if (section.rows.length === 0) return 'Нет распарсенных строк';
-  return '';
-}
-
-function createMethodId(): string {
-  return `method-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function createMethodDocument(name = DEFAULT_METHOD_NAME, sections: DocSection[] = createInitialSections(), id = createMethodId()): MethodDocument {
-  return {
-    id,
-    name,
-    updatedAt: new Date().toISOString(),
-    sections
-  };
-}
-
-function createWorkspaceSeed(): WorkspaceProjectData {
-  const method = createMethodDocument();
-  return {
-    version: 3,
-    projectName: DEFAULT_PROJECT_NAME,
-    updatedAt: new Date().toISOString(),
-    activeMethodId: method.id,
-    methods: [method],
-    groups: [],
-    projectSections: createDefaultProjectSections(),
-    flows: [createDefaultFlow(method.id)]
-  };
-}
-
-function createOnboardingDemoWorkspace(): WorkspaceProjectData {
-  const demoRequestInput = [
-    "curl --request POST 'https://api.demo.local/v1/payments/transfer' ",
-    "--header 'Authorization: Bearer <token>' ",
-    "--header 'Content-Type: application/json' ",
-    "--data '{",
-    '  "senderAccount": "40817810000000000123",',
-    '  "receiverAccount": "40817810000000000999",',
-    '  "amount": 150000,',
-    '  "currency": "UZS",',
-    '  "comment": "Оплата по договору 42"',
-    "}'"
-  ].join(' ');
-
-  const demoResponseInput = JSON.stringify(
-    {
-      transferId: 'trf-20260319-0001',
-      status: 'ACCEPTED',
-      createdAt: '2026-03-19T08:15:00Z',
-      fee: {
-        amount: 2500,
-        currency: 'UZS'
-      }
-    },
-    null,
-    2
-  );
-
-  const baseSections = createInitialSections();
-  const demoSections: DocSection[] = baseSections.map((section): DocSection => {
-    if (section.kind === 'text' && section.id === 'goal') {
-      return {
-        ...section,
-        value:
-          'Документация описывает перевод между счетами внутри банка через REST endpoint.\n\nЦель: показать контракт запроса и ответа для интеграции клиентских систем.'
-      };
-    }
-
-    if (section.kind === 'text' && section.id === 'functional') {
-      return {
-        ...section,
-        value:
-          '1. Проверка авторизации и прав на списание.\n2. Валидация суммы и валюты.\n3. Создание транзакции и возврат transferId.'
-      };
-    }
-
-    if (section.kind === 'parsed' && section.sectionType === 'request') {
-      const serverRows = parseToRows('curl', demoRequestInput);
-      return {
-        ...section,
-        format: 'curl' as const,
-        lastSyncedFormat: 'curl' as const,
-        input: demoRequestInput,
-        rows: serverRows,
-        error: '',
-        requestUrl: 'https://api.demo.local/v1/payments/transfer',
-        requestMethod: 'POST' as const
-      };
-    }
-
-    if (section.kind === 'parsed' && section.sectionType === 'response') {
-      const wrappedInput = section.domainModelEnabled ? demoResponseInput : wrapNonDomainResponseJson(demoResponseInput);
-      const serverRows = parseToRows('json', wrappedInput);
-      return {
-        ...section,
-        format: 'json' as const,
-        lastSyncedFormat: 'json' as const,
-        input: wrappedInput,
-        rows: serverRows,
-        error: ''
-      };
-    }
-
-    if (section.kind === 'diagram') {
-      return {
-        ...section,
-        diagrams: [
-          {
-            ...section.diagrams[0],
-            title: 'Основной поток перевода',
-            engine: 'mermaid',
-            code: [
-              'sequenceDiagram',
-              'participant Client',
-              'participant API',
-              'participant Core',
-              'Client->>API: POST /payments/transfer',
-              'API->>Core: Validate and reserve funds',
-              'Core-->>API: transfer created',
-              'API-->>Client: 200 ACCEPTED + transferId'
-            ].join('\n'),
-            description: 'Базовый happy-path: запрос, проверка, создание перевода, подтверждение клиенту.'
-          }
-        ]
-      };
-    }
-
-    if (section.kind === 'errors') {
-      return {
-        ...section,
-        rows: [
-          {
-            clientHttpStatus: '400',
-            clientResponse: 'Некорректная сумма перевода',
-            clientResponseCode: '{"code":"VAL_001","message":"Invalid amount"}',
-            trigger: 'Сумма <= 0 или превышен лимит клиента',
-            errorType: 'BusinessException',
-            serverHttpStatus: '422',
-            internalCode: '100101',
-            message: ERROR_CATALOG_BY_CODE.get('100101')?.message ?? 'Bad request sent to the system',
-            responseCode: '{"code":"100101","message":"Bad request sent to the system"}'
-          }
-        ],
-        validationRules: [
-          {
-            parameter: 'amount',
-            validationCase: 'max/min',
-            condition: 'amount > 0 and amount <= dailyLimit',
-            cause: 'Ограничения тарифа и антифрод политики'
-          }
-        ]
-      };
-    }
-
-    return section;
-  });
-
-  const method = createMethodDocument('Демо: Перевод между счетами', demoSections);
-  return {
-    version: 3,
-    projectName: 'Демо проект',
-    updatedAt: new Date().toISOString(),
-    activeMethodId: method.id,
-    methods: [method],
-    groups: [],
-    projectSections: createDefaultProjectSections(),
-    flows: [createDefaultFlow(method.id)]
-  };
-}
-
 function normalizeWorkspaceForMode(workspace: WorkspaceProjectData): WorkspaceProjectData {
-  if (ENABLE_MULTI_METHODS) {
-    return {
-      ...workspace,
-      projectSections: sanitizeProjectSections(workspace.projectSections),
-      flows: sanitizeProjectFlows(workspace.flows, workspace.methods)
-    };
-  }
-
-  const resolvedMethod = workspace.methods.find((method) => method.id === workspace.activeMethodId) ?? workspace.methods[0] ?? createMethodDocument();
-  return {
-    ...workspace,
-    projectName: normalizeProjectName(workspace.projectName),
-    activeMethodId: resolvedMethod.id,
-    methods: [resolvedMethod],
-    groups: [],
-    projectSections: sanitizeProjectSections(workspace.projectSections),
-    flows: sanitizeProjectFlows(workspace.flows, [resolvedMethod])
-  };
+  return normalizeWorkspaceForModeCore(workspace, ENABLE_MULTI_METHODS);
 }
 
 function asWorkspaceProjectData(
@@ -1180,27 +454,19 @@ function asWorkspaceProjectData(
   projectSections: ProjectSection[] = createDefaultProjectSections(),
   flows: ProjectFlow[] = [createDefaultFlow(methods[0]?.id)]
 ): WorkspaceProjectData {
-  const normalizedMethods = methods.length > 0 ? methods : [createMethodDocument()];
-  const resolvedActiveMethodId = normalizedMethods.some((method) => method.id === activeMethodId)
-    ? activeMethodId
-    : normalizedMethods[0].id;
-
-  const workspace: WorkspaceProjectData = {
-    version: 3,
-    projectName: normalizeProjectName(projectName),
-    updatedAt: new Date().toISOString(),
-    activeMethodId: resolvedActiveMethodId,
-    methods: normalizedMethods.map((method) => ({
-      ...method,
-      updatedAt: method.updatedAt || new Date().toISOString(),
-      sections: sanitizeSections(method.sections).map(withSectionRowIds)
-    })),
+  return asWorkspaceProjectDataCore(
+    projectName,
+    methods,
+    activeMethodId,
     groups,
-    projectSections: sanitizeProjectSections(projectSections),
-    flows: sanitizeProjectFlows(flows, normalizedMethods)
-  };
+    projectSections,
+    flows,
+    ENABLE_MULTI_METHODS
+  );
+}
 
-  return normalizeWorkspaceForMode(workspace);
+function loadWorkspaceProject(): WorkspaceProjectData {
+  return loadWorkspaceProjectCore(STORAGE_KEY, ENABLE_MULTI_METHODS);
 }
 
 function slugifyMethodFileName(value: string): string {
@@ -1211,72 +477,6 @@ function slugifyMethodFileName(value: string): string {
     .replace(/^-+|-+$/g, '');
 
   return slug || 'method';
-}
-
-function loadWorkspaceProject(): WorkspaceProjectData {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return createWorkspaceSeed();
-    const parsed = JSON.parse(raw) as WorkspaceProjectData | ProjectData;
-
-    if ('methods' in parsed && Array.isArray(parsed.methods)) {
-      const sanitizedMethods = parsed.methods
-        .filter((method) => method && Array.isArray(method.sections))
-        .map((method, index) => ({
-          id: method.id || createMethodId(),
-          name: method.name?.trim() || `Метод ${index + 1}`,
-          updatedAt: method.updatedAt || new Date().toISOString(),
-          sections: sanitizeSections(method.sections).map(withSectionRowIds)
-        }));
-
-      if (sanitizedMethods.length === 0) return createWorkspaceSeed();
-
-      const groups = Array.isArray(parsed.groups)
-        ? parsed.groups.map((group) => ({
-            id: group.id || `group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-            name: group.name?.trim() || 'Новая цепочка',
-            methodIds: Array.isArray(group.methodIds) ? group.methodIds.filter(Boolean) : [],
-            links: Array.isArray(group.links) ? group.links : []
-          }))
-        : [];
-
-      const activeMethodId =
-        parsed.activeMethodId && sanitizedMethods.some((method) => method.id === parsed.activeMethodId)
-          ? parsed.activeMethodId
-          : sanitizedMethods[0].id;
-
-      const workspace: WorkspaceProjectData = {
-        version: 3,
-        projectName: normalizeProjectName(parsed.projectName),
-        updatedAt: parsed.updatedAt || new Date().toISOString(),
-        activeMethodId,
-        methods: sanitizedMethods,
-        groups,
-        projectSections: sanitizeProjectSections(parsed.projectSections),
-        flows: sanitizeProjectFlows(parsed.flows, sanitizedMethods)
-      };
-
-      return normalizeWorkspaceForMode(workspace);
-    }
-
-    if ('sections' in parsed && Array.isArray(parsed.sections)) {
-      const legacyMethod = createMethodDocument(DEFAULT_METHOD_NAME, sanitizeSections(parsed.sections));
-      return {
-        version: 3,
-        projectName: DEFAULT_PROJECT_NAME,
-        updatedAt: parsed.updatedAt || new Date().toISOString(),
-        activeMethodId: legacyMethod.id,
-        methods: [legacyMethod],
-        groups: [],
-        projectSections: createDefaultProjectSections(),
-        flows: [createDefaultFlow(legacyMethod.id)]
-      };
-    }
-
-    return createWorkspaceSeed();
-  } catch {
-    return createWorkspaceSeed();
-  }
 }
 
 function downloadText(filename: string, content: string): void {
@@ -1301,163 +501,6 @@ function reorderSections(list: DocSection[], fromId: string, toId: string): DocS
 
 function formatTime(date: Date): string {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
-function escapeCodeHtml(value: string): string {
-  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
-}
-
-function wrapCodeToken(kind: string, value: string): string {
-  return `<span class="code-token ${kind}">${escapeCodeHtml(value)}</span>`;
-}
-
-function highlightJsonCode(value: string): string {
-  let index = 0;
-  let result = '';
-
-  while (index < value.length) {
-    const char = value[index];
-
-    if (char === '"') {
-      let end = index + 1;
-      let escaped = false;
-      while (end < value.length) {
-        const current = value[end];
-        if (current === '"' && !escaped) break;
-        escaped = current === '\\' && !escaped;
-        if (current !== '\\') escaped = false;
-        end += 1;
-      }
-
-      const token = value.slice(index, Math.min(end + 1, value.length));
-      let lookahead = end + 1;
-      while (lookahead < value.length && /\s/.test(value[lookahead])) lookahead += 1;
-      const kind = value[lookahead] === ':' ? 'code-key' : 'code-string';
-      result += wrapCodeToken(kind, token);
-      index = Math.min(end + 1, value.length);
-      continue;
-    }
-
-    if ('{}[]:,'.includes(char)) {
-      result += wrapCodeToken('code-punctuation', char);
-      index += 1;
-      continue;
-    }
-
-    const literalMatch = value.slice(index).match(/^(true|false|null)\b/);
-    if (literalMatch) {
-      const token = literalMatch[1];
-      const kind = token === 'null' ? 'code-null' : 'code-boolean';
-      result += wrapCodeToken(kind, token);
-      index += token.length;
-      continue;
-    }
-
-    const numberMatch = value.slice(index).match(/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/);
-    if (numberMatch) {
-      const token = numberMatch[0];
-      result += wrapCodeToken('code-number', token);
-      index += token.length;
-      continue;
-    }
-
-    result += escapeCodeHtml(char);
-    index += 1;
-  }
-
-  return result;
-}
-
-function highlightCurlCode(value: string): string {
-  return escapeCodeHtml(value)
-    .replace(/\b(curl)\b/g, '<span class="code-token code-keyword">$1</span>')
-    .replace(/(^|\s)(--?[A-Za-z-]+)/g, '$1<span class="code-token code-flag">$2</span>')
-    .replace(/(&quot;https?:\/\/.*?&quot;)/g, '<span class="code-token code-url">$1</span>')
-    .replace(/(&quot;.*?&quot;|'.*?')/g, '<span class="code-token code-string">$1</span>');
-}
-
-function highlightCode(format: ParseFormat, value: string): string {
-  if (format === 'json') return highlightJsonCode(value);
-  return highlightCurlCode(value);
-}
-
-function getDuplicateValueSet(rows: ParsedRow[]): Set<string> {
-  const counts = new Map<string, number>();
-
-  for (const row of rows) {
-    const value = row.field.trim();
-    if (!value) continue;
-    counts.set(value, (counts.get(value) ?? 0) + 1);
-  }
-
-  return new Set(
-    Array.from(counts.entries())
-      .filter(([, count]) => count > 1)
-      .map(([value]) => value)
-  );
-}
-
-function typeRequiresJsonExample(type: string): boolean {
-  return [
-    'object',
-    'map',
-    'array',
-    'array_object',
-    'array_string',
-    'array_int',
-    'array_long',
-    'array_number',
-    'array_boolean',
-    'array_array',
-    'array_null'
-  ].includes(type);
-}
-
-function validateExampleValue(example: string, type: string): string {
-  const trimmed = example.trim();
-  if (!trimmed) return '';
-  if (usesStructuredPlaceholder(type) && trimmed === STRUCTURED_EXAMPLE_PLACEHOLDER) return '';
-
-  const looksLikeJson = (trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'));
-  const mustBeJson = typeRequiresJsonExample(type) || looksLikeJson;
-
-  if (!mustBeJson) return '';
-
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (type.startsWith('array') && !Array.isArray(parsed)) {
-      return 'Для выбранного типа пример должен быть JSON-массивом';
-    }
-    if ((type === 'object' || type === 'map' || type === 'array_object') && (parsed === null || Array.isArray(parsed) || typeof parsed !== 'object')) {
-      return 'Для выбранного типа пример должен быть JSON-объектом';
-    }
-    return '';
-  } catch {
-    return 'Пример должен быть валидным JSON';
-  }
-}
-
-function validateJsonDraft(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) return '';
-
-  const startsLikeJson = trimmed.startsWith('{') || trimmed.startsWith('[');
-  const endsLikeJson = trimmed.endsWith('}') || trimmed.endsWith(']');
-  if (!startsLikeJson && !endsLikeJson) return '';
-
-  try {
-    JSON.parse(trimmed);
-    return '';
-  } catch {
-    return 'Client Response похож на JSON, но содержит ошибку синтаксиса';
-  }
-}
-
-function getDynamicTextareaRows(value: string, minRows = 1, maxRows = 8): number {
-  const normalized = value.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
-  const lines = normalized.split('\n');
-  const wrappedLineEstimate = lines.reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / 56)), 0);
-  return Math.max(minRows, Math.min(maxRows, wrappedLineEstimate));
 }
 
 export default function App() {

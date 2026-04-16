@@ -6,8 +6,10 @@ describe('parsers', () => {
     const rows = parseToRows('json', '{"id":1,"user":{"name":"Alice"},"items":[{"active":true}]}');
 
     expect(rows.some((row) => row.field === 'id' && row.type === 'int')).toBe(true);
+    expect(rows.some((row) => row.field === 'user' && row.type === 'object')).toBe(true);
     expect(rows.some((row) => row.field === 'user.name' && row.type === 'string')).toBe(true);
     expect(rows.some((row) => row.field === 'items' && row.type === 'array_object')).toBe(true);
+    expect(rows.some((row) => row.field === 'items[0]' && row.type === 'object')).toBe(true);
     expect(rows.some((row) => row.field === 'items[0].active' && row.type === 'boolean')).toBe(true);
   });
 
@@ -99,6 +101,7 @@ describe('parsers', () => {
     expect(rows.some((row) => row.field === 'globId' && row.type === 'string' && row.required === '+')).toBe(true);
     expect(rows.some((row) => row.field === 'amount' && row.type === 'number' && row.required === '-')).toBe(true);
     expect(rows.some((row) => row.field === 'items' && row.type === 'array_object')).toBe(true);
+    expect(rows.some((row) => row.field === 'items[0]' && row.type === 'object')).toBe(true);
     expect(rows.some((row) => row.field === 'items[0].id' && row.type === 'int')).toBe(true);
     expect(rows.some((row) => row.field === 'items[0].active' && row.type === 'boolean')).toBe(true);
   });

@@ -169,6 +169,7 @@ const MAX_SIDEBAR_WIDTH = 520;
 const COMPACT_LAYOUT_MEDIA_QUERY = '(max-width: 64rem)';
 const EMPTY_SECTIONS: DocSection[] = [];
 const ENABLE_MULTI_METHODS = true;
+const ENABLE_SCROLL_SECTION_SYNC = false;
 const DEFAULT_RICH_TEXT_HIGHLIGHT = '#fef08a';
 
 function clampTableFieldColumnWidth(value: number): number {
@@ -2166,6 +2167,7 @@ export default function App() {
   const activeTextSection = selectedSection?.kind === 'text' ? selectedSection : null;
 
   useEffect(() => {
+    if (!ENABLE_SCROLL_SECTION_SYNC) return;
     if (tab !== 'editor') return;
     if (editingField || editingRequestCell || editingHeaderCell || editingTitle || editingSource || editingSchema || editingMappingCell) return;
     if (typeof window === 'undefined' || typeof window.IntersectionObserver !== 'function') return;
@@ -7634,7 +7636,8 @@ export default function App() {
               {tab === 'editor' && workspaceScope === 'methods' && (
                 <div className="editor-stream">
                   {sections.map((section) => {
-                    const isActiveSection = selectedSection?.id === section.id;
+                    const isSelectedSection = selectedSection?.id === section.id;
+                    const isActiveSection = true;
                     const isJumpHighlighted = sectionJumpHighlightId === section.id;
                     return (
                       <section
@@ -7642,6 +7645,12 @@ export default function App() {
                         id={`section-${section.id}`}
                         data-section-id={section.id}
                         className={`panel editor-section ${isActiveSection ? 'editor-section-active' : ''} ${isJumpHighlighted ? 'editor-section-jump' : ''}`}
+                        onMouseDown={() => {
+                          if (selectedId !== section.id) {
+                            setSelectedId(section.id);
+                            suppressObserverSelectionUntilRef.current = Date.now() + 750;
+                          }
+                        }}
                         ref={(node) => {
                           if (node) {
                             sectionAnchorRefs.current.set(section.id, node);
@@ -7656,7 +7665,7 @@ export default function App() {
                           </div>
                           <div className="row gap">
                             {renderSectionActionCluster(section, 'header')}
-                            {isActiveSection && (
+                            {isSelectedSection && (
                               <button
                                 className="icon-button danger section-delete-btn"
                                 type="button"
@@ -7680,7 +7689,7 @@ export default function App() {
 
                         {section.kind === 'text' && (
                           <div className="stack">
-                            {isActiveSection ? (
+                            {isSelectedSection ? (
                               <>
                                 <div className="editor-toolbar-shell" data-onboarding-anchor="refine-structure">
                                   <div className="editor-toolbar-head">

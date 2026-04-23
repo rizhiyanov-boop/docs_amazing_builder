@@ -1,0 +1,96 @@
+{
+  "version": 3,
+  "updatedAt": "2026-04-23T20:30:00.000Z",
+  "methods": [
+    {
+      "id": "method_orders_create",
+      "name": "Orders Create",
+      "updatedAt": "2026-04-23T20:30:00.000Z",
+      "sections": [
+        {
+          "id": "a_goal",
+          "title": "Goal",
+          "enabled": true,
+          "kind": "text",
+          "value": "Create a new order in OMS"
+        },
+        {
+          "id": "a_request",
+          "title": "Request",
+          "enabled": true,
+          "kind": "parsed",
+          "sectionType": "request",
+          "format": "json",
+          "lastSyncedFormat": "json",
+          "requestMethod": "POST",
+          "requestProtocol": "REST",
+          "requestUrl": "/api/v1/orders",
+          "authType": "bearer",
+          "authHeaderName": "Authorization",
+          "authTokenExample": "Bearer <token>",
+          "input": "{\n  \"orderId\": \"ORD-1001\",\n  \"customerId\": \"C-501\",\n  \"amount\": 12500,\n  \"currency\": \"USD\",\n  \"items\": [\n    {\n      \"sku\": \"SKU-1\",\n      \"qty\": 2\n    }\n  ]\n}",
+          "rows": [
+            { "id": "a_r1", "field": "orderId", "sourceField": "orderId", "origin": "parsed", "enabled": true, "type": "string", "required": "+", "description": "Order identifier", "example": "ORD-1001", "source": "body" },
+            { "id": "a_r2", "field": "customerId", "sourceField": "customerId", "origin": "parsed", "enabled": true, "type": "string", "required": "+", "description": "Customer ID", "example": "C-501", "source": "body" },
+            { "id": "a_r3", "field": "amount", "sourceField": "amount", "origin": "parsed", "enabled": true, "type": "int", "required": "+", "description": "Amount in cents", "example": "12500", "source": "body" },
+            { "id": "a_r4", "field": "currency", "sourceField": "currency", "origin": "parsed", "enabled": true, "type": "string", "required": "+", "description": "ISO currency", "example": "USD", "source": "body" },
+            { "id": "a_r5", "field": "items[0].sku", "sourceField": "items[0].sku", "origin": "parsed", "enabled": true, "type": "string", "required": "+", "description": "Item SKU", "example": "SKU-1", "source": "body" },
+            { "id": "a_r6", "field": "items[0].qty", "sourceField": "items[0].qty", "origin": "parsed", "enabled": true, "type": "int", "required": "+", "description": "Quantity", "example": "2", "source": "body" }
+          ],
+          "error": ""
+        },
+        {
+          "id": "a_response",
+          "title": "Response",
+          "enabled": true,
+          "kind": "parsed",
+          "sectionType": "response",
+          "format": "json",
+          "lastSyncedFormat": "json",
+          "input": "{\n  \"orderId\": \"ORD-1001\",\n  \"status\": \"created\",\n  \"createdAt\": \"2026-04-23T20:30:00Z\",\n  \"total\": 12500\n}",
+          "rows": [
+            { "id": "a_s1", "field": "orderId", "sourceField": "orderId", "origin": "parsed", "enabled": true, "type": "string", "required": "+", "description": "Order identifier", "example": "ORD-1001", "source": "body" },
+            { "id": "a_s2", "field": "status", "sourceField": "status", "origin": "parsed", "enabled": true, "type": "string", "required": "+", "description": "Order status", "example": "created", "source": "body" },
+            { "id": "a_s3", "field": "createdAt", "sourceField": "createdAt", "origin": "parsed", "enabled": true, "type": "string", "required": "+", "description": "Creation timestamp", "example": "2026-04-23T20:30:00Z", "source": "body" },
+            { "id": "a_s4", "field": "total", "sourceField": "total", "origin": "parsed", "enabled": true, "type": "int", "required": "+", "description": "Total in cents", "example": "12500", "source": "body" }
+          ],
+          "error": ""
+        },
+        {
+          "id": "a_errors",
+          "title": "Errors",
+          "enabled": true,
+          "kind": "errors",
+          "rows": [
+            {
+              "clientHttpStatus": "400",
+              "clientResponse": "{\"error\":\"validation_failed\"}",
+              "clientResponseCode": "ORD_400_01",
+              "trigger": "amount <= 0",
+              "errorType": "BusinessException",
+              "serverHttpStatus": "400",
+              "internalCode": "ORDER_VALIDATION_ERROR",
+              "message": "Invalid request payload",
+              "responseCode": "{\"code\":\"ORDER_VALIDATION_ERROR\"}"
+            }
+          ],
+          "validationRules": [
+            {
+              "parameter": "amount",
+              "validationCase": "Positive",
+              "condition": "amount > 0",
+              "cause": "Amount must be positive"
+            },
+            {
+              "parameter": "currency",
+              "validationCase": "NotBlank",
+              "condition": "currency != ''",
+              "cause": "Currency is required"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "groups": []
+}

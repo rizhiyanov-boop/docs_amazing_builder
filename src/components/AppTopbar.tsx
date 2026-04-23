@@ -31,7 +31,7 @@ type AppTopbarProps = {
   onboardingStepHint: string;
   onboardingPrimaryActionLabel: string;
   onOpenProjectImport: () => void;
-  onImportProjectJson: (file: File | undefined) => void;
+  onImportProjectJson: (files: File[]) => void;
   onExportProjectJson: () => void;
   onExportMockServiceJson: () => void;
   onExportFullProjectHtml: () => void;
@@ -122,8 +122,13 @@ export function AppTopbar({
             ref={importInputRef}
             className="hidden-file-input"
             type="file"
+            multiple
             accept="application/json"
-            onChange={(event) => onImportProjectJson(event.target.files?.[0])}
+            onChange={(event) => {
+              const files = Array.from(event.target.files ?? []);
+              onImportProjectJson(files);
+              event.currentTarget.value = '';
+            }}
           />
           <button
             className="ghost topbar-action topbar-format-btn"

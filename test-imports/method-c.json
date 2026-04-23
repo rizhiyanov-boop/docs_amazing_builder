@@ -1,0 +1,88 @@
+{
+  "version": 3,
+  "updatedAt": "2026-04-23T20:32:00.000Z",
+  "methods": [
+    {
+      "id": "method_payments_refund",
+      "name": "Payments Refund",
+      "updatedAt": "2026-04-23T20:32:00.000Z",
+      "sections": [
+        {
+          "id": "c_goal",
+          "title": "Goal",
+          "enabled": true,
+          "kind": "text",
+          "value": "Refund captured payment"
+        },
+        {
+          "id": "c_request",
+          "title": "Request",
+          "enabled": true,
+          "kind": "parsed",
+          "sectionType": "request",
+          "format": "json",
+          "lastSyncedFormat": "json",
+          "requestMethod": "POST",
+          "requestProtocol": "REST",
+          "requestUrl": "/api/v1/payments/refund",
+          "authType": "bearer",
+          "authHeaderName": "Authorization",
+          "authTokenExample": "Bearer <token>",
+          "input": "{\n  \"paymentId\": \"PAY-9001\",\n  \"refundAmount\": 5000,\n  \"reason\": \"customer_request\",\n  \"metadata\": {\n    \"initiator\": \"support\"\n  }\n}",
+          "rows": [
+            { "id": "c_r1", "field": "paymentId", "sourceField": "paymentId", "origin": "parsed", "enabled": true, "type": "string", "required": "+", "description": "Payment identifier", "example": "PAY-9001", "source": "body" },
+            { "id": "c_r2", "field": "refundAmount", "sourceField": "refundAmount", "origin": "parsed", "enabled": true, "type": "int", "required": "+", "description": "Refund amount in cents", "example": "5000", "source": "body" },
+            { "id": "c_r3", "field": "reason", "sourceField": "reason", "origin": "parsed", "enabled": true, "type": "string", "required": "+", "description": "Refund reason", "example": "customer_request", "source": "body" },
+            { "id": "c_r4", "field": "metadata.initiator", "sourceField": "metadata.initiator", "origin": "parsed", "enabled": true, "type": "string", "required": "-", "description": "Operation initiator", "example": "support", "source": "body" }
+          ],
+          "error": ""
+        },
+        {
+          "id": "c_response",
+          "title": "Response",
+          "enabled": true,
+          "kind": "parsed",
+          "sectionType": "response",
+          "format": "json",
+          "lastSyncedFormat": "json",
+          "input": "{\n  \"refundId\": \"REF-100\",\n  \"status\": \"accepted\",\n  \"refundedAmount\": 5000,\n  \"processedAt\": \"2026-04-23T20:32:00Z\"\n}",
+          "rows": [
+            { "id": "c_s1", "field": "refundId", "sourceField": "refundId", "origin": "parsed", "enabled": true, "type": "string", "required": "+", "description": "Refund identifier", "example": "REF-100", "source": "body" },
+            { "id": "c_s2", "field": "status", "sourceField": "status", "origin": "parsed", "enabled": true, "type": "string", "required": "+", "description": "Refund status", "example": "accepted", "source": "body" },
+            { "id": "c_s3", "field": "refundedAmount", "sourceField": "refundedAmount", "origin": "parsed", "enabled": true, "type": "int", "required": "+", "description": "Refunded amount", "example": "5000", "source": "body" },
+            { "id": "c_s4", "field": "processedAt", "sourceField": "processedAt", "origin": "parsed", "enabled": true, "type": "string", "required": "+", "description": "Processing timestamp", "example": "2026-04-23T20:32:00Z", "source": "body" }
+          ],
+          "error": ""
+        },
+        {
+          "id": "c_errors",
+          "title": "Errors",
+          "enabled": true,
+          "kind": "errors",
+          "rows": [
+            {
+              "clientHttpStatus": "409",
+              "clientResponse": "{\"error\":\"already_refunded\"}",
+              "clientResponseCode": "PAY_409_01",
+              "trigger": "Payment already fully refunded",
+              "errorType": "BusinessException",
+              "serverHttpStatus": "409",
+              "internalCode": "PAYMENT_ALREADY_REFUNDED",
+              "message": "Payment is already refunded",
+              "responseCode": "{\"code\":\"PAYMENT_ALREADY_REFUNDED\"}"
+            }
+          ],
+          "validationRules": [
+            {
+              "parameter": "refundAmount",
+              "validationCase": "Positive",
+              "condition": "refundAmount > 0",
+              "cause": "Refund amount must be positive"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "groups": []
+}

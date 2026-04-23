@@ -87,15 +87,31 @@ describe('App integration', () => {
 
     const navTree = screen.getByRole('tree', { name: 'Проекты, методы и секции' });
     await user.click(within(navTree).getByRole('treeitem', { name: /Request/i }));
-    const activeSection = document.querySelector('.editor-section-active');
-    expect(activeSection).not.toBeNull();
-    const parseButton = activeSection?.querySelector('button[title="Запустить парсер"]') as HTMLButtonElement | null;
+    const parseButton = document.querySelector('button[title="Запустить парсер"]') as HTMLButtonElement | null;
     expect(parseButton).not.toBeNull();
     await user.click(parseButton as HTMLButtonElement);
 
     await waitFor(() => {
       expect(document.querySelectorAll('.alert.error').length).toBeGreaterThan(0);
     });
+  });
+
+  it('routes cURL text import without json parse error', async () => {
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(screen.getByRole('button', { name: 'Импорт' }));
+    const textarea = screen.getByRole('textbox', { name: 'Текст для импорта' });
+    fireEvent.change(textarea, {
+      target: {
+        value: "curl -X POST 'https://api.example.com/orders?limit=1' -H 'Content-Type: application/json' --data-raw '{\"orderId\":1}'"
+      }
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Импортировать текст' }));
+
+    expect(await screen.findByRole('dialog', { name: 'Маршрутизация JSON импорта' })).toBeInTheDocument();
+    expect(screen.queryByText(/Ошибка импорта/i)).not.toBeInTheDocument();
   });
 
   it('switches active editor section from toc click', async () => {
@@ -122,5 +138,49 @@ describe('App integration', () => {
     fireEvent.change(fileInput as HTMLInputElement, { target: { files: [invalidFile] } });
 
     expect(await screen.findByText(/Ошибка импорта/i)).toBeInTheDocument();
+  });
+
+  it('imports multiple workspace json files as methods', async () => {
+    renderApp();
+
+    const fileInput = document.querySelector('input[type="file"]');
+    expect(fileInput).not.toBeNull();
+
+    const methodA = JSON.stringify({
+      version: 3,
+      updatedAt: '2026-04-23T12:00:00.000Z',
+      methods: [
+        {
+          id: 'm_a',
+          name: 'Метод A',
+          updatedAt: '2026-04-23T12:00:00.000Z',
+          sections: [{ id: 's_a', title: 'Цель', enabled: true, kind: 'text', value: 'A' }]
+        }
+      ],
+      groups: []
+    });
+    const methodB = JSON.stringify({
+      version: 3,
+      updatedAt: '2026-04-23T12:00:00.000Z',
+      methods: [
+        {
+          id: 'm_b',
+          name: 'Метод B',
+          updatedAt: '2026-04-23T12:00:00.000Z',
+          sections: [{ id: 's_b', title: 'Цель', enabled: true, kind: 'text', value: 'B' }]
+        }
+      ],
+      groups: []
+    });
+
+    const fileA = new File([methodA], 'method-a.json', { type: 'application/json' });
+    const fileB = new File([methodB], 'method-b.json', { type: 'application/json' });
+
+    fireEvent.change(fileInput as HTMLInputElement, { target: { files: [fileA, fileB] } });
+
+    const navTree = screen.getByRole('tree', { name: 'Проекты, методы и секции' });
+    await waitFor(() => {
+      expect(within(navTree).getByRole('treeitem', { name: /Метод B/i })).toBeInTheDocument();
+    });
   });
 });

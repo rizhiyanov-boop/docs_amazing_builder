@@ -1,0 +1,88 @@
+{
+  "version": 3,
+  "updatedAt": "2026-04-23T20:31:00.000Z",
+  "methods": [
+    {
+      "id": "method_orders_status",
+      "name": "Orders Status",
+      "updatedAt": "2026-04-23T20:31:00.000Z",
+      "sections": [
+        {
+          "id": "b_goal",
+          "title": "Goal",
+          "enabled": true,
+          "kind": "text",
+          "value": "Fetch order status and shipment progress"
+        },
+        {
+          "id": "b_request",
+          "title": "Request",
+          "enabled": true,
+          "kind": "parsed",
+          "sectionType": "request",
+          "format": "json",
+          "lastSyncedFormat": "json",
+          "requestMethod": "POST",
+          "requestProtocol": "REST",
+          "requestUrl": "/api/v1/orders/status",
+          "authType": "bearer",
+          "authHeaderName": "Authorization",
+          "authTokenExample": "Bearer <token>",
+          "input": "{\n  \"orderId\": \"ORD-1001\",\n  \"includeHistory\": true,\n  \"locale\": \"en-US\"\n}",
+          "rows": [
+            { "id": "b_r1", "field": "orderId", "sourceField": "orderId", "origin": "parsed", "enabled": true, "type": "string", "required": "+", "description": "Order identifier", "example": "ORD-1001", "source": "body" },
+            { "id": "b_r2", "field": "includeHistory", "sourceField": "includeHistory", "origin": "parsed", "enabled": true, "type": "boolean", "required": "-", "description": "Include status history", "example": "true", "source": "body" },
+            { "id": "b_r3", "field": "locale", "sourceField": "locale", "origin": "parsed", "enabled": true, "type": "string", "required": "-", "description": "Localization", "example": "en-US", "source": "body" }
+          ],
+          "error": ""
+        },
+        {
+          "id": "b_response",
+          "title": "Response",
+          "enabled": true,
+          "kind": "parsed",
+          "sectionType": "response",
+          "format": "json",
+          "lastSyncedFormat": "json",
+          "input": "{\n  \"orderId\": \"ORD-1001\",\n  \"status\": \"processing\",\n  \"shipment\": {\n    \"carrier\": \"DHL\",\n    \"trackingId\": \"TRK-123\"\n  },\n  \"historyCount\": 3\n}",
+          "rows": [
+            { "id": "b_s1", "field": "orderId", "sourceField": "orderId", "origin": "parsed", "enabled": true, "type": "string", "required": "+", "description": "Order identifier", "example": "ORD-1001", "source": "body" },
+            { "id": "b_s2", "field": "status", "sourceField": "status", "origin": "parsed", "enabled": true, "type": "string", "required": "+", "description": "Current status", "example": "processing", "source": "body" },
+            { "id": "b_s3", "field": "shipment.carrier", "sourceField": "shipment.carrier", "origin": "parsed", "enabled": true, "type": "string", "required": "-", "description": "Shipment carrier", "example": "DHL", "source": "body" },
+            { "id": "b_s4", "field": "shipment.trackingId", "sourceField": "shipment.trackingId", "origin": "parsed", "enabled": true, "type": "string", "required": "-", "description": "Tracking identifier", "example": "TRK-123", "source": "body" },
+            { "id": "b_s5", "field": "historyCount", "sourceField": "historyCount", "origin": "parsed", "enabled": true, "type": "int", "required": "-", "description": "History records count", "example": "3", "source": "body" }
+          ],
+          "error": ""
+        },
+        {
+          "id": "b_errors",
+          "title": "Errors",
+          "enabled": true,
+          "kind": "errors",
+          "rows": [
+            {
+              "clientHttpStatus": "404",
+              "clientResponse": "{\"error\":\"not_found\"}",
+              "clientResponseCode": "ORD_404_01",
+              "trigger": "orderId not found",
+              "errorType": "BusinessException",
+              "serverHttpStatus": "404",
+              "internalCode": "ORDER_NOT_FOUND",
+              "message": "Order does not exist",
+              "responseCode": "{\"code\":\"ORDER_NOT_FOUND\"}"
+            }
+          ],
+          "validationRules": [
+            {
+              "parameter": "orderId",
+              "validationCase": "NotBlank",
+              "condition": "orderId != ''",
+              "cause": "Order ID is required"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "groups": []
+}

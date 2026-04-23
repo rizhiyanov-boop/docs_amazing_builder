@@ -15,7 +15,22 @@ const SESSION_CLEANUP_INTERVAL_MS = 1000 * 60 * 5;
 let schemaReady = false;
 let lastSessionCleanupAt = 0;
 
-const sql = neon(process.env.DATABASE_URL || process.env.POSTGRES_URL || '');
+let sqlClient: ReturnType<typeof neon> | null = null;
+
+function getSqlClient(): ReturnType<typeof neon> {
+  const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  if (!connectionString) {
+    throw new Error('Не настроен DATABASE_URL или POSTGRES_URL для подключения к Neon');
+  }
+  if (!sqlClient) {
+    sqlClient = neon(connectionString);
+  }
+  return sqlClient;
+}
+
+function sql(strings: TemplateStringsArray, ...values: unknown[]) {
+  return getSqlClient()(strings, ...values);
+}
 
 function randomHex(size: number): string {
   const bytes = new Uint8Array(size);

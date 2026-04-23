@@ -362,6 +362,7 @@ type ProjectMethodPreview = {
 type JsonImportRoutingState = {
   fileName: string;
   rawText: string;
+  sourceFormat: ParseFormat;
   sampleType: JsonImportSampleType;
   domainModelEnabled: boolean;
   targetSide: JsonImportTargetSide;
@@ -1613,6 +1614,7 @@ export default function App() {
     if (!jsonImportRouting) return;
 
     const targetType = jsonImportRouting.sampleType;
+    const targetFormat = jsonImportRouting.sourceFormat;
     let nextSelectedId = '';
 
     setSections((prev) => {
@@ -1629,9 +1631,9 @@ export default function App() {
         let parsedRows: ParsedRow[] = [];
         let parseError = '';
         try {
-          const shouldWrap = section.sectionType === 'response' && !section.domainModelEnabled;
+          const shouldWrap = targetFormat === 'json' && section.sectionType === 'response' && !section.domainModelEnabled;
           const inputToParse = shouldWrap ? wrapNonDomainResponseJson(jsonImportRouting.rawText) : jsonImportRouting.rawText;
-          parsedRows = normalizeParsedRowsForSection(section, parseToRows('json', inputToParse));
+          parsedRows = normalizeParsedRowsForSection(section, parseToRows(targetFormat, inputToParse));
         } catch (error) {
           parseError = error instanceof Error ? error.message : 'Ошибка парсинга';
         }
@@ -1660,8 +1662,8 @@ export default function App() {
             ...section,
             domainModelEnabled: nextDomainEnabled,
             ...initializedClientProps,
-            clientFormat: 'json' as const,
-            clientLastSyncedFormat: 'json' as const,
+            clientFormat: targetFormat,
+            clientLastSyncedFormat: targetFormat,
             clientInput: jsonImportRouting.rawText,
             clientRows: parsedRows,
             clientError: parseError
@@ -1672,8 +1674,8 @@ export default function App() {
           ...section,
           domainModelEnabled: nextDomainEnabled,
           ...initializedClientProps,
-          format: 'json' as const,
-          lastSyncedFormat: 'json' as const,
+          format: targetFormat,
+          lastSyncedFormat: targetFormat,
           input: jsonImportRouting.rawText,
           rows: parsedRows,
           error: parseError
@@ -1688,8 +1690,9 @@ export default function App() {
     setTab('editor');
     setImportError('');
     setJsonImportRouting(null);
+    const formatLabel = targetFormat === 'curl' ? 'cURL' : 'JSON';
     setToastMessage(
-      `JSON импортирован и распарсен в ${jsonImportRouting.sampleType === 'request' ? 'Request' : 'Response'} (${jsonImportRouting.targetSide === 'client' ? 'Client' : 'Server'}).`
+      `${formatLabel} импортирован и распарсен в ${jsonImportRouting.sampleType === 'request' ? 'Request' : 'Response'} (${jsonImportRouting.targetSide === 'client' ? 'Client' : 'Server'}).`
     );
   }
 
@@ -3198,7 +3201,7 @@ export default function App() {
       return;
     }
 
-    let normalizedSchemaInput = '';
+    let normalizedSchemaInput: string;
     try {
       const parsedSchema = JSON.parse(schemaInput) as unknown;
       if (!parsedSchema || typeof parsedSchema !== 'object' || Array.isArray(parsedSchema)) {
@@ -3922,7 +3925,33 @@ export default function App() {
         return;
       }
 
-      const parsed = JSON.parse(text) as WorkspaceProjectData | ProjectData | Record<string, unknown>;
+      let parsed: WorkspaceProjectData | ProjectData | Record<string, unknown> | null = null;
+      try {
+        parsed = JSON.parse(text) as WorkspaceProjectData | ProjectData | Record<string, unknown>;
+      } catch {
+        parsed = null;
+      }
+
+      if (parsed === null) {
+        // Fallback: allow cURL in project import dialog (request sample import flow).
+        parseToRows('curl', text);
+        const linkedSectionId = getParsedSectionIdByType('request');
+        const linkedSection = sections.find(
+          (section): section is ParsedSection => section.kind === 'parsed' && section.id === linkedSectionId
+        );
+        const domainModelEnabled = Boolean(linkedSection?.domainModelEnabled);
+        setJsonImportRouting({
+          fileName,
+          rawText: text,
+          sourceFormat: 'curl',
+          sampleType: 'request',
+          domainModelEnabled,
+          targetSide: domainModelEnabled ? 'client' : 'server'
+        });
+        setImportError('');
+        setProjectTextImport(null);
+        return;
+      }
 
       if ('methods' in parsed && Array.isArray(parsed.methods)) {
         setWorkspaceMethodsImportRouting({
@@ -3953,6 +3982,7 @@ export default function App() {
       setJsonImportRouting({
         fileName,
         rawText: text,
+        sourceFormat: 'json',
         sampleType: guessedType,
         domainModelEnabled,
         targetSide: domainModelEnabled ? 'client' : 'server'
@@ -3964,13 +3994,172 @@ export default function App() {
     }
   }
 
+  function readFileAsText(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error(`Не удалось прочитать файл ${file.name}`));
+      reader.readAsText(file);
+    });
+  }
+
   function importProjectJson(file: File | undefined): void {
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      processImportedText(String(reader.result || ''), file.name);
-    };
-    reader.readAsText(file);
+    void readFileAsText(file)
+      .then((text) => processImportedText(text, file.name))
+      .catch((error) => {
+        setImportError(error instanceof Error ? error.message : 'Ошибка импорта');
+      });
+  }
+
+  function mergeWorkspaceImportsAsMethods(workspaces: WorkspaceProjectData[]): number {
+    const loadedWorkspaces = workspaces.map((workspace) => loadWorkspaceProjectFromPayload(workspace));
+    const hasMethods = loadedWorkspaces.some((workspace) => workspace.methods.length > 0);
+    if (!hasMethods) {
+      setImportError('JSON не содержит методов для импорта');
+      return 0;
+    }
+
+    const takenNames = new Set(methods.map((method) => method.name.trim().toLowerCase()));
+    const importedMethods: MethodDocument[] = [];
+    const importedGroups: MethodGroup[] = [];
+
+    for (const loaded of loadedWorkspaces) {
+      const methodIdMap = new Map<string, string>();
+      for (const method of loaded.methods) {
+        const nextId = createMethodId();
+        methodIdMap.set(method.id, nextId);
+
+        const nextName = getUniqueMethodImportName(method.name, takenNames);
+        takenNames.add(nextName.toLowerCase());
+
+        importedMethods.push({
+          ...method,
+          id: nextId,
+          name: nextName,
+          updatedAt: method.updatedAt || new Date().toISOString()
+        });
+      }
+
+      if (!ENABLE_MULTI_METHODS) continue;
+      const remappedGroups = loaded.groups
+        .map((group) => {
+          const remappedMethodIds = group.methodIds
+            .map((methodId) => methodIdMap.get(methodId) ?? null)
+            .filter((methodId): methodId is string => Boolean(methodId));
+
+          if (remappedMethodIds.length === 0) {
+            return null;
+          }
+
+          const remappedLinks = group.links
+            .map((link) => {
+              const fromMethodId = methodIdMap.get(link.fromMethodId);
+              const toMethodId = methodIdMap.get(link.toMethodId);
+              if (!fromMethodId || !toMethodId) return null;
+              return {
+                ...link,
+                fromMethodId,
+                toMethodId
+              };
+            })
+            .filter((link): link is MethodGroup['links'][number] => Boolean(link));
+
+          return {
+            ...group,
+            id: `group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            methodIds: remappedMethodIds,
+            links: remappedLinks
+          };
+        })
+        .filter((group): group is MethodGroup => Boolean(group));
+      importedGroups.push(...remappedGroups);
+    }
+
+    if (importedMethods.length === 0) {
+      setImportError('JSON не содержит методов для импорта');
+      return 0;
+    }
+
+    setMethodsState((current) => [...current, ...importedMethods]);
+    if (importedGroups.length > 0) {
+      setMethodGroups((current) => [...current, ...importedGroups]);
+    }
+
+    const firstImportedMethod = importedMethods[0];
+    setActiveMethodId(firstImportedMethod.id);
+    setSelectedId(firstImportedMethod.sections[0]?.id ?? createInitialSections()[0].id);
+    setTab('editor');
+    setImportError('');
+    return importedMethods.length;
+  }
+
+  function importProjectJsonFiles(files: File[]): void {
+    if (files.length === 0) return;
+    if (files.length === 1) {
+      importProjectJson(files[0]);
+      return;
+    }
+
+    void Promise.all(files.map((file) => readFileAsText(file).then((text) => ({ file, text }))))
+      .then((loadedFiles) => {
+        const invalidFiles: string[] = [];
+        const workspaces: WorkspaceProjectData[] = [];
+
+        for (const loadedFile of loadedFiles) {
+          try {
+            const parsed = JSON.parse(loadedFile.text.trim()) as Record<string, unknown>;
+            if (parsed && typeof parsed === 'object' && 'methods' in parsed && Array.isArray(parsed.methods)) {
+              workspaces.push(parsed as WorkspaceProjectData);
+              continue;
+            }
+
+            const methodName = typeof parsed?.name === 'string' && parsed.name.trim()
+              ? parsed.name.trim()
+              : loadedFile.file.name.replace(/\.json$/i, '').trim();
+            if (parsed && typeof parsed === 'object' && 'sections' in parsed && Array.isArray(parsed.sections)) {
+              workspaces.push({
+                version: 3,
+                updatedAt: new Date().toISOString(),
+                methods: [
+                  {
+                    id: typeof parsed.id === 'string' && parsed.id.trim() ? parsed.id.trim() : createMethodId(),
+                    name: methodName || DEFAULT_METHOD_NAME,
+                    updatedAt: typeof parsed.updatedAt === 'string' && parsed.updatedAt ? parsed.updatedAt : new Date().toISOString(),
+                    sections: sanitizeSections(parsed.sections as DocSection[])
+                  }
+                ],
+                groups: []
+              });
+            } else {
+              invalidFiles.push(loadedFile.file.name);
+            }
+          } catch {
+            invalidFiles.push(loadedFile.file.name);
+          }
+        }
+
+        if (workspaces.length === 0) {
+          setImportError(`Для множественного импорта подходят JSON с methods[] или sections[]. Проблемные файлы: ${invalidFiles.join(', ')}`);
+          return;
+        }
+
+        const importedCount = mergeWorkspaceImportsAsMethods(workspaces);
+        if (importedCount > 0) {
+          setWorkspaceMethodsImportRouting(null);
+          setProjectTextImport(null);
+          if (invalidFiles.length > 0) {
+            setImportError(`Пропущены файлы: ${invalidFiles.join(', ')}`);
+            setToastMessage(`Импортировано методов: ${importedCount}. Пропущено файлов: ${invalidFiles.length}`);
+          } else {
+            setImportError('');
+            setToastMessage(`Импортировано методов: ${importedCount}`);
+          }
+        }
+      })
+      .catch((error) => {
+        setImportError(error instanceof Error ? error.message : 'Ошибка импорта');
+      });
   }
 
   function getUniqueMethodImportName(name: string, takenNames: Set<string>): string {
@@ -4003,81 +4192,11 @@ export default function App() {
   function applyWorkspaceImportAsMethodsMerge(): void {
     if (!workspaceMethodsImportRouting) return;
 
-    const loaded = loadWorkspaceProjectFromPayload(workspaceMethodsImportRouting.workspace);
-    const importedMethodsSource = loaded.methods;
-
-    if (importedMethodsSource.length === 0) {
+    const importedCount = mergeWorkspaceImportsAsMethods([workspaceMethodsImportRouting.workspace]);
+    if (importedCount > 0) {
       setWorkspaceMethodsImportRouting(null);
-      setImportError('JSON не содержит методов для импорта');
-      return;
+      setToastMessage(`Импортировано методов: ${importedCount}`);
     }
-
-    const takenNames = new Set(methods.map((method) => method.name.trim().toLowerCase()));
-    const methodIdMap = new Map<string, string>();
-
-    const importedMethods = importedMethodsSource.map((method) => {
-      const originalId = method.id;
-      const nextId = createMethodId();
-      methodIdMap.set(originalId, nextId);
-
-      const nextName = getUniqueMethodImportName(method.name, takenNames);
-      takenNames.add(nextName.toLowerCase());
-
-      return {
-        ...method,
-        id: nextId,
-        name: nextName,
-        updatedAt: method.updatedAt || new Date().toISOString()
-      };
-    });
-
-    const importedGroups = ENABLE_MULTI_METHODS
-      ? loaded.groups
-          .map((group) => {
-            const remappedMethodIds = group.methodIds
-              .map((methodId) => methodIdMap.get(methodId) ?? null)
-              .filter((methodId): methodId is string => Boolean(methodId));
-
-            if (remappedMethodIds.length === 0) {
-              return null;
-            }
-
-            const remappedLinks = group.links
-              .map((link) => {
-                const fromMethodId = methodIdMap.get(link.fromMethodId);
-                const toMethodId = methodIdMap.get(link.toMethodId);
-                if (!fromMethodId || !toMethodId) return null;
-                return {
-                  ...link,
-                  fromMethodId,
-                  toMethodId
-                };
-              })
-              .filter((link): link is MethodGroup['links'][number] => Boolean(link));
-
-            return {
-              ...group,
-              id: `group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-              methodIds: remappedMethodIds,
-              links: remappedLinks
-            };
-          })
-          .filter((group): group is MethodGroup => Boolean(group))
-      : [];
-
-    setMethodsState((current) => [...current, ...importedMethods]);
-    if (importedGroups.length > 0) {
-      setMethodGroups((current) => [...current, ...importedGroups]);
-    }
-
-    const firstImportedMethod = importedMethods[0];
-    setActiveMethodId(firstImportedMethod.id);
-    setSelectedId(firstImportedMethod.sections[0]?.id ?? createInitialSections()[0].id);
-    setTab('editor');
-
-    setWorkspaceMethodsImportRouting(null);
-    setImportError('');
-    setToastMessage(`Импортировано методов: ${importedMethods.length}`);
   }
 
   function openSourceTextImport(section: ParsedSection, target: ParseTarget): void {
@@ -7396,7 +7515,7 @@ export default function App() {
         onboardingStepHint={onboardingStepHint}
         onboardingPrimaryActionLabel={onboardingPrimaryActionLabel}
         onOpenProjectImport={() => openProjectImportDialog(false)}
-        onImportProjectJson={(file) => importProjectJson(file)}
+        onImportProjectJson={(files) => importProjectJsonFiles(files)}
         onExportProjectJson={exportProjectJson}
         onExportMockServiceJson={exportMockServiceJson}
         onExportFullProjectHtml={() => void handleExportFullProjectHtml()}

@@ -1,0 +1,15 @@
+{
+  "version": 3,
+  "updatedAt": "2026-04-23T20:13:00.000Z",
+  "projectName": "Not a methods payload",
+  "projectSections": [
+    {
+      "id": "proj_overview",
+      "title": "Overview",
+      "enabled": true,
+      "type": "markdown",
+      "content": "This file should be skipped in multi import",
+      "order": 0
+    }
+  ]
+}

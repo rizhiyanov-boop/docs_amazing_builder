@@ -1,0 +1,53 @@
+{
+  "id": "method_catalog_search",
+  "name": "Catalog Search",
+  "updatedAt": "2026-04-23T20:33:00.000Z",
+  "sections": [
+    {
+      "id": "s_goal",
+      "title": "Goal",
+      "enabled": true,
+      "kind": "text",
+      "value": "Search catalog with filters"
+    },
+    {
+      "id": "s_request",
+      "title": "Request",
+      "enabled": true,
+      "kind": "parsed",
+      "sectionType": "request",
+      "format": "json",
+      "lastSyncedFormat": "json",
+      "requestMethod": "POST",
+      "requestProtocol": "REST",
+      "requestUrl": "/api/v1/catalog/search",
+      "authType": "none",
+      "input": "{\n  \"query\": \"phone\",\n  \"limit\": 20,\n  \"offset\": 0,\n  \"filters\": {\n    \"brand\": \"ACME\",\n    \"inStock\": true\n  }\n}",
+      "rows": [
+        { "id": "s_r1", "field": "query", "sourceField": "query", "origin": "parsed", "enabled": true, "type": "string", "required": "+", "description": "Search query", "example": "phone", "source": "body" },
+        { "id": "s_r2", "field": "limit", "sourceField": "limit", "origin": "parsed", "enabled": true, "type": "int", "required": "-", "description": "Page size", "example": "20", "source": "body" },
+        { "id": "s_r3", "field": "offset", "sourceField": "offset", "origin": "parsed", "enabled": true, "type": "int", "required": "-", "description": "Offset", "example": "0", "source": "body" },
+        { "id": "s_r4", "field": "filters.brand", "sourceField": "filters.brand", "origin": "parsed", "enabled": true, "type": "string", "required": "-", "description": "Brand filter", "example": "ACME", "source": "body" },
+        { "id": "s_r5", "field": "filters.inStock", "sourceField": "filters.inStock", "origin": "parsed", "enabled": true, "type": "boolean", "required": "-", "description": "Stock filter", "example": "true", "source": "body" }
+      ],
+      "error": ""
+    },
+    {
+      "id": "s_response",
+      "title": "Response",
+      "enabled": true,
+      "kind": "parsed",
+      "sectionType": "response",
+      "format": "json",
+      "lastSyncedFormat": "json",
+      "input": "{\n  \"total\": 2,\n  \"items\": [\n    {\n      \"sku\": \"SKU-11\",\n      \"name\": \"Phone 11\",\n      \"price\": 29900\n    }\n  ]\n}",
+      "rows": [
+        { "id": "s_s1", "field": "total", "sourceField": "total", "origin": "parsed", "enabled": true, "type": "int", "required": "+", "description": "Total found", "example": "2", "source": "body" },
+        { "id": "s_s2", "field": "items[0].sku", "sourceField": "items[0].sku", "origin": "parsed", "enabled": true, "type": "string", "required": "+", "description": "Item SKU", "example": "SKU-11", "source": "body" },
+        { "id": "s_s3", "field": "items[0].name", "sourceField": "items[0].name", "origin": "parsed", "enabled": true, "type": "string", "required": "+", "description": "Item name", "example": "Phone 11", "source": "body" },
+        { "id": "s_s4", "field": "items[0].price", "sourceField": "items[0].price", "origin": "parsed", "enabled": true, "type": "int", "required": "+", "description": "Item price", "example": "29900", "source": "body" }
+      ],
+      "error": ""
+    }
+  ]
+}

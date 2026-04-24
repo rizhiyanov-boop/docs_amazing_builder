@@ -378,6 +378,13 @@ type WorkspaceProjectImportPayload = Record<string, unknown> & {
   groups?: Record<string, unknown>[];
 };
 
+type MethodDocumentImportPayload = Record<string, unknown> & {
+  id?: unknown;
+  name?: unknown;
+  updatedAt?: unknown;
+  sections: unknown[];
+};
+
 type ProjectTextImportState = {
   rawText: string;
   fromOnboarding: boolean;
@@ -455,6 +462,37 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isWorkspaceProjectImportPayload(value: Record<string, unknown>): value is WorkspaceProjectImportPayload {
   return Array.isArray(value.methods) && value.methods.every(isRecord);
+}
+
+function isMethodDocumentImportPayload(value: Record<string, unknown>): value is MethodDocumentImportPayload {
+  return Array.isArray(value.sections)
+    && !Array.isArray(value.methods)
+    && (typeof value.name === 'string' || typeof value.id === 'string');
+}
+
+function buildWorkspaceImportFromMethodPayload(
+  payload: MethodDocumentImportPayload,
+  fallbackName: string
+): WorkspaceProjectData {
+  const resolvedName = typeof payload.name === 'string' && payload.name.trim()
+    ? payload.name.trim()
+    : fallbackName.replace(/\.json$/i, '').trim() || DEFAULT_METHOD_NAME;
+  const resolvedUpdatedAt = typeof payload.updatedAt === 'string' && payload.updatedAt ? payload.updatedAt : new Date().toISOString();
+  const resolvedId = typeof payload.id === 'string' && payload.id.trim() ? payload.id.trim() : createMethodId();
+
+  return asWorkspaceProjectData(
+    resolvedName,
+    [
+      {
+        id: resolvedId,
+        name: resolvedName,
+        updatedAt: resolvedUpdatedAt,
+        sections: payload.sections as DocSection[]
+      }
+    ],
+    resolvedId,
+    []
+  );
 }
 
 function normalizeWorkspaceForMode(workspace: WorkspaceProjectData): WorkspaceProjectData {
@@ -3976,6 +4014,19 @@ export default function App() {
         return;
       }
 
+      if (isRecord(parsed) && isMethodDocumentImportPayload(parsed)) {
+        const importedCount = mergeWorkspaceImportsAsMethods([
+          buildWorkspaceImportFromMethodPayload(parsed, fileName)
+        ]);
+        if (importedCount > 0) {
+          setWorkspaceMethodsImportRouting(null);
+          setImportError('');
+          setProjectTextImport(null);
+          setToastMessage(`Импортировано методов: ${importedCount}`);
+        }
+        return;
+      }
+
       if ('sections' in parsed && Array.isArray(parsed.sections)) {
         const sanitizedSections = sanitizeSections((parsed as ProjectData).sections);
         setSections(sanitizedSections);
@@ -4124,6 +4175,11 @@ export default function App() {
             const parsed = JSON.parse(loadedFile.text.trim()) as Record<string, unknown>;
             if (isRecord(parsed) && isWorkspaceProjectImportPayload(parsed)) {
               workspaces.push(loadWorkspaceProjectFromPayload(parsed));
+              continue;
+            }
+
+            if (isRecord(parsed) && isMethodDocumentImportPayload(parsed)) {
+              workspaces.push(buildWorkspaceImportFromMethodPayload(parsed, loadedFile.file.name));
               continue;
             }
 
@@ -7317,16 +7373,20 @@ export default function App() {
       {workspaceMethodsImportRouting && (
         <div className="import-routing-backdrop" role="dialog" aria-modal="true" aria-label="Импорт методов из JSON">
           <div className="import-routing-card">
-            <h2>Импорт JSON проекта</h2>
+            <h2>{workspaceMethodsImportRouting.workspace.methods.length === 1 ? 'Импорт JSON метода' : 'Импорт JSON проекта'}</h2>
             <p className="import-routing-file">Файл: {workspaceMethodsImportRouting.fileName}</p>
             <p className="import-routing-file">
-              Обнаружен JSON вашей площадки с методами. Выберите режим импорта.
+              {workspaceMethodsImportRouting.workspace.methods.length === 1
+                ? 'Обнаружен JSON одного метода. Выберите режим импорта.'
+                : 'Обнаружен JSON вашей площадки с методами. Выберите режим импорта.'}
             </p>
 
             <div className="import-routing-actions">
               <button type="button" className="ghost" onClick={cancelWorkspaceMethodsImportRouting}>Отмена</button>
               <button type="button" className="ghost" onClick={applyWorkspaceImportAsReplace}>Заменить проект</button>
-              <button type="button" onClick={applyWorkspaceImportAsMethodsMerge}>Импортировать методы</button>
+              <button type="button" onClick={applyWorkspaceImportAsMethodsMerge}>
+                {workspaceMethodsImportRouting.workspace.methods.length === 1 ? 'Импортировать метод' : 'Импортировать методы'}
+              </button>
             </div>
           </div>
         </div>

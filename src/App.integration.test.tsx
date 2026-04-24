@@ -183,4 +183,83 @@ describe('App integration', () => {
       expect(within(navTree).getByRole('treeitem', { name: /Метод B/i })).toBeInTheDocument();
     });
   });
+
+  it('imports a single method json file as a method', async () => {
+    renderApp();
+
+    const fileInput = document.querySelector('input[type="file"]');
+    expect(fileInput).not.toBeNull();
+
+    const singleMethod = JSON.stringify({
+      id: 'method_catalog_search',
+      name: 'Catalog Search',
+      updatedAt: '2026-04-23T20:33:00.000Z',
+      sections: [
+        { id: 's_goal', title: 'Goal', enabled: true, kind: 'text', value: 'Search catalog with filters' },
+        {
+          id: 's_request',
+          title: 'Request',
+          enabled: true,
+          kind: 'parsed',
+          sectionType: 'request',
+          format: 'json',
+          lastSyncedFormat: 'json',
+          input: '{"query":"phone"}',
+          rows: [],
+          error: ''
+        }
+      ]
+    });
+
+    const file = new File([singleMethod], 'method-single-object.json', { type: 'application/json' });
+    fireEvent.change(fileInput as HTMLInputElement, { target: { files: [file] } });
+
+    const navTree = screen.getByRole('tree', { name: 'Проекты, методы и секции' });
+    await waitFor(() => {
+      expect(within(navTree).getByRole('treeitem', { name: /Catalog Search/i })).toBeInTheDocument();
+    });
+  });
+
+  it('imports a single method from pasted json text', async () => {
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(screen.getByRole('button', { name: 'Импорт' }));
+    const textarea = screen.getByRole('textbox', { name: 'Текст для импорта' });
+    fireEvent.change(textarea, {
+      target: {
+        value: JSON.stringify({
+          id: 'method_customer_lookup',
+          name: 'Customer Lookup',
+          updatedAt: '2026-04-23T20:33:00.000Z',
+          sections: [
+            { id: 's_goal', title: 'Goal', enabled: true, kind: 'text', value: 'Find customer by id' },
+            {
+              id: 's_response',
+              title: 'Response',
+              enabled: true,
+              kind: 'parsed',
+              sectionType: 'response',
+              format: 'json',
+              lastSyncedFormat: 'json',
+              input: '{"customerId":"C-1"}',
+              rows: [],
+              error: ''
+            }
+          ]
+        })
+      }
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Импортировать текст' }));
+
+    const navTree = screen.getByRole('tree', { name: 'Проекты, методы и секции' });
+    await waitFor(() => {
+      expect(within(navTree).getByRole('treeitem', { name: /Customer Lookup/i })).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Импорт проекта из текста' })).not.toBeInTheDocument();
+    });
+  });
 });

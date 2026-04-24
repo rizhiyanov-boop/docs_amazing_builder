@@ -178,7 +178,7 @@ body {
 .import-routing-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 130;
+  z-index: 1300;
   display: grid;
   place-items: center;
   padding: var(--space-8);
@@ -222,6 +222,38 @@ body {
 .import-routing-actions-start {
   justify-content: flex-start;
   margin: 0;
+}
+
+.import-preview-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.import-preview-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: calc(var(--space-1) * 168 / 4);
+  overflow: auto;
+}
+
+.import-preview-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: calc(var(--space-1) / 4) solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--panel) 82%, var(--card));
+}
+
+.import-preview-list-errors .import-preview-item {
+  border-color: color-mix(in srgb, var(--danger) 38%, var(--border));
+  background: color-mix(in srgb, var(--danger) 8%, var(--panel));
 }
 
 .hidden-file-input {

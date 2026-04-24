@@ -368,9 +368,21 @@ type JsonImportRoutingState = {
   targetSide: JsonImportTargetSide;
 };
 
-type WorkspaceMethodsImportRoutingState = {
-  fileName: string;
+type WorkspaceMethodImportPreviewItem = {
+  sourceName: string;
   workspace: WorkspaceProjectData;
+};
+
+type WorkspaceMethodImportPreviewIssue = {
+  fileName: string;
+  reason: string;
+};
+
+type WorkspaceMethodsImportRoutingState = {
+  sourceLabel: string;
+  items: WorkspaceMethodImportPreviewItem[];
+  invalidFiles: WorkspaceMethodImportPreviewIssue[];
+  allowReplace: boolean;
 };
 
 type WorkspaceProjectImportPayload = Record<string, unknown> & {
@@ -493,6 +505,10 @@ function buildWorkspaceImportFromMethodPayload(
     resolvedId,
     []
   );
+}
+
+function countImportedMethods(items: WorkspaceMethodImportPreviewItem[]): number {
+  return items.reduce((total, item) => total + item.workspace.methods.length, 0);
 }
 
 function normalizeWorkspaceForMode(workspace: WorkspaceProjectData): WorkspaceProjectData {
@@ -4006,8 +4022,10 @@ export default function App() {
 
       if (isRecord(parsed) && isWorkspaceProjectImportPayload(parsed)) {
         setWorkspaceMethodsImportRouting({
-          fileName,
-          workspace: loadWorkspaceProjectFromPayload(parsed)
+          sourceLabel: fileName,
+          items: [{ sourceName: fileName, workspace: loadWorkspaceProjectFromPayload(parsed) }],
+          invalidFiles: [],
+          allowReplace: true
         });
         setImportError('');
         setProjectTextImport(null);
@@ -4015,15 +4033,14 @@ export default function App() {
       }
 
       if (isRecord(parsed) && isMethodDocumentImportPayload(parsed)) {
-        const importedCount = mergeWorkspaceImportsAsMethods([
-          buildWorkspaceImportFromMethodPayload(parsed, fileName)
-        ]);
-        if (importedCount > 0) {
-          setWorkspaceMethodsImportRouting(null);
-          setImportError('');
-          setProjectTextImport(null);
-          setToastMessage(`Импортировано методов: ${importedCount}`);
-        }
+        setWorkspaceMethodsImportRouting({
+          sourceLabel: fileName,
+          items: [{ sourceName: fileName, workspace: buildWorkspaceImportFromMethodPayload(parsed, fileName) }],
+          invalidFiles: [],
+          allowReplace: true
+        });
+        setImportError('');
+        setProjectTextImport(null);
         return;
       }
 
@@ -4167,19 +4184,19 @@ export default function App() {
 
     void Promise.all(files.map((file) => readFileAsText(file).then((text) => ({ file, text }))))
       .then((loadedFiles) => {
-        const invalidFiles: string[] = [];
-        const workspaces: WorkspaceProjectData[] = [];
+        const invalidFiles: WorkspaceMethodImportPreviewIssue[] = [];
+        const previewItems: WorkspaceMethodImportPreviewItem[] = [];
 
         for (const loadedFile of loadedFiles) {
           try {
             const parsed = JSON.parse(loadedFile.text.trim()) as Record<string, unknown>;
             if (isRecord(parsed) && isWorkspaceProjectImportPayload(parsed)) {
-              workspaces.push(loadWorkspaceProjectFromPayload(parsed));
+              previewItems.push({ sourceName: loadedFile.file.name, workspace: loadWorkspaceProjectFromPayload(parsed) });
               continue;
             }
 
             if (isRecord(parsed) && isMethodDocumentImportPayload(parsed)) {
-              workspaces.push(buildWorkspaceImportFromMethodPayload(parsed, loadedFile.file.name));
+              previewItems.push({ sourceName: loadedFile.file.name, workspace: buildWorkspaceImportFromMethodPayload(parsed, loadedFile.file.name) });
               continue;
             }
 
@@ -4187,7 +4204,9 @@ export default function App() {
               ? parsed.name.trim()
               : loadedFile.file.name.replace(/\.json$/i, '').trim();
             if (parsed && typeof parsed === 'object' && 'sections' in parsed && Array.isArray(parsed.sections)) {
-              workspaces.push({
+              previewItems.push({
+                sourceName: loadedFile.file.name,
+                workspace: {
                 version: 3,
                 updatedAt: new Date().toISOString(),
                 methods: [
@@ -4199,32 +4218,35 @@ export default function App() {
                   }
                 ],
                 groups: []
+              }
               });
             } else {
-              invalidFiles.push(loadedFile.file.name);
+              invalidFiles.push({
+                fileName: loadedFile.file.name,
+                reason: 'Неподдерживаемый формат: нужен JSON с methods[] или sections[]'
+              });
             }
           } catch {
-            invalidFiles.push(loadedFile.file.name);
+            invalidFiles.push({
+              fileName: loadedFile.file.name,
+              reason: 'Некорректный JSON'
+            });
           }
         }
 
-        if (workspaces.length === 0) {
-          setImportError(`Для множественного импорта подходят JSON с methods[] или sections[]. Проблемные файлы: ${invalidFiles.join(', ')}`);
+        if (previewItems.length === 0) {
+          setImportError(`Для множественного импорта подходят JSON с methods[] или sections[]. Проблемные файлы: ${invalidFiles.map((item) => item.fileName).join(', ')}`);
           return;
         }
 
-        const importedCount = mergeWorkspaceImportsAsMethods(workspaces);
-        if (importedCount > 0) {
-          setWorkspaceMethodsImportRouting(null);
-          setProjectTextImport(null);
-          if (invalidFiles.length > 0) {
-            setImportError(`Пропущены файлы: ${invalidFiles.join(', ')}`);
-            setToastMessage(`Импортировано методов: ${importedCount}. Пропущено файлов: ${invalidFiles.length}`);
-          } else {
-            setImportError('');
-            setToastMessage(`Импортировано методов: ${importedCount}`);
-          }
-        }
+        setWorkspaceMethodsImportRouting({
+          sourceLabel: `Файлы: ${loadedFiles.length}`,
+          items: previewItems,
+          invalidFiles,
+          allowReplace: false
+        });
+        setImportError('');
+        setProjectTextImport(null);
       })
       .catch((error) => {
         setImportError(error instanceof Error ? error.message : 'Ошибка импорта');
@@ -4250,8 +4272,8 @@ export default function App() {
   }
 
   function applyWorkspaceImportAsReplace(): void {
-    if (!workspaceMethodsImportRouting) return;
-    const loaded = loadWorkspaceProjectFromPayload(workspaceMethodsImportRouting.workspace);
+    if (!workspaceMethodsImportRouting || workspaceMethodsImportRouting.items.length === 0) return;
+    const loaded = loadWorkspaceProjectFromPayload(workspaceMethodsImportRouting.items[0].workspace);
     applyWorkspaceState({ ...loaded, groups: ENABLE_MULTI_METHODS ? loaded.groups : [] });
     setWorkspaceMethodsImportRouting(null);
     setImportError('');
@@ -4261,10 +4283,17 @@ export default function App() {
   function applyWorkspaceImportAsMethodsMerge(): void {
     if (!workspaceMethodsImportRouting) return;
 
-    const importedCount = mergeWorkspaceImportsAsMethods([workspaceMethodsImportRouting.workspace]);
+    const importedCount = mergeWorkspaceImportsAsMethods(workspaceMethodsImportRouting.items.map((item) => item.workspace));
     if (importedCount > 0) {
+      const skippedCount = workspaceMethodsImportRouting.invalidFiles.length;
       setWorkspaceMethodsImportRouting(null);
-      setToastMessage(`Импортировано методов: ${importedCount}`);
+      if (skippedCount > 0) {
+        setImportError(`Пропущены файлы: ${workspaceMethodsImportRouting.invalidFiles.map((item) => item.fileName).join(', ')}`);
+        setToastMessage(`Импортировано методов: ${importedCount}. Пропущено файлов: ${skippedCount}`);
+      } else {
+        setImportError('');
+        setToastMessage(`Импортировано методов: ${importedCount}`);
+      }
     }
   }
 
@@ -7373,19 +7402,47 @@ export default function App() {
       {workspaceMethodsImportRouting && (
         <div className="import-routing-backdrop" role="dialog" aria-modal="true" aria-label="Импорт методов из JSON">
           <div className="import-routing-card">
-            <h2>{workspaceMethodsImportRouting.workspace.methods.length === 1 ? 'Импорт JSON метода' : 'Импорт JSON проекта'}</h2>
-            <p className="import-routing-file">Файл: {workspaceMethodsImportRouting.fileName}</p>
+            <h2>{countImportedMethods(workspaceMethodsImportRouting.items) === 1 ? 'Предпросмотр импорта метода' : 'Предпросмотр импорта методов'}</h2>
+            <p className="import-routing-file">Источник: {workspaceMethodsImportRouting.sourceLabel}</p>
             <p className="import-routing-file">
-              {workspaceMethodsImportRouting.workspace.methods.length === 1
-                ? 'Обнаружен JSON одного метода. Выберите режим импорта.'
-                : 'Обнаружен JSON вашей площадки с методами. Выберите режим импорта.'}
+              Найдено методов: {countImportedMethods(workspaceMethodsImportRouting.items)}. Проверьте, что будет добавлено, и затем подтвердите импорт.
             </p>
+
+            <div className="import-preview-block">
+              <div className="label">Будут импортированы методы</div>
+              <ul className="import-preview-list">
+                {workspaceMethodsImportRouting.items.flatMap((item) =>
+                  item.workspace.methods.map((method) => (
+                    <li key={`${item.sourceName}:${method.id}`} className="import-preview-item">
+                      <strong>{method.name}</strong>
+                      <span className="import-routing-file">{item.sourceName}</span>
+                    </li>
+                  ))
+                )}
+              </ul>
+            </div>
+
+            {workspaceMethodsImportRouting.invalidFiles.length > 0 && (
+              <div className="import-preview-block">
+                <div className="label">Файлы с ошибкой</div>
+                <ul className="import-preview-list import-preview-list-errors">
+                  {workspaceMethodsImportRouting.invalidFiles.map((item) => (
+                    <li key={`${item.fileName}:${item.reason}`} className="import-preview-item">
+                      <strong>{item.fileName}</strong>
+                      <span className="import-routing-file">{item.reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             <div className="import-routing-actions">
               <button type="button" className="ghost" onClick={cancelWorkspaceMethodsImportRouting}>Отмена</button>
-              <button type="button" className="ghost" onClick={applyWorkspaceImportAsReplace}>Заменить проект</button>
+              {workspaceMethodsImportRouting.allowReplace && (
+                <button type="button" className="ghost" onClick={applyWorkspaceImportAsReplace}>Заменить проект</button>
+              )}
               <button type="button" onClick={applyWorkspaceImportAsMethodsMerge}>
-                {workspaceMethodsImportRouting.workspace.methods.length === 1 ? 'Импортировать метод' : 'Импортировать методы'}
+                {countImportedMethods(workspaceMethodsImportRouting.items) === 1 ? 'Импортировать метод' : 'Импортировать методы'}
               </button>
             </div>
           </div>

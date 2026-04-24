@@ -141,6 +141,7 @@ describe('App integration', () => {
   });
 
   it('imports multiple workspace json files as methods', async () => {
+    const user = userEvent.setup();
     renderApp();
 
     const fileInput = document.querySelector('input[type="file"]');
@@ -178,6 +179,10 @@ describe('App integration', () => {
 
     fireEvent.change(fileInput as HTMLInputElement, { target: { files: [fileA, fileB] } });
 
+    expect(await screen.findByRole('dialog', { name: 'Импорт методов из JSON' })).toBeInTheDocument();
+    expect(screen.getByText(/Найдено методов: 2/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Импортировать методы' }));
+
     const navTree = screen.getByRole('tree', { name: 'Проекты, методы и секции' });
     await waitFor(() => {
       expect(within(navTree).getByRole('treeitem', { name: /Метод B/i })).toBeInTheDocument();
@@ -185,6 +190,7 @@ describe('App integration', () => {
   });
 
   it('imports a single method json file as a method', async () => {
+    const user = userEvent.setup();
     renderApp();
 
     const fileInput = document.querySelector('input[type="file"]');
@@ -213,6 +219,10 @@ describe('App integration', () => {
 
     const file = new File([singleMethod], 'method-single-object.json', { type: 'application/json' });
     fireEvent.change(fileInput as HTMLInputElement, { target: { files: [file] } });
+
+    expect(await screen.findByRole('dialog', { name: 'Импорт методов из JSON' })).toBeInTheDocument();
+    expect(screen.getByText(/Catalog Search/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Импортировать метод' }));
 
     const navTree = screen.getByRole('tree', { name: 'Проекты, методы и секции' });
     await waitFor(() => {
@@ -252,6 +262,8 @@ describe('App integration', () => {
     });
 
     await user.click(screen.getByRole('button', { name: 'Импортировать текст' }));
+    expect(await screen.findByRole('dialog', { name: 'Импорт методов из JSON' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Импортировать метод' }));
 
     const navTree = screen.getByRole('tree', { name: 'Проекты, методы и секции' });
     await waitFor(() => {
@@ -260,6 +272,83 @@ describe('App integration', () => {
 
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: 'Импорт проекта из текста' })).not.toBeInTheDocument();
+    });
+  });
+
+  it('imports method json with partial parsed rows without trim crash', async () => {
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(screen.getByRole('button', { name: 'Импорт' }));
+    const textarea = screen.getByRole('textbox', { name: 'Текст для импорта' });
+    fireEvent.change(textarea, {
+      target: {
+        value: JSON.stringify({
+          id: 'method_partial_rows',
+          name: 'Partial Rows Method',
+          sections: [
+            {
+              id: 'request',
+              enabled: true,
+              kind: 'parsed',
+              rows: [
+                {
+                  id: 'row-1',
+                  required: '+',
+                  source: 'body'
+                }
+              ],
+              error: ''
+            }
+          ]
+        })
+      }
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Импортировать текст' }));
+    expect(await screen.findByRole('dialog', { name: 'Импорт методов из JSON' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Импортировать метод' }));
+
+    const navTree = screen.getByRole('tree', { name: 'Проекты, методы и секции' });
+    await waitFor(() => {
+      expect(within(navTree).getByRole('treeitem', { name: /Partial Rows Method/i })).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Ошибка импорта:/i)).not.toBeInTheDocument();
+    });
+  });
+
+  it('shows preview with added methods and invalid files before multi import', async () => {
+    const user = userEvent.setup();
+    renderApp();
+
+    const fileInput = document.querySelector('input[type="file"]');
+    expect(fileInput).not.toBeNull();
+
+    const validMethod = new File([JSON.stringify({
+      id: 'method_preview_ok',
+      name: 'Preview OK',
+      sections: [{ id: 's_goal', title: 'Goal', enabled: true, kind: 'text', value: 'ok' }]
+    })], 'preview-ok.json', { type: 'application/json' });
+    const invalidFile = new File(['{bad-json'], 'broken.json', { type: 'application/json' });
+
+    fireEvent.change(fileInput as HTMLInputElement, { target: { files: [validMethod, invalidFile] } });
+
+    expect(await screen.findByRole('dialog', { name: 'Импорт методов из JSON' })).toBeInTheDocument();
+    expect(screen.getByText(/Preview OK/i)).toBeInTheDocument();
+    expect(screen.getByText(/broken.json/i)).toBeInTheDocument();
+    expect(screen.getByText(/Некорректный JSON/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Импортировать метод' }));
+
+    const navTree = screen.getByRole('tree', { name: 'Проекты, методы и секции' });
+    await waitFor(() => {
+      expect(within(navTree).getByRole('treeitem', { name: /Preview OK/i })).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Ошибка импорта: Пропущены файлы: broken.json/i)).toBeInTheDocument();
     });
   });
 });

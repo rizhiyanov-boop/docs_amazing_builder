@@ -373,6 +373,11 @@ type WorkspaceMethodsImportRoutingState = {
   workspace: WorkspaceProjectData;
 };
 
+type WorkspaceProjectImportPayload = Record<string, unknown> & {
+  methods: Record<string, unknown>[];
+  groups?: Record<string, unknown>[];
+};
+
 type ProjectTextImportState = {
   rawText: string;
   fromOnboarding: boolean;
@@ -442,6 +447,14 @@ function guessJsonSampleType(value: unknown): JsonImportSampleType {
 
   if (responseHits >= requestHits) return 'response';
   return 'request';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isWorkspaceProjectImportPayload(value: Record<string, unknown>): value is WorkspaceProjectImportPayload {
+  return Array.isArray(value.methods) && value.methods.every(isRecord);
 }
 
 function normalizeWorkspaceForMode(workspace: WorkspaceProjectData): WorkspaceProjectData {
@@ -3953,10 +3966,10 @@ export default function App() {
         return;
       }
 
-      if ('methods' in parsed && Array.isArray(parsed.methods)) {
+      if (isRecord(parsed) && isWorkspaceProjectImportPayload(parsed)) {
         setWorkspaceMethodsImportRouting({
           fileName,
-          workspace: parsed as WorkspaceProjectData
+          workspace: loadWorkspaceProjectFromPayload(parsed)
         });
         setImportError('');
         setProjectTextImport(null);
@@ -4109,8 +4122,8 @@ export default function App() {
         for (const loadedFile of loadedFiles) {
           try {
             const parsed = JSON.parse(loadedFile.text.trim()) as Record<string, unknown>;
-            if (parsed && typeof parsed === 'object' && 'methods' in parsed && Array.isArray(parsed.methods)) {
-              workspaces.push(parsed as WorkspaceProjectData);
+            if (isRecord(parsed) && isWorkspaceProjectImportPayload(parsed)) {
+              workspaces.push(loadWorkspaceProjectFromPayload(parsed));
               continue;
             }
 
@@ -4256,40 +4269,46 @@ export default function App() {
     setToastMessage(`Текст импортирован в ${sourceTextImport.target === 'client' ? 'Client source' : 'Server source'}.`);
   }
 
-  function loadWorkspaceProjectFromPayload(payload: WorkspaceProjectData): WorkspaceProjectData {
+  function loadWorkspaceProjectFromPayload(payload: WorkspaceProjectData | WorkspaceProjectImportPayload): WorkspaceProjectData {
     const methods = payload.methods
-      .filter((method) => method && Array.isArray(method.sections))
+      .filter((method): method is Record<string, unknown> => isRecord(method) && Array.isArray(method.sections))
       .map((method, index) => ({
-        id: method.id || createMethodId(),
-        name: method.name?.trim() || `Метод ${index + 1}`,
-        updatedAt: method.updatedAt || new Date().toISOString(),
-        sections: sanitizeSections(method.sections).map(withSectionRowIds)
+        id: typeof method.id === 'string' && method.id.trim() ? method.id.trim() : createMethodId(),
+        name: typeof method.name === 'string' && method.name.trim() ? method.name.trim() : `Метод ${index + 1}`,
+        updatedAt: typeof method.updatedAt === 'string' && method.updatedAt ? method.updatedAt : new Date().toISOString(),
+        sections: sanitizeSections(method.sections as DocSection[]).map(withSectionRowIds)
       }));
 
     if (methods.length === 0) return createWorkspaceSeed();
 
     const groups = Array.isArray(payload.groups)
-      ? payload.groups.map((group) => ({
-          id: group.id || `group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          name: group.name?.trim() || 'Новая цепочка',
-          methodIds: Array.isArray(group.methodIds) ? group.methodIds.filter(Boolean) : [],
-          links: Array.isArray(group.links) ? group.links : []
+      ? payload.groups.filter(isRecord).map((group) => ({
+          id: typeof group.id === 'string' && group.id.trim() ? group.id.trim() : `group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          name: typeof group.name === 'string' && group.name.trim() ? group.name.trim() : 'Новая цепочка',
+          methodIds: Array.isArray(group.methodIds) ? group.methodIds.filter((methodId): methodId is string => typeof methodId === 'string' && Boolean(methodId.trim())) : [],
+          links: Array.isArray(group.links)
+            ? group.links.filter((link): link is MethodGroup['links'][number] => (
+                isRecord(link)
+                && typeof link.fromMethodId === 'string'
+                && typeof link.toMethodId === 'string'
+              ))
+            : []
         }))
       : [];
 
-    const activeMethodId = payload.activeMethodId && methods.some((method) => method.id === payload.activeMethodId)
+    const activeMethodId = typeof payload.activeMethodId === 'string' && methods.some((method) => method.id === payload.activeMethodId)
       ? payload.activeMethodId
       : methods[0].id;
 
     const workspace: WorkspaceProjectData = {
       version: 3,
-      projectName: normalizeProjectName(payload.projectName),
-      updatedAt: payload.updatedAt || new Date().toISOString(),
+      projectName: normalizeProjectName(typeof payload.projectName === 'string' ? payload.projectName : undefined),
+      updatedAt: typeof payload.updatedAt === 'string' && payload.updatedAt ? payload.updatedAt : new Date().toISOString(),
       methods,
       groups,
       activeMethodId,
-      projectSections: sanitizeProjectSections(payload.projectSections),
-      flows: sanitizeProjectFlows(payload.flows, methods)
+      projectSections: sanitizeProjectSections(Array.isArray(payload.projectSections) ? payload.projectSections as ProjectSection[] : undefined),
+      flows: sanitizeProjectFlows(Array.isArray(payload.flows) ? payload.flows as ProjectFlow[] : undefined, methods)
     };
 
     return normalizeWorkspaceForMode(workspace);

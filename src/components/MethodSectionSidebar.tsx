@@ -286,7 +286,7 @@ export function MethodSectionSidebar({
                                         aria-label="Название метода"
                                       />
                                     ) : (
-                                      <div className="section-title method-title">{method.name}</div>
+                                      <div className="section-title method-title method-title-ellipsis" title={method.name}>{method.name}</div>
                                     )}
                                   </div>
                                   <button
@@ -368,7 +368,7 @@ export function MethodSectionSidebar({
                                 {readonlyMethods.map((method) => (
                                   <div key={method.id} className="section-item method-item readonly-method-item" role="treeitem" aria-selected="false" tabIndex={-1}>
                                     <div className="section-item-main">
-                                      <div className="section-title method-title">{method.name}</div>
+                                      <div className="section-title method-title method-title-ellipsis" title={method.name}>{method.name}</div>
                                       <div className="chips">
                                         <span className="chip muted">Секций: {method.sectionCount}</span>
                                       </div>
@@ -452,6 +452,14 @@ export function MethodSectionSidebar({
             {methodNameWarning && <div className="method-warning">{methodNameWarning}</div>}
           </div>
         )}
+        <div className="sidebar-workspace-footer" aria-label="Рабочее пространство">
+          <div className="sidebar-workspace-title">Рабочее пространство</div>
+          <div className="sidebar-workspace-list">
+            <button type="button" className="sidebar-workspace-item active">ГРКИ</button>
+            <button type="button" className="sidebar-workspace-item">OpenAPI</button>
+            <button type="button" className="sidebar-workspace-item">Internal</button>
+          </div>
+        </div>
       </aside>
       <button
         type="button"

@@ -4243,3 +4243,43 @@ tr:nth-child(odd) td {
 
 
 
+:root .method-title-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root .sidebar-workspace-footer {
+  border-top: 1px solid var(--border);
+  margin-top: auto;
+  padding: var(--space-3);
+}
+
+:root .sidebar-workspace-title {
+  font-size: var(--font-size-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: var(--space-2);
+}
+
+:root .sidebar-workspace-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-1-5);
+}
+
+:root .sidebar-workspace-item {
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text-dim);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1-5) var(--space-2);
+  font-size: var(--font-size-xs);
+  text-align: left;
+}
+
+:root .sidebar-workspace-item.active {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent-solid) 44%, var(--border));
+}

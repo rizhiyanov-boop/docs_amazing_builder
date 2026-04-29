@@ -96,10 +96,18 @@ export function AppTopbar({
   canNavigateToOnboardingStep,
   renderUiIcon
 }: AppTopbarProps): ReactNode {
-  // Autosave stays wired for now, but hidden from topbar UI by product request.
-  void autosaveState;
-  void autosaveAt;
   void onManualSave;
+  void onOpenHtmlPreview;
+  void onOpenWikiPreview;
+
+  const autosaveLabel =
+    autosaveState === 'saving'
+      ? 'Сохранение...'
+      : autosaveState === 'saved'
+        ? `Сохранено${autosaveAt ? ` · ${autosaveAt}` : ''}`
+        : autosaveState === 'error'
+          ? 'Ошибка сохранения'
+          : 'Нет изменений';
 
   return (
     <header ref={topbarRef} className="topbar">
@@ -149,25 +157,6 @@ export function AppTopbar({
             <span className="ui-icon export-format-icon" data-format="MOCK" aria-hidden>{renderUiIcon('download')}</span>
           </button>
           <button
-            className="primary topbar-action topbar-format-btn"
-            data-onboarding-anchor="export-docs"
-            onClick={onOpenHtmlPreview}
-            disabled={!canExport}
-            title={canExport ? `Открыть HTML-предпросмотр. ${exportTitle}` : exportTitle}
-            aria-label="Открыть HTML-предпросмотр"
-          >
-            <span className="ui-icon export-format-icon" data-format="HTML" aria-hidden>{renderUiIcon('download')}</span>
-          </button>
-          <button
-            className="topbar-action topbar-format-btn"
-            onClick={onOpenWikiPreview}
-            disabled={!canExport}
-            title={canExport ? `Открыть Wiki-предпросмотр. ${exportTitle}` : exportTitle}
-            aria-label="Открыть Wiki-предпросмотр"
-          >
-            <span className="ui-icon export-format-icon" data-format="WIKI" aria-hidden>{renderUiIcon('download')}</span>
-          </button>
-          <button
             className="ghost small"
             type="button"
             onClick={onExportFullProjectHtml}
@@ -196,6 +185,9 @@ export function AppTopbar({
                 <span className="ui-icon" aria-hidden>{renderUiIcon('redo')}</span>
               </button>
             </div>
+          </div>
+          <div className={`topbar-cluster topbar-autosave-cluster autosave-${autosaveState}`}>
+            <span className="topbar-autosave-label">{autosaveLabel}</span>
           </div>
           <div className="topbar-cluster topbar-system-cluster">
             {authLoading ? (

@@ -19,19 +19,33 @@ export function ParsedSectionEditor({
   renderParsedTable
 }: ParsedSectionEditorProps): ReactNode {
   if (isDualModelSection(section)) {
-    return <>{renderRequestEditor(section)}</>;
+    return (
+      <section className="ds-section-card">
+        <header className="ds-section-card-head">
+          <div className="ds-section-card-eyebrow">{section.sectionType === 'request' ? 'REQUEST' : 'RESPONSE'}</div>
+          <h3 className="ds-section-card-title">{section.title}</h3>
+        </header>
+        <div className="ds-section-card-body">{renderRequestEditor(section)}</div>
+      </section>
+    );
   }
 
   return (
-    <div className="stack">
-      {renderSourceEditor(section, 'server')}
-      <div className="row gap">
-        <button className="ghost small" type="button" onClick={() => onAddManualRow(section)}>
-          + Параметр
-        </button>
+    <section className="ds-section-card">
+      <header className="ds-section-card-head">
+        <div className="ds-section-card-eyebrow">{section.format.toUpperCase()}</div>
+        <h3 className="ds-section-card-title">{section.title}</h3>
+      </header>
+      <div className="ds-section-card-body stack">
+        {renderSourceEditor(section, 'server')}
+        <div className="row gap">
+          <button className="ghost small" type="button" onClick={() => onAddManualRow(section)}>
+            + Параметр
+          </button>
+        </div>
+        {section.error && <div className="alert error">{section.error}</div>}
+        {renderParsedTable(section)}
       </div>
-      {section.error && <div className="alert error">{section.error}</div>}
-      {renderParsedTable(section)}
-    </div>
+    </section>
   );
 }

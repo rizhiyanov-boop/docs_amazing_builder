@@ -4283,3 +4283,38 @@ tr:nth-child(odd) td {
   color: var(--text);
   border-color: color-mix(in srgb, var(--accent-solid) 44%, var(--border));
 }
+
+:root .ds-section-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  overflow: hidden;
+}
+
+:root .ds-section-card-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  background: color-mix(in srgb, var(--card-muted) 60%, var(--card));
+  border-bottom: 1px solid var(--border-soft);
+}
+
+:root .ds-section-card-eyebrow {
+  font-size: var(--font-size-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+:root .ds-section-card-title {
+  margin: 0;
+  font-size: var(--font-size-md);
+  line-height: 1.3;
+  color: var(--text);
+}
+
+:root .ds-section-card-body {
+  padding: var(--space-4);
+}

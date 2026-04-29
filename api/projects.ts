@@ -1,4 +1,4 @@
-import { deleteProject, getProjectById, getProjectsByUser, getUserBySessionToken, saveProject } from './_lib/db.js';
+import { ProjectNotFoundError, deleteProject, getProjectById, getProjectsByUser, getUserBySessionToken, saveProject } from './_lib/db.js';
 import { getSessionToken, readQueryString } from './_lib/http.js';
 
 type VercelRequest = {
@@ -94,14 +94,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       return;
     }
 
-    const saved = await saveProject({
-      userId: user.id,
-      projectId: body.projectId,
-      name: resolvedName,
-      workspace: body.workspace,
-      history: includeHistory ? body.history ?? null : undefined,
-      includeHistory
-    });
+    let saved: { id: string; updatedAt: string };
+    try {
+      saved = await saveProject({
+        userId: user.id,
+        projectId: body.projectId,
+        name: resolvedName,
+        workspace: body.workspace,
+        history: includeHistory ? body.history ?? null : undefined,
+        includeHistory
+      });
+    } catch (error) {
+      if (error instanceof ProjectNotFoundError) {
+        res.status(404).json({ error: 'Проект не найден' });
+        return;
+      }
+      throw error;
+    }
 
     res.status(200).json({ data: saved });
     return;

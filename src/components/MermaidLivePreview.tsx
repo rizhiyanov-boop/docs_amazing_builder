@@ -31,7 +31,7 @@ export function MermaidLivePreview({ code }: MermaidLivePreviewProps): ReactNode
       try {
         const mermaidModule = await import('mermaid');
         const mermaid = mermaidModule.default;
-        mermaid.initialize({ startOnLoad: false, securityLevel: 'loose' });
+        mermaid.initialize({ startOnLoad: false, securityLevel: 'strict' });
         const graphId = `mermaid-${Math.random().toString(36).slice(2, 10)}`;
         const { svg } = await mermaid.render(graphId, source);
         if (!isActive) return;

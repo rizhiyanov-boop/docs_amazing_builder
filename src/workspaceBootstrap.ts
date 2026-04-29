@@ -13,10 +13,10 @@ import type {
   WorkspaceProjectData
 } from './types';
 
-const DEFAULT_METHOD_NAME = 'Метод 1';
-const DEFAULT_PROJECT_NAME = 'Новый проект';
+export const DEFAULT_METHOD_NAME = 'Метод 1';
+export const DEFAULT_PROJECT_NAME = 'Новый проект';
 
-function normalizeProjectName(value: string | null | undefined): string {
+export function normalizeProjectName(value: string | null | undefined): string {
   const trimmed = value?.trim();
   return trimmed || DEFAULT_PROJECT_NAME;
 }

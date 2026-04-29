@@ -1,4 +1,5 @@
 import { neon } from '@neondatabase/serverless';
+import bcrypt from 'bcryptjs';
 
 declare const crypto: Crypto;
 declare const process: {
@@ -10,8 +11,21 @@ export type AuthUser = {
   login: string;
 };
 
+export class ProjectNotFoundError extends Error {
+  readonly projectId: string;
+
+  constructor(projectId: string) {
+    super('Проект не найден');
+    this.name = 'ProjectNotFoundError';
+    this.projectId = projectId;
+  }
+}
+
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const SESSION_CLEANUP_INTERVAL_MS = 1000 * 60 * 5;
+const BCRYPT_ROUNDS = 12;
+const PASSWORD_ALGORITHM_BCRYPT = 'bcrypt';
+const PASSWORD_ALGORITHM_SHA256 = 'sha256';
 let schemaReady = false;
 let lastSessionCleanupAt = 0;
 
@@ -42,12 +56,25 @@ function makeId(prefix: string): string {
   return `${prefix}_${randomHex(9)}`;
 }
 
-async function hashPassword(password: string, salt: string): Promise<string> {
+async function hashLegacySha256Password(password: string, salt: string): Promise<string> {
   const encoder = new TextEncoder();
   const data = encoder.encode(`${salt}:${password}`);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function hashPassword(password: string): Promise<string> {
+  return bcrypt.hash(password, BCRYPT_ROUNDS);
+}
+
+async function verifyPassword(password: string, user: { password_hash: string; password_salt: string; password_algorithm: string }): Promise<boolean> {
+  if (user.password_algorithm === PASSWORD_ALGORITHM_BCRYPT) {
+    return bcrypt.compare(password, user.password_hash);
+  }
+
+  const legacyHash = await hashLegacySha256Password(password, user.password_salt);
+  return legacyHash === user.password_hash;
 }
 
 async function hashProjectPayload(payload: { name: string; workspace: unknown; history: unknown }): Promise<string> {
@@ -71,10 +98,13 @@ async function ensureSchema(): Promise<void> {
       login TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
       password_salt TEXT NOT NULL,
+      password_algorithm TEXT NOT NULL DEFAULT 'bcrypt',
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `;
+
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_algorithm TEXT NOT NULL DEFAULT 'sha256'`;
 
   await sql`
     CREATE TABLE IF NOT EXISTS sessions (
@@ -128,11 +158,10 @@ export async function registerUser(payload: { login: string; password: string })
     throw new Error('Пользователь с таким логином уже существует');
   }
 
-  const salt = randomHex(12);
-  const hash = await hashPassword(payload.password, salt);
+  const hash = await hashPassword(payload.password);
   const created = await sql`
-    INSERT INTO users (id, login, password_hash, password_salt)
-    VALUES (${makeId('usr')}, ${login}, ${hash}, ${salt})
+    INSERT INTO users (id, login, password_hash, password_salt, password_algorithm)
+    VALUES (${makeId('usr')}, ${login}, ${hash}, ${''}, ${PASSWORD_ALGORITHM_BCRYPT})
     RETURNING id, login
   `;
   const createdRow = created[0] as { id: string; login: string };
@@ -145,17 +174,33 @@ export async function verifyUser(payload: { login: string; password: string }): 
 
   const login = payload.login.trim().toLowerCase();
   const result = await sql`
-    SELECT id, login, password_hash, password_salt
+    SELECT id, login, password_hash, password_salt, password_algorithm
     FROM users
     WHERE login = ${login}
     LIMIT 1
   `;
 
-  const user = result[0] as { id: string; login: string; password_hash: string; password_salt: string } | undefined;
+  const user = result[0] as { id: string; login: string; password_hash: string; password_salt: string; password_algorithm?: string } | undefined;
   if (!user) return null;
 
-  const hash = await hashPassword(payload.password, user.password_salt);
-  if (hash !== user.password_hash) return null;
+  const passwordUser = {
+    ...user,
+    password_algorithm: user.password_algorithm || PASSWORD_ALGORITHM_SHA256
+  };
+  const isValid = await verifyPassword(payload.password, passwordUser);
+  if (!isValid) return null;
+
+  if (passwordUser.password_algorithm !== PASSWORD_ALGORITHM_BCRYPT) {
+    const hash = await hashPassword(payload.password);
+    await sql`
+      UPDATE users
+      SET password_hash = ${hash},
+          password_salt = ${''},
+          password_algorithm = ${PASSWORD_ALGORITHM_BCRYPT},
+          updated_at = now()
+      WHERE id = ${user.id}
+    `;
+  }
 
   return { id: user.id, login: user.login };
 }
@@ -179,7 +224,6 @@ export async function getUserBySessionToken(token: string | undefined): Promise<
   if (!token) return null;
 
   await ensureSchema();
-  await cleanupExpiredSessions();
 
   const result = await sql`
     SELECT users.id, users.login
@@ -249,6 +293,7 @@ export async function saveProject(payload: {
     if (updatedRow) {
       return { id: updatedRow.id, updatedAt: updatedRow.updated_at };
     }
+    throw new ProjectNotFoundError(projectId);
   }
 
   const duplicate = await sql`
@@ -283,7 +328,6 @@ export async function saveProject(payload: {
 
 export async function getProjectsByUser(userId: string): Promise<Array<{ id: string; name: string; updatedAt: string }>> {
   await ensureSchema();
-  await cleanupExpiredSessions();
 
   const result = await sql`
     SELECT id, name, updated_at
@@ -300,7 +344,6 @@ export async function getProjectsByUser(userId: string): Promise<Array<{ id: str
 
 export async function getProjectById(userId: string, projectId: string): Promise<{ id: string; name: string; workspace: unknown; history: unknown; updatedAt: string } | null> {
   await ensureSchema();
-  await cleanupExpiredSessions();
 
   const result = await sql`
     SELECT id, name, workspace, history, updated_at

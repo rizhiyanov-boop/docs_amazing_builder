@@ -32,6 +32,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
+  if (password.length < 8) {
+    res.status(400).json({ error: 'Пароль должен быть не менее 8 символов' });
+    return;
+  }
+
   try {
     const user = await registerUser({ login, password });
     const session = await createSession(user.id);

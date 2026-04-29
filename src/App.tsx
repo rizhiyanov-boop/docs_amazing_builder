@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from 'react';
+﻿import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -76,6 +76,8 @@ import {
 } from './sectionFactories';
 import {
   asWorkspaceProjectData as asWorkspaceProjectDataCore,
+  DEFAULT_METHOD_NAME,
+  DEFAULT_PROJECT_NAME,
   createDefaultFlow,
   createDefaultProjectSections,
   createMethodDocument,
@@ -84,6 +86,7 @@ import {
   createProjectSectionId,
   createWorkspaceSeed,
   loadWorkspaceProject as loadWorkspaceProjectCore,
+  normalizeProjectName,
   normalizeWorkspaceForMode as normalizeWorkspaceForModeCore,
   sanitizeProjectFlows,
   sanitizeProjectSections
@@ -103,19 +106,14 @@ import { ProjectDocsEditor } from './components/ProjectDocsEditor';
 import { ProjectFlowsEditor } from './components/ProjectFlowsEditor';
 import { WorkspaceTabs } from './components/WorkspaceTabs';
 import { useRemoteProjectAutosave } from './hooks/useRemoteProjectAutosave';
+import { useServerSync } from './hooks/useServerSync';
 import { useWorkspaceHistory } from './hooks/useWorkspaceHistory';
 import {
-  fetchCurrentUser,
   loginWithPassword,
   listServerProjects,
-  loadServerProject,
   deleteServerProject,
   logoutFromServer,
-  registerWithPassword,
-  saveServerProject,
-  type AuthUser as ServerAuthUser,
-  type PersistedHistoryState,
-  type ProjectListItem
+  registerWithPassword
 } from './serverSyncClient';
 import type { OnboardingState } from './onboarding/types';
 import { applyThemeToRoot } from './theme';
@@ -149,8 +147,6 @@ const THEME_STORAGE_KEY = 'doc-builder-theme-v1';
 const TABLE_FIELD_COLUMN_WIDTH_KEY = 'doc-builder-table-field-column-width-v1';
 const SIDEBAR_WIDTH_KEY = 'doc-builder-sidebar-width-v1';
 const SIDEBAR_HIDDEN_KEY = 'doc-builder-sidebar-hidden-v1';
-const DEFAULT_METHOD_NAME = 'Метод 1';
-const DEFAULT_PROJECT_NAME = 'Новый проект';
 const DELETE_UNDO_WINDOW_MS = 8000;
 const HISTORY_LIMIT = 50;
 const HISTORY_COALESCE_MS = 700;
@@ -169,7 +165,6 @@ const MAX_SIDEBAR_WIDTH = 520;
 const COMPACT_LAYOUT_MEDIA_QUERY = '(max-width: 64rem)';
 const EMPTY_SECTIONS: DocSection[] = [];
 const ENABLE_MULTI_METHODS = true;
-const ENABLE_SCROLL_SECTION_SYNC = false;
 const DEFAULT_RICH_TEXT_HIGHLIGHT = '#fef08a';
 
 function clampTableFieldColumnWidth(value: number): number {
@@ -178,11 +173,6 @@ function clampTableFieldColumnWidth(value: number): number {
 
 function clampSidebarWidth(value: number): number {
   return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, Math.round(value)));
-}
-
-function normalizeProjectName(value: string | null | undefined): string {
-  const trimmed = value?.trim();
-  return trimmed || DEFAULT_PROJECT_NAME;
 }
 
 function deepClone<T>(value: T): T {
@@ -210,14 +200,6 @@ function saveOnboardingEntrySuppressed(value: boolean): void {
     }
   } catch {
     // Ignore persistence errors for local preference.
-  }
-}
-
-function loadPersistedServerProjectId(): string | null {
-  try {
-    return localStorage.getItem(STORAGE_SERVER_PROJECT_ID_KEY);
-  } catch {
-    return null;
   }
 }
 
@@ -337,26 +319,6 @@ type DeletedRowUndoState = {
 type SectionClipboardState = {
   type: 'section';
   section: DocSection;
-};
-
-type ServerProjectPayload = {
-  id: string;
-  name: string;
-  workspace: WorkspaceProjectData;
-  history: PersistedHistoryState | null;
-  updatedAt: string;
-};
-
-type CachedServerProjectData = {
-  workspace: WorkspaceProjectData;
-  history: PersistedHistoryState | null;
-  loadedAt: number;
-};
-
-type ProjectMethodPreview = {
-  id: string;
-  name: string;
-  sectionCount: number;
 };
 
 type JsonImportRoutingState = {
@@ -577,9 +539,7 @@ export default function App() {
   const sectionAnchorRefs = useRef<Map<string, HTMLElement>>(new Map());
   const inlineFieldInputRef = useRef<HTMLInputElement | null>(null);
   const inlineRequestCellInputRef = useRef<HTMLElement | null>(null);
-  const sectionVisibilityRatiosRef = useRef<Map<string, number>>(new Map());
   const suppressObserverSelectionUntilRef = useRef<number>(0);
-  const observerRafRef = useRef<number | null>(null);
   const sectionJumpHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const richEditorSelectionRef = useRef<{ editor: HTMLElement; range: Range } | null>(null);
   const topbarRef = useRef<HTMLElement | null>(null);
@@ -675,22 +635,10 @@ export default function App() {
   const [dismissedOnboardingHints, setDismissedOnboardingHints] = useState<Record<string, true>>({});
   const [onboardingNavStep, setOnboardingNavStep] = useState<OnboardingStepId>(() => initialOnboarding.currentStep);
   const [onboardingStepHint, setOnboardingStepHint] = useState('');
-  const [authLoading, setAuthLoading] = useState(true);
-  const [authUser, setAuthUser] = useState<ServerAuthUser | null>(null);
-  const [serverProjectId, setServerProjectId] = useState<string | null>(() => loadPersistedServerProjectId());
-  const [serverProjects, setServerProjects] = useState<ProjectListItem[]>([]);
-  const [projectMethodCounts, setProjectMethodCounts] = useState<Record<string, number>>({});
-  const [projectMethodPreviews, setProjectMethodPreviews] = useState<Record<string, ProjectMethodPreview[]>>({});
-  const [serverSyncError, setServerSyncError] = useState('');
-  const [isProjectSwitching, setIsProjectSwitching] = useState(false);
-  const [switchingProjectId, setSwitchingProjectId] = useState<string | null>(null);
   const internalCodeAnchorRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   useEffect(() => {
     return () => {
-      if (observerRafRef.current !== null && typeof window !== 'undefined') {
-        window.cancelAnimationFrame(observerRafRef.current);
-      }
       if (sectionJumpHighlightTimerRef.current) {
         clearTimeout(sectionJumpHighlightTimerRef.current);
       }
@@ -705,9 +653,6 @@ export default function App() {
       }
       if (localAutosaveFlushRef.current !== null) {
         window.clearTimeout(localAutosaveFlushRef.current);
-      }
-      if (preloadQueueTimerRef.current !== null) {
-        window.clearTimeout(preloadQueueTimerRef.current);
       }
     };
   }, []);
@@ -735,32 +680,6 @@ export default function App() {
     } catch {
       return false;
     }
-  }
-
-  function getMethodPreviews(workspace: WorkspaceProjectData): ProjectMethodPreview[] {
-    return workspace.methods.map((method) => ({
-      id: method.id,
-      name: method.name,
-      sectionCount: method.sections.length
-    }));
-  }
-
-  function upsertProjectCache(projectId: string, cached: CachedServerProjectData): void {
-    projectCacheRef.current.set(projectId, cached);
-    setProjectMethodPreviews((current) => ({
-      ...current,
-      [projectId]: getMethodPreviews(cached.workspace)
-    }));
-  }
-
-  function removeProjectCache(projectId: string): void {
-    projectCacheRef.current.delete(projectId);
-    setProjectMethodPreviews((current) => {
-      if (!(projectId in current)) return current;
-      const next = { ...current };
-      delete next[projectId];
-      return next;
-    });
   }
 
   function startSidebarResize(event: ReactMouseEvent<HTMLButtonElement>): void {
@@ -836,9 +755,10 @@ export default function App() {
   const deleteProjectCancelButtonRef = useRef<HTMLButtonElement | null>(null);
   const deleteProjectDialogRef = useRef<HTMLDivElement | null>(null);
   const remoteHydratedRef = useRef(false);
-  const projectCacheRef = useRef<Map<string, CachedServerProjectData>>(new Map());
-  const preloadInFlightRef = useRef<Set<string>>(new Set());
-  const preloadQueueTimerRef = useRef<number | null>(null);
+  const remoteSaveInFlightRef = useRef(false);
+  const remotePendingChangesRef = useRef(0);
+  const remoteLastObservedHashRef = useRef('');
+  const remoteLastSavedHashRef = useRef('');
   const localAutosaveTimerRef = useRef<number | null>(null);
   const localAutosaveFlushRef = useRef<number | null>(null);
   const normalizedProjectName = projectName.trim() || DEFAULT_PROJECT_NAME;
@@ -871,49 +791,64 @@ export default function App() {
     setActiveMethodId,
     setSelectedId
   });
-  const buildWorkspaceProjectData = () => asWorkspaceProjectData(
+  const {
+    authLoading,
+    authUser,
+    serverProjectId,
+    serverProjects,
+    projectMethodPreviews,
+    serverSyncError,
+    isProjectSwitching,
+    switchingProjectId,
+    projectCacheRef,
+    setAuthUser,
+    setServerProjectId,
+    setServerProjects,
+    setServerSyncError,
+    upsertProjectCache,
+    removeProjectCache,
+    upsertServerProjectListEntry,
+    saveServerProjectWithFallback,
+    saveRemoteWorkspace,
+    loadServerProjectIntoWorkspace,
+    handleServerProjectSelect,
+    applyCachedServerProject,
+    handleRemoteAutosaveSaved,
+    handleRemoteAutosaveError,
+    isProjectCacheFresh
+  } = useServerSync({
+    storageServerProjectIdKey: STORAGE_SERVER_PROJECT_ID_KEY,
+    projectCacheTtlMs: PROJECT_CACHE_TTL_MS,
+    projectPreloadConcurrency: PROJECT_PRELOAD_CONCURRENCY,
+    projectPreloadStartDelayMs: PROJECT_PRELOAD_START_DELAY_MS,
+    remoteHydratedRef,
+    remoteLastObservedHashRef,
+    remoteLastSavedHashRef,
+    remotePendingChangesRef,
+    normalizeProjectName,
+    deepClone,
+    applyWorkspaceState,
+    applyPersistedHistoryState,
+    setToastMessage
+  });
+  const buildWorkspaceProjectData = useCallback(() => asWorkspaceProjectData(
     normalizedProjectName,
     methods,
     activeMethodId,
     methodGroups,
     projectSections,
     flows
-  );
-  const saveRemoteWorkspace = (params: { projectId?: string; name: string; workspace: WorkspaceProjectData }) =>
-    saveServerProjectWithFallback(params);
-  const handleRemoteAutosaveSaved = (params: {
-    saved: { id: string; updatedAt: string };
-    workspace: WorkspaceProjectData;
-    projectName: string;
-    workspaceHash: string;
-  }) => {
-    setServerProjectId(params.saved.id);
-    setProjectMethodCounts((current) => ({
-      ...current,
-      [params.saved.id]: params.workspace.methods.length
-    }));
-    upsertProjectCache(params.saved.id, {
-      workspace: deepClone(params.workspace),
-      history: null,
-      loadedAt: Date.now()
-    });
-    setServerSyncError('');
-    upsertServerProjectListEntry({ id: params.saved.id, name: params.projectName, updatedAt: params.saved.updatedAt });
-    remoteLastSavedHashRef.current = params.workspaceHash;
-  };
-  const handleRemoteAutosaveError = (message: string) => {
-    setServerSyncError(message);
-  };
+  ), [normalizedProjectName, methods, activeMethodId, methodGroups, projectSections, flows]);
   const {
-    remoteSaveInFlightRef,
-    remotePendingChangesRef,
-    remoteLastObservedHashRef,
-    remoteLastSavedHashRef,
     cancelPendingRemoteSave,
     resetRemoteTracking
   } = useRemoteProjectAutosave({
     authUser,
     remoteHydratedRef,
+    remoteSaveInFlightRef,
+    remotePendingChangesRef,
+    remoteLastObservedHashRef,
+    remoteLastSavedHashRef,
     normalizedProjectName,
     methods,
     activeMethodId,
@@ -946,70 +881,6 @@ export default function App() {
   const canRenderWorkspace = workspaceScope !== 'methods' || sections.length > 0;
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function hydrateFromServer(): Promise<void> {
-      try {
-        setAuthLoading(true);
-        const user = await fetchCurrentUser();
-        if (cancelled) return;
-
-        setAuthUser(user);
-        setServerSyncError('');
-
-        if (!user) {
-          setServerProjects([]);
-          remoteHydratedRef.current = true;
-          return;
-        }
-
-        const projects = await listServerProjects();
-        if (cancelled) return;
-        setServerProjects(projects);
-        if (projects.length === 0) {
-          setServerProjectId(null);
-          remoteHydratedRef.current = true;
-          return;
-        }
-
-        setServerProjectId((current) => {
-          if (current && projects.some((project) => project.id === current)) {
-            return current;
-          }
-          return null;
-        });
-      } catch (error) {
-        if (!cancelled) {
-          setServerSyncError(error instanceof Error ? error.message : 'Ошибка синхронизации с сервером');
-        }
-      } finally {
-        if (!cancelled) {
-          remoteHydratedRef.current = true;
-          setAuthLoading(false);
-        }
-      }
-    }
-
-    void hydrateFromServer();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    try {
-      if (serverProjectId) {
-        localStorage.setItem(STORAGE_SERVER_PROJECT_ID_KEY, serverProjectId);
-      } else {
-        localStorage.removeItem(STORAGE_SERVER_PROJECT_ID_KEY);
-      }
-    } catch {
-      // Ignore persistence errors for optional sync key.
-    }
-  }, [serverProjectId]);
-
-  useEffect(() => {
     if (!serverProjectId) return;
     setExpandedProjectIds((current) => {
       if (current[serverProjectId]) return current;
@@ -1019,80 +890,6 @@ export default function App() {
       };
     });
   }, [serverProjectId]);
-
-  useEffect(() => {
-    const availableProjectIds = new Set(serverProjects.map((project) => project.id));
-    for (const cachedId of Array.from(projectCacheRef.current.keys())) {
-      if (!availableProjectIds.has(cachedId)) {
-        removeProjectCache(cachedId);
-      }
-    }
-  }, [serverProjects]);
-
-  useEffect(() => {
-    if (!authUser) return;
-    if (serverProjects.length === 0) return;
-
-    let cancelled = false;
-
-    if (preloadQueueTimerRef.current !== null) {
-      window.clearTimeout(preloadQueueTimerRef.current);
-      preloadQueueTimerRef.current = null;
-    }
-
-    const runPreloadQueue = async (): Promise<void> => {
-      const targetIds = serverProjects
-        .map((project) => project.id)
-        .filter((projectId) => projectId !== serverProjectId);
-
-      if (targetIds.length === 0) return;
-
-      let cursor = 0;
-      const worker = async (): Promise<void> => {
-        while (!cancelled) {
-          const targetId = targetIds[cursor];
-          cursor += 1;
-          if (!targetId) return;
-
-          const cached = projectCacheRef.current.get(targetId);
-          if (cached && isProjectCacheFresh(cached)) {
-            continue;
-          }
-          if (preloadInFlightRef.current.has(targetId)) {
-            continue;
-          }
-
-          preloadInFlightRef.current.add(targetId);
-          try {
-            await preloadServerProjectToCache(targetId);
-          } catch {
-            // Ignore preload errors: they should not block interactive flow.
-          } finally {
-            preloadInFlightRef.current.delete(targetId);
-          }
-        }
-      };
-
-      const workers = Array.from(
-        { length: Math.min(PROJECT_PRELOAD_CONCURRENCY, targetIds.length) },
-        () => worker()
-      );
-      await Promise.all(workers);
-    };
-
-    preloadQueueTimerRef.current = window.setTimeout(() => {
-      void runPreloadQueue();
-      preloadQueueTimerRef.current = null;
-    }, PROJECT_PRELOAD_START_DELAY_MS);
-
-    return () => {
-      cancelled = true;
-      if (preloadQueueTimerRef.current !== null) {
-        window.clearTimeout(preloadQueueTimerRef.current);
-        preloadQueueTimerRef.current = null;
-      }
-    };
-  }, [authUser, serverProjects, serverProjectId]);
 
   useEffect(() => {
     const topbar = topbarRef.current;
@@ -1365,14 +1162,6 @@ export default function App() {
     }
   }
 
-  function upsertServerProjectListEntry(entry: ProjectListItem): void {
-    setServerProjects((current) => {
-      const next = [entry, ...current.filter((item) => item.id !== entry.id)];
-      next.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-      return next;
-    });
-  }
-
   function resolveServerProjectName(projectId: string | null): string {
     if (!projectId) return 'проект';
     const found = serverProjects.find((project) => project.id === projectId);
@@ -1397,132 +1186,6 @@ export default function App() {
     setEditingProjectNameDraft('');
     setEditingProjectName(false);
     setPendingProjectNameFocus(false);
-  }
-
-  async function saveServerProjectWithFallback(params: {
-    projectId?: string;
-    name: string;
-    workspace: WorkspaceProjectData;
-    history?: PersistedHistoryState;
-  }): Promise<{ id: string; updatedAt: string }> {
-    try {
-      return await saveServerProject(params);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '';
-      if (params.history !== undefined && message.includes('Слишком большой объем данных')) {
-        return saveServerProject({
-          projectId: params.projectId,
-          name: params.name,
-          workspace: params.workspace
-        });
-      }
-      throw error;
-    }
-  }
-
-  function isProjectCacheFresh(cached: CachedServerProjectData): boolean {
-    return Date.now() - cached.loadedAt < PROJECT_CACHE_TTL_MS;
-  }
-
-  function payloadToCachedServerProject(payload: ServerProjectPayload): CachedServerProjectData {
-    const normalizedWorkspace = {
-      ...payload.workspace,
-      projectName: normalizeProjectName(payload.workspace.projectName || payload.name)
-    };
-
-    return {
-      workspace: deepClone(normalizedWorkspace),
-      history: payload.history ? deepClone(payload.history) : null,
-      loadedAt: Date.now()
-    };
-  }
-
-  function applyLoadedServerProject(payload: ServerProjectPayload): void {
-    const cached = payloadToCachedServerProject(payload);
-    const normalizedWorkspace = deepClone(cached.workspace);
-
-    applyWorkspaceState(normalizedWorkspace);
-    applyPersistedHistoryState(payload.history);
-    setServerProjectId(payload.id);
-    setProjectMethodCounts((current) => ({
-      ...current,
-      [payload.id]: normalizedWorkspace.methods.length
-    }));
-    upsertProjectCache(payload.id, cached);
-    const loadedHash = JSON.stringify(normalizedWorkspace);
-    remoteLastObservedHashRef.current = loadedHash;
-    remoteLastSavedHashRef.current = loadedHash;
-    remotePendingChangesRef.current = 0;
-  }
-
-  function applyCachedServerProject(projectId: string, cached: CachedServerProjectData): void {
-    const cachedWorkspace = deepClone(cached.workspace);
-    applyWorkspaceState(cachedWorkspace);
-    applyPersistedHistoryState(cached.history ? deepClone(cached.history) : null);
-    setServerProjectId(projectId);
-    setProjectMethodCounts((current) => ({
-      ...current,
-      [projectId]: cachedWorkspace.methods.length
-    }));
-    const loadedHash = JSON.stringify(cachedWorkspace);
-    remoteLastObservedHashRef.current = loadedHash;
-    remoteLastSavedHashRef.current = loadedHash;
-    remotePendingChangesRef.current = 0;
-  }
-
-  async function loadServerProjectIntoWorkspace(projectId: string): Promise<void> {
-    const payload = (await loadServerProject(projectId)) as ServerProjectPayload;
-    applyLoadedServerProject(payload);
-  }
-
-  async function preloadServerProjectToCache(projectId: string): Promise<void> {
-    if (!projectId) return;
-    const cached = projectCacheRef.current.get(projectId);
-    if (cached && isProjectCacheFresh(cached)) return;
-
-    const payload = (await loadServerProject(projectId)) as ServerProjectPayload;
-    const nextCached = payloadToCachedServerProject(payload);
-    upsertProjectCache(projectId, nextCached);
-    setProjectMethodCounts((current) => ({
-      ...current,
-      [projectId]: nextCached.workspace.methods.length
-    }));
-  }
-
-  async function handleServerProjectSelect(nextId: string): Promise<void> {
-    if (!nextId) {
-      setServerProjectId(null);
-      setServerSyncError('');
-      setToastMessage('Выбран новый проект');
-      return;
-    }
-
-    if (nextId === serverProjectId && !isProjectSwitching) {
-      return;
-    }
-
-    setIsProjectSwitching(true);
-    setSwitchingProjectId(nextId);
-
-    try {
-      remoteHydratedRef.current = false;
-      const cached = projectCacheRef.current.get(nextId);
-      if (cached && isProjectCacheFresh(cached)) {
-        applyCachedServerProject(nextId, cached);
-        setServerSyncError('');
-        setToastMessage('Проект открыт из кэша');
-        return;
-      }
-      await loadServerProjectIntoWorkspace(nextId);
-      setServerSyncError('');
-      setToastMessage('Проект загружен с сервера');
-    } catch (error) {
-      setServerSyncError(error instanceof Error ? error.message : 'Ошибка синхронизации с сервером');
-    } finally {
-      remoteHydratedRef.current = true;
-      setSwitchingProjectId(null);
-      setIsProjectSwitching(false);
-    }
   }
 
   function cancelDeleteServerProject(): void {
@@ -2008,7 +1671,7 @@ export default function App() {
     if (methods.some((method) => method.id === editingMethodId)) return;
     setEditingMethodId(null);
     setEditingMethodNameDraft('');
-  }, [methods]);
+  }, [methods, editingMethodId]);
 
   useEffect(() => {
     if (!sections.length) return;
@@ -2067,7 +1730,7 @@ export default function App() {
     }
 
     focusWithoutScroll();
-  }, [editingField?.sectionId, editingField?.rowKey, editingField?.target, editingField?.column]);
+  }, [editingField]);
 
   useEffect(() => {
     if (!editingRequestCell) return;
@@ -2088,7 +1751,7 @@ export default function App() {
     }
 
     focusWithoutScroll();
-  }, [editingRequestCell?.sectionId, editingRequestCell?.rowKey, editingRequestCell?.column, editingRequestCell?.target]);
+  }, [editingRequestCell]);
 
   useEffect(() => {
     if (!activeMethodId) return;
@@ -2190,6 +1853,16 @@ export default function App() {
     };
   }, []);
 
+  const undoWorkspaceRef = useRef(undoWorkspace);
+  const redoWorkspaceRef = useRef(redoWorkspace);
+  const undoDeletedRowRef = useRef(undoDeletedRow);
+
+  useLayoutEffect(() => {
+    undoWorkspaceRef.current = undoWorkspace;
+    redoWorkspaceRef.current = redoWorkspace;
+    undoDeletedRowRef.current = undoDeletedRow;
+  });
+
   useEffect(() => {
     const handleHistoryHotkeys = (event: KeyboardEvent): void => {
       const code = event.code;
@@ -2209,19 +1882,19 @@ export default function App() {
       event.preventDefault();
       if (isUndoCombo) {
         if (deletedRowUndo) {
-          undoDeletedRow();
+          undoDeletedRowRef.current();
           return;
         }
-        undoWorkspace();
+        undoWorkspaceRef.current();
         return;
       }
 
-      redoWorkspace();
+      redoWorkspaceRef.current();
     };
 
     window.addEventListener('keydown', handleHistoryHotkeys);
     return () => window.removeEventListener('keydown', handleHistoryHotkeys);
-  }, [deletedRowUndo, methods, methodGroups, activeMethodId, selectedId]);
+  }, [deletedRowUndo]);
 
   useEffect(() => {
     setTab('editor');
@@ -2235,75 +1908,6 @@ export default function App() {
 
   const selectedSection = sections.find((section) => section.id === selectedId) ?? sections[0];
   const activeTextSection = selectedSection?.kind === 'text' ? selectedSection : null;
-
-  useEffect(() => {
-    if (!ENABLE_SCROLL_SECTION_SYNC) return;
-    if (tab !== 'editor') return;
-    if (editingField || editingRequestCell || editingHeaderCell || editingTitle || editingSource || editingSchema || editingMappingCell) return;
-    if (typeof window === 'undefined' || typeof window.IntersectionObserver !== 'function') return;
-
-    const anchors = sections
-      .map((section) => ({ sectionId: section.id, node: sectionAnchorRefs.current.get(section.id) }))
-      .filter((item): item is { sectionId: string; node: HTMLElement } => Boolean(item.node));
-
-    if (anchors.length === 0) return;
-
-    const observer = new window.IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          const sectionId = (entry.target as HTMLElement).dataset.sectionId;
-          if (!sectionId) continue;
-          if (entry.isIntersecting) {
-            sectionVisibilityRatiosRef.current.set(sectionId, entry.intersectionRatio);
-          } else {
-            sectionVisibilityRatiosRef.current.delete(sectionId);
-          }
-        }
-
-        if (observerRafRef.current !== null) return;
-        observerRafRef.current = window.requestAnimationFrame(() => {
-          observerRafRef.current = null;
-          if (Date.now() < suppressObserverSelectionUntilRef.current) return;
-
-          let bestSectionId: string | null = null;
-          let bestRatio = -1;
-          for (const section of sections) {
-            const ratio = sectionVisibilityRatiosRef.current.get(section.id);
-            if (ratio === undefined) continue;
-            if (ratio > bestRatio) {
-              bestRatio = ratio;
-              bestSectionId = section.id;
-            }
-          }
-
-          if (!bestSectionId || bestRatio < 0.2) return;
-          if (bestSectionId === selectedId) return;
-
-          const currentRatio = sectionVisibilityRatiosRef.current.get(selectedId) ?? 0;
-          const ratioDelta = bestRatio - currentRatio;
-          if (ratioDelta < 0.08) return;
-
-          setSelectedId(bestSectionId);
-        });
-      },
-      {
-        threshold: [0.2, 0.45, 0.7],
-        rootMargin: '-96px 0px -35% 0px'
-      }
-    );
-
-    sectionVisibilityRatiosRef.current.clear();
-    for (const item of anchors) observer.observe(item.node);
-
-    return () => {
-      observer.disconnect();
-      if (observerRafRef.current !== null) {
-        window.cancelAnimationFrame(observerRafRef.current);
-        observerRafRef.current = null;
-      }
-      sectionVisibilityRatiosRef.current.clear();
-    };
-  }, [tab, sections, selectedId, editingField, editingRequestCell, editingHeaderCell, editingTitle, editingSource, editingSchema, editingMappingCell]);
 
   function isSelectionInsideListItem(): boolean {
     if (!textEditor) return false;
@@ -2389,7 +1993,7 @@ export default function App() {
     const nextHtml = richTextToHtml(activeTextSection.value, { editable: true });
     textEditor.commands.setContent(nextHtml, { emitUpdate: false });
     textEditorWikiSnapshotRef.current = activeTextSection.value;
-  }, [textEditor, activeTextSection?.id, activeTextSection?.value]);
+  }, [textEditor, activeTextSection]);
 
   const selectedServerSourceRows =
     selectedSection?.kind === 'parsed' ? getRowsRelevantToSourceFormat(selectedSection.rows, selectedSection.format) : [];
@@ -7153,10 +6757,6 @@ export default function App() {
             history
           });
           setServerProjectId(saved.id);
-          setProjectMethodCounts((current) => ({
-            ...current,
-            [saved.id]: workspace.methods.length
-          }));
           upsertProjectCache(saved.id, {
             workspace: deepClone(workspace),
             history: history ? deepClone(history) : null,
@@ -7746,7 +7346,6 @@ export default function App() {
             methods={methods}
             serverProjects={serverProjects}
             currentProjectId={serverProjectId}
-            projectMethodCounts={projectMethodCounts}
             projectMethodPreviews={projectMethodPreviews}
             activeMethodId={activeMethod?.id}
             editingMethodId={editingMethodId}
@@ -8249,5 +7848,4 @@ export default function App() {
     </div>
   );
 }
-
 

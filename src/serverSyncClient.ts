@@ -28,6 +28,16 @@ type ApiEnvelope<T> = {
   error?: string;
 };
 
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
 const API_MODE_HINT =
   'Для auth/синхронизации запустите full-stack режим через `npx vercel dev` и откройте http://localhost:3001 (не только Vite на http://localhost:5173).';
 
@@ -74,9 +84,9 @@ async function parseResponse<T>(response: Response): Promise<T> {
 
   if (!response.ok) {
     if (response.status === 404) {
-      throw new Error('Ошибка серверного запроса (HTTP 404). Проверьте, что открыт проект через Vercel Dev (обычно http://localhost:3001), а не только Vite.');
+      throw new ApiError(payload?.error || 'Проект не найден', 404);
     }
-    throw new Error(payload?.error || `Ошибка серверного запроса (HTTP ${response.status})`);
+    throw new ApiError(payload?.error || `Ошибка серверного запроса (HTTP ${response.status})`, response.status);
   }
 
   if (!payload?.data) {

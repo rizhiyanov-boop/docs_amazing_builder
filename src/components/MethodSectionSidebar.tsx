@@ -14,7 +14,6 @@ type MethodSectionSidebarProps = {
   methods: MethodDocument[];
   serverProjects: ReadonlyArray<{ id: string; name: string }>;
   currentProjectId: string | null;
-  projectMethodCounts: Record<string, number>;
   projectMethodPreviews: Record<string, Array<{ id: string; name: string; sectionCount: number }>>;
   activeMethodId?: string;
   editingMethodId: string | null;
@@ -69,7 +68,6 @@ export function MethodSectionSidebar({
   methods,
   serverProjects,
   currentProjectId,
-  projectMethodCounts,
   projectMethodPreviews,
   activeMethodId,
   editingMethodId,
@@ -117,7 +115,7 @@ export function MethodSectionSidebar({
     ? serverProjects.map((project) => ({
         id: project.id,
         name: project.name,
-        methodCount: projectMethodCounts[project.id]
+        methodCount: projectMethodPreviews[project.id]?.length ?? 0
       }))
     : [
         {

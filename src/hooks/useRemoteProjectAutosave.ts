@@ -11,6 +11,10 @@ type SaveResult = {
 type UseRemoteProjectAutosaveOptions = {
   authUser: ServerAuthUser | null;
   remoteHydratedRef: MutableRefObject<boolean>;
+  remoteSaveInFlightRef: MutableRefObject<boolean>;
+  remotePendingChangesRef: MutableRefObject<number>;
+  remoteLastObservedHashRef: MutableRefObject<string>;
+  remoteLastSavedHashRef: MutableRefObject<string>;
   normalizedProjectName: string;
   methods: MethodDocument[];
   activeMethodId: string;
@@ -47,6 +51,10 @@ type UseRemoteProjectAutosaveResult = {
 export function useRemoteProjectAutosave({
   authUser,
   remoteHydratedRef,
+  remoteSaveInFlightRef,
+  remotePendingChangesRef,
+  remoteLastObservedHashRef,
+  remoteLastSavedHashRef,
   normalizedProjectName,
   methods,
   activeMethodId,
@@ -62,10 +70,6 @@ export function useRemoteProjectAutosave({
   onError
 }: UseRemoteProjectAutosaveOptions): UseRemoteProjectAutosaveResult {
   const remoteSaveTimerRef = useRef<number | null>(null);
-  const remoteSaveInFlightRef = useRef(false);
-  const remotePendingChangesRef = useRef(0);
-  const remoteLastObservedHashRef = useRef('');
-  const remoteLastSavedHashRef = useRef('');
 
   function cancelPendingRemoteSave(): void {
     if (remoteSaveTimerRef.current !== null) {
@@ -149,6 +153,10 @@ export function useRemoteProjectAutosave({
     flows,
     serverProjectId,
     remoteHydratedRef,
+    remoteSaveInFlightRef,
+    remotePendingChangesRef,
+    remoteLastObservedHashRef,
+    remoteLastSavedHashRef,
     remoteSaveChangeThreshold,
     remoteSaveIdleMs,
     buildWorkspace,

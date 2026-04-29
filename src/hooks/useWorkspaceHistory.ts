@@ -70,7 +70,7 @@ export function useWorkspaceHistory({
   const historyLastSnapshotRef = useRef<WorkspaceSnapshot | null>(null);
   const historyLastHashRef = useRef('');
   const historyLastPushAtRef = useRef(0);
-  const historySuspendRef = useRef(false);
+  const applyCountRef = useRef(0);
 
   const cloneSnapshot = useCallback((snapshot: WorkspaceSnapshot): WorkspaceSnapshot => ({
     projectName: snapshot.projectName,
@@ -93,7 +93,7 @@ export function useWorkspaceHistory({
   }), [projectName, methods, methodGroups, projectSections, flows, activeMethodId, selectedId]);
 
   function applyWorkspaceSnapshot(snapshot: WorkspaceSnapshot): void {
-    historySuspendRef.current = true;
+    applyCountRef.current += 1;
     setProjectName(snapshot.projectName);
     setMethodsState(snapshot.methods);
     setMethodGroups(snapshot.methodGroups);
@@ -101,9 +101,6 @@ export function useWorkspaceHistory({
     setFlows(snapshot.flows);
     setActiveMethodId(snapshot.activeMethodId);
     setSelectedId(snapshot.selectedId);
-    window.setTimeout(() => {
-      historySuspendRef.current = false;
-    }, 0);
   }
 
   function undoWorkspace(): void {
@@ -199,13 +196,18 @@ export function useWorkspaceHistory({
       return;
     }
 
+    if (applyCountRef.current > 0) {
+      applyCountRef.current -= 1;
+      historyLastSnapshotRef.current = cloneSnapshot(snapshot);
+      historyLastHashRef.current = hash;
+      setCanUndo(undoStackRef.current.length > 0);
+      setCanRedo(redoStackRef.current.length > 0);
+      return;
+    }
+
     const previousSnapshot = historyLastSnapshotRef.current;
     historyLastSnapshotRef.current = cloneSnapshot(snapshot);
     historyLastHashRef.current = hash;
-
-    if (historySuspendRef.current) {
-      return;
-    }
 
     const now = Date.now();
     if (now - historyLastPushAtRef.current <= historyCoalesceMs) {

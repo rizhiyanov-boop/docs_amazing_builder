@@ -148,7 +148,7 @@ const TABLE_FIELD_COLUMN_WIDTH_KEY = 'doc-builder-table-field-column-width-v1';
 const SIDEBAR_WIDTH_KEY = 'doc-builder-sidebar-width-v1';
 const SIDEBAR_HIDDEN_KEY = 'doc-builder-sidebar-hidden-v1';
 const DELETE_UNDO_WINDOW_MS = 8000;
-const HISTORY_LIMIT = 50;
+const HISTORY_LIMIT = 20;
 const HISTORY_COALESCE_MS = 700;
 const REMOTE_SAVE_CHANGE_THRESHOLD = 10;
 const REMOTE_SAVE_IDLE_MS = 20000;
@@ -635,6 +635,7 @@ export default function App() {
   const [dismissedOnboardingHints, setDismissedOnboardingHints] = useState<Record<string, true>>({});
   const [onboardingNavStep, setOnboardingNavStep] = useState<OnboardingStepId>(() => initialOnboarding.currentStep);
   const [onboardingStepHint, setOnboardingStepHint] = useState('');
+  const workspaceVersionRef = useRef(0);
   const internalCodeAnchorRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   useEffect(() => {
@@ -726,6 +727,10 @@ export default function App() {
     }, 3500);
   }
 
+  function markWorkspaceChanged(): void {
+    workspaceVersionRef.current += 1;
+  }
+
   function setAiStatus(message: string): void {
     clearAiStatusResetTimeout();
     setAiRequestStatus({ state: 'success', message });
@@ -787,6 +792,7 @@ export default function App() {
     flows,
     activeMethodId,
     selectedId,
+    workspaceVersion: workspaceVersionRef.current,
     historyLimit: HISTORY_LIMIT,
     historyCoalesceMs: HISTORY_COALESCE_MS,
     normalizeProjectName,
@@ -1072,6 +1078,7 @@ export default function App() {
   function handleQuickStartOnboarding(): void {
     startOnboardingEntry('quick_start');
     const seed = createOnboardingDemoWorkspace();
+    markWorkspaceChanged();
     applyWorkspaceState(seed);
     setToastMessage('Открыт демо-проект с готовым примером request/response.');
   }
@@ -1079,6 +1086,7 @@ export default function App() {
   function handleScratchOnboarding(): void {
     startOnboardingEntry('scratch');
     const seed = createWorkspaceSeed();
+    markWorkspaceChanged();
     applyWorkspaceState(seed);
     setToastMessage('Создан новый пустой проект.');
   }
@@ -1185,6 +1193,7 @@ export default function App() {
 
   function finishProjectRename(): void {
     const nextName = normalizeProjectName(editingProjectNameDraft || projectName);
+    markWorkspaceChanged();
     setProjectName(nextName);
     setEditingProjectNameDraft('');
     setEditingProjectName(false);
@@ -1473,6 +1482,7 @@ export default function App() {
   function finishMethodRename(): void {
     if (!editingMethodId) return;
     const resolved = (editingMethodNameDraft || '').trim() || DEFAULT_METHOD_NAME;
+    markWorkspaceChanged();
     setMethodsState((prev) =>
       prev.map((method) =>
         method.id === editingMethodId
@@ -1494,6 +1504,7 @@ export default function App() {
   }
 
   function setSections(next: DocSection[] | ((prev: DocSection[]) => DocSection[])): void {
+    markWorkspaceChanged();
     setMethodsState((prev) => {
       if (prev.length === 0) {
         const baseSections = typeof next === 'function' ? next(createInitialSections()) : next;
@@ -1522,6 +1533,7 @@ export default function App() {
     const name = `Метод ${methods.length + 1}`;
     const method = createMethodDocument(name, createInitialSections());
     clearPreviewCaches();
+    markWorkspaceChanged();
     setMethodsState((prev) => [...prev, method]);
     setActiveMethodId(method.id);
     setExpandedMethodId(method.id);
@@ -1536,6 +1548,7 @@ export default function App() {
 
   function createProject(): void {
     const seed = createWorkspaceSeed();
+    markWorkspaceChanged();
     applyWorkspaceState(seed);
     setServerProjectId(null);
     setServerSyncError('');
@@ -1553,11 +1566,13 @@ export default function App() {
       content: '',
       order: projectSections.length
     };
+    markWorkspaceChanged();
     setProjectSections((prev) => [...prev, nextSection]);
     setActiveProjectSectionId(nextSection.id);
   }
 
   function updateProjectDocSection(sectionId: string, updater: (current: ProjectSection) => ProjectSection): void {
+    markWorkspaceChanged();
     setProjectSections((prev) => {
       const next = prev.map((section) => (section.id === sectionId ? updater(section) : section));
       return next.map((section, index) => ({ ...section, order: index }));
@@ -1565,6 +1580,7 @@ export default function App() {
   }
 
   function moveProjectDocSection(sectionId: string, direction: 'up' | 'down'): void {
+    markWorkspaceChanged();
     setProjectSections((prev) => {
       const index = prev.findIndex((section) => section.id === sectionId);
       if (index === -1) return prev;
@@ -1578,6 +1594,7 @@ export default function App() {
   }
 
   function deleteProjectDocSection(sectionId: string): void {
+    markWorkspaceChanged();
     setProjectSections((prev) => {
       const next = prev.filter((section) => section.id !== sectionId).map((section, index) => ({ ...section, order: index }));
       if (next.length === 0) {
@@ -1594,11 +1611,13 @@ export default function App() {
 
   function createProjectFlow(): void {
     const next = createDefaultFlow(activeMethod?.id);
+    markWorkspaceChanged();
     setFlows((prev) => [...prev, next]);
     setActiveFlowId(next.id);
   }
 
   function updateProjectFlow(flowId: string, updater: (current: ProjectFlow) => ProjectFlow): void {
+    markWorkspaceChanged();
     setFlows((prev) =>
       prev.map((flow) =>
         flow.id === flowId
@@ -1612,6 +1631,7 @@ export default function App() {
   }
 
   function deleteProjectFlow(flowId: string): void {
+    markWorkspaceChanged();
     setFlows((prev) => {
       const next = prev.filter((flow) => flow.id !== flowId);
       if (next.length === 0) {
@@ -1651,6 +1671,7 @@ export default function App() {
     const deletingMethodName = pendingMethodDelete.methodName;
     setPendingMethodDelete(null);
 
+    markWorkspaceChanged();
     setMethodsState((prev) => {
       const currentIndex = prev.findIndex((method) => method.id === deletingMethodId);
       if (currentIndex === -1) return prev;
@@ -3798,6 +3819,7 @@ export default function App() {
       return 0;
     }
 
+    markWorkspaceChanged();
     setMethodsState((current) => [...current, ...importedMethods]);
     if (importedGroups.length > 0) {
       setMethodGroups((current) => [...current, ...importedGroups]);
@@ -3911,6 +3933,7 @@ export default function App() {
   function applyWorkspaceImportAsReplace(): void {
     if (!workspaceMethodsImportRouting || workspaceMethodsImportRouting.items.length === 0) return;
     const loaded = loadWorkspaceProjectFromPayload(workspaceMethodsImportRouting.items[0].workspace);
+    markWorkspaceChanged();
     applyWorkspaceState({ ...loaded, groups: ENABLE_MULTI_METHODS ? loaded.groups : [] });
     setWorkspaceMethodsImportRouting(null);
     setImportError('');

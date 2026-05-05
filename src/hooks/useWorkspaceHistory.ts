@@ -21,6 +21,7 @@ type UseWorkspaceHistoryOptions = {
   flows: ProjectFlow[];
   activeMethodId: string;
   selectedId: string;
+  workspaceVersion: number;
   historyLimit: number;
   historyCoalesceMs: number;
   normalizeProjectName: (value: string | null | undefined) => string;
@@ -51,6 +52,7 @@ export function useWorkspaceHistory({
   flows,
   activeMethodId,
   selectedId,
+  workspaceVersion,
   historyLimit,
   historyCoalesceMs,
   normalizeProjectName,
@@ -68,9 +70,8 @@ export function useWorkspaceHistory({
   const undoStackRef = useRef<WorkspaceSnapshot[]>([]);
   const redoStackRef = useRef<WorkspaceSnapshot[]>([]);
   const historyLastSnapshotRef = useRef<WorkspaceSnapshot | null>(null);
-  const historyLastHashRef = useRef('');
   const historyLastPushAtRef = useRef(0);
-  const applyCountRef = useRef(0);
+  const prevVersionRef = useRef(workspaceVersion);
 
   const cloneSnapshot = useCallback((snapshot: WorkspaceSnapshot): WorkspaceSnapshot => ({
     projectName: snapshot.projectName,
@@ -93,7 +94,8 @@ export function useWorkspaceHistory({
   }), [projectName, methods, methodGroups, projectSections, flows, activeMethodId, selectedId]);
 
   function applyWorkspaceSnapshot(snapshot: WorkspaceSnapshot): void {
-    applyCountRef.current += 1;
+    historyLastSnapshotRef.current = cloneSnapshot(snapshot);
+    prevVersionRef.current = workspaceVersion;
     setProjectName(snapshot.projectName);
     setMethodsState(snapshot.methods);
     setMethodGroups(snapshot.methodGroups);
@@ -154,7 +156,7 @@ export function useWorkspaceHistory({
       undoStack: undoStackRef.current.map((item) => toPersistedHistorySnapshot(item)),
       redoStack: redoStackRef.current.map((item) => toPersistedHistorySnapshot(item)),
       lastSnapshot: historyLastSnapshotRef.current ? toPersistedHistorySnapshot(historyLastSnapshotRef.current) : null,
-      lastHash: historyLastHashRef.current,
+      lastHash: '',
       lastPushAt: historyLastPushAtRef.current
     };
   }
@@ -164,8 +166,8 @@ export function useWorkspaceHistory({
       undoStackRef.current = [];
       redoStackRef.current = [];
       historyLastSnapshotRef.current = null;
-      historyLastHashRef.current = '';
       historyLastPushAtRef.current = 0;
+      prevVersionRef.current = workspaceVersion;
       setCanUndo(false);
       setCanRedo(false);
       return;
@@ -174,46 +176,35 @@ export function useWorkspaceHistory({
     undoStackRef.current = history.undoStack.map((item) => fromPersistedHistorySnapshot(item));
     redoStackRef.current = history.redoStack.map((item) => fromPersistedHistorySnapshot(item));
     historyLastSnapshotRef.current = history.lastSnapshot ? fromPersistedHistorySnapshot(history.lastSnapshot) : null;
-    historyLastHashRef.current = history.lastHash;
     historyLastPushAtRef.current = history.lastPushAt;
+    prevVersionRef.current = workspaceVersion;
     setCanUndo(undoStackRef.current.length > 0);
     setCanRedo(redoStackRef.current.length > 0);
   }
 
   useEffect(() => {
     const snapshot = getWorkspaceSnapshot();
-    const hash = JSON.stringify(snapshot);
 
     if (!historyLastSnapshotRef.current) {
       historyLastSnapshotRef.current = cloneSnapshot(snapshot);
-      historyLastHashRef.current = hash;
+      prevVersionRef.current = workspaceVersion;
       setCanUndo(undoStackRef.current.length > 0);
       setCanRedo(redoStackRef.current.length > 0);
       return;
     }
 
-    if (hash === historyLastHashRef.current) {
+    if (workspaceVersion === prevVersionRef.current) {
       return;
     }
-
-    if (applyCountRef.current > 0) {
-      applyCountRef.current -= 1;
-      historyLastSnapshotRef.current = cloneSnapshot(snapshot);
-      historyLastHashRef.current = hash;
-      setCanUndo(undoStackRef.current.length > 0);
-      setCanRedo(redoStackRef.current.length > 0);
-      return;
-    }
-
-    const previousSnapshot = historyLastSnapshotRef.current;
-    historyLastSnapshotRef.current = cloneSnapshot(snapshot);
-    historyLastHashRef.current = hash;
+    prevVersionRef.current = workspaceVersion;
 
     const now = Date.now();
     if (now - historyLastPushAtRef.current <= historyCoalesceMs) {
       return;
     }
 
+    const previousSnapshot = historyLastSnapshotRef.current;
+    historyLastSnapshotRef.current = cloneSnapshot(snapshot);
     undoStackRef.current.push(cloneSnapshot(previousSnapshot));
     if (undoStackRef.current.length > historyLimit) {
       undoStackRef.current.shift();
@@ -222,7 +213,7 @@ export function useWorkspaceHistory({
     historyLastPushAtRef.current = now;
     setCanUndo(undoStackRef.current.length > 0);
     setCanRedo(redoStackRef.current.length > 0);
-  }, [cloneSnapshot, getWorkspaceSnapshot, historyCoalesceMs, historyLimit]);
+  }, [workspaceVersion, cloneSnapshot, getWorkspaceSnapshot, historyCoalesceMs, historyLimit]);
 
   return {
     canUndo,

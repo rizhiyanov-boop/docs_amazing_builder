@@ -15,6 +15,7 @@ function createMethod(name: string): MethodDocument {
 
 function useHistoryHarness() {
   const [projectName, setProjectName] = useState('Project A');
+  const [workspaceVersion, setWorkspaceVersion] = useState(0);
   const [methods, setMethodsState] = useState<MethodDocument[]>([createMethod('Method A')]);
   const [methodGroups, setMethodGroups] = useState<MethodGroup[]>([]);
   const [projectSections, setProjectSections] = useState<ProjectSection[]>([]);
@@ -29,6 +30,7 @@ function useHistoryHarness() {
     flows,
     activeMethodId,
     selectedId,
+    workspaceVersion,
     historyLimit: 50,
     historyCoalesceMs: -1,
     normalizeProjectName: (value) => value?.trim() || 'New Project',
@@ -41,7 +43,12 @@ function useHistoryHarness() {
     setActiveMethodId,
     setSelectedId
   });
-  return { projectName, setProjectName, ...history };
+  function updateProjectName(value: string): void {
+    setWorkspaceVersion((current) => current + 1);
+    setProjectName(value);
+  }
+
+  return { projectName, setProjectName: updateProjectName, ...history };
 }
 
 describe('useWorkspaceHistory', () => {

@@ -6776,9 +6776,9 @@ export default function App() {
     );
   }
 
-  const toggleTheme = () => {
+  const toggleTheme = useCallback(() => {
     setTheme((current) => (current === 'dark' ? 'light' : 'dark'));
-  };
+  }, []);
 
   const handleManualSave = async () => {
     setAutosave({ state: 'saving' });
@@ -6838,9 +6838,111 @@ export default function App() {
     ONBOARDING_FEATURES.onboardingV1
     && ONBOARDING_FEATURES.onboardingGuidedMode
     && !showOnboardingEntry;
-  const toggleOnboardingHeaderNavigation = () => {
+  const toggleOnboardingHeaderNavigation = useCallback(() => {
     setIsOnboardingNavVisible((current) => !current);
-  };
+  }, []);
+
+  const handleOpenProjectImport = useCallback(() => {
+    openProjectImportDialog(false);
+  }, []);
+
+  const handleImportProjectJsonFiles = useCallback((files: File[]) => {
+    importProjectJsonFiles(files);
+  }, [importProjectJsonFiles]);
+
+  const handleExportFullProjectHtmlClick = useCallback(() => {
+    void handleExportFullProjectHtml();
+  }, [handleExportFullProjectHtml]);
+
+  const handleLogoutClick = useCallback(() => {
+    void handleLogout();
+  }, [handleLogout]);
+
+  const handleOpenLoginDialog = useCallback(() => {
+    openAuthDialog('login');
+  }, []);
+
+  const handleOpenRegisterDialog = useCallback(() => {
+    openAuthDialog('register');
+  }, []);
+
+  const handleToggleSidebar = useCallback(() => {
+    setIsSidebarHidden((current) => !current);
+  }, []);
+
+  const handleManualSaveClick = useCallback(() => {
+    void handleManualSave();
+  }, [handleManualSave]);
+
+  const handleSelectProject = useCallback((projectId: string | null) => {
+    if (!projectId) return;
+    if (projectId === serverProjectId || isProjectSwitching) return;
+    void handleServerProjectSelect(projectId);
+  }, [serverProjectId, isProjectSwitching, handleServerProjectSelect]);
+
+  const handleToggleProjectExpanded = useCallback((projectId: string | null) => {
+    if (!projectId) return;
+    setExpandedProjectIds((current) => {
+      if (current[projectId]) {
+        const next = { ...current };
+        delete next[projectId];
+        return next;
+      }
+      return { ...current, [projectId]: true };
+    });
+  }, []);
+
+  const handleDropSection = useCallback((targetId: string) => {
+    setDraggingId((currentDraggingId) => {
+      if (currentDraggingId) {
+        setSections((prev) => reorderSections(prev, currentDraggingId, targetId));
+      }
+      return null;
+    });
+  }, [setSections]);
+
+  const handleSelectSection = useCallback((sectionId: string) => {
+    setSelectedId(sectionId);
+    suppressObserverSelectionUntilRef.current = Date.now() + 750;
+    if (sectionJumpHighlightTimerRef.current) {
+      clearTimeout(sectionJumpHighlightTimerRef.current);
+    }
+    setSectionJumpHighlightId(sectionId);
+    sectionJumpHighlightTimerRef.current = setTimeout(() => {
+      setSectionJumpHighlightId((current) => (current === sectionId ? null : current));
+    }, 850);
+    setTab('editor');
+    const scrollToTargetSection = (): void => {
+      const target = sectionAnchorRefs.current.get(sectionId);
+      if (!target) return;
+      if (typeof target.scrollIntoView !== 'function') return;
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+    if (typeof window !== 'undefined') {
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(scrollToTargetSection);
+      });
+    }
+    if (isCompactLayout) setIsSidebarHidden(true);
+  }, [isCompactLayout]);
+
+  const handleSwitchMethod = useCallback((method: MethodDocument) => {
+    switchMethod(method);
+  }, [switchMethod]);
+
+  const handleDragStartSection = useCallback((id: string) => {
+    setDraggingId(id);
+  }, []);
+
+  const handleToggleAddEntityMenu = useCallback(() => {
+    setIsDeleteEntityMenuOpen(false);
+    setIsAddEntityMenuOpen((current) => !current);
+  }, []);
+
+  const handleToggleDeleteEntityMenu = useCallback(() => {
+    setIsAddEntityMenuOpen(false);
+    setIsDeleteEntityMenuOpen((current) => !current);
+  }, []);
 
   return (
     <div className="shell">
@@ -7316,23 +7418,23 @@ export default function App() {
         activeOnboardingStepId={activeOnboardingStep.id}
         onboardingStepHint={onboardingStepHint}
         onboardingPrimaryActionLabel={onboardingPrimaryActionLabel}
-        onOpenProjectImport={() => openProjectImportDialog(false)}
-        onImportProjectJson={(files) => importProjectJsonFiles(files)}
+        onOpenProjectImport={handleOpenProjectImport}
+        onImportProjectJson={handleImportProjectJsonFiles}
         onExportProjectJson={exportProjectJson}
         onExportMockServiceJson={exportMockServiceJson}
-        onExportFullProjectHtml={() => void handleExportFullProjectHtml()}
+        onExportFullProjectHtml={handleExportFullProjectHtmlClick}
         onExportFullProjectWiki={handleExportFullProjectWiki}
         onOpenHtmlPreview={openHtmlPreview}
         onOpenWikiPreview={openWikiPreview}
         onUndoWorkspace={undoWorkspace}
         onRedoWorkspace={redoWorkspace}
-        onLogout={() => void handleLogout()}
-        onOpenLogin={() => openAuthDialog('login')}
-        onOpenRegister={() => openAuthDialog('register')}
+        onLogout={handleLogoutClick}
+        onOpenLogin={handleOpenLoginDialog}
+        onOpenRegister={handleOpenRegisterDialog}
         onToggleOnboardingHeaderNavigation={toggleOnboardingHeaderNavigation}
-        onToggleSidebar={() => setIsSidebarHidden((current) => !current)}
+        onToggleSidebar={handleToggleSidebar}
         onToggleTheme={toggleTheme}
-        onManualSave={() => void handleManualSave()}
+        onManualSave={handleManualSaveClick}
         onJumpToOnboardingStep={jumpToOnboardingStep}
         onPrimaryOnboardingAction={activeOnboardingHint ? handleActiveOnboardingHintAction : focusOnboardingCurrentStep}
         canNavigateToOnboardingStep={canNavigateToOnboardingStep}
@@ -7429,30 +7531,13 @@ export default function App() {
             isProjectSwitching={isProjectSwitching}
             switchingProjectId={switchingProjectId}
             onCreateProject={createProject}
-            onSelectProject={(projectId) => {
-              if (!projectId) return;
-              if (projectId === serverProjectId || isProjectSwitching) return;
-              void handleServerProjectSelect(projectId);
-            }}
+            onSelectProject={handleSelectProject}
             onStartProjectRename={startProjectRename}
             onProjectNameDraftChange={setEditingProjectNameDraft}
             onFinishProjectRename={finishProjectRename}
             onCancelProjectRename={cancelProjectRename}
-            onToggleProjectExpanded={(projectId) => {
-              if (!projectId) return;
-              setExpandedProjectIds((current) => {
-                if (current[projectId]) {
-                  const next = { ...current };
-                  delete next[projectId];
-                  return next;
-                }
-                return {
-                  ...current,
-                  [projectId]: true
-                };
-              });
-            }}
-            onSwitchMethod={switchMethod}
+            onToggleProjectExpanded={handleToggleProjectExpanded}
+            onSwitchMethod={handleSwitchMethod}
             onToggleMethodExpanded={toggleMethodExpanded}
             onStartMethodRename={startMethodRename}
             onMethodNameDraftChange={setEditingMethodNameDraft}
@@ -7462,45 +7547,11 @@ export default function App() {
             canDeleteProject={Boolean(serverProjectId)}
             onDeleteActiveMethod={deleteActiveMethod}
             onRequestDeleteProject={requestDeleteCurrentProject}
-            onDragStartSection={setDraggingId}
-            onDropSection={(targetId) => {
-              if (draggingId) {
-                setSections((prev) => reorderSections(prev, draggingId, targetId));
-              }
-              setDraggingId(null);
-            }}
-            onSelectSection={(sectionId) => {
-              setSelectedId(sectionId);
-              suppressObserverSelectionUntilRef.current = Date.now() + 750;
-              if (sectionJumpHighlightTimerRef.current) {
-                clearTimeout(sectionJumpHighlightTimerRef.current);
-              }
-              setSectionJumpHighlightId(sectionId);
-              sectionJumpHighlightTimerRef.current = setTimeout(() => {
-                setSectionJumpHighlightId((current) => (current === sectionId ? null : current));
-              }, 850);
-              setTab('editor');
-              const scrollToTargetSection = (): void => {
-                const target = sectionAnchorRefs.current.get(sectionId);
-                if (!target) return;
-                if (typeof target.scrollIntoView !== 'function') return;
-                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-              };
-              if (typeof window !== 'undefined') {
-                window.requestAnimationFrame(() => {
-                  window.requestAnimationFrame(scrollToTargetSection);
-                });
-              }
-              if (isCompactLayout) setIsSidebarHidden(true);
-            }}
-            onToggleAddEntityMenu={() => {
-              setIsDeleteEntityMenuOpen(false);
-              setIsAddEntityMenuOpen((current) => !current);
-            }}
-            onToggleDeleteEntityMenu={() => {
-              setIsAddEntityMenuOpen(false);
-              setIsDeleteEntityMenuOpen((current) => !current);
-            }}
+            onDragStartSection={handleDragStartSection}
+            onDropSection={handleDropSection}
+            onSelectSection={handleSelectSection}
+            onToggleAddEntityMenu={handleToggleAddEntityMenu}
+            onToggleDeleteEntityMenu={handleToggleDeleteEntityMenu}
             onStartSidebarResize={startSidebarResize}
             renderUiIcon={renderUiIcon}
             resolveSectionTitle={resolveSectionTitle}

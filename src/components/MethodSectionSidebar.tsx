@@ -1,3 +1,4 @@
+import React from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from 'react';
 import type { DocSection, MethodDocument } from '../types';
 
@@ -57,7 +58,7 @@ type MethodSectionSidebarProps = {
   resolveSectionTitle: (title: string) => string;
 };
 
-export function MethodSectionSidebar({
+function MethodSectionSidebarComponent({
   enableMultiMethods,
   normalizedProjectName,
   editingProjectName,
@@ -471,3 +472,95 @@ export function MethodSectionSidebar({
     </>
   );
 }
+
+function shallowRecordEqual(left: Record<string, true>, right: Record<string, true>): boolean {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((key) => left[key] === right[key]);
+}
+
+function serverProjectsEqual(
+  left: MethodSectionSidebarProps['serverProjects'],
+  right: MethodSectionSidebarProps['serverProjects']
+): boolean {
+  return left.length === right.length && left.every((project, index) => {
+    const other = right[index];
+    return Boolean(other) && project.id === other.id && project.name === other.name;
+  });
+}
+
+function projectMethodPreviewsEqual(
+  left: MethodSectionSidebarProps['projectMethodPreviews'],
+  right: MethodSectionSidebarProps['projectMethodPreviews']
+): boolean {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((projectId) => {
+    const leftItems = left[projectId] ?? [];
+    const rightItems = right[projectId] ?? [];
+    return leftItems.length === rightItems.length && leftItems.every((item, index) => {
+      const other = rightItems[index];
+      return Boolean(other) && item.id === other.id && item.name === other.name && item.sectionCount === other.sectionCount;
+    });
+  });
+}
+
+function methodsNavEqual(left: MethodDocument[], right: MethodDocument[]): boolean {
+  return left.length === right.length && left.every((method, index) => {
+    const other = right[index];
+    return Boolean(other)
+      && method.id === other.id
+      && method.name === other.name
+      && method.sections.length === other.sections.length;
+  });
+}
+
+function sectionsNavEqual(
+  left: DocSection[],
+  right: DocSection[],
+  leftValidation: Map<string, string>,
+  rightValidation: Map<string, string>
+): boolean {
+  return left.length === right.length && left.every((section, index) => {
+    const other = right[index];
+    return Boolean(other)
+      && section.id === other.id
+      && section.kind === other.kind
+      && section.title === other.title
+      && section.enabled === other.enabled
+      && leftValidation.get(section.id) === rightValidation.get(other.id);
+  });
+}
+
+function areMethodSectionSidebarPropsEqual(prev: MethodSectionSidebarProps, next: MethodSectionSidebarProps): boolean {
+  return prev.enableMultiMethods === next.enableMultiMethods
+    && prev.normalizedProjectName === next.normalizedProjectName
+    && prev.editingProjectName === next.editingProjectName
+    && prev.editingProjectNameDraft === next.editingProjectNameDraft
+    && prev.projectNameInputRef === next.projectNameInputRef
+    && shallowRecordEqual(prev.expandedProjectIds, next.expandedProjectIds)
+    && prev.expandedMethodId === next.expandedMethodId
+    && methodsNavEqual(prev.methods, next.methods)
+    && serverProjectsEqual(prev.serverProjects, next.serverProjects)
+    && prev.currentProjectId === next.currentProjectId
+    && projectMethodPreviewsEqual(prev.projectMethodPreviews, next.projectMethodPreviews)
+    && prev.activeMethodId === next.activeMethodId
+    && prev.editingMethodId === next.editingMethodId
+    && prev.editingMethodNameDraft === next.editingMethodNameDraft
+    && prev.methodNameWarning === next.methodNameWarning
+    && prev.methodNameInputRef === next.methodNameInputRef
+    && prev.canDeleteMethod === next.canDeleteMethod
+    && sectionsNavEqual(prev.sections, next.sections, prev.validationMap, next.validationMap)
+    && prev.selectedSectionId === next.selectedSectionId
+    && prev.draggingId === next.draggingId
+    && prev.isSectionPanelPulse === next.isSectionPanelPulse
+    && prev.isAddEntityMenuOpen === next.isAddEntityMenuOpen
+    && prev.isDeleteEntityMenuOpen === next.isDeleteEntityMenuOpen
+    && prev.isProjectSwitching === next.isProjectSwitching
+    && prev.switchingProjectId === next.switchingProjectId
+    && prev.canDeleteProject === next.canDeleteProject;
+}
+
+export const MethodSectionSidebar = React.memo(MethodSectionSidebarComponent, areMethodSectionSidebarPropsEqual);

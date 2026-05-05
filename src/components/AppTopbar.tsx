@@ -1,3 +1,4 @@
+import React from 'react';
 import type { ReactNode, RefObject } from 'react';
 import type { OnboardingStepId } from '../onboarding/steps';
 
@@ -53,7 +54,7 @@ type AppTopbarProps = {
   renderUiIcon: (name: string) => ReactNode;
 };
 
-export function AppTopbar({
+function AppTopbarComponent({
   topbarRef,
   importInputRef,
   canExport,
@@ -240,3 +241,51 @@ export function AppTopbar({
     </header>
   );
 }
+
+function onboardingStepsEqual(
+  left: readonly OnboardingStepViewModel[],
+  right: readonly OnboardingStepViewModel[]
+): boolean {
+  return left.length === right.length && left.every((step, index) => {
+    const other = right[index];
+    return Boolean(other)
+      && step.id === other.id
+      && step.title === other.title
+      && step.description === other.description;
+  });
+}
+
+function onboardingCompletionEqual(
+  left: Record<OnboardingStepId, boolean>,
+  right: Record<OnboardingStepId, boolean>
+): boolean {
+  const leftKeys = Object.keys(left) as OnboardingStepId[];
+  const rightKeys = Object.keys(right) as OnboardingStepId[];
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((key) => left[key] === right[key]);
+}
+
+function areAppTopbarPropsEqual(prev: AppTopbarProps, next: AppTopbarProps): boolean {
+  return prev.topbarRef === next.topbarRef
+    && prev.importInputRef === next.importInputRef
+    && prev.canExport === next.canExport
+    && prev.exportTitle === next.exportTitle
+    && prev.authLoading === next.authLoading
+    && prev.authUserLogin === next.authUserLogin
+    && prev.canUndo === next.canUndo
+    && prev.canRedo === next.canRedo
+    && prev.isOnboardingHeaderAvailable === next.isOnboardingHeaderAvailable
+    && prev.isOnboardingNavVisible === next.isOnboardingNavVisible
+    && prev.isSidebarHidden === next.isSidebarHidden
+    && prev.theme === next.theme
+    && prev.autosaveState === next.autosaveState
+    && prev.autosaveAt === next.autosaveAt
+    && prev.isLogoutBusy === next.isLogoutBusy
+    && onboardingStepsEqual(prev.onboardingSteps, next.onboardingSteps)
+    && onboardingCompletionEqual(prev.onboardingStepCompleted, next.onboardingStepCompleted)
+    && prev.activeOnboardingStepId === next.activeOnboardingStepId
+    && prev.onboardingStepHint === next.onboardingStepHint
+    && prev.onboardingPrimaryActionLabel === next.onboardingPrimaryActionLabel;
+}
+
+export const AppTopbar = React.memo(AppTopbarComponent, areAppTopbarPropsEqual);

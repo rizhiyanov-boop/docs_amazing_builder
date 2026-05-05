@@ -6950,6 +6950,7 @@ export default function App() {
         >
           <div className="import-routing-card">
             <h2>{authDialog.mode === 'login' ? 'Вход' : 'Регистрация'}</h2>
+            <div className="auth-card-subtitle">doc-builder</div>
             <label className="field">
               <div className="label">Логин</div>
               <input
@@ -6994,6 +6995,17 @@ export default function App() {
                   </>
                 ) : authDialog.mode === 'login' ? 'Войти' : 'Зарегистрироваться'}
               </button>
+            </div>
+            <div className="auth-card-switch">
+              {authDialog.mode === 'login' ? (
+                <button type="button" className="ghost small" onClick={() => openAuthDialog('register')} disabled={authDialog.isSubmitting}>
+                  Нет аккаунта? Зарегистрироваться
+                </button>
+              ) : (
+                <button type="button" className="ghost small" onClick={() => openAuthDialog('login')} disabled={authDialog.isSubmitting}>
+                  Уже есть аккаунт? Войти
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -7489,6 +7501,20 @@ export default function App() {
               <div className="panes">
               {tab === 'editor' && workspaceScope === 'methods' && (
                 <div className="editor-stream">
+                  <section className="panel ai-action-bar-panel" aria-label="AI действия">
+                    <div className="panel-title">AI Actions</div>
+                    <div className="row gap">
+                      <button type="button" className="ghost small" onClick={() => setAiStatus('AI: генерирую подсказки...')}>Подсказки</button>
+                      <button type="button" className="ghost small" onClick={() => setAiStatus('AI: проверяю соответствие секций...')}>Проверка</button>
+                      <button type="button" className="ghost small" onClick={() => setAiStatus('AI: готово')}>Сброс</button>
+                    </div>
+                  </section>
+                  {sections.length === 0 && (
+                    <section className="panel empty-state-panel" aria-label="Нет секций">
+                      <div className="panel-title">Нет секций</div>
+                      <div className="muted">Добавьте первый блок в методе, чтобы начать заполнение.</div>
+                    </section>
+                  )}
                   {sections.map((section) => {
                     const isSelectedSection = selectedSection?.id === section.id;
                     const isActiveSection = true;
@@ -7785,9 +7811,21 @@ export default function App() {
                 <section className={tab === 'html' ? 'panel panel-html-preview' : 'panel'}>
                   <div className="panel-head">
                     <div className="panel-title">Предпросмотр HTML</div>
-                    <button className="ghost small" onClick={() => void handleExportHtml()}>
-                      Скачать
-                    </button>
+                    <div className="row gap">
+                      <button
+                        type="button"
+                        className="ghost small"
+                        onClick={() => {
+                          void copyToClipboard(htmlPreviewOutput);
+                          setToastMessage('Скопировано');
+                        }}
+                      >
+                        Скопировать
+                      </button>
+                      <button className="ghost small" onClick={() => void handleExportHtml()}>
+                        Скачать
+                      </button>
+                    </div>
                   </div>
                   <iframe
                     className={tab === 'html' ? 'preview-frame preview-frame-full' : 'preview-frame'}
@@ -7799,7 +7837,7 @@ export default function App() {
               )}
 
               {tab === 'wiki' && workspaceScope === 'methods' && (
-                <section className="panel">
+                <section className="panel panel-wiki-preview">
                   <div className="panel-head">
                     <div className="panel-title">Предпросмотр Wiki</div>
                     <div className="row gap">
@@ -7808,7 +7846,7 @@ export default function App() {
                         className="ghost small"
                         onClick={() => {
                           void copyToClipboard(wikiOutput);
-                          setToastMessage('Wiki текст скопирован в буфер обмена.');
+                          setToastMessage('Скопировано');
                         }}
                       >
                         Скопировать
@@ -7826,7 +7864,7 @@ export default function App() {
                       title="Скопировать Wiki"
                       onClick={() => {
                         void copyToClipboard(wikiOutput);
-                        setToastMessage('Wiki текст скопирован в буфер обмена.');
+                        setToastMessage('Скопировано');
                       }}
                     >
                       <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -7834,6 +7872,7 @@ export default function App() {
                         <rect x="5" y="5" width="10" height="10" rx="2" />
                       </svg>
                     </button>
+                    <div className="wiki-preview-label">WIKI-РАЗМЕТКА</div>
                     <textarea className="code wiki-preview-code" readOnly value={wikiOutput} rows={24} />
                   </div>
                 </section>
@@ -7841,7 +7880,10 @@ export default function App() {
               </div>
             </>
           ) : (
-            <div className="muted">Секция не выбрана</div>
+            <section className="panel empty-state-panel" aria-label="Метод не выбран">
+              <div className="panel-title">Метод не выбран</div>
+              <div className="muted">Выберите метод слева или создайте новый проект.</div>
+            </section>
           )}
         </main>
       </div>

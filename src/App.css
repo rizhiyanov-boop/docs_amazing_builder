@@ -4318,3 +4318,113 @@ tr:nth-child(odd) td {
 :root .ds-section-card-body {
   padding: var(--space-4);
 }
+
+:root .topbar-autosave-cluster {
+  min-width: calc(var(--space-1) * 120 / 4);
+  justify-content: center;
+}
+
+:root .topbar-autosave-label {
+  font-size: var(--font-size-xs);
+  color: var(--muted);
+}
+
+:root .autosave-error .topbar-autosave-label {
+  color: var(--danger-text);
+}
+
+:root .empty-state-panel {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+  align-content: center;
+  min-height: calc(var(--space-1) * 240 / 4);
+}
+
+:root .panel-wiki-preview .wiki-preview-wrap {
+  box-shadow: var(--shadow-sm);
+}
+
+:root .wiki-preview-label {
+  font-size: var(--font-size-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0 0 var(--space-2);
+}
+
+:root .html-preview-wrap {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
+  overflow: auto;
+}
+
+:root .html-preview-code {
+  margin: 0;
+  max-height: calc(var(--space-1) * 560 / 4);
+}
+
+:root .ai-action-bar-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+:root .topbar-export-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding-inline: var(--space-2);
+}
+
+:root .topbar-group-label {
+  font-size: var(--font-size-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-right: var(--space-1);
+}
+
+:root .topbar-user-menu {
+  position: relative;
+}
+
+:root .topbar-user-menu > summary {
+  list-style: none;
+}
+
+:root .topbar-user-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+:root .topbar-user-menu-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--space-1));
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  padding: var(--space-2);
+  z-index: 20;
+}
+
+:root .auth-card-subtitle {
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+  margin-top: calc(var(--space-1) * -1);
+  margin-bottom: var(--space-2);
+}
+
+:root .auth-card-switch {
+  margin-top: var(--space-2);
+  display: flex;
+  justify-content: center;
+}
+
+:root .import-routing-card {
+  box-shadow: var(--shadow-md);
+}

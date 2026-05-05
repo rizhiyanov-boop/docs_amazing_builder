@@ -175,7 +175,7 @@ describe('renderers', () => {
             clientResponseCode: '{"error":{"code":"100101","message":"Bad request"}}',
             trigger: 'Ошибка валидации',
             errorType: 'BusinessException',
-            serverHttpStatus: '422',
+            serverHttpStatus: '400',
             internalCode: '100101',
             message: 'Bad request',
             responseCode: '{"error":{"code":"100101","message":"Bad request"}}'

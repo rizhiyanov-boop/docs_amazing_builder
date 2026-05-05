@@ -1,0 +1,279 @@
+{
+  "version": 3,
+  "projectName": "Новый проект",
+  "updatedAt": "2026-04-24T06:18:01.337Z",
+  "activeMethodId": "method-saveclaim-001",
+  "methods": [
+    {
+      "id": "method-saveclaim-001",
+      "name": "saveClaim",
+      "updatedAt": "2026-04-23T16:52:00.000Z",
+      "sections": [
+        {
+          "id": "goal",
+          "title": "Цель",
+          "enabled": true,
+          "kind": "text",
+          "value": "Регистрация заявки в АИС ГРКИ."
+        },
+        {
+          "id": "functional",
+          "title": "Функциональные требования",
+          "enabled": true,
+          "kind": "text",
+          "value": "Описание бизнес-логики метода."
+        },
+        {
+          "id": "process-diagram",
+          "title": "Диаграмма процесса",
+          "enabled": true,
+          "kind": "diagram",
+          "diagrams": [
+            {
+              "id": "diagram-saveclaim-001",
+              "title": "",
+              "engine": "mermaid",
+              "code": "",
+              "description": ""
+            }
+          ]
+        },
+        {
+          "id": "request",
+          "title": "Request",
+          "enabled": true,
+          "kind": "parsed",
+          "sectionType": "request",
+          "format": "json",
+          "lastSyncedFormat": "json",
+          "input": "",
+          "schemaInput": "",
+          "rows": [
+            {
+              "id": "row-saveclaim-001",
+              "type": "string",
+              "field": "save_mode",
+              "origin": "parsed",
+              "source": "body",
+              "enabled": true,
+              "example": "1",
+              "required": "+",
+              "maskInLogs": false,
+              "description": "Вид цели передачи информации",
+              "sourceField": "save_mode",
+              "clientField": ""
+            },
+            {
+              "id": "row-saveclaim-002",
+              "type": "string",
+              "field": "claim.claim_id",
+              "origin": "parsed",
+              "source": "body",
+              "enabled": true,
+              "example": "20260000000000000015",
+              "required": "+",
+              "maskInLogs": false,
+              "description": "Уникальный регистрационный номер заявки",
+              "sourceField": "claim.claim_id",
+              "clientField": ""
+            }
+          ],
+          "error": "",
+          "domainModelEnabled": false,
+          "clientFormat": "json",
+          "clientLastSyncedFormat": "json",
+          "clientInput": "",
+          "clientSchemaInput": "",
+          "clientRows": [],
+          "clientError": "",
+          "clientMappings": {},
+          "authType": "none",
+          "authHeaderName": "X-API-Key",
+          "authTokenExample": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.<payload>.<signature>",
+          "authUsername": "api-user",
+          "authPassword": "secret-password",
+          "authApiKeyExample": "sk_live_51QExampleKey",
+          "requestUrl": "",
+          "requestMethod": "POST",
+          "requestProtocol": "REST",
+          "externalRequestUrl": "",
+          "externalRequestMethod": "POST",
+          "externalAuthType": "none",
+          "externalAuthHeaderName": "X-API-Key",
+          "externalAuthTokenExample": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.<payload>.<signature>",
+          "externalAuthUsername": "api-user",
+          "externalAuthPassword": "secret-password",
+          "externalAuthApiKeyExample": "sk_live_51QExampleKey",
+          "requestColumnOrder": [
+            "field",
+            "type",
+            "required",
+            "clientField",
+            "description",
+            "maskInLogs",
+            "example"
+          ]
+        },
+        {
+          "id": "response",
+          "title": "Response",
+          "enabled": true,
+          "kind": "parsed",
+          "sectionType": "response",
+          "format": "json",
+          "lastSyncedFormat": "json",
+          "input": "",
+          "schemaInput": "",
+          "rows": [],
+          "error": "",
+          "domainModelEnabled": false,
+          "clientFormat": "json",
+          "clientLastSyncedFormat": "json",
+          "clientInput": "",
+          "clientSchemaInput": "",
+          "clientRows": [],
+          "clientError": "",
+          "clientMappings": {},
+          "requestColumnOrder": [
+            "field",
+            "type",
+            "required",
+            "clientField",
+            "description",
+            "maskInLogs",
+            "example"
+          ]
+        },
+        {
+          "id": "errors",
+          "title": "Ошибки",
+          "enabled": true,
+          "kind": "errors",
+          "rows": [
+            {
+              "clientHttpStatus": "",
+              "clientResponse": "",
+              "clientResponseCode": "",
+              "trigger": "",
+              "errorType": "-",
+              "serverHttpStatus": "",
+              "internalCode": "",
+              "message": "",
+              "responseCode": ""
+            }
+          ],
+          "validationRules": [
+            {
+              "parameter": "",
+              "validationCase": "NotNull",
+              "condition": "",
+              "cause": ""
+            }
+          ]
+        },
+        {
+          "id": "non-functional",
+          "title": "Нефункциональные требования",
+          "enabled": true,
+          "kind": "text",
+          "value": ""
+        }
+      ]
+    }
+  ],
+  "groups": [],
+  "projectSections": [
+    {
+      "id": "project-section-overview",
+      "title": "Overview",
+      "enabled": true,
+      "type": "markdown",
+      "content": "",
+      "order": 0
+    },
+    {
+      "id": "project-section-business-rules",
+      "title": "Business Rules",
+      "enabled": true,
+      "type": "text",
+      "content": "",
+      "order": 1
+    }
+  ],
+  "flows": [
+    {
+      "id": "flow-saveclaim-main",
+      "name": "Основной сценарий",
+      "description": "",
+      "nodes": [
+        {
+          "id": "start-saveclaim",
+          "type": "start",
+          "position": {
+            "x": 80,
+            "y": 180
+          },
+          "label": "Start",
+          "description": "",
+          "actor": "",
+          "noteContent": "",
+          "preconditions": [],
+          "postconditions": []
+        },
+        {
+          "id": "method-saveclaim-node",
+          "type": "method",
+          "position": {
+            "x": 340,
+            "y": 180
+          },
+          "label": "Method",
+          "description": "",
+          "actor": "",
+          "methodRef": {
+            "methodId": "method-saveclaim-001"
+          },
+          "noteContent": "",
+          "preconditions": [],
+          "postconditions": []
+        },
+        {
+          "id": "end-saveclaim",
+          "type": "end",
+          "position": {
+            "x": 600,
+            "y": 180
+          },
+          "label": "End",
+          "description": "",
+          "actor": "",
+          "noteContent": "",
+          "preconditions": [],
+          "postconditions": []
+        }
+      ],
+      "edges": [
+        {
+          "id": "edge-start-to-method",
+          "type": "sequence",
+          "fromNodeId": "start-saveclaim",
+          "toNodeId": "method-saveclaim-node",
+          "label": "",
+          "condition": "",
+          "mappings": []
+        },
+        {
+          "id": "edge-method-to-end",
+          "type": "sequence",
+          "fromNodeId": "method-saveclaim-node",
+          "toNodeId": "end-saveclaim",
+          "label": "",
+          "condition": "",
+          "mappings": []
+        }
+      ],
+      "createdAt": "2026-04-24T06:18:01.337Z",
+      "updatedAt": "2026-04-24T06:18:01.337Z"
+    }
+  ]
+}

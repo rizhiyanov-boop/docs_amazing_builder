@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>doc-builder · Design System</title>
+<link rel="stylesheet" href="tokens.css">
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; font-family: var(--font-sans); color: var(--color-text-primary); }
+  body { background: #f0eee9; }
+  @keyframes db-spin { to { transform: rotate(360deg); } }
+  .db-tooltip-wrap:hover .db-tooltip { opacity: 1; transition-delay: 400ms; }
+  .db-btn:hover:not(:disabled) { filter: brightness(0.97); }
+  .db-btn-secondary:hover:not(:disabled), .db-btn-ghost:hover:not(:disabled) {
+    background: var(--color-bg-hover) !important;
+  }
+  .db-btn-primary:hover:not(:disabled) { background: var(--color-accent-hover) !important; border-color: var(--color-accent-hover) !important; }
+  .db-btn-danger:hover:not(:disabled) { background: var(--color-danger-hover) !important; border-color: var(--color-danger-hover) !important; }
+  .db-icon-btn:hover { background: var(--color-bg-hover) !important; color: var(--color-text-primary) !important; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--color-border-default); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--color-text-tertiary); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="db-primitives.jsx"></script>
+<script type="text/babel" src="db-app.jsx"></script>
+<script type="text/babel" src="db-content.jsx"></script>
+<script type="text/babel" src="db-foundations.jsx"></script>
+<script type="text/babel" src="db-primitives-cards.jsx"></script>
+
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+// Themed wrapper — applies theme + accent inside the artboard via a nested data-theme div
+const Themed = ({ theme = 'light', accent = 'blue', children, style = {} }) => (
+  <div data-theme={theme} data-accent={accent} style={{
+    width: '100%', height: '100%',
+    background: 'var(--color-bg-base)',
+    color: 'var(--color-text-primary)',
+    fontFamily: 'var(--font-sans)',
+    overflow: 'hidden',
+    ...style,
+  }}>{children}</div>
+);
+
+// Full app shell
+const AppShell = ({ theme = 'light', accent = 'blue', sidebarStyle = 'tree', topbarLayout = 'grouped', tab = 'wiki', overlay = null, content = null, autosave = 'saved' }) => {
+  const [t, setT] = useState(theme);
+  const [tb, setTb] = useState(tab);
+  useEffect(() => { setT(theme); }, [theme]);
+  useEffect(() => { if (window.lucide) window.lucide.createIcons(); }, [tb, t, content]);
+  return (
+    <Themed theme={t} accent={accent}>
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
+        <Topbar activeView={tb} onView={setTb} layout={topbarLayout} autosave={autosave} theme={t} onTheme={() => setT(t === 'dark' ? 'light' : 'dark')} />
+        <div style={{ flex: 1, display: 'flex', minHeight: 0, position: 'relative' }}>
+          <Sidebar style={sidebarStyle} />
+          <ContentArea tab={tb} onTab={setTb}>
+            {content || (tb === 'wiki' ? <WikiPreview /> : tb === 'html' ? <HtmlPreview /> : <EditorView />)}
+          </ContentArea>
+          {overlay}
+        </div>
+      </div>
+    </Themed>
+  );
+};
+
+const App = () => {
+  useEffect(() => { if (window.lucide) window.lucide.createIcons(); });
+  return (
+    <DesignCanvas>
+      <DCSection id="screens" title="App screens" subtitle="Полный shell — light + dark, разные табы и состояния">
+        <DCArtboard id="editor-light" label="01 · Редактор · Light · Blue" width={1280} height={800}>
+          <AppShell theme="light" accent="blue" tab="editor" />
+        </DCArtboard>
+        <DCArtboard id="wiki-dark" label="02 · Wiki preview · Dark · Blue" width={1280} height={800}>
+          <AppShell theme="dark" accent="blue" tab="wiki" />
+        </DCArtboard>
+        <DCArtboard id="html-light" label="03 · HTML preview · Light" width={1280} height={800}>
+          <AppShell theme="light" accent="blue" tab="html" />
+        </DCArtboard>
+        <DCArtboard id="editor-dark-lime" label="04 · Редактор · Dark · Lime accent" width={1280} height={800}>
+          <AppShell theme="dark" accent="lime" tab="editor" />
+        </DCArtboard>
+        <DCArtboard id="ai-loading" label="05 · AI Action Bar · loading" width={1280} height={800}>
+          <AppShell theme="light" accent="violet" tab="editor" content={
+            <div style={{ maxWidth: 920, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <Badge variant="post" size="sm">POST</Badge>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--color-text-secondary)' }}>/api/v1/grki-adapter/v1/saveContractRestore</span>
+                </div>
+                <h1 style={{ fontSize: 24, fontWeight: 600, margin: 0, letterSpacing: -0.4 }}>saveContractRestore</h1>
+              </div>
+              <AiActionBar loading />
+              <SectionCard title="Request" eyebrow="Параметры запроса" badge={<Badge variant="post" size="sm">REQUEST</Badge>}>
+                <ParamTable rows={[
+                  { name: 'contractId', type: 'string', req: true, desc: 'Идентификатор договора в АИС ГРКИ' },
+                  { name: 'restoreDate', type: 'date', req: true, desc: 'Дата восстановления договора' },
+                  { name: 'restoreReason', type: 'enum', req: true, desc: 'Причина восстановления (court/bank/client)' },
+                ]} />
+              </SectionCard>
+            </div>
+          } />
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="states" title="App states" subtitle="Empty · confirm · dropdown · toasts">
+        <DCArtboard id="empty-no-method" label="06 · Empty · нет выбранного метода" width={1280} height={800}>
+          <AppShell theme="light" accent="blue" content={<EmptyState kind="no-method" />} />
+        </DCArtboard>
+        <DCArtboard id="empty-project" label="07 · Empty · пустой проект · Dark" width={1280} height={800}>
+          <Themed theme="dark" accent="blue">
+            <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+              <Topbar layout="grouped" theme="dark" onTheme={() => {}} />
+              <div style={{ flex: 1, display: 'flex' }}>
+                <div style={{
+                  width: 260, background: 'var(--color-bg-subtle)', borderRight: '1px solid var(--color-border-default)',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 20, gap: 10,
+                }}>
+                  <Icon name="folder-plus" size={20} color="var(--color-text-tertiary)" />
+                  <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', textAlign: 'center' }}>Методы появятся здесь</div>
+                </div>
+                <ContentArea><EmptyState kind="empty-project" /></ContentArea>
+              </div>
+            </div>
+          </Themed>
+        </DCArtboard>
+        <DCArtboard id="confirm" label="08 · Confirmation dialog" width={1280} height={800}>
+          <AppShell theme="light" accent="blue" tab="editor" overlay={<ConfirmDialog />} />
+        </DCArtboard>
+        <DCArtboard id="dropdown" label="09 · Replace dropdown" width={1280} height={800}>
+          <AppShell theme="dark" accent="blue" tab="editor" overlay={<ReplaceDropdown />} />
+        </DCArtboard>
+        <DCArtboard id="toasts" label="10 · Toast stack" width={1280} height={800}>
+          <AppShell theme="light" accent="blue" tab="editor" overlay={
+            <div style={{ position: 'absolute', bottom: 24, right: 24, display: 'flex', flexDirection: 'column', gap: 10, zIndex: 40 }}>
+              <Toast variant="success" title="Скопировано в буфер" desc="HTML-документ готов к вставке." />
+              <Toast variant="info" title="Экспорт начат" desc="Сборка проекта в Wiki — 23 метода." action="Журнал" />
+              <Toast variant="error" title="Ошибка сохранения" desc="Не удалось синхронизировать поля Request." action="Повторить" />
+            </div>
+          } />
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="topbar-variants" title="Topbar layouts" subtitle="Группировка экспорта · 3 подхода">
+        <DCArtboard id="tb-grouped" label="A · Grouped (МЕТОД / ПРОЕКТ)" width={1280} height={120}>
+          <Themed theme="light" accent="blue"><Topbar layout="grouped" theme="light" onTheme={() => {}} /></Themed>
+        </DCArtboard>
+        <DCArtboard id="tb-flat" label="B · Flat" width={1280} height={120}>
+          <Themed theme="light" accent="blue"><Topbar layout="flat" theme="light" onTheme={() => {}} /></Themed>
+        </DCArtboard>
+        <DCArtboard id="tb-compact" label="C · Compact menus" width={1280} height={120}>
+          <Themed theme="light" accent="blue"><Topbar layout="compact" theme="light" onTheme={() => {}} /></Themed>
+        </DCArtboard>
+        <DCArtboard id="tb-grouped-dark" label="D · Grouped · Dark" width={1280} height={120}>
+          <Themed theme="dark" accent="blue"><Topbar layout="grouped" theme="dark" onTheme={() => {}} /></Themed>
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="sidebar-variants" title="Sidebar styles" subtitle="Дерево · Плоский · Группированный">
+        <DCArtboard id="sb-tree" label="A · Tree (метод → секции)" width={300} height={680}>
+          <Themed theme="light" accent="blue"><SidebarTree activeMethod="saveContractRestore" activeSection="Цель" /></Themed>
+        </DCArtboard>
+        <DCArtboard id="sb-flat" label="B · Flat (HTTP-бейдж + имя)" width={300} height={680}>
+          <Themed theme="light" accent="blue"><SidebarFlat activeMethod="saveContractRestore" /></Themed>
+        </DCArtboard>
+        <DCArtboard id="sb-grouped" label="C · Grouped by resource" width={300} height={680}>
+          <Themed theme="light" accent="blue"><SidebarGrouped activeMethod="saveContractRestore" /></Themed>
+        </DCArtboard>
+        <DCArtboard id="sb-tree-dark" label="D · Tree · Dark" width={300} height={680}>
+          <Themed theme="dark" accent="blue"><SidebarTree activeMethod="saveContractRestore" activeSection="Цель" /></Themed>
+        </DCArtboard>
+        <DCArtboard id="sb-grouped-lime" label="E · Grouped · Dark · Lime" width={300} height={680}>
+          <Themed theme="dark" accent="lime"><SidebarGrouped activeMethod="saveContractRestore" /></Themed>
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="accents" title="Accent variations" subtitle="Один экран в 4 цветовых схемах · светлая + тёмная">
+        <DCArtboard id="ac-blue-l" label="Blue · Light" width={1180} height={760}>
+          <AppShell theme="light" accent="blue" tab="editor" />
+        </DCArtboard>
+        <DCArtboard id="ac-blue-d" label="Blue · Dark" width={1180} height={760}>
+          <AppShell theme="dark" accent="blue" tab="editor" />
+        </DCArtboard>
+        <DCArtboard id="ac-lime-l" label="Lime · Light" width={1180} height={760}>
+          <AppShell theme="light" accent="lime" tab="editor" />
+        </DCArtboard>
+        <DCArtboard id="ac-lime-d" label="Lime · Dark" width={1180} height={760}>
+          <AppShell theme="dark" accent="lime" tab="editor" />
+        </DCArtboard>
+        <DCArtboard id="ac-violet-l" label="Violet · Light" width={1180} height={760}>
+          <AppShell theme="light" accent="violet" tab="editor" />
+        </DCArtboard>
+        <DCArtboard id="ac-violet-d" label="Violet · Dark" width={1180} height={760}>
+          <AppShell theme="dark" accent="violet" tab="editor" />
+        </DCArtboard>
+        <DCArtboard id="ac-mono-l" label="Mono · Light" width={1180} height={760}>
+          <AppShell theme="light" accent="mono" tab="editor" />
+        </DCArtboard>
+        <DCArtboard id="ac-mono-d" label="Mono · Dark" width={1180} height={760}>
+          <AppShell theme="dark" accent="mono" tab="editor" />
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="compounds" title="Compounds" subtitle="Crops of complex components">
+        <DCArtboard id="ai-bar" label="AI Action Bar — idle · loading" width={920} height={260}>
+          <Themed theme="light" accent="blue" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <AiActionBar />
+            <AiActionBar loading />
+          </Themed>
+        </DCArtboard>
+        <DCArtboard id="ai-bar-dark" label="AI Action Bar · Dark" width={920} height={260}>
+          <Themed theme="dark" accent="blue" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <AiActionBar />
+            <AiActionBar loading />
+          </Themed>
+        </DCArtboard>
+        <DCArtboard id="section-card" label="Section Card with table" width={920} height={420}>
+          <Themed theme="light" accent="blue" style={{ padding: 24 }}>
+            <SectionCard title="Request" eyebrow="Параметры запроса" badge={<Badge variant="post" size="sm">REQUEST</Badge>}
+              actions={<>
+                <Button variant="ghost" size="sm" icon="sparkles">Заполнить описания</Button>
+                <Button variant="secondary" size="sm" icon="plus">Добавить поле</Button>
+              </>}>
+              <ParamTable rows={[
+                { name: 'contractId', type: 'string', req: true, desc: 'Идентификатор договора в АИС ГРКИ' },
+                { name: 'restoreDate', type: 'date', req: true, desc: 'Дата восстановления договора' },
+                { name: 'restoreReason', type: 'enum', req: true, desc: 'Причина восстановления' },
+                { name: 'comment', type: 'string', req: false, desc: 'Произвольный комментарий оператора' },
+              ]} />
+            </SectionCard>
+          </Themed>
+        </DCArtboard>
+        <DCArtboard id="confirm-c" label="Confirm dialog · close-up" width={500} height={300}>
+          <Themed theme="light" accent="blue" style={{ position: 'relative' }}>
+            <ConfirmDialog />
+          </Themed>
+        </DCArtboard>
+        <DCArtboard id="confirm-c-dark" label="Confirm dialog · Dark" width={500} height={300}>
+          <Themed theme="dark" accent="blue" style={{ position: 'relative' }}>
+            <ConfirmDialog />
+          </Themed>
+        </DCArtboard>
+        <DCArtboard id="empty-c" label="Empty state · close-up" width={620} height={420}>
+          <Themed theme="light" accent="blue"><EmptyState kind="no-method" /></Themed>
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="primitives" title="Primitives" subtitle="Кирпичики системы">
+        <DCArtboard id="p-buttons" label="Button" width={520} height={520}>
+          <Themed theme="light" accent="blue"><ButtonsCard /></Themed>
+        </DCArtboard>
+        <DCArtboard id="p-inputs" label="Input · Textarea" width={520} height={520}>
+          <Themed theme="light" accent="blue"><InputsCard /></Themed>
+        </DCArtboard>
+        <DCArtboard id="p-badges" label="Badge · Tag" width={520} height={520}>
+          <Themed theme="light" accent="blue"><BadgesCard /></Themed>
+        </DCArtboard>
+        <DCArtboard id="p-tabs" label="Tabs · Dropdown · Tooltip · Kbd" width={520} height={520}>
+          <Themed theme="light" accent="blue"><TabsAndDropdownCard /></Themed>
+        </DCArtboard>
+        <DCArtboard id="p-table" label="Table · inline editing" width={620} height={520}>
+          <Themed theme="light" accent="blue"><TableCard /></Themed>
+        </DCArtboard>
+        <DCArtboard id="p-toasts" label="Toast notifications" width={420} height={400}>
+          <Themed theme="light" accent="blue"><ToastsCard /></Themed>
+        </DCArtboard>
+        <DCArtboard id="p-buttons-d" label="Button · Dark" width={520} height={520}>
+          <Themed theme="dark" accent="blue"><ButtonsCard /></Themed>
+        </DCArtboard>
+        <DCArtboard id="p-inputs-d" label="Input · Dark" width={520} height={520}>
+          <Themed theme="dark" accent="blue"><InputsCard /></Themed>
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="foundations" title="Foundations" subtitle="Tokens, type, spacing, motion">
+        <DCArtboard id="f-colors-l" label="Colors · Light" width={460} height={620}>
+          <Themed theme="light" accent="blue"><FoundationsColors /></Themed>
+        </DCArtboard>
+        <DCArtboard id="f-colors-d" label="Colors · Dark" width={460} height={620}>
+          <Themed theme="dark" accent="blue"><FoundationsColors /></Themed>
+        </DCArtboard>
+        <DCArtboard id="f-type-l" label="Typography · Light" width={520} height={620}>
+          <Themed theme="light" accent="blue"><FoundationsType /></Themed>
+        </DCArtboard>
+        <DCArtboard id="f-type-d" label="Typography · Dark" width={520} height={620}>
+          <Themed theme="dark" accent="blue"><FoundationsType /></Themed>
+        </DCArtboard>
+        <DCArtboard id="f-space" label="Spacing · Radii · Shadow" width={460} height={620}>
+          <Themed theme="light" accent="blue"><FoundationsSpacing /></Themed>
+        </DCArtboard>
+        <DCArtboard id="f-motion" label="Motion · Iconography" width={520} height={620}>
+          <Themed theme="light" accent="blue"><FoundationsMotion /></Themed>
+        </DCArtboard>
+      </DCSection>
+    </DesignCanvas>
+  );
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

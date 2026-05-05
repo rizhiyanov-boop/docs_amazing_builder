@@ -1,6 +1,7 @@
 # Конструктор документации API (MVP)
 
 **Текущая версия:** 1.1.0
+**Актуализация документации:** 2026-04-29
 
 Приложение собирает документацию из фиксированных секций, парсит JSON/cURL в таблицы и генерирует 2 независимых формата:
 
@@ -186,6 +187,23 @@
 - Рендер HTML: [src/renderHtml.ts](src/renderHtml.ts)
 - Рендер Wiki: [src/renderWiki.ts](src/renderWiki.ts)
 - Модели данных: [src/types.ts](src/types.ts)
+
+## Пакет для ревью (zip)
+
+Для передачи проекта в ревью используется архив без служебного и локального мусора.
+
+Что включается:
+- исходный код (`src/`, `api/`, `server/`, `scripts/`, `public/`);
+- конфиги и метафайлы проекта (`package.json`, `tsconfig*`, `vite.config.ts`, `vitest.config.ts`, `eslint.config.js`);
+- документация (`README.md`, `ARCHITECTURE.md`, `docs/`), включая сопроводительный файл [docs/REVIEW_PACKAGE.md](docs/REVIEW_PACKAGE.md).
+
+Что исключается:
+- зависимости и сборочные артефакты: `node_modules/`, `dist/`, `coverage/`, `output/`;
+- git/vercel/runtime-данные: `.git/`, `.vercel/`;
+- локальные секреты и окружение: `.env`, `.env.local`;
+- временные файлы и логи: `*.log`, `vite*.log`, `vercel*.log`, `test-results/`.
+
+Детали состава и проверки архива: [docs/REVIEW_PACKAGE.md](docs/REVIEW_PACKAGE.md).
 
 ## Важные примечания
 

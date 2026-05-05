@@ -76,6 +76,7 @@ export function WorkbenchTopbar({
   return (
     <header
       ref={topbarRef}
+      className="wb-topbar"
       style={{
         height: 48,
         minHeight: 48,
@@ -108,7 +109,7 @@ export function WorkbenchTopbar({
 
       <div style={{ flex: 1 }} />
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+      <div className="wb-topbar-actions" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
         <WBButton variant="ghost" size="sm" onClick={onOpenProjectImport} aria-label="Импорт">Импорт</WBButton>
         <input
           ref={importInputRef}
@@ -128,7 +129,7 @@ export function WorkbenchTopbar({
         <WBButton variant="secondary" size="sm" onClick={onExportJson}>JSON</WBButton>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+      <div className="wb-topbar-actions" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
         <WBButton variant="ghost" size="sm" onClick={onUndo} disabled={!canUndo} title="Отменить">↶</WBButton>
         <WBButton variant="ghost" size="sm" onClick={onRedo} disabled={!canRedo} title="Повторить">↷</WBButton>
         <WBButton variant="ghost" size="sm" onClick={onManualSave} title="Сохранить">Сохранить</WBButton>

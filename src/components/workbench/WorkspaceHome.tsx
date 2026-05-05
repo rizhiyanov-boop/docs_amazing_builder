@@ -15,7 +15,7 @@ type WorkspaceHomeProps = {
 
 export function WorkspaceHome({ projectName, methods, groups, getMethodHttpMethod, onCreateMethod, onImportOpenApi, onCreateService, onOpenMethod }: WorkspaceHomeProps): ReactNode {
   return (
-    <div style={{ padding: '40px 64px', maxWidth: 980, margin: '0 auto', color: 'var(--wb-text)' }}>
+    <div className="wb-workspace-home">
       <div style={{ fontSize: 42, marginBottom: 8 }}>▣</div>
       <h1 style={{ margin: 0, fontSize: 38, fontWeight: 700 }}>{projectName || 'doc-builder'}</h1>
       <p style={{ fontSize: 15, color: 'var(--wb-text-soft)', marginTop: 6, maxWidth: 580 }}>
@@ -49,7 +49,7 @@ export function WorkspaceHome({ projectName, methods, groups, getMethodHttpMetho
         {(groups.length > 0 ? groups : [{ id: 'methods', name: 'Methods', methodIds: methods.map((method) => method.id), links: [] }]).map((group) => {
           const groupMethods = methods.filter((method) => group.methodIds.includes(method.id));
           return (
-            <div key={group.id} style={{ display: 'grid', gridTemplateColumns: '32px minmax(160px, 1fr) 80px minmax(160px, 1fr)', padding: '10px 4px', alignItems: 'center', gap: 8, borderBottom: '1px solid var(--wb-border-soft)', fontSize: 13 }}>
+            <div key={group.id} className="wb-project-structure-row">
               <div>▣</div>
               <div style={{ fontWeight: 600 }}>{group.name}</div>
               <div style={{ color: 'var(--wb-text-muted)', fontSize: 12 }}>{groupMethods.length} методов</div>

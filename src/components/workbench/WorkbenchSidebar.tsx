@@ -72,19 +72,7 @@ export function WorkbenchSidebar({
   }, [groups, methods, normalizedQuery]);
 
   return (
-    <aside
-      style={{
-        width: 240,
-        minWidth: 240,
-        height: '100vh',
-        background: 'var(--wb-bg-sidebar)',
-        borderRight: '1px solid var(--wb-border)',
-        display: 'flex',
-        flexDirection: 'column',
-        fontFamily: 'var(--wb-font-sans)',
-        color: 'var(--wb-text)'
-      }}
-    >
+    <aside className="wb-sidebar">
       <div style={{ padding: '12px 14px 10px', display: 'flex', alignItems: 'center', gap: 8, borderBottom: '1px solid var(--wb-border)' }}>
         <div style={{ width: 22, height: 22, borderRadius: 6, background: 'var(--wb-text)', color: 'var(--wb-bg-surface)', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>D</div>
         <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--wb-text)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>doc-builder</div>
@@ -124,11 +112,7 @@ export function WorkbenchSidebar({
         </label>
       </div>
 
-      <div
-        role="tree"
-        aria-label="Проекты, методы и секции"
-        style={{ padding: '4px 0', flex: 1, overflowY: 'auto' }}
-      >
+      <div role="tree" aria-label="Проекты, методы и секции" style={{ padding: '4px 0', flex: 1, overflowY: 'auto' }}>
         {visibleGroups.length === 0 ? (
           <div style={{ margin: 12, padding: 12, border: '1px dashed var(--wb-border-strong)', borderRadius: 'var(--wb-radius)', color: 'var(--wb-text-muted)', fontSize: 13 }}>
             Ничего не найдено
@@ -142,23 +126,13 @@ export function WorkbenchSidebar({
               {group.methods.map((method) => (
                 <div key={method.id}>
                   <div role="treeitem" aria-selected={method.id === activeMethodId}>
-                    <SidebarItem
-                      depth={1}
-                      http={getMethodHttpMethod(method)}
-                      active={method.id === activeMethodId}
-                      onClick={() => onSwitchMethod(method)}
-                    >
+                    <SidebarItem depth={1} http={getMethodHttpMethod(method)} active={method.id === activeMethodId} onClick={() => onSwitchMethod(method)}>
                       {method.name}
                     </SidebarItem>
                   </div>
                   {method.id === activeMethodId && sections.map((section) => (
                     <div key={section.id} role="treeitem" aria-selected={section.id === selectedSectionId}>
-                      <SidebarItem
-                        depth={2}
-                        active={section.id === selectedSectionId}
-                        dim={!section.enabled}
-                        onClick={() => onSelectSection(section.id)}
-                      >
+                      <SidebarItem depth={2} active={section.id === selectedSectionId} dim={!section.enabled} onClick={() => onSelectSection(section.id)}>
                         {resolveSectionTitle(section)}
                       </SidebarItem>
                     </div>

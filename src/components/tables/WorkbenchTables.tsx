@@ -13,15 +13,42 @@ function isRequired(value: string): boolean {
   return value === 'Да' || value.toLowerCase() === 'true' || value === '1' || value.toLowerCase() === 'required';
 }
 
+function FieldInput({ row, onUpdateRow }: { row: ParsedRow; onUpdateRow?: (row: ParsedRow, patch: Partial<ParsedRow>) => void }): ReactNode {
+  return (
+    <input
+      value={row.field || row.sourceField || ''}
+      onChange={(event) => onUpdateRow?.(row, { field: event.target.value, sourceField: event.target.value })}
+      aria-label="Имя поля"
+      style={{ width: '100%', border: '1px solid var(--wb-border-soft)', background: 'var(--wb-bg-surface)', color: 'var(--wb-text)', borderRadius: 5, padding: '4px 6px', fontFamily: 'var(--wb-font-mono)', fontSize: 12.5, fontWeight: 600 }}
+    />
+  );
+}
+
+function DescriptionInput({ row, onUpdateRow, rows = 2 }: { row: ParsedRow; onUpdateRow?: (row: ParsedRow, patch: Partial<ParsedRow>) => void; rows?: number }): ReactNode {
+  return (
+    <textarea
+      value={row.description}
+      onChange={(event) => onUpdateRow?.(row, { description: event.target.value })}
+      onKeyDown={(event) => {
+        if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+          event.currentTarget.blur();
+        }
+      }}
+      rows={rows}
+      aria-label="Описание поля"
+      style={{ width: '100%', resize: 'vertical', border: '1px solid var(--wb-border-soft)', background: 'var(--wb-bg-soft)', color: 'var(--wb-text)', borderRadius: 5, padding: '4px 6px', fontFamily: 'var(--wb-font-sans)', fontSize: 12.5, lineHeight: 1.45 }}
+    />
+  );
+}
+
 export function TableClassic({ rows, onUpdateRow, onAddRow, editable = false }: TableProps): ReactNode {
   return (
     <div style={{ display: 'grid', gap: 0, border: '1px solid var(--wb-border-soft)', borderRadius: 'var(--wb-radius)', overflow: 'hidden' }}>
       {rows.map((row) => (
         <div
           key={row.id ?? row.field}
+          className="wb-table-classic-row"
           style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(120px, 1.5fr) 90px minmax(160px, 1fr) 28px',
             gap: 8,
             alignItems: 'start',
             padding: '8px 10px',
@@ -31,12 +58,7 @@ export function TableClassic({ rows, onUpdateRow, onAddRow, editable = false }: 
         >
           <div style={{ minWidth: 0 }}>
             {editable ? (
-              <input
-                value={row.field || row.sourceField || ''}
-                onChange={(event) => onUpdateRow?.(row, { field: event.target.value, sourceField: event.target.value })}
-                style={{ width: '100%', border: '1px solid transparent', background: 'transparent', color: 'var(--wb-text)', fontFamily: 'var(--wb-font-mono)', fontSize: 12.5, fontWeight: 500, outline: 0, padding: 0 }}
-                aria-label="Имя поля"
-              />
+              <FieldInput row={row} onUpdateRow={onUpdateRow} />
             ) : (
               <code style={{ fontFamily: 'var(--wb-font-mono)', fontSize: 12.5, fontWeight: 500, color: 'var(--wb-text)', overflowWrap: 'anywhere' }}>
                 {row.field || row.sourceField || 'field'}
@@ -46,18 +68,7 @@ export function TableClassic({ rows, onUpdateRow, onAddRow, editable = false }: 
           </div>
           <TypeChip type={row.type} />
           {editable ? (
-            <textarea
-              value={row.description}
-              onChange={(event) => onUpdateRow?.(row, { description: event.target.value })}
-              onKeyDown={(event) => {
-                if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-                  event.currentTarget.blur();
-                }
-              }}
-              rows={2}
-              aria-label="Описание поля"
-              style={{ width: '100%', resize: 'vertical', border: '1px solid var(--wb-border-soft)', background: 'var(--wb-bg-soft)', color: 'var(--wb-text)', borderRadius: 5, padding: '4px 6px', fontFamily: 'var(--wb-font-sans)', fontSize: 12.5, lineHeight: 1.45 }}
-            />
+            <DescriptionInput row={row} onUpdateRow={onUpdateRow} />
           ) : (
             <div style={{ fontSize: 12.5, lineHeight: 1.45, color: row.description ? 'var(--wb-text-soft)' : 'var(--wb-text-muted)' }}>
               {row.description || 'Описание не заполнено'}
@@ -83,12 +94,9 @@ export function TableGallery({ rows, onUpdateRow, onAddRow, editable = false }: 
         <div key={row.id ?? row.field} style={{ background: 'var(--wb-bg-soft)', border: '1px solid var(--wb-border-soft)', borderRadius: 'var(--wb-radius)', padding: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             {editable ? (
-              <input
-                value={row.field || row.sourceField || ''}
-                onChange={(event) => onUpdateRow?.(row, { field: event.target.value, sourceField: event.target.value })}
-                aria-label="Имя поля"
-                style={{ minWidth: 140, border: '1px solid var(--wb-border-soft)', background: 'var(--wb-bg-surface)', color: 'var(--wb-text)', borderRadius: 5, padding: '4px 6px', fontFamily: 'var(--wb-font-mono)', fontSize: 13, fontWeight: 600 }}
-              />
+              <div style={{ minWidth: 140, flex: 1 }}>
+                <FieldInput row={row} onUpdateRow={onUpdateRow} />
+              </div>
             ) : (
               <code style={{ fontFamily: 'var(--wb-font-mono)', fontSize: 13, fontWeight: 600 }}>{row.field || row.sourceField || 'field'}</code>
             )}
@@ -96,13 +104,9 @@ export function TableGallery({ rows, onUpdateRow, onAddRow, editable = false }: 
             <ReqDot required={isRequired(row.required)} />
           </div>
           {editable ? (
-            <textarea
-              value={row.description}
-              onChange={(event) => onUpdateRow?.(row, { description: event.target.value })}
-              rows={2}
-              aria-label="Описание поля"
-              style={{ marginTop: 8, width: '100%', resize: 'vertical', border: '1px solid var(--wb-border-soft)', background: 'var(--wb-bg-surface)', color: 'var(--wb-text)', borderRadius: 5, padding: '5px 7px', fontFamily: 'var(--wb-font-sans)', fontSize: 13, lineHeight: 1.5 }}
-            />
+            <div style={{ marginTop: 8 }}>
+              <DescriptionInput row={row} onUpdateRow={onUpdateRow} />
+            </div>
           ) : (
             <div style={{ marginTop: 6, fontSize: 13, lineHeight: 1.5, color: 'var(--wb-text-soft)' }}>{row.description || 'Описание не заполнено'}</div>
           )}
@@ -119,27 +123,16 @@ export function TableMiniCards({ rows, onUpdateRow, onAddRow, editable = false }
       {rows.map((row) => (
         <div key={row.id ?? row.field} style={{ background: 'var(--wb-bg-soft)', border: '1px solid var(--wb-border-soft)', borderRadius: 'var(--wb-radius)', padding: 10 }}>
           {editable ? (
-            <input
-              value={row.field || row.sourceField || ''}
-              onChange={(event) => onUpdateRow?.(row, { field: event.target.value, sourceField: event.target.value })}
-              aria-label="Имя поля"
-              style={{ width: '100%', marginBottom: 6, border: '1px solid var(--wb-border-soft)', background: 'var(--wb-bg-surface)', color: 'var(--wb-text)', borderRadius: 5, padding: '4px 6px', fontFamily: 'var(--wb-font-mono)', fontSize: 12.5, fontWeight: 600 }}
-            />
+            <FieldInput row={row} onUpdateRow={onUpdateRow} />
           ) : (
             <code style={{ display: 'block', fontFamily: 'var(--wb-font-mono)', fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>{row.field || row.sourceField || 'field'}</code>
           )}
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '6px 0' }}>
             <TypeChip type={row.type} />
             <ReqDot required={isRequired(row.required)} />
           </div>
           {editable ? (
-            <textarea
-              value={row.description}
-              onChange={(event) => onUpdateRow?.(row, { description: event.target.value })}
-              rows={3}
-              aria-label="Описание поля"
-              style={{ width: '100%', resize: 'vertical', border: '1px solid var(--wb-border-soft)', background: 'var(--wb-bg-surface)', color: 'var(--wb-text)', borderRadius: 5, padding: '5px 7px', fontFamily: 'var(--wb-font-sans)', fontSize: 12.5, lineHeight: 1.45 }}
-            />
+            <DescriptionInput row={row} onUpdateRow={onUpdateRow} rows={3} />
           ) : (
             <div style={{ fontSize: 12.5, lineHeight: 1.45, color: 'var(--wb-text-soft)' }}>{row.description || 'Описание не заполнено'}</div>
           )}

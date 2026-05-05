@@ -8190,6 +8190,8 @@ export default function App() {
                     html={getHtmlPreview()}
                     projectName={normalizedProjectName}
                     methodName={activeMethod?.name ?? DEFAULT_METHOD_NAME}
+                    accent={wbAccent}
+                    onAccentChange={handleWbAccentChange}
                     onCopy={() => {
                       void copyToClipboard(getHtmlPreview());
                       setToastMessage('Скопировано');

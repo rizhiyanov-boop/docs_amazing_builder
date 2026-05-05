@@ -778,7 +778,6 @@ export default function App() {
     canRedo,
     undoWorkspace,
     redoWorkspace,
-    getPersistedHistoryState,
     applyPersistedHistoryState
   } = useWorkspaceHistory({
     projectName,
@@ -6780,20 +6779,18 @@ export default function App() {
       if (!remoteSaveInFlightRef.current) {
         remoteSaveInFlightRef.current = true;
         const nextProjectName = normalizedProjectName;
-        const history = getPersistedHistoryState();
         const workspaceHash = JSON.stringify(workspace);
 
         try {
           const saved = await saveServerProjectWithFallback({
             projectId: serverProjectId ?? undefined,
             name: nextProjectName,
-            workspace,
-            history
+            workspace
           });
           setServerProjectId(saved.id);
           upsertProjectCache(saved.id, {
             workspace: deepClone(workspace),
-            history: history ? deepClone(history) : null,
+            history: null,
             loadedAt: Date.now()
           });
           upsertServerProjectListEntry({ id: saved.id, name: nextProjectName, updatedAt: saved.updatedAt });

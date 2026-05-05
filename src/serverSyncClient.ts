@@ -61,7 +61,6 @@ export type LoadedProject = {
   id: string;
   name: string;
   workspace: WorkspaceProjectData;
-  history: PersistedHistoryState | null;
   updatedAt: string;
 };
 
@@ -174,7 +173,6 @@ export async function saveServerProject(params: {
   projectId?: string;
   name: string;
   workspace: WorkspaceProjectData;
-  history?: PersistedHistoryState;
 }): Promise<{ id: string; updatedAt: string }> {
   const response = await fetch('/api/projects', {
     method: 'POST',

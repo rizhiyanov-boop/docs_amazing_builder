@@ -15,7 +15,7 @@ export type ServerProjectPayload = {
   id: string;
   name: string;
   workspace: WorkspaceProjectData;
-  history: PersistedHistoryState | null;
+  history?: PersistedHistoryState | null;
   updatedAt: string;
 };
 
@@ -124,24 +124,14 @@ export function useServerSync({
     projectId?: string;
     name: string;
     workspace: WorkspaceProjectData;
-    history?: PersistedHistoryState;
   }): Promise<{ id: string; updatedAt: string }> => {
     try {
       return await saveServerProject(params);
     } catch (error) {
-      const message = error instanceof Error ? error.message : '';
       if (error instanceof ApiError && error.status === 404 && params.projectId) {
         setServerProjectId(null);
         setServerSyncError('Серверный проект удалён. Создаю новую копию проекта.');
         return saveServerProject({
-          name: params.name,
-          workspace: params.workspace,
-          history: params.history
-        });
-      }
-      if (params.history !== undefined && message.includes('Слишком большой объем данных')) {
-        return saveServerProject({
-          projectId: params.projectId,
           name: params.name,
           workspace: params.workspace
         });
@@ -162,7 +152,7 @@ export function useServerSync({
 
     return {
       workspace: deepClone(normalizedWorkspace),
-      history: payload.history ? deepClone(payload.history) : null,
+      history: null,
       loadedAt: Date.now()
     };
   }, [deepClone, normalizeProjectName]);
@@ -172,7 +162,7 @@ export function useServerSync({
     const normalizedWorkspace = deepClone(cached.workspace);
 
     applyWorkspaceState(normalizedWorkspace);
-    applyPersistedHistoryState(payload.history);
+    applyPersistedHistoryState(null);
     setServerProjectId(payload.id);
     upsertProjectCache(payload.id, cached);
     const loadedHash = JSON.stringify(normalizedWorkspace);
@@ -193,7 +183,7 @@ export function useServerSync({
   const applyCachedServerProject = useCallback((projectId: string, cached: CachedServerProjectData): void => {
     const cachedWorkspace = deepClone(cached.workspace);
     applyWorkspaceState(cachedWorkspace);
-    applyPersistedHistoryState(cached.history ? deepClone(cached.history) : null);
+    applyPersistedHistoryState(null);
     setServerProjectId(projectId);
     const loadedHash = JSON.stringify(cachedWorkspace);
     remoteLastObservedHashRef.current = loadedHash;

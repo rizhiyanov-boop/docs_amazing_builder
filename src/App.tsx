@@ -726,6 +726,15 @@ export default function App() {
     }, 3500);
   }
 
+  function setAiStatus(message: string): void {
+    clearAiStatusResetTimeout();
+    setAiRequestStatus({ state: 'success', message });
+    aiStatusResetTimeoutRef.current = setTimeout(() => {
+      setAiRequestStatus((current) => (current?.message === message ? null : current));
+      aiStatusResetTimeoutRef.current = null;
+    }, 2200);
+  }
+
   function clearAuthStatusResetTimeout(): void {
     if (authStatusResetTimeoutRef.current) {
       clearTimeout(authStatusResetTimeoutRef.current);
@@ -1037,6 +1046,7 @@ export default function App() {
     const resolvedActiveMethod = workspace.methods.find((method) => method.id === workspace.activeMethodId) ?? workspace.methods[0];
     const nextProjectSections = sanitizeProjectSections(workspace.projectSections);
     const nextFlows = sanitizeProjectFlows(workspace.flows, workspace.methods);
+    clearPreviewCaches();
     setProjectName(normalizeProjectName(workspace.projectName));
     setMethodsState(workspace.methods);
     setMethodGroups(workspace.groups);
@@ -1438,6 +1448,7 @@ export default function App() {
   function switchMethod(method: MethodDocument): void {
     setEditingMethodId(null);
     setEditingMethodNameDraft('');
+    clearPreviewCaches();
     setActiveMethodId(method.id);
     setExpandedMethodId(method.id);
     setSelectedId(method.sections[0]?.id ?? createInitialSections()[0].id);
@@ -1511,6 +1522,7 @@ export default function App() {
   function createMethod(): void {
     const name = `Метод ${methods.length + 1}`;
     const method = createMethodDocument(name, createInitialSections());
+    clearPreviewCaches();
     setMethodsState((prev) => [...prev, method]);
     setActiveMethodId(method.id);
     setExpandedMethodId(method.id);
@@ -2077,8 +2089,29 @@ export default function App() {
     setToastMessage('Навигация завершена: первый экспорт выполнен.');
   }, [onboardingState.status, onboardingState.entryPath, onboardingState.currentStep, hasOnboardingExport]);
 
-  const htmlPreviewOutput = useMemo(() => renderHtmlDocument(sections, theme, { interactive: false }), [sections, theme]);
-  const wikiOutput = useMemo(() => renderWikiDocument(sections), [sections]);
+  const htmlPreviewCacheRef = useRef<{ sectionsRef: DocSection[]; theme: ThemeName; output: string } | null>(null);
+  const wikiPreviewCacheRef = useRef<{ sectionsRef: DocSection[]; output: string } | null>(null);
+
+  function clearPreviewCaches(): void {
+    htmlPreviewCacheRef.current = null;
+    wikiPreviewCacheRef.current = null;
+  }
+
+  function getHtmlPreview(): string {
+    const cached = htmlPreviewCacheRef.current;
+    if (cached && cached.sectionsRef === sections && cached.theme === theme) return cached.output;
+    const output = renderHtmlDocument(sections, theme, { interactive: false });
+    htmlPreviewCacheRef.current = { sectionsRef: sections, output, theme };
+    return output;
+  }
+
+  function getWikiPreview(): string {
+    const cached = wikiPreviewCacheRef.current;
+    if (cached && cached.sectionsRef === sections) return cached.output;
+    const output = renderWikiDocument(sections);
+    wikiPreviewCacheRef.current = { sectionsRef: sections, output };
+    return output;
+  }
   const onboardingStepCompleted = useMemo<Record<OnboardingStepId, boolean>>(
     () => ({
       'prepare-source': onboardingProgress.hasSourceInput,
@@ -3507,7 +3540,7 @@ export default function App() {
   function handleExportWiki(): void {
     if (!activeMethod) return;
     const methodSlug = slugifyMethodFileName(activeMethod.name);
-    downloadText(`${methodSlug}.documentation.wiki.txt`, wikiOutput);
+    downloadText(`${methodSlug}.documentation.wiki.txt`, getWikiPreview());
     markOnboardingExportTouched();
   }
 
@@ -3774,6 +3807,7 @@ export default function App() {
     const firstImportedMethod = importedMethods[0];
     setActiveMethodId(firstImportedMethod.id);
     setSelectedId(firstImportedMethod.sections[0]?.id ?? createInitialSections()[0].id);
+    clearPreviewCaches();
     setTab('editor');
     setImportError('');
     return importedMethods.length;
@@ -7816,7 +7850,7 @@ export default function App() {
                         type="button"
                         className="ghost small"
                         onClick={() => {
-                          void copyToClipboard(htmlPreviewOutput);
+                          void copyToClipboard(getHtmlPreview());
                           setToastMessage('Скопировано');
                         }}
                       >
@@ -7831,7 +7865,7 @@ export default function App() {
                     className={tab === 'html' ? 'preview-frame preview-frame-full' : 'preview-frame'}
                     title="HTML preview"
                     sandbox="allow-same-origin"
-                    srcDoc={htmlPreviewOutput}
+                    srcDoc={getHtmlPreview()}
                   />
                 </section>
               )}
@@ -7845,7 +7879,7 @@ export default function App() {
                         type="button"
                         className="ghost small"
                         onClick={() => {
-                          void copyToClipboard(wikiOutput);
+                          void copyToClipboard(getWikiPreview());
                           setToastMessage('Скопировано');
                         }}
                       >
@@ -7863,7 +7897,7 @@ export default function App() {
                       aria-label="Скопировать Wiki"
                       title="Скопировать Wiki"
                       onClick={() => {
-                        void copyToClipboard(wikiOutput);
+                        void copyToClipboard(getWikiPreview());
                         setToastMessage('Скопировано');
                       }}
                     >
@@ -7873,7 +7907,7 @@ export default function App() {
                       </svg>
                     </button>
                     <div className="wiki-preview-label">WIKI-РАЗМЕТКА</div>
-                    <textarea className="code wiki-preview-code" readOnly value={wikiOutput} rows={24} />
+                    <textarea className="code wiki-preview-code" readOnly value={getWikiPreview()} rows={24} />
                   </div>
                 </section>
               )}

@@ -29,10 +29,12 @@ body {
   padding: var(--space-8);
   background: color-mix(in srgb, var(--bg) 74%, rgba(138, 183, 228, 0.2));
   backdrop-filter: blur(calc(var(--space-1) / 2));
+  overflow: auto;
 }
 
 .onboarding-entry-card {
   width: min(calc(var(--space-1) * 680 / 4), calc(100vw - var(--space-10)));
+  max-width: calc(100vw - var(--space-10));
   background: var(--panel);
   border: calc(var(--space-1) / 4) solid var(--border);
   border-radius: var(--radius-lg);
@@ -3807,6 +3809,19 @@ tr:nth-child(odd) td {
 
   .onboarding-entry-options {
     grid-template-columns: 1fr;
+  }
+
+  .onboarding-entry-backdrop {
+    padding: var(--space-4);
+    place-items: center;
+  }
+
+  .onboarding-entry-card {
+    width: min(100%, 18rem);
+    max-width: calc(100vw - var(--space-8));
+    max-height: calc(100vh - var(--space-8));
+    overflow: auto;
+    padding: var(--space-5);
   }
 
   .onboarding-entry-footer {

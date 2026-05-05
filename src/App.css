@@ -4428,3 +4428,161 @@ tr:nth-child(odd) td {
 :root .import-routing-card {
   box-shadow: var(--shadow-md);
 }
+html[data-wb-accent],
+body[data-wb-accent] {
+  background: var(--wb-bg-canvas);
+}
+
+.wb-app-root {
+  width: 100vw;
+  height: 100vh;
+  background: var(--wb-bg-canvas);
+  color: var(--wb-text);
+  font-family: var(--wb-font-sans);
+  display: flex;
+  overflow: hidden;
+}
+
+.wb-shell-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.wb-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.legacy-app-topbar-accessibility {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.legacy-app-sidebar-accessibility,
+.legacy-preview-accessibility {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.wb-content .layout {
+  min-height: 100%;
+  display: block;
+}
+
+.wb-content .workspace {
+  min-height: 100%;
+  max-width: none;
+}
+
+.wb-content .workspace-tabs {
+  display: none;
+}
+
+.wb-card-layout {
+  padding: 32px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wb-card-layout-vertical {
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.wb-card-layout-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  align-items: start;
+}
+
+.wb-card-layout-grid > :first-child {
+  grid-column: 1 / -1;
+}
+
+.wb-table-view-btn {
+  border: 1px solid var(--wb-border-soft);
+  background: var(--wb-bg-soft);
+  color: var(--wb-text-soft);
+  border-radius: 5px;
+  padding: 3px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: var(--wb-font-sans);
+}
+
+.wb-rich-preview p:first-child {
+  margin-top: 0;
+}
+
+.wb-rich-preview p:last-child {
+  margin-bottom: 0;
+}
+
+.wb-html-export-content {
+  font-family: var(--wb-font-sans);
+}
+
+.wb-html-export-content * {
+  max-width: 100%;
+}
+
+.wb-html-export-content mark.wb-html-search-mark {
+  background: var(--wb-accent-soft);
+  color: var(--wb-text);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+.wb-wiki-preview {
+  font-family: var(--wb-font-sans);
+}
+
+.wb-wiki-preview table,
+.wb-html-export-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+}
+
+.wb-wiki-preview th,
+.wb-wiki-preview td,
+.wb-html-export-content th,
+.wb-html-export-content td {
+  border: 1px solid var(--wb-border-soft);
+  padding: 7px 8px;
+  text-align: left;
+}
+
+.wb-wiki-preview th,
+.wb-html-export-content th {
+  background: var(--wb-bg-soft);
+}
+
+.wb-wiki-toc {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  margin-bottom: 16px;
+  background: var(--wb-bg-soft);
+  border-radius: var(--wb-radius);
+}
+
+.wb-wiki-toc a {
+  color: var(--wb-accent);
+  text-decoration: none;
+}

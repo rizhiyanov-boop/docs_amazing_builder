@@ -5,6 +5,7 @@ import StarterKit from '@tiptap/starter-kit';
 import Highlight from '@tiptap/extension-highlight';
 import { liftListItem, sinkListItem } from '@tiptap/pm/schema-list';
 import './tokens.css';
+import './tokens-workbench.css';
 import './App.css';
 import { parseCurlMeta, parseJsonSchemaToRows, parseToRows, wrapNonDomainResponseJson } from './parsers';
 import { getDiagramExportFileName, getDiagramImageUrl, resolveDiagramEngine } from './diagramUtils';
@@ -96,15 +97,24 @@ import { ONBOARDING_STEPS, evaluateOnboardingProgress, resolveOnboardingStep, ty
 import { loadOnboardingState, markOnboardingCompleted, markOnboardingStarted, saveOnboardingState } from './onboarding/storage';
 import { emitOnboardingEvent } from './onboarding/telemetry';
 import { buildValidationRulesWithAi, fillDescriptionsWithAi, repairJsonWithAi, suggestMappingsWithAi, suggestMaskFieldsWithAi } from './openrouterClient';
-import { AppTopbar } from './components/AppTopbar';
+import { Card } from './components/cards/Card';
+import { MethodHeaderCard } from './components/cards/MethodHeaderCard';
 import { DiagramSectionEditor } from './components/DiagramSectionEditor';
+import { EmptyState } from './components/EmptyState';
 import { ErrorsSectionEditor } from './components/ErrorsSectionEditor';
-import { MethodSectionSidebar } from './components/MethodSectionSidebar';
 import type { AddableBlockType } from './components/MethodSectionSidebar';
 import { ParsedSectionEditor } from './components/ParsedSectionEditor';
 import { ProjectDocsEditor } from './components/ProjectDocsEditor';
 import { ProjectFlowsEditor } from './components/ProjectFlowsEditor';
+import { SearchPalette } from './components/dialogs/SearchPalette';
+import { Toast } from './components/Toast';
+import { AiTableButton, httpMethodToAccent } from './components/primitives/WorkbenchPrimitives';
+import { WorkbenchSidebar } from './components/workbench/WorkbenchSidebar';
+import { WorkbenchTopbar, type WorkbenchAccent, type WorkbenchLayout, type WorkbenchMode } from './components/workbench/WorkbenchTopbar';
+import { TableClassic, TableGallery, TableMiniCards } from './components/tables/WorkbenchTables';
 import { WorkspaceTabs } from './components/WorkspaceTabs';
+import { HtmlExportScreen } from './screens/HtmlExportScreen';
+import { WikiScreen } from './screens/WikiScreen';
 import { useRemoteProjectAutosave } from './hooks/useRemoteProjectAutosave';
 import { useServerSync } from './hooks/useServerSync';
 import { useWorkspaceHistory } from './hooks/useWorkspaceHistory';
@@ -144,6 +154,7 @@ const STORAGE_KEY = 'doc-builder-project-v2';
 const STORAGE_SERVER_PROJECT_ID_KEY = 'doc-builder-server-project-id-v1';
 const ONBOARDING_ENTRY_SUPPRESS_KEY = 'doc-builder-onboarding-entry-suppressed-v1';
 const THEME_STORAGE_KEY = 'doc-builder-theme-v1';
+const WB_ACCENT_STORAGE_KEY = 'doc-builder-wb-accent-v1';
 const TABLE_FIELD_COLUMN_WIDTH_KEY = 'doc-builder-table-field-column-width-v1';
 const SIDEBAR_WIDTH_KEY = 'doc-builder-sidebar-width-v1';
 const SIDEBAR_HIDDEN_KEY = 'doc-builder-sidebar-hidden-v1';
@@ -212,6 +223,23 @@ function loadPersistedTheme(): ThemeName {
   }
 }
 
+function loadPersistedWbAccent(): WorkbenchAccent {
+  try {
+    const raw = localStorage.getItem(WB_ACCENT_STORAGE_KEY);
+    return raw === 'blue' || raw === 'violet' || raw === 'warm' ? raw : 'warm';
+  } catch {
+    return 'warm';
+  }
+}
+
+function persistWbAccent(accent: WorkbenchAccent): void {
+  try {
+    localStorage.setItem(WB_ACCENT_STORAGE_KEY, accent);
+  } catch {
+    // Ignore persistence errors for local preference.
+  }
+}
+
 function loadPersistedTableFieldColumnWidth(): number {
   try {
     const raw = localStorage.getItem(TABLE_FIELD_COLUMN_WIDTH_KEY);
@@ -247,8 +275,47 @@ function isCompactLayoutViewport(): boolean {
   return window.matchMedia(COMPACT_LAYOUT_MEDIA_QUERY).matches;
 }
 
+function getMethodRequestSection(method: MethodDocument | null | undefined): ParsedSection | null {
+  if (!method) return null;
+  return method.sections.find((section): section is ParsedSection => section.kind === 'parsed' && section.sectionType === 'request') ?? null;
+}
+
+function getMethodHttpMethod(method: MethodDocument | null | undefined): RequestMethod {
+  return getMethodRequestSection(method)?.requestMethod ?? 'POST';
+}
+
+function getMethodPath(method: MethodDocument | null | undefined): string {
+  const requestSection = getMethodRequestSection(method);
+  return requestSection?.requestUrl?.trim() || requestSection?.externalRequestUrl?.trim() || '/';
+}
+
+function getSectionWorkbenchMeta(section: DocSection): {
+  emoji: string;
+  eyebrow: string;
+  accent?: 'get' | 'post' | 'put' | 'del' | 'patch';
+} {
+  if (section.kind === 'parsed') {
+    if (section.sectionType === 'request') {
+      return { emoji: '↓', eyebrow: 'Request', accent: httpMethodToAccent(section.requestMethod ?? 'POST') };
+    }
+    if (section.sectionType === 'response') {
+      return { emoji: '↑', eyebrow: 'Response', accent: 'get' };
+    }
+    return { emoji: '▦', eyebrow: 'Структура' };
+  }
+  if (section.kind === 'errors') return { emoji: '!', eyebrow: 'Ошибки', accent: 'del' };
+  if (section.kind === 'diagram') return { emoji: '◇', eyebrow: 'Диаграмма' };
+  const title = section.title.toLowerCase();
+  if (title.includes('цель') || title.includes('goal')) return { emoji: '◎', eyebrow: 'Цель' };
+  if (title.includes('треб') || title.includes('requirement')) return { emoji: '☑', eyebrow: 'Функциональные требования' };
+  if (title.includes('пример') || title.includes('example')) return { emoji: '∴', eyebrow: 'Примеры' };
+  if (title.includes('нефунк') || title.includes('non-functional')) return { emoji: '⚙', eyebrow: 'Нефункциональные требования' };
+  return { emoji: '□', eyebrow: 'Текст' };
+}
+
 type TabKey = 'editor' | 'html' | 'wiki';
 type WorkspaceScope = 'methods' | 'project-docs' | 'flows';
+type TablePreviewView = 'classic' | 'gallery' | 'mini';
 type AutosaveState = 'idle' | 'saving' | 'saved' | 'error';
 type ParseTarget = 'server' | 'client';
 type JsonImportSampleType = 'request' | 'response';
@@ -572,6 +639,11 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string>(() => initialWorkspace.methods[0]?.sections[0]?.id ?? createInitialSections()[0].id);
   const [tab, setTab] = useState<TabKey>('editor');
   const [workspaceScope, setWorkspaceScope] = useState<WorkspaceScope>('methods');
+  const [workbenchMode, setWorkbenchMode] = useState<WorkbenchMode>('workbench');
+  const [workbenchLayout, setWorkbenchLayout] = useState<WorkbenchLayout>('vertical');
+  const [workbenchTableView, setWorkbenchTableView] = useState<TablePreviewView>('classic');
+  const [wbAccent, setWbAccent] = useState<WorkbenchAccent>(() => loadPersistedWbAccent());
+  const [isSearchPaletteOpen, setIsSearchPaletteOpen] = useState(false);
   const [sectionJumpHighlightId, setSectionJumpHighlightId] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeName>(() => loadPersistedTheme());
   const [autosave, setAutosave] = useState<AutosaveInfo>({ state: 'idle' });
@@ -657,6 +729,12 @@ export default function App() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-wb-accent', wbAccent);
+    document.body.setAttribute('data-wb-accent', wbAccent);
+    persistWbAccent(wbAccent);
+  }, [wbAccent]);
 
   function persistParsedFieldColumnWidth(width: number): void {
     try {
@@ -6944,8 +7022,208 @@ export default function App() {
     setIsDeleteEntityMenuOpen((current) => !current);
   }, []);
 
+  const handleWbAccentChange = useCallback((accent: WorkbenchAccent) => {
+    setWbAccent(accent);
+  }, []);
+
+  const handleOpenSearchPalette = useCallback(() => {
+    setIsSearchPaletteOpen(true);
+  }, []);
+
+  const handleCloseSearchPalette = useCallback(() => {
+    setIsSearchPaletteOpen(false);
+  }, []);
+
+  const handleAddWorkbenchSection = useCallback(() => {
+    const nextSection = createSectionFromBlockType('text');
+    setSections((prev) => [...prev, nextSection]);
+    setSelectedId(nextSection.id);
+    setToastMessage('Раздел добавлен');
+  }, [setSections]);
+
+  function renderWorkbenchTable(section: ParsedSection): ReactNode {
+    const rows = section.rows;
+    if (workbenchTableView === 'gallery') return <TableGallery rows={rows} />;
+    if (workbenchTableView === 'mini') return <TableMiniCards rows={rows} />;
+    return <TableClassic rows={rows} />;
+  }
+
+  function renderWorkbenchSectionPreview(section: DocSection): ReactNode {
+    if (section.kind === 'text') {
+      return (
+        <div
+          className="wb-rich-preview"
+          style={{ fontSize: 13, lineHeight: 1.55, color: 'var(--wb-text-soft)' }}
+          dangerouslySetInnerHTML={{ __html: richTextToHtml(section.value, { editable: false }) || '<p>Содержимое не заполнено.</p>' }}
+        />
+      );
+    }
+
+    if (section.kind === 'parsed') {
+      return (
+        <div style={{ display: 'grid', gap: 10 }}>
+          {renderWorkbenchTable(section)}
+          {section.error && <div style={{ color: 'var(--wb-required)', fontSize: 12 }}>{section.error}</div>}
+        </div>
+      );
+    }
+
+    if (section.kind === 'diagram') {
+      return (
+        <div style={{ display: 'grid', gap: 8 }}>
+          {section.diagrams.length === 0 && <div style={{ color: 'var(--wb-text-muted)', fontSize: 13 }}>Диаграммы не добавлены.</div>}
+          {section.diagrams.map((diagram) => (
+            <div key={diagram.id} style={{ background: 'var(--wb-bg-soft)', border: '1px solid var(--wb-border-soft)', borderRadius: 'var(--wb-radius)', padding: 10 }}>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>{diagram.title}</div>
+              <pre style={{ margin: 0, fontFamily: 'var(--wb-font-mono)', fontSize: 11.5, whiteSpace: 'pre-wrap', color: 'var(--wb-text-soft)' }}>{diagram.code}</pre>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    return (
+      <div style={{ display: 'grid', gap: 8 }}>
+        {section.rows.length === 0 && section.validationRules.length === 0 && <div style={{ color: 'var(--wb-text-muted)', fontSize: 13 }}>Ошибки и правила не добавлены.</div>}
+        {section.rows.map((row, index) => (
+          <div key={`${row.internalCode}-${index}`} style={{ display: 'grid', gridTemplateColumns: '64px 1fr', gap: 8, padding: '7px 0', borderBottom: '1px solid var(--wb-border-soft)', fontSize: 13 }}>
+            <code style={{ fontFamily: 'var(--wb-font-mono)', color: 'var(--wb-required)' }}>{row.clientHttpStatus || row.serverHttpStatus || row.responseCode || 'ERR'}</code>
+            <div>
+              <div style={{ fontWeight: 600 }}>{row.message || row.trigger || 'Ошибка'}</div>
+              <div style={{ color: 'var(--wb-text-soft)', fontSize: 12 }}>{row.clientResponse || row.internalCode}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  function renderWorkbenchEditor(): ReactNode {
+    if (!activeMethod) {
+      return <EmptyState kind="no-workspace" onPrimary={createProject} onSecondary={createMethod} />;
+    }
+
+    return (
+      <div className={`wb-card-layout wb-card-layout-${workbenchLayout}`}>
+        <MethodHeaderCard method={activeMethod} httpMethod={getMethodHttpMethod(activeMethod)} path={getMethodPath(activeMethod)} />
+        {sections.length === 0 && <EmptyState kind="no-method" onPrimary={handleOpenProjectImport} onSecondary={handleAddWorkbenchSection} />}
+        {sections.map((section) => {
+          const meta = getSectionWorkbenchMeta(section);
+          return (
+            <Card
+              key={section.id}
+              id={`section-${section.id}`}
+              data-section-id={section.id}
+              emoji={meta.emoji}
+              eyebrow={meta.eyebrow}
+              title={renderEditableSectionTitle(section)}
+              accent={meta.accent}
+              draggable
+              onDragStart={() => setDraggingId(section.id)}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={() => handleDropSection(section.id)}
+              onMouseDown={() => {
+                if (selectedId !== section.id) {
+                  setSelectedId(section.id);
+                  suppressObserverSelectionUntilRef.current = Date.now() + 750;
+                }
+              }}
+              ref={(node) => {
+                if (node) {
+                  sectionAnchorRefs.current.set(section.id, node);
+                } else {
+                  sectionAnchorRefs.current.delete(section.id);
+                }
+              }}
+              actions={
+                section.kind === 'parsed' ? (
+                  <>
+                    <button type="button" className="wb-table-view-btn" onClick={() => setWorkbenchTableView('classic')}>classic</button>
+                    <button type="button" className="wb-table-view-btn" onClick={() => setWorkbenchTableView('gallery')}>gallery</button>
+                    <button type="button" className="wb-table-view-btn" onClick={() => setWorkbenchTableView('mini')}>mini</button>
+                    <AiTableButton kind="fill" onClick={() => setAiStatus('AI: заполняю описания...')} />
+                    <AiTableButton kind="json" onClick={() => setAiStatus('AI: форматирую JSON...')} />
+                  </>
+                ) : (
+                  renderSectionActionCluster(section, 'header')
+                )
+              }
+            >
+              {renderWorkbenchSectionPreview(section)}
+            </Card>
+          );
+        })}
+        <button
+          type="button"
+          onClick={handleAddWorkbenchSection}
+          className="wb-add-card"
+          style={{
+            border: '1px dashed var(--wb-border-strong)',
+            borderRadius: 'var(--wb-radius-lg)',
+            padding: 18,
+            minHeight: 100,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'var(--wb-text-muted)',
+            fontSize: 13,
+            cursor: 'pointer',
+            background: 'transparent',
+            fontFamily: 'var(--wb-font-sans)'
+          }}
+        >
+          + Добавить секцию
+        </button>
+      </div>
+    );
+  }
+
+  void [
+    authLoading,
+    autosave,
+    draggingId,
+    expandedMethodId,
+    expandedProjectIds,
+    exportMockServiceJson,
+    exportTitle,
+    handleActiveOnboardingHintAction,
+    handleDragStartSection,
+    handleExportFullProjectHtmlClick,
+    handleExportFullProjectWiki,
+    handleToggleAddEntityMenu,
+    handleToggleDeleteEntityMenu,
+    handleToggleProjectExpanded,
+    handleToggleSidebar,
+    isOnboardingHeaderAvailable,
+    isOnboardingNavVisible,
+    jumpToOnboardingStep,
+    methodNameWarning,
+    onboardingPrimaryActionLabel,
+    onboardingStepCompleted,
+    onboardingStepHint,
+    projectMethodPreviews,
+    switchingProjectId,
+    toggleOnboardingHeaderNavigation,
+    toggleTheme,
+    validationMap
+  ];
+  void [
+    cancelMethodRename,
+    cancelProjectRename,
+    deleteActiveMethod,
+    finishMethodRename,
+    finishProjectRename,
+    focusOnboardingCurrentStep,
+    requestDeleteCurrentProject,
+    startMethodRename,
+    startProjectRename,
+    startSidebarResize,
+    toggleMethodExpanded
+  ];
+  void activeOnboardingStep;
+
   return (
-    <div className="shell">
+    <div className="wb-app-root" data-wb-accent={wbAccent}>
       {ONBOARDING_FEATURES.onboardingV1 && showOnboardingEntry && (
         <div
           className="onboarding-entry-backdrop"
@@ -7397,53 +7675,72 @@ export default function App() {
         </div>
       )}
 
-      <AppTopbar
-        topbarRef={topbarRef}
-        importInputRef={importInputRef}
-        canExport={Boolean(activeMethod)}
-        exportTitle={exportTitle}
-        authLoading={authLoading}
-        authUserLogin={authUser?.login ?? null}
-        canUndo={canUndo}
-        canRedo={canRedo}
-        isOnboardingHeaderAvailable={isOnboardingHeaderAvailable}
-        isOnboardingNavVisible={isOnboardingNavVisible}
-        isSidebarHidden={isSidebarHidden}
-        theme={theme}
-        autosaveState={autosave.state}
-        autosaveAt={autosave.at ?? null}
-        isLogoutBusy={authBusyKey === 'auth:logout'}
-        onboardingSteps={ONBOARDING_STEPS}
-        onboardingStepCompleted={onboardingStepCompleted}
-        activeOnboardingStepId={activeOnboardingStep.id}
-        onboardingStepHint={onboardingStepHint}
-        onboardingPrimaryActionLabel={onboardingPrimaryActionLabel}
-        onOpenProjectImport={handleOpenProjectImport}
-        onImportProjectJson={handleImportProjectJsonFiles}
-        onExportProjectJson={exportProjectJson}
-        onExportMockServiceJson={exportMockServiceJson}
-        onExportFullProjectHtml={handleExportFullProjectHtmlClick}
-        onExportFullProjectWiki={handleExportFullProjectWiki}
-        onOpenHtmlPreview={openHtmlPreview}
-        onOpenWikiPreview={openWikiPreview}
-        onUndoWorkspace={undoWorkspace}
-        onRedoWorkspace={redoWorkspace}
-        onLogout={handleLogoutClick}
-        onOpenLogin={handleOpenLoginDialog}
-        onOpenRegister={handleOpenRegisterDialog}
-        onToggleOnboardingHeaderNavigation={toggleOnboardingHeaderNavigation}
-        onToggleSidebar={handleToggleSidebar}
-        onToggleTheme={toggleTheme}
-        onManualSave={handleManualSaveClick}
-        onJumpToOnboardingStep={jumpToOnboardingStep}
-        onPrimaryOnboardingAction={activeOnboardingHint ? handleActiveOnboardingHintAction : focusOnboardingCurrentStep}
-        canNavigateToOnboardingStep={canNavigateToOnboardingStep}
-        renderUiIcon={renderUiIcon}
+      <SearchPalette
+        open={isSearchPaletteOpen}
+        methods={methods}
+        getMethodHttpMethod={getMethodHttpMethod}
+        onClose={handleCloseSearchPalette}
+        onSelectMethod={handleSwitchMethod}
+        onCreateMethod={createMethod}
       />
+
+      <Toast message={toastMessage} />
+
+      <WorkbenchSidebar
+        projectName={normalizedProjectName}
+        methods={methods}
+        groups={methodGroups}
+        activeMethodId={activeMethod?.id}
+        sections={sections}
+        selectedSectionId={selectedSection?.id}
+        serverProjects={serverProjects}
+        currentProjectId={serverProjectId}
+        getMethodHttpMethod={getMethodHttpMethod}
+        onSwitchMethod={handleSwitchMethod}
+        onSelectSection={handleSelectSection}
+        resolveSectionTitle={(section) => resolveSectionTitle(section.title)}
+        onSelectProject={handleSelectProject}
+        onCreateMethod={createMethod}
+        onCreateProject={createProject}
+        onOpenSearch={handleOpenSearchPalette}
+      />
+
+      <div className="wb-shell-content">
+        <WorkbenchTopbar
+          topbarRef={topbarRef}
+          importInputRef={importInputRef}
+          methodName={activeMethod?.name ?? DEFAULT_METHOD_NAME}
+          methodPath={getMethodPath(activeMethod)}
+          methodHttpMethod={getMethodHttpMethod(activeMethod)}
+          mode={workbenchMode}
+          layout={workbenchLayout}
+          activeTab={tab}
+          accent={wbAccent}
+          authUserLogin={authUser?.login ?? null}
+          isLogoutBusy={authBusyKey === 'auth:logout'}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          onModeChange={setWorkbenchMode}
+          onLayoutChange={setWorkbenchLayout}
+          onAccentChange={handleWbAccentChange}
+          onOpenEditor={() => setTab('editor')}
+          onOpenProjectImport={handleOpenProjectImport}
+          onImportProjectJson={handleImportProjectJsonFiles}
+          onOpenHtml={openHtmlPreview}
+          onOpenWiki={openWikiPreview}
+          onExportJson={exportProjectJson}
+          onUndo={undoWorkspace}
+          onRedo={redoWorkspace}
+          onManualSave={handleManualSaveClick}
+          onLogout={handleLogoutClick}
+          onOpenLogin={handleOpenLoginDialog}
+          onOpenRegister={handleOpenRegisterDialog}
+        />
+
+        <div className="wb-content">
 
       {importError && <div className="alert error">Ошибка импорта: {importError}</div>}
       {serverSyncError && <div className="alert error">Ошибка синхронизации: {serverSyncError}</div>}
-      {toastMessage && <div className="toast-info">{toastMessage}</div>}
 
       {isCompactLayout && !isSidebarHidden && (
         <button
@@ -7502,62 +7799,6 @@ export default function App() {
         className={`layout ${isSidebarHidden ? 'sidebar-hidden' : ''}`}
         style={{ '--sidebar-width': `${sidebarWidth}px` } as CSSProperties}
       >
-        {!isSidebarHidden && workspaceScope === 'methods' && (
-          <MethodSectionSidebar
-            enableMultiMethods={ENABLE_MULTI_METHODS}
-            normalizedProjectName={normalizedProjectName}
-            editingProjectName={editingProjectName}
-            editingProjectNameDraft={editingProjectNameDraft}
-            projectNameInputRef={projectNameInputRef}
-            expandedProjectIds={expandedProjectIds}
-            expandedMethodId={expandedMethodId}
-            methods={methods}
-            serverProjects={serverProjects}
-            currentProjectId={serverProjectId}
-            projectMethodPreviews={projectMethodPreviews}
-            activeMethodId={activeMethod?.id}
-            editingMethodId={editingMethodId}
-            editingMethodNameDraft={editingMethodNameDraft}
-            methodNameWarning={methodNameWarning}
-            methodNameInputRef={methodNameInputRef}
-            canDeleteMethod={methods.length > 1 && Boolean(activeMethod)}
-            sections={sections}
-            selectedSectionId={selectedSection?.id}
-            validationMap={validationMap}
-            draggingId={draggingId}
-            isSectionPanelPulse={isSectionPanelPulse}
-            isAddEntityMenuOpen={isAddEntityMenuOpen}
-            isDeleteEntityMenuOpen={isDeleteEntityMenuOpen}
-            isProjectSwitching={isProjectSwitching}
-            switchingProjectId={switchingProjectId}
-            onCreateProject={createProject}
-            onSelectProject={handleSelectProject}
-            onStartProjectRename={startProjectRename}
-            onProjectNameDraftChange={setEditingProjectNameDraft}
-            onFinishProjectRename={finishProjectRename}
-            onCancelProjectRename={cancelProjectRename}
-            onToggleProjectExpanded={handleToggleProjectExpanded}
-            onSwitchMethod={handleSwitchMethod}
-            onToggleMethodExpanded={toggleMethodExpanded}
-            onStartMethodRename={startMethodRename}
-            onMethodNameDraftChange={setEditingMethodNameDraft}
-            onFinishMethodRename={finishMethodRename}
-            onCancelMethodRename={cancelMethodRename}
-            onCreateMethod={createMethod}
-            canDeleteProject={Boolean(serverProjectId)}
-            onDeleteActiveMethod={deleteActiveMethod}
-            onRequestDeleteProject={requestDeleteCurrentProject}
-            onDragStartSection={handleDragStartSection}
-            onDropSection={handleDropSection}
-            onSelectSection={handleSelectSection}
-            onToggleAddEntityMenu={handleToggleAddEntityMenu}
-            onToggleDeleteEntityMenu={handleToggleDeleteEntityMenu}
-            onStartSidebarResize={startSidebarResize}
-            renderUiIcon={renderUiIcon}
-            resolveSectionTitle={resolveSectionTitle}
-          />
-        )}
-
         <main className={`workspace ${workspaceScope === 'flows' && tab === 'editor' ? 'workspace-flow-focus' : ''}`} role="main">
           {canRenderWorkspace ? (
             <>
@@ -7604,7 +7845,8 @@ export default function App() {
               )}
 
               <div className="panes">
-              {tab === 'editor' && workspaceScope === 'methods' && (
+              {tab === 'editor' && workspaceScope === 'methods' && workbenchMode === 'workbench' && renderWorkbenchEditor()}
+              {tab === 'editor' && workspaceScope === 'methods' && workbenchMode === 'editor' && (
                 <div className="editor-stream">
                   <section className="panel ai-action-bar-panel" aria-label="AI действия">
                     <div className="panel-title">AI Actions</div>
@@ -7913,74 +8155,31 @@ export default function App() {
               )}
 
               {tab === 'html' && workspaceScope === 'methods' && (
-                <section className={tab === 'html' ? 'panel panel-html-preview' : 'panel'}>
-                  <div className="panel-head">
-                    <div className="panel-title">Предпросмотр HTML</div>
-                    <div className="row gap">
-                      <button
-                        type="button"
-                        className="ghost small"
-                        onClick={() => {
-                          void copyToClipboard(getHtmlPreview());
-                          setToastMessage('Скопировано');
-                        }}
-                      >
-                        Скопировать
-                      </button>
-                      <button className="ghost small" onClick={() => void handleExportHtml()}>
-                        Скачать
-                      </button>
-                    </div>
-                  </div>
-                  <iframe
-                    className={tab === 'html' ? 'preview-frame preview-frame-full' : 'preview-frame'}
-                    title="HTML preview"
-                    sandbox="allow-same-origin"
-                    srcDoc={getHtmlPreview()}
+                <>
+                  <HtmlExportScreen
+                    html={getHtmlPreview()}
+                    projectName={normalizedProjectName}
+                    methodName={activeMethod?.name ?? DEFAULT_METHOD_NAME}
+                    onCopy={() => {
+                      void copyToClipboard(getHtmlPreview());
+                      setToastMessage('Скопировано');
+                    }}
+                    onDownload={() => void handleExportHtml()}
                   />
-                </section>
+                </>
               )}
 
               {tab === 'wiki' && workspaceScope === 'methods' && (
-                <section className="panel panel-wiki-preview">
-                  <div className="panel-head">
-                    <div className="panel-title">Предпросмотр Wiki</div>
-                    <div className="row gap">
-                      <button
-                        type="button"
-                        className="ghost small"
-                        onClick={() => {
-                          void copyToClipboard(getWikiPreview());
-                          setToastMessage('Скопировано');
-                        }}
-                      >
-                        Скопировать
-                      </button>
-                      <button type="button" className="ghost small" onClick={handleExportWiki}>
-                        Скачать
-                      </button>
-                    </div>
-                  </div>
-                  <div className="wiki-preview-wrap">
-                    <button
-                      type="button"
-                      className="icon-button wiki-copy-btn"
-                      aria-label="Скопировать Wiki"
-                      title="Скопировать Wiki"
-                      onClick={() => {
-                        void copyToClipboard(getWikiPreview());
-                        setToastMessage('Скопировано');
-                      }}
-                    >
-                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                        <rect x="9" y="9" width="10" height="10" rx="2" />
-                        <rect x="5" y="5" width="10" height="10" rx="2" />
-                      </svg>
-                    </button>
-                    <div className="wiki-preview-label">WIKI-РАЗМЕТКА</div>
-                    <textarea className="code wiki-preview-code" readOnly value={getWikiPreview()} rows={24} />
-                  </div>
-                </section>
+                <>
+                  <WikiScreen
+                    wiki={getWikiPreview()}
+                    onCopy={() => {
+                      void copyToClipboard(getWikiPreview());
+                      setToastMessage('Скопировано');
+                    }}
+                    onDownload={handleExportWiki}
+                  />
+                </>
               )}
               </div>
             </>
@@ -7991,6 +8190,8 @@ export default function App() {
             </section>
           )}
         </main>
+      </div>
+        </div>
       </div>
     </div>
   );

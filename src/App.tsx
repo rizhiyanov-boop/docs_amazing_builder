@@ -98,6 +98,7 @@ import { loadOnboardingState, markOnboardingCompleted, markOnboardingStarted, sa
 import { emitOnboardingEvent } from './onboarding/telemetry';
 import { buildValidationRulesWithAi, fillDescriptionsWithAi, repairJsonWithAi, suggestMappingsWithAi, suggestMaskFieldsWithAi } from './openrouterClient';
 import { Card } from './components/cards/Card';
+import { AiLoadingCard } from './components/cards/AiLoadingCard';
 import { MethodHeaderCard } from './components/cards/MethodHeaderCard';
 import { DiagramSectionEditor } from './components/DiagramSectionEditor';
 import { EmptyState } from './components/EmptyState';
@@ -111,6 +112,7 @@ import { Toast } from './components/Toast';
 import { AiTableButton, httpMethodToAccent } from './components/primitives/WorkbenchPrimitives';
 import { WorkbenchSidebar } from './components/workbench/WorkbenchSidebar';
 import { WorkbenchTopbar, type WorkbenchAccent, type WorkbenchLayout, type WorkbenchMode } from './components/workbench/WorkbenchTopbar';
+import { WorkspaceHome } from './components/workbench/WorkspaceHome';
 import { TableClassic, TableGallery, TableMiniCards } from './components/tables/WorkbenchTables';
 import { WorkspaceTabs } from './components/WorkspaceTabs';
 import { HtmlExportScreen } from './screens/HtmlExportScreen';
@@ -7041,25 +7043,42 @@ export default function App() {
     setToastMessage('Раздел добавлен');
   }, [setSections]);
 
+  function updateWorkbenchRow(section: ParsedSection, row: ParsedRow, patch: Partial<ParsedRow>): void {
+    const rowKey = getParsedRowKey(row);
+    updateServerRow(section.id, rowKey, (current) => ({ ...current, ...patch }));
+  }
+
   function renderWorkbenchTable(section: ParsedSection): ReactNode {
+    const tableProps = {
+      rows: section.rows,
+      editable: true,
+      onUpdateRow: (row: ParsedRow, patch: Partial<ParsedRow>) => updateWorkbenchRow(section, row, patch),
+      onAddRow: () => addManualRow(section)
+    };
     const rows = section.rows;
-    if (workbenchTableView === 'gallery') return <TableGallery rows={rows} />;
-    if (workbenchTableView === 'mini') return <TableMiniCards rows={rows} />;
-    return <TableClassic rows={rows} />;
+    void rows;
+    if (workbenchTableView === 'gallery') return <TableGallery {...tableProps} />;
+    if (workbenchTableView === 'mini') return <TableMiniCards {...tableProps} />;
+    return <TableClassic {...tableProps} />;
   }
 
   function renderWorkbenchSectionPreview(section: DocSection): ReactNode {
     if (section.kind === 'text') {
       return (
-        <div
-          className="wb-rich-preview"
-          style={{ fontSize: 13, lineHeight: 1.55, color: 'var(--wb-text-soft)' }}
-          dangerouslySetInnerHTML={{ __html: richTextToHtml(section.value, { editable: false }) || '<p>Содержимое не заполнено.</p>' }}
+        <textarea
+          value={section.value}
+          onChange={(event) => updateSection(section.id, (current) => current.kind === 'text' ? { ...current, value: event.target.value } : current)}
+          rows={6}
+          aria-label="Содержимое секции"
+          style={{ width: '100%', resize: 'vertical', background: 'var(--wb-bg-soft)', color: 'var(--wb-text)', border: '1px solid var(--wb-border-soft)', borderRadius: 'var(--wb-radius)', padding: 10, fontFamily: 'var(--wb-font-sans)', fontSize: 13, lineHeight: 1.55 }}
         />
       );
     }
 
     if (section.kind === 'parsed') {
+      if (aiRequestStatus?.state === 'loading') {
+        return <AiLoadingCard message={aiRequestStatus.message} processed={0} total={section.rows.length} onCancel={() => setAiRequestStatus(null)} />;
+      }
       return (
         <div style={{ display: 'grid', gap: 10 }}>
           {renderWorkbenchTable(section)}
@@ -7099,8 +7118,19 @@ export default function App() {
   }
 
   function renderWorkbenchEditor(): ReactNode {
-    if (!activeMethod) {
-      return <EmptyState kind="no-workspace" onPrimary={createProject} onSecondary={createMethod} />;
+    if (!activeMethod || methods.length === 0) {
+      return (
+        <WorkspaceHome
+          projectName={normalizedProjectName}
+          methods={methods}
+          groups={methodGroups}
+          getMethodHttpMethod={getMethodHttpMethod}
+          onCreateMethod={createMethod}
+          onImportOpenApi={handleOpenProjectImport}
+          onCreateService={createProject}
+          onOpenMethod={handleSwitchMethod}
+        />
+      );
     }
 
     return (

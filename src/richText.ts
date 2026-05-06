@@ -8,6 +8,19 @@ export function escapeRichTextHtml(value: string): string {
     .replaceAll('"', '&quot;');
 }
 
+export function richTextToPlainText(value: string): string {
+  const html = richTextToHtml(value);
+  return html
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export function sanitizeAnchorId(value: string): string {
   return value
     .toLowerCase()

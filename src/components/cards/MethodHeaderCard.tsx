@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import type { MethodDocument, RequestMethod, TextSection } from '../../types';
 import { Card } from './Card';
 import { HttpChip } from '../primitives/WorkbenchPrimitives';
+import { richTextToPlainText } from '../../richText';
 
 type MethodHeaderCardProps = {
   method: MethodDocument;
@@ -34,7 +35,7 @@ export function MethodHeaderCard({ method, httpMethod, path }: MethodHeaderCardP
           </h1>
           {description && (
             <p style={{ margin: '8px 0 0', fontSize: 14, color: 'var(--wb-text-soft)', lineHeight: 1.55, maxWidth: 680 }}>
-              {description.replace(/<[^>]*>/g, '').slice(0, 360)}
+              {richTextToPlainText(description).slice(0, 360)}
             </p>
           )}
         </div>

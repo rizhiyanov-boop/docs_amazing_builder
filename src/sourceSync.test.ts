@@ -70,6 +70,21 @@ describe('sourceSync', () => {
     expect(curl).not.toContain('--data-raw');
   });
 
+  it('keeps string examples as plain text instead of json parsing', () => {
+    const rows = [
+      makeParsedRow({ field: 'note', type: 'string', example: '{"raw":true}', source: 'parsed' })
+    ];
+    const parsed = JSON.parse(buildInputFromRows('json', rows)) as { note: string };
+    expect(parsed.note).toBe('{"raw":true}');
+  });
+
+  it('escapes single quotes in curl body payload', () => {
+    const rows = [makeParsedRow({ field: 'author', type: 'string', example: "O'Reilly", source: 'parsed' })];
+    const curl = buildInputFromRows('curl', rows, { requestMethod: 'POST' });
+    expect(curl).toContain("--data-raw '{");
+    expect(curl).toContain("O'\"'\"'Reilly");
+  });
+
   it('uses default curl url when url is missing', () => {
     const curl = buildInputFromRows('curl', [makeParsedRow({ field: 'id', type: 'int', example: '1' })]);
     expect(curl).toContain('"https://example.com"');

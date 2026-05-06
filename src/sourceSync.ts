@@ -57,11 +57,7 @@ function parseExampleValue(row: ParsedRow): unknown {
   }
 
   if (row.type === 'string' || row.type === 'element' || row.type === 'attribute') {
-    try {
-      return JSON.parse(trimmed);
-    } catch {
-      return trimmed;
-    }
+    return trimmed;
   }
 
   if (row.type === 'boolean') return trimmed.toLowerCase() === 'true';
@@ -130,6 +126,7 @@ function buildJsonObject(rows: ParsedRow[]): unknown {
 function buildCurl(rows: ParsedRow[], options?: BuildInputOptions): string {
   const baseUrl = options?.requestUrl?.trim() || rows.find((row) => row.source === 'url')?.example.trim() || 'https://example.com';
   const method = options?.requestMethod?.trim() || 'POST';
+  const normalizedMethod = method.toUpperCase();
   const queryRows = rows.filter((row) => row.source === 'query' && row.field.trim());
   const url = buildUrlWithQuery(baseUrl, queryRows);
   const headers = rows
@@ -139,17 +136,19 @@ function buildCurl(rows: ParsedRow[], options?: BuildInputOptions): string {
   const bodyFromExample = options?.bodyJson?.trim() ?? '';
   let body = '';
 
-  if (bodyFromExample) {
+  if (bodyFromExample && normalizedMethod !== 'GET' && normalizedMethod !== 'HEAD') {
     try {
       body = JSON.stringify(JSON.parse(bodyFromExample), null, 2);
     } catch {
       body = bodyFromExample;
     }
-  } else {
+  } else if (normalizedMethod !== 'GET' && normalizedMethod !== 'HEAD') {
     body = bodyRows.length > 0 ? JSON.stringify(buildJsonObject(bodyRows), null, 2) : '';
   }
 
-  return ['curl', '-X', method, `"${url}"`, ...headers, ...(body ? [`--data-raw '${body}'`] : [])].join(' ');
+  const escapedBody = body.replace(/'/g, "'\"'\"'");
+
+  return ['curl', '-X', method, `"${url}"`, ...headers, ...(body ? [`--data-raw '${escapedBody}'`] : [])].join(' ');
 }
 
 export function buildInputFromRows(format: ParseFormat, rows: ParsedRow[], options?: BuildInputOptions): string {

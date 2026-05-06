@@ -48,6 +48,22 @@ describe('parsers', () => {
     expect(meta.url).toBe('https://example.com/v1/user/42');
   });
 
+  it('defaults curl metadata method to GET without body', () => {
+    const meta = parseCurlMeta('curl "https://example.com/v1/items"');
+    expect(meta.method).toBe('GET');
+  });
+
+  it('defaults curl metadata method to POST when body is present', () => {
+    const meta = parseCurlMeta("curl \"https://example.com/v1/items\" --data-raw '{\"id\":1}'");
+    expect(meta.method).toBe('POST');
+  });
+
+  it('parses url with backslash continuation in curl', () => {
+    const rows = parseToRows('curl', "curl \\\n\"https://example.com/v1/items?page=2\"");
+    expect(rows.some((row) => row.source === 'url' && row.example === 'https://example.com/v1/items')).toBe(true);
+    expect(rows.some((row) => row.source === 'query' && row.field === 'page' && row.example === '2')).toBe(true);
+  });
+
   it('extracts query params from get curl url', () => {
     const curl = 'curl -X GET "https://example.com/v1/items?page=2&search=invoice"';
     const rows = parseToRows('curl', curl);

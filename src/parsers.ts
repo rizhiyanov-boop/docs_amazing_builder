@@ -270,7 +270,7 @@ function splitUrlAndQuery(rawUrl: string): { baseUrl: string; queryRows: ParsedR
 }
 
 function parseCurl(input: string): ParsedRow[] {
-  const normalized = input.replace(/\r\n/g, ' ').replace(/\n/g, ' ');
+  const normalized = input.replace(/\\\r?\n/g, ' ').replace(/\r\n/g, ' ').replace(/\n/g, ' ');
   const rows: ParsedRow[] = [];
   let extractedAny = false;
 
@@ -439,13 +439,15 @@ function parseCurl(input: string): ParsedRow[] {
 }
 
 export function parseCurlMeta(input: string): ParsedCurlMeta {
-  const normalized = input.replace(/\r\n/g, ' ').replace(/\n/g, ' ');
+  const normalized = input.replace(/\\\r?\n/g, ' ').replace(/\r\n/g, ' ').replace(/\n/g, ' ');
   const methodMatch = normalized.match(/(?:^|\s)(?:-X|--request)\s+(GET|POST|PUT|PATCH|DELETE)\b/i);
   const urlMatch = normalized.match(/curl\s+(?:-X\s+\w+\s+)?['"]?(https?:\/\/[^'"\s]+)['"]?/i);
   const parsedUrl = urlMatch?.[1] ? splitUrlAndQuery(urlMatch[1]).baseUrl : undefined;
+  const hasBody = /(?:^|\s)(?:--data-raw|--data|-d)\s+/i.test(normalized);
+  const defaultMethod = urlMatch ? (hasBody ? 'POST' : 'GET') : undefined;
 
   return {
-    method: (methodMatch?.[1]?.toUpperCase() as RequestMethod | undefined) ?? (urlMatch ? 'POST' : undefined),
+    method: (methodMatch?.[1]?.toUpperCase() as RequestMethod | undefined) ?? defaultMethod,
     url: parsedUrl
   };
 }

@@ -3643,12 +3643,6 @@ export default function App() {
     markOnboardingExportTouched();
   }
 
-  function openHtmlPreview(): void {
-    if (!activeMethod) return;
-    setWorkspaceScope('methods');
-    setTab('html');
-  }
-
   async function handleExportFullProjectHtml(): Promise<void> {
     const projectSlug = slugifyMethodFileName(normalizedProjectName);
     const flowImageMap = await buildEmbeddedProjectFlowImageMap();
@@ -3699,12 +3693,6 @@ export default function App() {
     });
     downloadText(`${projectSlug}.project.documentation.wiki.txt`, wiki);
     markOnboardingExportTouched();
-  }
-
-  function openWikiPreview(): void {
-    if (!activeMethod) return;
-    setWorkspaceScope('methods');
-    setTab('wiki');
   }
 
   async function copyToClipboard(value: string): Promise<void> {
@@ -7743,7 +7731,6 @@ export default function App() {
           methodHttpMethod={getMethodHttpMethod(activeMethod)}
           mode={workbenchMode}
           layout={workbenchLayout}
-          activeTab={tab}
           accent={wbAccent}
           authUserLogin={authUser?.login ?? null}
           isLogoutBusy={authBusyKey === 'auth:logout'}
@@ -7752,11 +7739,10 @@ export default function App() {
           onModeChange={setWorkbenchMode}
           onLayoutChange={setWorkbenchLayout}
           onAccentChange={handleWbAccentChange}
-          onOpenEditor={() => setTab('editor')}
           onOpenProjectImport={handleOpenProjectImport}
           onImportProjectJson={handleImportProjectJsonFiles}
-          onOpenHtml={openHtmlPreview}
-          onOpenWiki={openWikiPreview}
+          onExportHtml={() => void handleExportHtml()}
+          onExportWiki={handleExportWiki}
           onExportJson={exportProjectJson}
           onUndo={undoWorkspace}
           onRedo={redoWorkspace}

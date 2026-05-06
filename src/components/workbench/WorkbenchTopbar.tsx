@@ -14,7 +14,6 @@ type WorkbenchTopbarProps = {
   methodHttpMethod: RequestMethod;
   mode: WorkbenchMode;
   layout: WorkbenchLayout;
-  activeTab: 'editor' | 'html' | 'wiki';
   accent: WorkbenchAccent;
   authUserLogin: string | null;
   isLogoutBusy: boolean;
@@ -23,11 +22,10 @@ type WorkbenchTopbarProps = {
   onModeChange: (mode: WorkbenchMode) => void;
   onLayoutChange: (layout: WorkbenchLayout) => void;
   onAccentChange: (accent: WorkbenchAccent) => void;
-  onOpenEditor: () => void;
   onOpenProjectImport: () => void;
   onImportProjectJson: (files: File[]) => void;
-  onOpenHtml: () => void;
-  onOpenWiki: () => void;
+  onExportHtml: () => void;
+  onExportWiki: () => void;
   onExportJson: () => void;
   onUndo: () => void;
   onRedo: () => void;
@@ -51,7 +49,6 @@ export function WorkbenchTopbar({
   methodHttpMethod,
   mode,
   layout,
-  activeTab,
   accent,
   authUserLogin,
   isLogoutBusy,
@@ -60,11 +57,10 @@ export function WorkbenchTopbar({
   onModeChange,
   onLayoutChange,
   onAccentChange,
-  onOpenEditor,
   onOpenProjectImport,
   onImportProjectJson,
-  onOpenHtml,
-  onOpenWiki,
+  onExportHtml,
+  onExportWiki,
   onExportJson,
   onUndo,
   onRedo,
@@ -123,9 +119,8 @@ export function WorkbenchTopbar({
             event.currentTarget.value = '';
           }}
         />
-        <WBButton variant={activeTab === 'editor' ? 'secondary' : 'ghost'} size="sm" onClick={onOpenEditor}>Editor</WBButton>
-        <WBButton variant={activeTab === 'html' ? 'secondary' : 'ghost'} size="sm" onClick={onOpenHtml}>HTML</WBButton>
-        <WBButton variant={activeTab === 'wiki' ? 'secondary' : 'ghost'} size="sm" onClick={onOpenWiki}>Wiki</WBButton>
+        <WBButton variant="ghost" size="sm" onClick={onExportHtml}>HTML</WBButton>
+        <WBButton variant="ghost" size="sm" onClick={onExportWiki}>Wiki</WBButton>
         <WBButton variant="secondary" size="sm" onClick={onExportJson}>JSON</WBButton>
       </div>
 

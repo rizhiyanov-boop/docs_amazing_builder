@@ -1,4 +1,4 @@
-import type { ReactNode, RefObject } from 'react';
+import React, { type ReactNode, type RefObject } from 'react';
 import type { RequestMethod } from '../../types';
 import { HttpChip, TabPill, TabsPill, WBButton } from '../primitives/WorkbenchPrimitives';
 
@@ -41,7 +41,7 @@ const ACCENTS: Array<{ id: WorkbenchAccent; label: string }> = [
   { id: 'violet', label: 'Dusk' }
 ];
 
-export function WorkbenchTopbar({
+export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
   topbarRef,
   importInputRef,
   methodName,
@@ -199,4 +199,4 @@ export function WorkbenchTopbar({
       </details>
     </header>
   );
-}
+});

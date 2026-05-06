@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import React, { useMemo, useState, type ReactNode } from 'react';
 import type { DocSection, MethodDocument, MethodGroup, RequestMethod } from '../../types';
 import { HttpChip, SidebarItem, WBButton } from '../primitives/WorkbenchPrimitives';
 
@@ -40,7 +40,7 @@ function groupMethods(methods: MethodDocument[], groups: MethodGroup[]): Array<{
   return ungrouped.length > 0 ? [...grouped, { id: 'ungrouped', name: 'Methods', methods: ungrouped }] : grouped;
 }
 
-export function WorkbenchSidebar({
+export const WorkbenchSidebar = React.memo(function WorkbenchSidebar({
   projectName,
   methods,
   groups,
@@ -173,7 +173,7 @@ export function WorkbenchSidebar({
       </div>
     </aside>
   );
-}
+});
 
 export function MethodHttpPreview({ method }: { method: RequestMethod }): ReactNode {
   return <HttpChip method={method} size="sm" />;

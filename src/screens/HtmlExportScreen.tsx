@@ -6,6 +6,8 @@ type HtmlExportScreenProps = {
   html: string;
   projectName: string;
   methodName: string;
+  requestUrl?: string;
+  requestMethod?: string;
   accent: WorkbenchAccent;
   onAccentChange: (accent: WorkbenchAccent) => void;
   onCopy: () => void;
@@ -38,17 +40,18 @@ function highlight(body: string, query: string): string {
   return body.replace(new RegExp(escaped, 'gi'), (match) => `<mark class="wb-html-search-mark">${match}</mark>`);
 }
 
-export function HtmlExportScreen({ html, projectName, methodName, accent, onAccentChange, onCopy, onDownload }: HtmlExportScreenProps): ReactNode {
+export function HtmlExportScreen({ html, projectName, methodName, requestUrl = '/', requestMethod = 'POST', accent, onAccentChange, onCopy, onDownload }: HtmlExportScreenProps): ReactNode {
   const [query, setQuery] = useState('');
   const [snippetMode, setSnippetMode] = useState<'curl' | 'fetch' | 'httpie'>('curl');
   const body = useMemo(() => extractBody(html), [html]);
   const headings = useMemo(() => extractHeadings(body), [body]);
   const highlightedBody = useMemo(() => highlight(body, query), [body, query]);
+  const normalizedMethod = requestMethod.toUpperCase();
   const snippet = snippetMode === 'fetch'
-    ? "fetch('/mock', { method: 'POST' })"
+    ? `fetch('${requestUrl}', { method: '${normalizedMethod}' })`
     : snippetMode === 'httpie'
-      ? 'http POST /mock'
-      : 'curl -X POST /mock';
+      ? `http ${normalizedMethod} ${requestUrl}`
+      : `curl -X ${normalizedMethod} ${requestUrl}`;
 
   return (
     <section style={{ minHeight: '100%', background: 'var(--wb-bg-canvas)', color: 'var(--wb-text)', fontFamily: 'var(--wb-font-sans)' }}>

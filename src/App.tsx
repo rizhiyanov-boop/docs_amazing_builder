@@ -8172,6 +8172,8 @@ export default function App() {
                     html={getHtmlPreview()}
                     projectName={normalizedProjectName}
                     methodName={activeMethod?.name ?? DEFAULT_METHOD_NAME}
+                    requestUrl={activeMethod ? getMethodPath(activeMethod) : '/'}
+                    requestMethod={activeMethod ? getMethodHttpMethod(activeMethod) : 'POST'}
                     accent={wbAccent}
                     onAccentChange={handleWbAccentChange}
                     onCopy={() => {

@@ -9,8 +9,9 @@ type TableProps = {
   editable?: boolean;
 };
 
-function isRequired(value: string): boolean {
-  return value === 'Да' || value.toLowerCase() === 'true' || value === '1' || value.toLowerCase() === 'required';
+export function isRequired(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return value === '+' || value === 'Да' || normalized === 'true' || value === '1' || normalized === 'required';
 }
 
 function FieldInput({ row, onUpdateRow }: { row: ParsedRow; onUpdateRow?: (row: ParsedRow, patch: Partial<ParsedRow>) => void }): ReactNode {

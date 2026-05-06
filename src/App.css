@@ -4483,6 +4483,7 @@ body[data-wb-accent] {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  background: var(--wb-bg-canvas);
 }
 
 .legacy-app-topbar-accessibility {
@@ -4507,15 +4508,41 @@ body[data-wb-accent] {
 .wb-content .layout {
   min-height: 100%;
   display: block;
+  background: var(--wb-bg-canvas);
 }
 
 .wb-content .workspace {
   min-height: 100%;
   max-width: none;
+  background: var(--wb-bg-canvas);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+  gap: 0;
 }
 
 .wb-content .workspace-tabs {
   display: none;
+}
+
+.wb-content .workspace-context-tabs {
+  padding: 16px 16px 0;
+  background: var(--wb-bg-canvas);
+}
+
+.wb-content .workspace-context-tab {
+  border: 1px solid var(--wb-border-soft);
+  background: var(--wb-bg-surface);
+  color: var(--wb-text);
+  box-shadow: var(--wb-shadow-card);
+  font-family: var(--wb-font-sans);
+}
+
+.wb-content .workspace-context-tab.active {
+  border-color: var(--wb-accent);
+  background: var(--wb-accent);
+  color: var(--wb-accent-fg);
 }
 
 .wb-card-layout {

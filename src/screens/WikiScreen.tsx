@@ -13,7 +13,7 @@ function escapeHtml(value: string): string {
 
 function renderWiki(wiki: string): string {
   const lines = wiki.replace(/&#160;/g, '\u00A0').split(/\r?\n/);
-  const headings: string[] = [];
+  const headings: Array<{ level: number; text: string; id: string }> = [];
   const output: string[] = [];
   let tableOpen = false;
 
@@ -22,16 +22,17 @@ function renderWiki(wiki: string): string {
       output.push('__TOC__');
       continue;
     }
-    const heading = line.match(/^h2\.\s+(.+)$/);
+    const heading = line.match(/^h([1-6])\.\s+(.+)$/);
     if (heading) {
       if (tableOpen) {
         output.push('</tbody></table>');
         tableOpen = false;
       }
-      const text = heading[1].trim();
+      const level = Number(heading[1]);
+      const text = heading[2].trim();
       const id = `wiki-${headings.length}`;
-      headings.push(text);
-      output.push(`<h2 id="${id}">${escapeHtml(text)}</h2>`);
+      headings.push({ level, text, id });
+      output.push(`<h${level} id="${id}">${escapeHtml(text)}</h${level}>`);
       continue;
     }
     if (line.startsWith('||')) {
@@ -60,7 +61,7 @@ function renderWiki(wiki: string): string {
   }
   if (tableOpen) output.push('</tbody></table>');
 
-  const toc = `<nav class="wb-wiki-toc">${headings.map((heading, index) => `<a href="#wiki-${index}">${escapeHtml(heading)}</a>`).join('')}</nav>`;
+  const toc = `<nav class="wb-wiki-toc">${headings.map((heading) => `<a href="#${heading.id}" data-level="${heading.level}">${escapeHtml(heading.text)}</a>`).join('')}</nav>`;
   return output.join('\n').replace('__TOC__', toc);
 }
 

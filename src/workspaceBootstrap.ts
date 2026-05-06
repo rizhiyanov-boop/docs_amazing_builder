@@ -405,6 +405,12 @@ export function loadWorkspaceProject(storageKey: string, enableMultiMethods: boo
           id: method.id || createMethodId(),
           name: method.name?.trim() || `Метод ${index + 1}`,
           updatedAt: method.updatedAt || new Date().toISOString(),
+          jiraTicket: typeof method.jiraTicket === 'string' ? method.jiraTicket : undefined,
+          epic: typeof method.epic === 'string' ? method.epic : undefined,
+          initiators: typeof method.initiators === 'string' ? method.initiators : undefined,
+          responsible: typeof method.responsible === 'string' ? method.responsible : undefined,
+          externalUrl: typeof method.externalUrl === 'string' ? method.externalUrl : undefined,
+          status: method.status === 'draft' || method.status === 'review' || method.status === 'done' ? method.status : undefined,
           sections: sanitizeSections(method.sections).map(withSectionRowIds)
         }));
 

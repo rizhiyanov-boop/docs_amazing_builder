@@ -32,6 +32,7 @@ import { renderHtmlDocument } from './renderHtml';
 import { getFlowExportFileName, renderProjectHtmlDocument, renderProjectWikiDocument } from './projectExport';
 import { editorElementToWikiText, editorHtmlToWikiText, escapeRichTextHtml, richTextToHtml } from './richText';
 import { renderWikiDocument } from './renderWiki';
+import type { WikiRenderMeta } from './renderWiki';
 import { buildValidationRulesFromSchemaInput } from './schemaValidationRules';
 import {
   getExternalRequestHeaderRowsForEditor,
@@ -111,6 +112,7 @@ import { SearchPalette } from './components/dialogs/SearchPalette';
 import { Toast } from './components/Toast';
 import { AiTableButton } from './components/primitives/WorkbenchPrimitives';
 import { WorkbenchSidebar } from './components/workbench/WorkbenchSidebar';
+import { MethodMetaPanel } from './components/workbench/MethodMetaPanel';
 import { WorkbenchTopbar, type WorkbenchAccent, type WorkbenchLayout, type WorkbenchMode } from './components/workbench/WorkbenchTopbar';
 import { WorkspaceHome } from './components/workbench/WorkspaceHome';
 import { TableClassic, TableGallery, TableMiniCards } from './components/tables/WorkbenchTables';
@@ -424,6 +426,12 @@ type MethodDocumentImportPayload = Record<string, unknown> & {
   id?: unknown;
   name?: unknown;
   updatedAt?: unknown;
+  jiraTicket?: unknown;
+  epic?: unknown;
+  initiators?: unknown;
+  responsible?: unknown;
+  externalUrl?: unknown;
+  status?: unknown;
   sections: unknown[];
 };
 
@@ -529,6 +537,12 @@ function buildWorkspaceImportFromMethodPayload(
         id: resolvedId,
         name: resolvedName,
         updatedAt: resolvedUpdatedAt,
+        jiraTicket: typeof payload.jiraTicket === 'string' ? payload.jiraTicket : undefined,
+        epic: typeof payload.epic === 'string' ? payload.epic : undefined,
+        initiators: typeof payload.initiators === 'string' ? payload.initiators : undefined,
+        responsible: typeof payload.responsible === 'string' ? payload.responsible : undefined,
+        externalUrl: typeof payload.externalUrl === 'string' ? payload.externalUrl : undefined,
+        status: payload.status === 'draft' || payload.status === 'review' || payload.status === 'done' ? payload.status : undefined,
         sections: payload.sections as DocSection[]
       }
     ],
@@ -2209,7 +2223,17 @@ export default function App() {
   function getHtmlPreview(): string {
     const cached = htmlPreviewCacheRef.current;
     if (cached && cached.sectionsRef === sections && cached.theme === theme) return cached.output;
-    const output = renderHtmlDocument(sections, theme, { interactive: false });
+    const meta: WikiRenderMeta = {
+      httpMethod: activeMethod ? getMethodHttpMethod(activeMethod) : undefined,
+      path: activeMethod ? getMethodPath(activeMethod) : undefined,
+      jiraTicket: activeMethod?.jiraTicket,
+      epic: activeMethod?.epic,
+      initiators: activeMethod?.initiators,
+      responsible: activeMethod?.responsible,
+      externalUrl: activeMethod?.externalUrl,
+      updatedAt: activeMethod?.updatedAt
+    };
+    const output = renderHtmlDocument(sections, theme, { interactive: false, meta });
     htmlPreviewCacheRef.current = { sectionsRef: sections, output, theme };
     return output;
   }
@@ -2217,7 +2241,17 @@ export default function App() {
   function getWikiPreview(): string {
     const cached = wikiPreviewCacheRef.current;
     if (cached && cached.sectionsRef === sections) return cached.output;
-    const output = renderWikiDocument(sections);
+    const meta: WikiRenderMeta = {
+      httpMethod: activeMethod ? getMethodHttpMethod(activeMethod) : undefined,
+      path: activeMethod ? getMethodPath(activeMethod) : undefined,
+      jiraTicket: activeMethod?.jiraTicket,
+      epic: activeMethod?.epic,
+      initiators: activeMethod?.initiators,
+      responsible: activeMethod?.responsible,
+      externalUrl: activeMethod?.externalUrl,
+      updatedAt: activeMethod?.updatedAt
+    };
+    const output = renderWikiDocument(sections, meta);
     wikiPreviewCacheRef.current = { sectionsRef: sections, output };
     return output;
   }
@@ -3950,6 +3984,12 @@ export default function App() {
                     id: typeof parsed.id === 'string' && parsed.id.trim() ? parsed.id.trim() : createMethodId(),
                     name: methodName || DEFAULT_METHOD_NAME,
                     updatedAt: typeof parsed.updatedAt === 'string' && parsed.updatedAt ? parsed.updatedAt : new Date().toISOString(),
+                    jiraTicket: typeof parsed.jiraTicket === 'string' ? parsed.jiraTicket : undefined,
+                    epic: typeof parsed.epic === 'string' ? parsed.epic : undefined,
+                    initiators: typeof parsed.initiators === 'string' ? parsed.initiators : undefined,
+                    responsible: typeof parsed.responsible === 'string' ? parsed.responsible : undefined,
+                    externalUrl: typeof parsed.externalUrl === 'string' ? parsed.externalUrl : undefined,
+                    status: parsed.status === 'draft' || parsed.status === 'review' || parsed.status === 'done' ? parsed.status : undefined,
                     sections: sanitizeSections(parsed.sections as DocSection[])
                   }
                 ],
@@ -7007,6 +7047,19 @@ export default function App() {
     switchMethod(method);
   }, [switchMethod]);
 
+  const handleMethodMetaUpdate = useCallback((patch: Partial<MethodDocument>) => {
+    if (!activeMethodId) return;
+    markWorkspaceChanged();
+    clearPreviewCaches();
+    setMethodsState((prev) => (
+      prev.map((method) => (
+        method.id === activeMethodId
+          ? { ...method, ...patch, updatedAt: new Date().toISOString() }
+          : method
+      ))
+    ));
+  }, [activeMethodId]);
+
   const handleDragStartSection = useCallback((id: string) => {
     setDraggingId(id);
   }, []);
@@ -7761,6 +7814,7 @@ export default function App() {
         />
 
         <div className="wb-content">
+          <div className="wb-content-body">
 
       {importError && <div className="alert error">Ошибка импорта: {importError}</div>}
       {serverSyncError && <div className="alert error">Ошибка синхронизации: {serverSyncError}</div>}
@@ -8217,8 +8271,17 @@ export default function App() {
           )}
         </main>
       </div>
+      {activeMethod && tab === 'editor' && workspaceScope === 'methods' && (
+        <MethodMetaPanel
+          method={activeMethod}
+          methodHttpMethod={getMethodHttpMethod(activeMethod)}
+          methodPath={getMethodPath(activeMethod)}
+          onUpdate={handleMethodMetaUpdate}
+        />
+      )}
         </div>
       </div>
+    </div>
     </div>
   );
 }

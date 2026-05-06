@@ -8,6 +8,17 @@ import type { DiagramSection, DocSection, ErrorsSection, ParsedRow, ParsedSectio
 
 const EMPTY_WIKI_CELL = '\u00A0';
 
+export interface WikiRenderMeta {
+  httpMethod?: string;
+  path?: string;
+  jiraTicket?: string;
+  epic?: string;
+  initiators?: string;
+  responsible?: string;
+  externalUrl?: string;
+  updatedAt?: string;
+}
+
 function escapeWiki(value: string): string {
   return value.replaceAll('|', '&#124;');
 }
@@ -651,22 +662,31 @@ function renderErrorsSection(section: ErrorsSection): string[] {
   return lines;
 }
 
-function renderWikiTemplateIntro(): string[] {
+function renderWikiTemplateIntro(meta: WikiRenderMeta): string[] {
+  const methodCell = meta.httpMethod && meta.path
+    ? toWikiCell(`${meta.httpMethod} ${meta.path}`)
+    : meta.httpMethod
+      ? toWikiCell(meta.httpMethod)
+      : EMPTY_WIKI_CELL;
+  const dateCell = meta.updatedAt
+    ? toWikiCell(new Date(meta.updatedAt).toLocaleDateString('ru-RU'))
+    : EMPTY_WIKI_CELL;
+
   const historyTable = wrapWikiTable([
     '||Версия||Описание||Исполнитель||Дата||Jira||',
-    `|v.1|Создание документа|${EMPTY_WIKI_CELL}|${EMPTY_WIKI_CELL}|${EMPTY_WIKI_CELL}|`
+    `|v.1|Создание документа|${toWikiCell(meta.responsible ?? '')}|${dateCell}|${toWikiCell(meta.jiraTicket ?? '')}|`
   ]);
 
   const taskTable = wrapWikiTable([
-    `|Epic|${EMPTY_WIKI_CELL}|`,
+    `|Epic|${toWikiCell(meta.epic ?? '')}|`,
     `|Цель|${EMPTY_WIKI_CELL}|`,
-    `|Инициаторы|${EMPTY_WIKI_CELL}|`,
-    `|Ответственный разработчик / модуль|${EMPTY_WIKI_CELL}|`
+    `|Инициаторы|${toWikiCell(meta.initiators ?? '')}|`,
+    `|Ответственный разработчик / модуль|${toWikiCell(meta.responsible ?? '')}|`
   ]);
 
   const commonInfoTable = wrapWikiTable([
-    `|Метод|${EMPTY_WIKI_CELL}|`,
-    `|Внешний URL|${EMPTY_WIKI_CELL}|`
+    `|Метод|${methodCell}|`,
+    `|Внешний URL|${toWikiCell(meta.externalUrl ?? '')}|`
   ]);
 
   return [
@@ -684,8 +704,8 @@ function renderWikiTemplateIntro(): string[] {
   ];
 }
 
-export function renderWikiDocument(sections: DocSection[]): string {
-  const lines: string[] = ['{toc}', '', ...renderWikiTemplateIntro()];
+export function renderWikiDocument(sections: DocSection[], meta: WikiRenderMeta = {}): string {
+  const lines: string[] = ['{toc}', '', ...renderWikiTemplateIntro(meta)];
 
   for (const section of sections) {
     const rendered =

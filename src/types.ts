@@ -8,6 +8,7 @@ export type DiagramEngine = 'mermaid' | 'plantuml';
 export type ErrorType = 'CommonException' | 'BusinessException' | 'AlertException' | '-';
 
 export type SectionKind = 'text' | 'parsed' | 'diagram' | 'errors';
+export type MethodStatus = 'draft' | 'review' | 'done';
 
 export interface DiagramItem {
   id: string;
@@ -121,6 +122,12 @@ export interface MethodDocument {
   name: string;
   updatedAt: string;
   sections: DocSection[];
+  jiraTicket?: string;
+  epic?: string;
+  initiators?: string;
+  responsible?: string;
+  externalUrl?: string;
+  status?: MethodStatus;
 }
 
 export interface MethodGroupLink {

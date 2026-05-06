@@ -239,4 +239,22 @@ describe('renderers', () => {
     expect(wiki).toContain('0( 1-9 )');
     expect(wiki).toContain('( 12 )( 0-9 )');
   });
+
+  it('fills method and path in wiki intro from meta', () => {
+    const wiki = renderWikiDocument([], {
+      httpMethod: 'POST',
+      path: '/api/v1/saveContract'
+    });
+    expect(wiki).toContain('POST /api/v1/saveContract');
+  });
+
+  it('fills jira in wiki history from meta', () => {
+    const wiki = renderWikiDocument([], { jiraTicket: 'GRKI-1234' });
+    expect(wiki).toContain('GRKI-1234');
+  });
+
+  it('keeps empty cells when meta is empty', () => {
+    const wiki = renderWikiDocument([], {});
+    expect(wiki).toContain('\u00A0');
+  });
 });

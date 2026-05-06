@@ -9,12 +9,14 @@ import { getDiagramExportFileName, getDiagramImageUrl, resolveDiagramEngine } fr
 import { normalizeArrayFieldPath } from './fieldPath';
 import type { ThemeName } from './theme';
 import type { DiagramSection, DocSection, ErrorsSection, ParseFormat, ParsedRow, ParsedSection, TextSection } from './types';
+import type { WikiRenderMeta } from './renderWiki';
 
 type RenderHtmlOptions = {
   interactive?: boolean;
   diagramImageSource?: 'remote' | 'local-jpeg';
   diagramImageMap?: Record<string, string>;
   diagramLocalFiles?: Record<string, boolean>;
+  meta?: WikiRenderMeta;
 };
 
 function escapeHtml(value: string): string {
@@ -506,6 +508,7 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
   const diagramImageSource = options.diagramImageSource ?? 'remote';
   const diagramImageMap = options.diagramImageMap;
   const diagramLocalFiles = options.diagramLocalFiles;
+  const renderMeta = options.meta;
   const visibleSections = getVisibleSections(sections);
   const blocks = visibleSections.map((section) => {
     if (section.kind === 'text') return renderTextSection(section);
@@ -513,6 +516,15 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
     if (section.kind === 'diagram') return renderDiagramSection(section, diagramImageSource, diagramImageMap, diagramLocalFiles, interactive);
     return renderErrorsSection(section);
   });
+  const methodPath = renderMeta?.path?.trim() || '';
+  const methodHttpMethod = renderMeta?.httpMethod?.trim() || '';
+  if (methodPath || methodHttpMethod) {
+    const summaryBody = [
+      renderMeta?.responsible ? renderInfoNote('Ответственный', renderMeta.responsible) : '',
+      renderMeta?.externalUrl ? renderInfoNote('Внешний URL', renderMeta.externalUrl) : ''
+    ].filter(Boolean).join('');
+    blocks.unshift(wrapCard('method-summary', 'Метод', '', summaryBody || '<span class="muted">Без дополнительных данных</span>', methodPath, methodHttpMethod, interactive));
+  }
   const darkTokens = getThemeTokens('dark');
   const lightTokens = getThemeTokens('light');
   const themeConfig = {

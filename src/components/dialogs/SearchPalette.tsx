@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { MethodDocument, RequestMethod } from '../../types';
 import { HttpChip, WBButton } from '../primitives/WorkbenchPrimitives';
 
@@ -13,11 +13,20 @@ type SearchPaletteProps = {
 
 export function SearchPalette({ open, methods, getMethodHttpMethod, onClose, onSelectMethod, onCreateMethod }: SearchPaletteProps): ReactNode {
   const [query, setQuery] = useState('');
+  const [activeIndex, setActiveIndex] = useState(0);
   const results = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     if (!normalized) return methods.slice(0, 8);
     return methods.filter((method) => method.name.toLowerCase().includes(normalized)).slice(0, 12);
   }, [methods, query]);
+
+  useEffect(() => {
+    if (results.length === 0) {
+      setActiveIndex(0);
+      return;
+    }
+    setActiveIndex((current) => (current >= results.length ? 0 : current));
+  }, [results.length]);
 
   if (!open) return null;
 
@@ -50,8 +59,16 @@ export function SearchPalette({ open, methods, getMethodHttpMethod, onClose, onS
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Escape') onClose();
-              if (event.key === 'Enter' && results[0]) {
-                onSelectMethod(results[0]);
+              if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                setActiveIndex((current) => (results.length === 0 ? 0 : (current + 1) % results.length));
+              }
+              if (event.key === 'ArrowUp') {
+                event.preventDefault();
+                setActiveIndex((current) => (results.length === 0 ? 0 : (current - 1 + results.length) % results.length));
+              }
+              if (event.key === 'Enter' && results[activeIndex]) {
+                onSelectMethod(results[activeIndex]);
                 onClose();
               }
             }}
@@ -61,7 +78,7 @@ export function SearchPalette({ open, methods, getMethodHttpMethod, onClose, onS
           <kbd style={{ fontFamily: 'var(--wb-font-mono)', fontSize: 11, color: 'var(--wb-text-muted)', background: 'var(--wb-bg-soft)', border: '1px solid var(--wb-border-soft)', borderRadius: 4, padding: '2px 5px' }}>Esc</kbd>
         </div>
         <div style={{ maxHeight: 380, overflowY: 'auto', padding: 8 }}>
-          {results.map((method) => (
+          {results.map((method, index) => (
             <button
               key={method.id}
               type="button"
@@ -69,7 +86,7 @@ export function SearchPalette({ open, methods, getMethodHttpMethod, onClose, onS
                 onSelectMethod(method);
                 onClose();
               }}
-              style={{ width: '100%', border: 0, background: 'transparent', borderRadius: 'var(--wb-radius-sm)', padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: 'var(--wb-text)', fontFamily: 'var(--wb-font-sans)', textAlign: 'left' }}
+              style={{ width: '100%', border: 0, background: index === activeIndex ? 'var(--wb-bg-active)' : 'transparent', borderRadius: 'var(--wb-radius-sm)', padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: 'var(--wb-text)', fontFamily: 'var(--wb-font-sans)', textAlign: 'left' }}
             >
               <HttpChip method={getMethodHttpMethod(method)} size="sm" />
               <span style={{ fontFamily: 'var(--wb-font-mono)', fontSize: 13, fontWeight: 600 }}>{method.name}</span>

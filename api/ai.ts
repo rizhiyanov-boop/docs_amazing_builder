@@ -1,6 +1,10 @@
+import { getUserBySessionToken } from './_lib/db.js';
+import { getSessionToken } from './_lib/http.js';
+
 type VercelRequest = {
   method?: string;
   body?: unknown;
+  headers?: Record<string, string | string[] | undefined>;
 };
 
 declare const process: {
@@ -302,6 +306,16 @@ function normalizeValidationRulesResult(raw: unknown): {
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   res.setHeader('Cache-Control', 'no-store');
+  if (req.method === 'OPTIONS') {
+    res.status(204).json({});
+    return;
+  }
+
+  const user = await getUserBySessionToken(getSessionToken(req));
+  if (!user) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
 
   if (req.method === 'GET') {
     res.status(200).json({

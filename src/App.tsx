@@ -109,7 +109,7 @@ import { ProjectDocsEditor } from './components/ProjectDocsEditor';
 import { ProjectFlowsEditor } from './components/ProjectFlowsEditor';
 import { SearchPalette } from './components/dialogs/SearchPalette';
 import { Toast } from './components/Toast';
-import { AiTableButton, httpMethodToAccent } from './components/primitives/WorkbenchPrimitives';
+import { AiTableButton } from './components/primitives/WorkbenchPrimitives';
 import { WorkbenchSidebar } from './components/workbench/WorkbenchSidebar';
 import { WorkbenchTopbar, type WorkbenchAccent, type WorkbenchLayout, type WorkbenchMode } from './components/workbench/WorkbenchTopbar';
 import { WorkspaceHome } from './components/workbench/WorkspaceHome';
@@ -297,7 +297,7 @@ function getSectionWorkbenchMeta(section: DocSection): {
 } {
   if (section.kind === 'parsed') {
     if (section.sectionType === 'request') {
-      return { emoji: '↓', eyebrow: 'Request', accent: httpMethodToAccent(section.requestMethod ?? 'POST') };
+      return { emoji: '↓', eyebrow: 'Request', accent: 'post' };
     }
     if (section.sectionType === 'response') {
       return { emoji: '↑', eyebrow: 'Response', accent: 'get' };

@@ -14,8 +14,17 @@ export const Card = forwardRef<HTMLDivElement, CardProps>(function Card(
   { emoji, title, eyebrow, actions, accent, draggableHandle = true, children, style, ...props },
   ref
 ): ReactNode {
-  const accentVar = accent === 'del' ? 'del' : accent;
-  const borderColor = accentVar ? `var(--wb-${accentVar}, var(--wb-border))` : 'var(--wb-border)';
+  const borderColor = accent
+    ? accent === 'post'
+      ? 'var(--wb-post-fg)'
+      : accent === 'get'
+        ? 'var(--wb-get-fg)'
+        : accent === 'put'
+          ? 'var(--wb-put-fg)'
+          : accent === 'del'
+            ? 'var(--wb-del-fg)'
+            : 'var(--wb-border)'
+    : 'var(--wb-border)';
 
   return (
     <div

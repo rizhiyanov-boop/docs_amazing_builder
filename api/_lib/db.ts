@@ -230,6 +230,7 @@ export async function getUserBySessionToken(token: string | undefined): Promise<
     FROM sessions
     JOIN users ON users.id = sessions.user_id
     WHERE sessions.token = ${token}
+      AND sessions.expires_at > now()
     LIMIT 1
   `;
 

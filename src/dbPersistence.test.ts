@@ -181,4 +181,16 @@ describe('session cleanup side effects', () => {
     expect(deleteQueries).toHaveLength(1);
     vi.useRealTimers();
   });
+
+  it('checks session expiry when loading user by token', async () => {
+    const { getUserBySessionToken } = await import('../api/_lib/db');
+    sqlMock.mockResolvedValue([{ id: 'usr_1', login: 'user' }]);
+
+    await getUserBySessionToken('token-1');
+
+    const sessionQuery = sqlMock.mock.calls
+      .map(([strings]) => queryText(strings as TemplateStringsArray))
+      .find((text) => text.startsWith('SELECT users.id, users.login'));
+    expect(sessionQuery).toContain('sessions.expires_at > now()');
+  });
 });

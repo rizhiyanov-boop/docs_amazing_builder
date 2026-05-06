@@ -1231,16 +1231,26 @@ export default function App() {
 
       setAuthUser(user);
       setServerSyncError('');
-      const projects = await listServerProjects();
-      setServerProjects(projects);
-      if (projects.length > 0) {
-        await loadServerProjectIntoWorkspace(projects[0].id);
-      } else {
-        setServerProjectId(null);
-      }
       setToastMessage(current.mode === 'login' ? 'Вы вошли в аккаунт' : 'Регистрация выполнена');
       completeAuthRequestStatus(current.mode === 'login' ? 'Авторизация: вход выполнен' : 'Авторизация: регистрация выполнена');
       setAuthDialog(null);
+
+      try {
+        const projects = await listServerProjects();
+        setServerProjects(projects);
+        if (projects.length > 0) {
+          await loadServerProjectIntoWorkspace(projects[0].id);
+        } else {
+          setServerProjectId(null);
+        }
+      } catch (projectLoadError) {
+        const projectLoadMessage = projectLoadError instanceof Error ? projectLoadError.message : 'Не удалось загрузить проекты';
+        setServerSyncError(projectLoadMessage);
+        if (/проект не найден/i.test(projectLoadMessage)) {
+          setServerProjectId(null);
+          setToastMessage('Вход выполнен, но серверный проект недоступен');
+        }
+      }
     } catch (error) {
       const message =
         error instanceof Error
@@ -7432,7 +7442,7 @@ export default function App() {
                 <span>{authDialog.mode === 'login' ? 'Выполняем вход...' : 'Создаем аккаунт...'}</span>
               </div>
             )}
-            <div className="import-routing-actions">
+            <div className="import-routing-actions auth-dialog-actions">
               <button type="button" className="ghost" onClick={closeAuthDialog} disabled={authDialog.isSubmitting}>
                 Отмена
               </button>

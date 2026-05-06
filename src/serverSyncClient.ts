@@ -64,7 +64,10 @@ export type LoadedProject = {
   updatedAt: string;
 };
 
-async function parseResponse<T>(response: Response): Promise<T> {
+async function parseResponse<T>(
+  response: Response,
+  options?: { notFoundMessage?: string }
+): Promise<T> {
   let payload: ApiEnvelope<T> | null = null;
   const contentType = response.headers.get('content-type') || '';
   const text = await response.text();
@@ -83,7 +86,7 @@ async function parseResponse<T>(response: Response): Promise<T> {
 
   if (!response.ok) {
     if (response.status === 404) {
-      throw new ApiError(payload?.error || 'Проект не найден', 404);
+      throw new ApiError(payload?.error || options?.notFoundMessage || 'Ресурс не найден', 404);
     }
     throw new ApiError(payload?.error || `Ошибка серверного запроса (HTTP ${response.status})`, response.status);
   }
@@ -123,7 +126,9 @@ export async function registerWithPassword(payload: { login: string; password: s
     body: JSON.stringify(payload)
   });
 
-  const payloadResponse = await parseResponse<{ user: AuthUser }>(response);
+  const payloadResponse = await parseResponse<{ user: AuthUser }>(response, {
+    notFoundMessage: `Auth API недоступен (POST /api/auth/register). ${API_MODE_HINT}`
+  });
   return payloadResponse.user;
 }
 
@@ -137,7 +142,9 @@ export async function loginWithPassword(payload: { login: string; password: stri
     body: JSON.stringify(payload)
   });
 
-  const payloadResponse = await parseResponse<{ user: AuthUser }>(response);
+  const payloadResponse = await parseResponse<{ user: AuthUser }>(response, {
+    notFoundMessage: `Auth API недоступен (POST /api/auth/login). ${API_MODE_HINT}`
+  });
   return payloadResponse.user;
 }
 
@@ -155,7 +162,9 @@ export async function listServerProjects(): Promise<ProjectListItem[]> {
     credentials: 'include'
   });
 
-  const payload = await parseResponse<{ projects: ProjectListItem[] }>(response);
+  const payload = await parseResponse<{ projects: ProjectListItem[] }>(response, {
+    notFoundMessage: `Projects API недоступен (GET /api/projects). ${API_MODE_HINT}`
+  });
   return payload.projects;
 }
 
@@ -165,7 +174,9 @@ export async function loadServerProject(projectId: string): Promise<LoadedProjec
     credentials: 'include'
   });
 
-  const payload = await parseResponse<{ project: LoadedProject }>(response);
+  const payload = await parseResponse<{ project: LoadedProject }>(response, {
+    notFoundMessage: 'Проект не найден'
+  });
   return payload.project;
 }
 

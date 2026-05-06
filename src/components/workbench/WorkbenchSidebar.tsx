@@ -75,7 +75,7 @@ export function WorkbenchSidebar({
     <aside className="wb-sidebar">
       <div style={{ padding: '12px 14px 10px', display: 'flex', alignItems: 'center', gap: 8, borderBottom: '1px solid var(--wb-border)' }}>
         <div style={{ width: 22, height: 22, borderRadius: 6, background: 'var(--wb-text)', color: 'var(--wb-bg-surface)', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>D</div>
-        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--wb-text)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>doc-builder</div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--wb-text)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{projectName || 'doc-builder'}</div>
         <button type="button" onClick={onOpenSearch} style={{ border: 0, background: 'transparent', color: 'var(--wb-text-muted)', cursor: 'pointer', fontSize: 14 }}>⌘K</button>
       </div>
 

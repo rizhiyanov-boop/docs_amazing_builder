@@ -6,6 +6,7 @@ type TableProps = {
   rows: ParsedRow[];
   onUpdateRow?: (row: ParsedRow, patch: Partial<ParsedRow>) => void;
   onAddRow?: () => void;
+  onRowMenu?: (row: ParsedRow) => void;
   editable?: boolean;
 };
 
@@ -42,7 +43,7 @@ function DescriptionInput({ row, onUpdateRow, rows = 2 }: { row: ParsedRow; onUp
   );
 }
 
-export function TableClassic({ rows, onUpdateRow, onAddRow, editable = false }: TableProps): ReactNode {
+export function TableClassic({ rows, onUpdateRow, onAddRow, onRowMenu, editable = false }: TableProps): ReactNode {
   return (
     <div style={{ display: 'grid', gap: 0, border: '1px solid var(--wb-border-soft)', borderRadius: 'var(--wb-radius)', overflow: 'hidden' }}>
       {rows.map((row) => (
@@ -75,7 +76,15 @@ export function TableClassic({ rows, onUpdateRow, onAddRow, editable = false }: 
               {row.description || 'Описание не заполнено'}
             </div>
           )}
-          <button type="button" style={{ border: 0, background: 'transparent', color: 'var(--wb-text-muted)', cursor: 'pointer', fontSize: 16 }}>⋯</button>
+          {onRowMenu && (
+            <button
+              type="button"
+              onClick={() => onRowMenu(row)}
+              style={{ border: 0, background: 'transparent', color: 'var(--wb-text-muted)', cursor: 'pointer', fontSize: 16 }}
+            >
+              ⋯
+            </button>
+          )}
         </div>
       ))}
       {rows.length === 0 && <div style={{ padding: 14, color: 'var(--wb-text-muted)', fontSize: 13 }}>Поля не добавлены.</div>}

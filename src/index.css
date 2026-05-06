@@ -8,6 +8,8 @@
 body {
   margin: 0;
   min-width: 320px;
+  background: var(--wb-bg-canvas);
+  color: var(--wb-text);
 }
 
 h1,

@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
+import './tokens-workbench.css'
 import App from './App.tsx'
 
 const DYNAMIC_IMPORT_RELOAD_KEY = 'doc-builder-dynamic-import-reload';

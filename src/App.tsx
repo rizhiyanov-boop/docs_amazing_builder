@@ -7161,9 +7161,7 @@ export default function App() {
                     <AiTableButton kind="fill" onClick={() => setAiStatus('AI: заполняю описания...')} />
                     <AiTableButton kind="json" onClick={() => setAiStatus('AI: форматирую JSON...')} />
                   </>
-                ) : (
-                  renderSectionActionCluster(section, 'header')
-                )
+                ) : undefined
               }
             >
               {renderWorkbenchSectionPreview(section)}

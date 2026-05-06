@@ -16,6 +16,7 @@ export const Card = forwardRef<HTMLDivElement, CardProps>(function Card(
 ): ReactNode {
   const accentVar = accent === 'del' ? 'del' : accent;
   const borderColor = accentVar ? `var(--wb-${accentVar}, var(--wb-border))` : 'var(--wb-border)';
+
   return (
     <div
       {...props}

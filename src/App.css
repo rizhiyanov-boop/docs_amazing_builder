@@ -4670,11 +4670,15 @@ body[data-wb-accent] {
   border: 1px solid var(--wb-border-soft);
   padding: 7px 8px;
   text-align: left;
+  background: var(--wb-bg-surface) !important;
+  color: var(--wb-text) !important;
 }
 
 .wb-wiki-preview th,
 .wb-html-export-content th {
-  background: var(--wb-bg-soft);
+  background: var(--wb-bg-soft) !important;
+  color: var(--wb-text-soft) !important;
+  font-weight: 600;
 }
 
 .wb-wiki-toc {

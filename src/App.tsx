@@ -114,7 +114,6 @@ import { WorkbenchSidebar } from './components/workbench/WorkbenchSidebar';
 import { WorkbenchTopbar, type WorkbenchAccent, type WorkbenchLayout, type WorkbenchMode } from './components/workbench/WorkbenchTopbar';
 import { WorkspaceHome } from './components/workbench/WorkspaceHome';
 import { TableClassic, TableGallery, TableMiniCards } from './components/tables/WorkbenchTables';
-import { WorkspaceTabs } from './components/WorkspaceTabs';
 import { HtmlExportScreen } from './screens/HtmlExportScreen';
 import { WikiScreen } from './screens/WikiScreen';
 import { useRemoteProjectAutosave } from './hooks/useRemoteProjectAutosave';
@@ -7832,7 +7831,6 @@ export default function App() {
         <main className={`workspace ${workspaceScope === 'flows' && tab === 'editor' ? 'workspace-flow-focus' : ''}`} role="main">
           {canRenderWorkspace ? (
             <>
-              <WorkspaceTabs tab={tab} onOpenEditor={() => setTab('editor')} onOpenHtml={openHtmlPreview} onOpenWiki={openWikiPreview} />
               {tab === 'editor' && (
                 <div className="workspace-context-tabs" role="tablist" aria-label="Контекст редактора">
                   <button

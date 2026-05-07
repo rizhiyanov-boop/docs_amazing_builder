@@ -108,6 +108,7 @@ import type { AddableBlockType } from './components/MethodSectionSidebar';
 import { ParsedSectionEditor } from './components/ParsedSectionEditor';
 import { ProjectDocsEditor } from './components/ProjectDocsEditor';
 import { ProjectFlowsEditor } from './components/ProjectFlowsEditor';
+import { AiDescriptionsPreview, type AiDescriptionSuggestion } from './components/dialogs/AiDescriptionsPreview';
 import { SearchPalette } from './components/dialogs/SearchPalette';
 import { Toast } from './components/Toast';
 import { AiTableButton } from './components/primitives/WorkbenchPrimitives';
@@ -446,6 +447,10 @@ type SourceTextImportState = {
   target: ParseTarget;
   draft: string;
 };
+type AiDescriptionsPreviewState = {
+  sectionId: string;
+  suggestions: AiDescriptionSuggestion[];
+};
 type AuthDialogState = {
   mode: AuthDialogMode;
   login: string;
@@ -685,6 +690,7 @@ export default function App() {
   const [aiErrorMessage, setAiErrorMessage] = useState('');
   const [aiRequestStatus, setAiRequestStatus] = useState<AiRequestStatus | null>(null);
   const [aiBusyKey, setAiBusyKey] = useState<string | null>(null);
+  const [aiDescriptionsPreview, setAiDescriptionsPreview] = useState<AiDescriptionsPreviewState | null>(null);
   const [authRequestStatus, setAuthRequestStatus] = useState<AuthRequestStatus | null>(null);
   const [authBusyKey, setAuthBusyKey] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState<EditableTitleState | null>(null);
@@ -3403,26 +3409,80 @@ export default function App() {
           .filter((item) => item[0] && item[1])
       );
 
-      updateSection(section.id, (current) => {
-        if (current.kind !== 'parsed') return current;
-
-        const rows = current.rows.map((row) => {
-          const suggested = descriptionByField.get(row.field.trim().toLowerCase());
-          if (!suggested || row.description.trim()) return row;
-          return { ...row, description: suggested };
+      const previewSuggestions: AiDescriptionSuggestion[] = [];
+      for (const row of targetRows) {
+        const suggested = descriptionByField.get(row.field.trim().toLowerCase());
+        if (!suggested) continue;
+        const locked = Boolean(row.description.trim());
+        previewSuggestions.push({
+          field: row.field,
+          description: suggested,
+          accepted: !locked,
+          locked
         });
+      }
 
-        return { ...current, rows };
+      if (previewSuggestions.length === 0) {
+        setAiRequestStatus(null);
+        setAiErrorMessage('AI не вернул новые описания для превью');
+        return;
+      }
+
+      setAiDescriptionsPreview({
+        sectionId: section.id,
+        suggestions: previewSuggestions
       });
-
-      setToastMessage('AI заполнил описания полей');
-      completeAiRequestStatus('AI: описания заполнены');
+      completeAiRequestStatus('AI: открыл предпросмотр описаний');
     } catch (error) {
       setAiRequestStatus(null);
       setAiErrorMessage(error instanceof Error ? error.message : 'Не удалось заполнить описания через AI');
     } finally {
       setAiBusyKey(null);
     }
+  }
+
+  function toggleAiDescriptionPreviewItem(field: string, accepted: boolean): void {
+    setAiDescriptionsPreview((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        suggestions: current.suggestions.map((item) => (
+          item.field === field && !item.locked
+            ? { ...item, accepted }
+            : item
+        ))
+      };
+    });
+  }
+
+  function applyAiDescriptionPreviewSelection(): void {
+    if (!aiDescriptionsPreview) return;
+    const selectedByField = new Map(
+      aiDescriptionsPreview.suggestions
+        .filter((item) => item.accepted && !item.locked)
+        .map((item) => [item.field.trim().toLowerCase(), item.description] as const)
+    );
+    const selectedCount = selectedByField.size;
+
+    if (selectedCount === 0) {
+      setAiDescriptionsPreview(null);
+      setToastMessage('Нет выбранных описаний для применения');
+      return;
+    }
+
+    updateSection(aiDescriptionsPreview.sectionId, (current) => {
+      if (current.kind !== 'parsed') return current;
+      const rows = current.rows.map((row) => {
+        if (row.description.trim()) return row;
+        const suggested = selectedByField.get(row.field.trim().toLowerCase());
+        return suggested ? { ...row, description: suggested } : row;
+      });
+      return { ...current, rows };
+    });
+
+    setAiDescriptionsPreview(null);
+    setToastMessage(`AI применил описания: ${selectedCount}`);
+    completeAiRequestStatus('AI: описания применены');
   }
 
   async function suggestParameterMappingsWithAi(section: ParsedSection): Promise<void> {
@@ -7360,6 +7420,33 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {aiDescriptionsPreview && (
+        <AiDescriptionsPreview
+          suggestions={aiDescriptionsPreview.suggestions}
+          onToggle={toggleAiDescriptionPreviewItem}
+          onSelectAll={() => {
+            setAiDescriptionsPreview((current) => {
+              if (!current) return current;
+              return {
+                ...current,
+                suggestions: current.suggestions.map((item) => (item.locked ? item : { ...item, accepted: true }))
+              };
+            });
+          }}
+          onSelectNone={() => {
+            setAiDescriptionsPreview((current) => {
+              if (!current) return current;
+              return {
+                ...current,
+                suggestions: current.suggestions.map((item) => (item.locked ? item : { ...item, accepted: false }))
+              };
+            });
+          }}
+          onConfirm={applyAiDescriptionPreviewSelection}
+          onCancel={() => setAiDescriptionsPreview(null)}
+        />
       )}
 
       {showDeleteProjectDialog && (

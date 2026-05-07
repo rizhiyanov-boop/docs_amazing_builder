@@ -1,9 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
 import { isRequired } from './WorkbenchTables';
 import { TableClassic } from './WorkbenchTables';
 import { makeParsedRow } from '../../test/fixtures';
+
+afterEach(() => {
+  cleanup();
+});
 
 describe('WorkbenchTables isRequired', () => {
   it('treats plus as required marker', () => {

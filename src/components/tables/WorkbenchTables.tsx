@@ -2,6 +2,19 @@ import type { ReactNode } from 'react';
 import type { ParsedRow } from '../../types';
 import { ReqDot, TypeChip } from '../primitives/WorkbenchPrimitives';
 
+const ROW_TYPES = [
+  { value: 'string', label: 'string' },
+  { value: 'int', label: 'int' },
+  { value: 'long', label: 'long' },
+  { value: 'number', label: 'number' },
+  { value: 'boolean', label: 'boolean' },
+  { value: 'object', label: 'object' },
+  { value: 'array', label: 'array' },
+  { value: 'array_object', label: 'array{}' },
+  { value: 'null', label: 'null' },
+  { value: 'map', label: 'map' }
+] as const;
+
 type TableProps = {
   rows: ParsedRow[];
   onUpdateRow?: (row: ParsedRow, patch: Partial<ParsedRow>) => void;
@@ -43,6 +56,43 @@ function DescriptionInput({ row, onUpdateRow, rows = 2 }: { row: ParsedRow; onUp
   );
 }
 
+function TypeSelect({
+  row,
+  onUpdateRow
+}: {
+  row: ParsedRow;
+  onUpdateRow?: (row: ParsedRow, patch: Partial<ParsedRow>) => void;
+}): ReactNode {
+  if (!onUpdateRow) {
+    return <TypeChip type={row.type} />;
+  }
+
+  return (
+    <select
+      value={row.type || 'string'}
+      onChange={(event) => onUpdateRow(row, { type: event.target.value })}
+      aria-label="Тип поля"
+      style={{
+        fontFamily: 'var(--wb-font-mono)',
+        fontSize: 11,
+        color: 'var(--wb-text-soft)',
+        background: 'var(--wb-bg-soft)',
+        border: '1px solid var(--wb-border-soft)',
+        borderRadius: 3,
+        padding: '1px 4px',
+        cursor: 'pointer',
+        width: '100%'
+      }}
+    >
+      {ROW_TYPES.map((item) => (
+        <option key={item.value} value={item.value}>
+          {item.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 export function TableClassic({ rows, onUpdateRow, onAddRow, onRowMenu, editable = false }: TableProps): ReactNode {
   return (
     <div style={{ display: 'grid', gap: 0, border: '1px solid var(--wb-border-soft)', borderRadius: 'var(--wb-radius)', overflow: 'hidden' }}>
@@ -68,7 +118,7 @@ export function TableClassic({ rows, onUpdateRow, onAddRow, onRowMenu, editable 
             )}
             <ReqDot required={isRequired(row.required)} />
           </div>
-          <TypeChip type={row.type} />
+          <TypeSelect row={row} onUpdateRow={onUpdateRow} />
           {editable ? (
             <DescriptionInput row={row} onUpdateRow={onUpdateRow} />
           ) : (
@@ -110,7 +160,7 @@ export function TableGallery({ rows, onUpdateRow, onAddRow, editable = false }: 
             ) : (
               <code style={{ fontFamily: 'var(--wb-font-mono)', fontSize: 13, fontWeight: 600 }}>{row.field || row.sourceField || 'field'}</code>
             )}
-            <TypeChip type={row.type} />
+            <TypeSelect row={row} onUpdateRow={onUpdateRow} />
             <ReqDot required={isRequired(row.required)} />
           </div>
           {editable ? (
@@ -138,7 +188,7 @@ export function TableMiniCards({ rows, onUpdateRow, onAddRow, editable = false }
             <code style={{ display: 'block', fontFamily: 'var(--wb-font-mono)', fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>{row.field || row.sourceField || 'field'}</code>
           )}
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '6px 0' }}>
-            <TypeChip type={row.type} />
+            <TypeSelect row={row} onUpdateRow={onUpdateRow} />
             <ReqDot required={isRequired(row.required)} />
           </div>
           {editable ? (

@@ -17,7 +17,7 @@ type VercelResponse = {
   setHeader: (name: string, value: string) => void;
 };
 
-type RequestTask = 'repair-json' | 'fill-descriptions' | 'suggest-mappings' | 'mask-fields' | 'build-validation-rules';
+type RequestTask = 'repair-json' | 'fill-descriptions' | 'generate-examples' | 'suggest-mappings' | 'mask-fields' | 'build-validation-rules';
 
 type RequestBody = {
   task?: RequestTask;
@@ -89,6 +89,18 @@ function buildTaskPrompt(task: RequestTask, payload: Record<string, unknown>): s
       'Не упоминай тип данных, обязательность, формат и технические пометки.',
       'Не выдумывай поле, если оно не передано.',
       'Ответь строго JSON-объектом вида {"descriptions":[{"field":"...","description":"..."}]}',
+      `SECTION_TYPE: ${String(payload.sectionType ?? 'generic')}`,
+      `ROWS: ${JSON.stringify(payload.rows ?? [])}`
+    ].join('\n');
+  }
+
+  if (task === 'generate-examples') {
+    return [
+      'Ты генерируешь примеры значений для API-полей на русском языке.',
+      'Возвращай только реалистичные примеры без lorem ipsum.',
+      'Не меняй названия полей и не добавляй новые.',
+      'Если пример уже передан во входе, можешь его пропустить.',
+      'Ответь строго JSON-объектом вида {"examples":[{"field":"...","example":"..."}]}.',
       `SECTION_TYPE: ${String(payload.sectionType ?? 'generic')}`,
       `ROWS: ${JSON.stringify(payload.rows ?? [])}`
     ].join('\n');
@@ -197,6 +209,17 @@ function normalizeDescriptionsResult(raw: unknown): { descriptions: Array<{ fiel
       .filter((row) => row.field && row.description)
     : [];
   return { descriptions };
+}
+
+function normalizeExamplesResult(raw: unknown): { examples: Array<{ field: string; example: string }> } {
+  const value = raw as { examples?: Array<{ field?: unknown; example?: unknown }> };
+  const examples = Array.isArray(value.examples)
+    ? value.examples
+      .filter((row) => typeof row?.field === 'string' && typeof row?.example === 'string')
+      .map((row) => ({ field: String(row.field).trim(), example: String(row.example).trim() }))
+      .filter((row) => row.field && row.example)
+    : [];
+  return { examples };
 }
 
 function normalizeMappingsResult(raw: unknown): { mappings: Array<{ serverField: string; clientField: string; confidence?: number }> } {
@@ -324,7 +347,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       provider: 'openai',
       model: process.env.OPENAI_MODEL?.trim() || 'gpt-4.1-nano',
       message: 'Use POST with JSON body: { task, payload }',
-      tasks: ['repair-json', 'fill-descriptions', 'suggest-mappings', 'mask-fields', 'build-validation-rules']
+      tasks: ['repair-json', 'fill-descriptions', 'generate-examples', 'suggest-mappings', 'mask-fields', 'build-validation-rules']
     });
     return;
   }
@@ -339,7 +362,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const task = body.task;
     const payload = body.payload ?? {};
 
-    if (!task || !['repair-json', 'fill-descriptions', 'suggest-mappings', 'mask-fields', 'build-validation-rules'].includes(task)) {
+    if (!task || !['repair-json', 'fill-descriptions', 'generate-examples', 'suggest-mappings', 'mask-fields', 'build-validation-rules'].includes(task)) {
       res.status(400).json({ error: 'Некорректный task' });
       return;
     }
@@ -354,6 +377,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
     if (task === 'fill-descriptions') {
       res.status(200).json({ data: normalizeDescriptionsResult(raw) });
+      return;
+    }
+
+    if (task === 'generate-examples') {
+      res.status(200).json({ data: normalizeExamplesResult(raw) });
       return;
     }
 

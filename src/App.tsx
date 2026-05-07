@@ -97,7 +97,7 @@ import { ONBOARDING_FEATURES } from './onboarding/featureFlags';
 import { ONBOARDING_STEPS, evaluateOnboardingProgress, resolveOnboardingStep, type OnboardingStepId } from './onboarding/steps';
 import { loadOnboardingState, markOnboardingCompleted, markOnboardingStarted, saveOnboardingState } from './onboarding/storage';
 import { emitOnboardingEvent } from './onboarding/telemetry';
-import { buildValidationRulesWithAi, fillDescriptionsWithAi, repairJsonWithAi, suggestMappingsWithAi, suggestMaskFieldsWithAi } from './openrouterClient';
+import { buildValidationRulesWithAi, fillDescriptionsWithAi, generateExamplesWithAi, repairJsonWithAi, suggestMappingsWithAi, suggestMaskFieldsWithAi } from './openrouterClient';
 import { Card } from './components/cards/Card';
 import { AiLoadingCard } from './components/cards/AiLoadingCard';
 import { MethodHeaderCard } from './components/cards/MethodHeaderCard';
@@ -691,6 +691,9 @@ export default function App() {
   const [aiRequestStatus, setAiRequestStatus] = useState<AiRequestStatus | null>(null);
   const [aiBusyKey, setAiBusyKey] = useState<string | null>(null);
   const [aiDescriptionsPreview, setAiDescriptionsPreview] = useState<AiDescriptionsPreviewState | null>(null);
+  const [inlineImportSectionId, setInlineImportSectionId] = useState<string | null>(null);
+  const [inlineImportText, setInlineImportText] = useState('');
+  const [inlineImportError, setInlineImportError] = useState('');
   const [authRequestStatus, setAuthRequestStatus] = useState<AuthRequestStatus | null>(null);
   const [authBusyKey, setAuthBusyKey] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState<EditableTitleState | null>(null);
@@ -706,7 +709,8 @@ export default function App() {
   const [pendingProjectNameFocus, setPendingProjectNameFocus] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [deletedRowUndo, setDeletedRowUndo] = useState<DeletedRowUndoState | null>(null);
-  const [sectionClipboard, setSectionClipboard] = useState<SectionClipboardState | null>(null);
+  const sectionClipboardRef = useRef<SectionClipboardState | null>(null);
+  const [hasSectionClipboard, setHasSectionClipboard] = useState(false);
   const [openSectionActionsMenuId, setOpenSectionActionsMenuId] = useState<string | null>(null);
   const [expandedProjectIds, setExpandedProjectIds] = useState<Record<string, true>>({});
   const [expandedMethodId, setExpandedMethodId] = useState<string | null>(() => initialWorkspace.activeMethodId ?? initialWorkspace.methods[0]?.id ?? null);
@@ -1335,14 +1339,16 @@ export default function App() {
   function copySection(sectionId: string): void {
     const section = sections.find((item) => item.id === sectionId);
     if (!section) return;
-    setSectionClipboard({
+    sectionClipboardRef.current = {
       type: 'section',
       section: deepClone(section)
-    });
+    };
+    setHasSectionClipboard(true);
     setToastMessage(`Секция «${resolveSectionTitle(section.title)}» скопирована`);
   }
 
   function pasteSectionRelative(targetSectionId: string, position: 'above' | 'below'): void {
+    const sectionClipboard = sectionClipboardRef.current;
     if (!sectionClipboard || sectionClipboard.type !== 'section') return;
 
     const nextSection = cloneSectionForPaste(sectionClipboard.section);
@@ -2543,7 +2549,7 @@ export default function App() {
   }
 
   function renderSectionActionCluster(section: DocSection, layout: 'sidebar' | 'header' = 'header'): ReactNode {
-    const hasClipboardSection = sectionClipboard?.type === 'section';
+    const hasClipboardSection = hasSectionClipboard && sectionClipboardRef.current?.type === 'section';
     const className = layout === 'sidebar' ? 'section-item-actions' : 'section-head-actions';
     const isMenuOpen = openSectionActionsMenuId === section.id;
 
@@ -3483,6 +3489,119 @@ export default function App() {
     setAiDescriptionsPreview(null);
     setToastMessage(`AI применил описания: ${selectedCount}`);
     completeAiRequestStatus('AI: описания применены');
+  }
+
+  async function generateExamplesWithAiForSection(section: ParsedSection): Promise<void> {
+    const busyKey = `generate-examples:${section.id}`;
+    if (aiBusyKey) return;
+
+    const targetRows = section.rows.filter((row) => row.field.trim() && row.source !== 'header' && row.source !== 'url');
+    const rowsWithoutExample = targetRows.filter((row) => !row.example.trim());
+    if (rowsWithoutExample.length === 0) {
+      setAiRequestStatus(null);
+      setAiErrorMessage('Нет пустых примеров для AI генерации');
+      return;
+    }
+
+    setAiErrorMessage('');
+    startAiRequestStatus('AI: генерирую примеры значений...');
+    setAiBusyKey(busyKey);
+
+    try {
+      const suggestions = await generateExamplesWithAi({
+        sectionType: section.sectionType ?? 'generic',
+        rows: targetRows.map((row) => ({
+          field: row.field,
+          type: row.type,
+          required: row.required,
+          description: row.description,
+          source: row.source,
+          example: row.example
+        }))
+      });
+
+      const suggestionsByField = new Map(
+        suggestions
+          .map((item) => [item.field.trim().toLowerCase(), item.example.trim()] as const)
+          .filter((item) => item[0] && item[1])
+      );
+
+      let updatedCount = 0;
+      updateSection(section.id, (current) => {
+        if (current.kind !== 'parsed') return current;
+        const rows = current.rows.map((row) => {
+          if (row.example.trim()) return row;
+          const nextExample = suggestionsByField.get(row.field.trim().toLowerCase());
+          if (!nextExample) return row;
+          updatedCount += 1;
+          return { ...row, example: nextExample };
+        });
+        return { ...current, rows };
+      });
+
+      if (updatedCount === 0) {
+        setToastMessage('AI не предложил новых примеров');
+        completeAiRequestStatus('AI: примеры не изменены');
+        return;
+      }
+
+      setToastMessage(`AI заполнил примеры: ${updatedCount}`);
+      completeAiRequestStatus('AI: примеры применены');
+    } catch (error) {
+      setAiRequestStatus(null);
+      setAiErrorMessage(error instanceof Error ? error.message : 'Не удалось сгенерировать примеры через AI');
+    } finally {
+      setAiBusyKey(null);
+    }
+  }
+
+  function openInlineImport(section: ParsedSection): void {
+    setInlineImportSectionId(section.id);
+    setInlineImportText('');
+    setInlineImportError('');
+  }
+
+  function cancelInlineImport(): void {
+    setInlineImportSectionId(null);
+    setInlineImportText('');
+    setInlineImportError('');
+  }
+
+  function applyInlineImport(section: ParsedSection): void {
+    const rawText = inlineImportText.trim();
+    if (!rawText) {
+      setInlineImportError('Введите cURL или JSON для импорта');
+      return;
+    }
+
+    const format: ParseFormat = /^\s*curl\b/i.test(rawText) ? 'curl' : 'json';
+
+    try {
+      const shouldWrap = section.sectionType === 'response' && !section.domainModelEnabled && format === 'json';
+      const inputToParse = shouldWrap ? wrapNonDomainResponseJson(rawText) : rawText;
+      const parsedRows = parseToRows(format, inputToParse);
+      const rows = normalizeParsedRowsForSection(section, parsedRows);
+      const curlMeta = isRequestSection(section) && format === 'curl' ? parseCurlMeta(rawText) : null;
+
+      updateSection(section.id, (current) => {
+        if (current.kind !== 'parsed') return current;
+        return {
+          ...current,
+          format,
+          input: rawText,
+          rows,
+          error: '',
+          lastSyncedFormat: format,
+          requestUrl: isRequestSection(current) ? curlMeta?.url ?? current.requestUrl ?? '' : current.requestUrl,
+          requestMethod: isRequestSection(current) ? curlMeta?.method ?? current.requestMethod ?? 'POST' : current.requestMethod
+        };
+      });
+
+      setToastMessage(format === 'curl' ? 'cURL импортирован в секцию' : 'JSON импортирован в секцию');
+      cancelInlineImport();
+    } catch (error) {
+      setInlineImportError(error instanceof Error ? error.message : 'Ошибка парсинга');
+    }
   }
 
   async function suggestParameterMappingsWithAi(section: ParsedSection): Promise<void> {
@@ -7287,12 +7406,45 @@ export default function App() {
                     <button type="button" className="wb-table-view-btn" onClick={() => setWorkbenchTableView('classic')}>classic</button>
                     <button type="button" className="wb-table-view-btn" onClick={() => setWorkbenchTableView('gallery')}>gallery</button>
                     <button type="button" className="wb-table-view-btn" onClick={() => setWorkbenchTableView('mini')}>mini</button>
-                    <AiTableButton kind="fill" onClick={() => setAiStatus('AI: заполняю описания...')} />
-                    <AiTableButton kind="json" onClick={() => setAiStatus('AI: форматирую JSON...')} />
+                    <AiTableButton kind="fill" onClick={() => void fillFieldDescriptionsWithAi(section)} />
+                    <AiTableButton kind="json" onClick={() => void generateExamplesWithAiForSection(section)} />
+                    {(section.sectionType === 'request' || section.sectionType === 'response') && (
+                      <button type="button" className="wb-table-view-btn" onClick={() => openInlineImport(section)}>
+                        ↓ Импорт
+                      </button>
+                    )}
                   </>
                 ) : undefined
               }
             >
+              {section.kind === 'parsed' && inlineImportSectionId === section.id && (
+                <div style={{ display: 'grid', gap: 8, marginBottom: 12 }}>
+                  <textarea
+                    value={inlineImportText}
+                    onChange={(event) => {
+                      setInlineImportText(event.target.value);
+                      if (inlineImportError) setInlineImportError('');
+                    }}
+                    placeholder="Вставьте cURL или JSON"
+                    rows={6}
+                    style={{
+                      width: '100%',
+                      resize: 'vertical',
+                      fontFamily: 'var(--wb-font-mono)',
+                      background: 'var(--wb-bg-soft)',
+                      color: 'var(--wb-text)',
+                      border: '1px solid var(--wb-border)',
+                      borderRadius: 'var(--wb-radius)',
+                      padding: '10px 12px'
+                    }}
+                  />
+                  {inlineImportError && <div style={{ color: 'var(--wb-required)', fontSize: 12 }}>{inlineImportError}</div>}
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                    <button type="button" className="wb-table-view-btn" onClick={cancelInlineImport}>Cancel</button>
+                    <button type="button" className="wb-table-view-btn" onClick={() => applyInlineImport(section)}>Apply</button>
+                  </div>
+                </div>
+              )}
               {renderWorkbenchSectionPreview(section)}
             </Card>
           );

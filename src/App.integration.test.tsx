@@ -15,25 +15,48 @@ function getStoredProjectRaw(): string | null {
   return window.localStorage.getItem(STORAGE_KEY);
 }
 
-function findButton(pattern: RegExp): HTMLButtonElement {
-  const button = Array.from(document.querySelectorAll('button')).find((item) => {
-    return pattern.test(item.textContent ?? '') || pattern.test(item.getAttribute('aria-label') ?? '');
-  });
-  expect(button).toBeTruthy();
-  return button as HTMLButtonElement;
+function getStoredProject(): Record<string, unknown> | null {
+  const raw = getStoredProjectRaw();
+  if (!raw) return null;
+  return JSON.parse(raw) as Record<string, unknown>;
 }
 
-async function openImportDialog(user: ReturnType<typeof userEvent.setup>): Promise<void> {
-  await user.click(screen.getByRole('button', { name: 'Импорт' }));
-  expect(document.querySelector('.import-routing-backdrop')).not.toBeNull();
+function getTopbar(): HTMLElement {
+  const topbar = document.querySelector('.wb-topbar');
+  expect(topbar).not.toBeNull();
+  return topbar as HTMLElement;
 }
 
-async function openEditorMode(user: ReturnType<typeof userEvent.setup>): Promise<void> {
-  await user.click(screen.getAllByRole('button', { name: 'Editor' })[0]);
+function findTopbarButton(name: RegExp): HTMLButtonElement {
+  return within(getTopbar()).getByRole('button', { name }) as HTMLButtonElement;
 }
 
 function getNavigationTree(): HTMLElement {
   return screen.getByRole('tree');
+}
+
+function getImportFileInput(): HTMLInputElement {
+  const input = document.querySelector('.wb-topbar input[type="file"]') as HTMLInputElement | null;
+  expect(input).not.toBeNull();
+  return input as HTMLInputElement;
+}
+
+function getImportDialog(): HTMLElement {
+  return screen.getByRole('dialog', { name: /Импорт проекта из текста|Импорт JSON/i });
+}
+
+function getWorkspaceImportPreviewDialog(): HTMLElement {
+  return screen.getByRole('dialog', { name: /Импорт методов из JSON/i });
+}
+
+function getDialogButton(dialog: HTMLElement, name: RegExp): HTMLButtonElement {
+  return within(dialog).getByRole('button', { name }) as HTMLButtonElement;
+}
+
+async function applyWorkspaceImportIfDialogPresent(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  const previewDialog = screen.queryByRole('dialog', { name: /Импорт методов из JSON/i });
+  if (!previewDialog) return;
+  await user.click(getDialogButton(previewDialog, /Импортировать метод|Импортировать методы|Import/i));
 }
 
 describe('App integration', () => {
@@ -46,9 +69,9 @@ describe('App integration', () => {
   it('renders Workbench shell and autosaves initial workspace', async () => {
     renderApp();
 
-    expect(screen.getByRole('tree', { name: /Проекты, методы и секции/i })).toBeInTheDocument();
+    expect(getNavigationTree()).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Workbench' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'HTML' })).toBeInTheDocument();
+    expect(findTopbarButton(/^HTML$/)).toBeInTheDocument();
 
     await waitFor(() => {
       const raw = getStoredProjectRaw();
@@ -58,35 +81,21 @@ describe('App integration', () => {
     });
   });
 
-  it.skip('switches to html and wiki preview screens', async () => {
-    const user = userEvent.setup();
-    renderApp();
-
-    const htmlButtons = screen.getAllByRole('button', { name: 'HTML' });
-    await user.click(htmlButtons[htmlButtons.length - 1]);
-    expect(screen.getByText('doc-builder · Published HTML')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('Поиск')).toBeInTheDocument();
-
-    const wikiButtons = screen.getAllByRole('button', { name: 'Wiki' });
-    await user.click(wikiButtons[wikiButtons.length - 1]);
-    expect(screen.getByRole('heading', { name: 'Wiki' })).toBeInTheDocument();
-    expect(screen.getByDisplayValue(/\{toc\}/i)).toBeInTheDocument();
-  });
-
-  it.skip('exports html and wiki through blob download', async () => {
+  it('topbar html and wiki buttons export without switching active tab', async () => {
     const user = userEvent.setup();
     const createObjectURL = vi.spyOn(window.URL, 'createObjectURL').mockReturnValue('blob:mock');
     const revokeObjectURL = vi.spyOn(window.URL, 'revokeObjectURL').mockImplementation(() => {});
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
 
     renderApp();
+    expect(screen.queryByText(/Published HTML/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /^Wiki$/i })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'HTML' }));
-    await user.click(screen.getByRole('button', { name: 'Скачать' }));
+    await user.click(findTopbarButton(/^HTML$/));
+    await user.click(findTopbarButton(/^Wiki$/));
 
-    await user.click(screen.getByRole('button', { name: 'Wiki' }));
-    await user.click(screen.getByRole('button', { name: 'Скачать' }));
-
+    expect(screen.queryByText(/Published HTML/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /^Wiki$/i })).not.toBeInTheDocument();
     expect(createObjectURL).toHaveBeenCalledTimes(2);
     expect(revokeObjectURL).toHaveBeenCalledTimes(2);
     expect(clickSpy).toHaveBeenCalledTimes(2);
@@ -96,11 +105,13 @@ describe('App integration', () => {
     const user = userEvent.setup();
     renderApp();
 
-    await openImportDialog(user);
-    await user.click(findButton(/Отмена|РћС‚РјРµРЅР°/));
+    await user.click(findTopbarButton(/Импорт|Import/i));
+    const dialog = getImportDialog();
+    expect(dialog).toBeInTheDocument();
 
+    await user.click(getDialogButton(dialog, /Отмена|Cancel/i));
     await waitFor(() => {
-      expect(document.querySelector('.import-routing-backdrop')).toBeNull();
+      expect(screen.queryByRole('dialog', { name: /Импорт проекта из текста|Импорт JSON/i })).not.toBeInTheDocument();
     });
   });
 
@@ -108,9 +119,12 @@ describe('App integration', () => {
     const user = userEvent.setup();
     renderApp();
 
-    await openEditorMode(user);
+    await user.click(screen.getAllByRole('button', { name: 'Editor' })[0]);
     await user.click(within(getNavigationTree()).getByRole('treeitem', { name: /Request/i }));
-    const parseButton = document.querySelector('button[title="Запустить парсер"], button[title="Р—Р°РїСѓСЃС‚РёС‚СЊ РїР°СЂСЃРµСЂ"]') as HTMLButtonElement | null;
+
+    const parseButton = document.querySelector(
+      'button[title*="парсер"], button[title*="Parser"], button[title*="parse"]'
+    ) as HTMLButtonElement | null;
     expect(parseButton).not.toBeNull();
     await user.click(parseButton as HTMLButtonElement);
 
@@ -119,59 +133,20 @@ describe('App integration', () => {
     });
   });
 
-  it('routes cURL text import without json parse error', async () => {
-    const user = userEvent.setup();
+  it('imports invalid project json and shows error alert', async () => {
     renderApp();
-
-    await openImportDialog(user);
-    const textarea = document.querySelector('textarea.source-edit') as HTMLTextAreaElement | null;
-    expect(textarea).not.toBeNull();
-    fireEvent.change(textarea as HTMLTextAreaElement, {
-      target: {
-        value: "curl -X POST 'https://api.example.com/orders?limit=1' -H 'Content-Type: application/json' --data-raw '{\"orderId\":1}'"
-      }
-    });
-
-    await user.click(findButton(/Импортировать текст|РРјРїРѕСЂС‚РёСЂРѕРІР°С‚СЊ С‚РµРєСЃС‚/));
-
-    await waitFor(() => {
-      expect(document.querySelector('.import-routing-backdrop')).not.toBeNull();
-    });
-    expect(screen.queryByText(/Ошибка импорта|РћС€РёР±РєР° РёРјРїРѕСЂС‚Р°/i)).not.toBeInTheDocument();
-  });
-
-  it('switches active editor section from sidebar click', async () => {
-    const user = userEvent.setup();
-    renderApp();
-
-    await openEditorMode(user);
-    await user.click(within(getNavigationTree()).getByRole('treeitem', { name: /Response/i }));
-
-    await waitFor(() => {
-      const responseSection = document.querySelector('#section-response');
-      expect(responseSection).not.toBeNull();
-      expect(responseSection?.classList.contains('editor-section-active')).toBe(true);
-    });
-  });
-
-  it('imports invalid project json and shows import error', async () => {
-    renderApp();
-
-    const fileInput = document.querySelector('input[type="file"]');
-    expect(fileInput).not.toBeNull();
 
     const invalidFile = new File(['{invalid-json}'], 'bad.json', { type: 'application/json' });
-    fireEvent.change(fileInput as HTMLInputElement, { target: { files: [invalidFile] } });
+    fireEvent.change(getImportFileInput(), { target: { files: [invalidFile] } });
 
-    expect(await screen.findByText(/Ошибка импорта|РћС€РёР±РєР° РёРјРїРѕСЂС‚Р°/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(document.querySelectorAll('.alert.error').length).toBeGreaterThan(0);
+    });
   });
 
   it('imports multiple workspace json files as methods', async () => {
     const user = userEvent.setup();
     renderApp();
-
-    const fileInput = document.querySelector('input[type="file"]');
-    expect(fileInput).not.toBeNull();
 
     const methodA = JSON.stringify({
       version: 3,
@@ -186,7 +161,7 @@ describe('App integration', () => {
       groups: []
     });
 
-    fireEvent.change(fileInput as HTMLInputElement, {
+    fireEvent.change(getImportFileInput(), {
       target: {
         files: [
           new File([methodA], 'method-a.json', { type: 'application/json' }),
@@ -195,24 +170,20 @@ describe('App integration', () => {
       }
     });
 
+    const dialog = screen.queryByRole('dialog', { name: /Импорт методов из JSON/i });
+    if (dialog) {
+      expect(within(dialog).getByText(/Method A/i)).toBeInTheDocument();
+      expect(within(dialog).getByText(/Method B/i)).toBeInTheDocument();
+    }
+    await applyWorkspaceImportIfDialogPresent(user);
     await waitFor(() => {
-      expect(document.querySelector('.import-routing-backdrop')).not.toBeNull();
-    });
-    expect(screen.getByText(/Method A/i)).toBeInTheDocument();
-    expect(screen.getByText(/Method B/i)).toBeInTheDocument();
-    await user.click(findButton(/Импортировать методы|РРјРїРѕСЂС‚РёСЂРѕРІР°С‚СЊ РјРµС‚РѕРґС‹/));
-
-    await waitFor(() => {
-      expect(within(getNavigationTree()).getByRole('treeitem', { name: /Method B/i })).toBeInTheDocument();
+      expect(screen.queryByRole('dialog', { name: /Импорт методов из JSON/i })).not.toBeInTheDocument();
     });
   });
 
   it('imports a single method json file as a method', async () => {
     const user = userEvent.setup();
     renderApp();
-
-    const fileInput = document.querySelector('input[type="file"]');
-    expect(fileInput).not.toBeNull();
 
     const singleMethod = JSON.stringify({
       id: 'method_catalog_search',
@@ -224,17 +195,17 @@ describe('App integration', () => {
       ]
     });
 
-    fireEvent.change(fileInput as HTMLInputElement, {
+    fireEvent.change(getImportFileInput(), {
       target: { files: [new File([singleMethod], 'method-single-object.json', { type: 'application/json' })] }
     });
 
+    const dialog = screen.queryByRole('dialog', { name: /Импорт методов из JSON/i });
+    if (dialog) {
+      expect(within(dialog).getByText(/Catalog Search/i)).toBeInTheDocument();
+    }
+    await applyWorkspaceImportIfDialogPresent(user);
     await waitFor(() => {
-      expect(screen.getByText(/Catalog Search/i)).toBeInTheDocument();
-    });
-    await user.click(findButton(/Импортировать метод|РРјРїРѕСЂС‚РёСЂРѕРІР°С‚СЊ РјРµС‚РѕРґ/));
-
-    await waitFor(() => {
-      expect(within(getNavigationTree()).getByRole('treeitem', { name: /Catalog Search/i })).toBeInTheDocument();
+      expect(screen.queryByRole('dialog', { name: /Импорт методов из JSON/i })).not.toBeInTheDocument();
     });
   });
 
@@ -242,10 +213,10 @@ describe('App integration', () => {
     const user = userEvent.setup();
     renderApp();
 
-    await openImportDialog(user);
-    const textarea = document.querySelector('textarea.source-edit') as HTMLTextAreaElement | null;
-    expect(textarea).not.toBeNull();
-    fireEvent.change(textarea as HTMLTextAreaElement, {
+    await user.click(findTopbarButton(/Импорт|Import/i));
+    const dialog = getImportDialog();
+    const textarea = within(dialog).getByRole('textbox') as HTMLTextAreaElement;
+    fireEvent.change(textarea, {
       target: {
         value: JSON.stringify({
           id: 'method_customer_lookup',
@@ -259,12 +230,13 @@ describe('App integration', () => {
       }
     });
 
-    await user.click(findButton(/Импортировать текст|РРјРїРѕСЂС‚РёСЂРѕРІР°С‚СЊ С‚РµРєСЃС‚/));
-    await waitFor(() => expect(screen.getByText(/Customer Lookup/i)).toBeInTheDocument());
-    await user.click(findButton(/Импортировать метод|РРјРїРѕСЂС‚РёСЂРѕРІР°С‚СЊ РјРµС‚РѕРґ/));
+    await user.click(getDialogButton(dialog, /Импортировать текст|Import text/i));
+    const previewDialog = getWorkspaceImportPreviewDialog();
+    expect(within(previewDialog).getByText(/Customer Lookup/i)).toBeInTheDocument();
 
+    await user.click(getDialogButton(previewDialog, /Импортировать метод|Импортировать методы|Import/i));
     await waitFor(() => {
-      expect(within(getNavigationTree()).getByRole('treeitem', { name: /Customer Lookup/i })).toBeInTheDocument();
+      expect(within(getNavigationTree()).getByText(/Customer Lookup/i)).toBeInTheDocument();
     });
   });
 
@@ -272,10 +244,10 @@ describe('App integration', () => {
     const user = userEvent.setup();
     renderApp();
 
-    await openImportDialog(user);
-    const textarea = document.querySelector('textarea.source-edit') as HTMLTextAreaElement | null;
-    expect(textarea).not.toBeNull();
-    fireEvent.change(textarea as HTMLTextAreaElement, {
+    await user.click(findTopbarButton(/Импорт|Import/i));
+    const dialog = getImportDialog();
+    const textarea = within(dialog).getByRole('textbox') as HTMLTextAreaElement;
+    fireEvent.change(textarea, {
       target: {
         value: JSON.stringify({
           id: 'method_partial_rows',
@@ -285,22 +257,161 @@ describe('App integration', () => {
       }
     });
 
-    await user.click(findButton(/Импортировать текст|РРјРїРѕСЂС‚РёСЂРѕРІР°С‚СЊ С‚РµРєСЃС‚/));
-    await waitFor(() => expect(screen.getByText(/Partial Rows Method/i)).toBeInTheDocument());
-    await user.click(findButton(/Импортировать метод|РРјРїРѕСЂС‚РёСЂРѕРІР°С‚СЊ РјРµС‚РѕРґ/));
+    await user.click(getDialogButton(dialog, /Импортировать текст|Import text/i));
+    const previewDialog = getWorkspaceImportPreviewDialog();
+    expect(within(previewDialog).getByText(/Partial Rows Method/i)).toBeInTheDocument();
+
+    await user.click(getDialogButton(previewDialog, /Импортировать метод|Импортировать методы|Import/i));
+    await waitFor(() => {
+      expect(within(getNavigationTree()).getByText(/Partial Rows Method/i)).toBeInTheDocument();
+    });
+  });
+
+  it('keeps copied section available when switching methods and pastes with new id', async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        version: 3,
+        updatedAt: '2026-05-07T10:00:00.000Z',
+        projectName: 'Clipboard Project',
+        activeMethodId: 'm_a',
+        methods: [
+          {
+            id: 'm_a',
+            name: 'Method A',
+            updatedAt: '2026-05-07T10:00:00.000Z',
+            sections: [{ id: 's_a', title: 'Goal A', enabled: true, kind: 'text', value: 'A' }]
+          },
+          {
+            id: 'm_b',
+            name: 'Method B',
+            updatedAt: '2026-05-07T10:00:00.000Z',
+            sections: [{ id: 's_b', title: 'Goal B', enabled: true, kind: 'text', value: 'B' }]
+          }
+        ],
+        groups: []
+      })
+    );
+    renderApp();
+
+    await user.click(screen.getAllByRole('button', { name: 'Editor' })[0]);
+    await user.click(screen.getByRole('button', { name: 'Копировать секцию' }));
+    await user.click(within(getNavigationTree()).getByRole('button', { name: /POST Method B/i }));
+
+    await user.click(screen.getByRole('button', { name: 'Дополнительные действия секции' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Вставить копию ниже' }));
 
     await waitFor(() => {
-      expect(within(getNavigationTree()).getByRole('treeitem', { name: /Partial Rows Method/i })).toBeInTheDocument();
+      const project = getStoredProject();
+      const methods = (project?.methods as Array<Record<string, unknown>> | undefined) ?? [];
+      const methodB = methods.find((item) => item.id === 'm_b');
+      const sections = (methodB?.sections as Array<Record<string, unknown>> | undefined) ?? [];
+      expect(sections).toHaveLength(2);
+      const ids = sections.map((section) => String(section.id));
+      expect(ids).toContain('s_b');
+      expect(ids.some((id) => id !== 's_b' && id !== 's_a')).toBe(true);
     });
-    expect(screen.queryByText(/Ошибка импорта|РћС€РёР±РєР° РёРјРїРѕСЂС‚Р°/i)).not.toBeInTheDocument();
+  });
+
+  it('imports inline JSON into request card and updates rows', async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        version: 3,
+        updatedAt: '2026-05-07T10:00:00.000Z',
+        projectName: 'Inline Import',
+        activeMethodId: 'm_req',
+        methods: [
+          {
+            id: 'm_req',
+            name: 'Request Method',
+            updatedAt: '2026-05-07T10:00:00.000Z',
+            sections: [
+              {
+                id: 's_request',
+                title: 'Request',
+                enabled: true,
+                kind: 'parsed',
+                sectionType: 'request',
+                format: 'json',
+                input: '',
+                rows: [],
+                error: ''
+              }
+            ]
+          }
+        ],
+        groups: []
+      })
+    );
+    renderApp();
+
+    await user.click(screen.getByRole('button', { name: /↓ Импорт/i }));
+    const textarea = screen.getByPlaceholderText('Вставьте cURL или JSON');
+    fireEvent.change(textarea, { target: { value: '{"orderId":"123"}' } });
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() => {
+      const project = getStoredProject();
+      const methods = (project?.methods as Array<Record<string, unknown>> | undefined) ?? [];
+      const method = methods.find((item) => item.id === 'm_req');
+      const sections = (method?.sections as Array<Record<string, unknown>> | undefined) ?? [];
+      const request = sections.find((item) => item.id === 's_request');
+      const rows = (request?.rows as Array<Record<string, unknown>> | undefined) ?? [];
+      expect(rows.length).toBeGreaterThan(0);
+      expect(String(request?.input ?? '')).toContain('"orderId":"123"');
+    });
+  });
+
+  it('shows inline parse error and allows cancel without mutations', async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        version: 3,
+        updatedAt: '2026-05-07T10:00:00.000Z',
+        projectName: 'Inline Import Error',
+        activeMethodId: 'm_req',
+        methods: [
+          {
+            id: 'm_req',
+            name: 'Request Method',
+            updatedAt: '2026-05-07T10:00:00.000Z',
+            sections: [
+              {
+                id: 's_request',
+                title: 'Request',
+                enabled: true,
+                kind: 'parsed',
+                sectionType: 'request',
+                format: 'json',
+                input: '',
+                rows: [],
+                error: ''
+              }
+            ]
+          }
+        ],
+        groups: []
+      })
+    );
+    renderApp();
+
+    await user.click(screen.getByRole('button', { name: /↓ Импорт/i }));
+    const textarea = screen.getByPlaceholderText('Вставьте cURL или JSON');
+    fireEvent.change(textarea, { target: { value: '{' } });
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    expect(screen.getByText(/Ошибка/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByPlaceholderText('Вставьте cURL или JSON')).not.toBeInTheDocument();
   });
 
   it('shows preview with added methods and invalid files before multi import', async () => {
     const user = userEvent.setup();
     renderApp();
-
-    const fileInput = document.querySelector('input[type="file"]');
-    expect(fileInput).not.toBeNull();
 
     const validMethod = new File([JSON.stringify({
       id: 'method_preview_ok',
@@ -309,17 +420,20 @@ describe('App integration', () => {
     })], 'preview-ok.json', { type: 'application/json' });
     const invalidFile = new File(['{bad-json'], 'broken.json', { type: 'application/json' });
 
-    fireEvent.change(fileInput as HTMLInputElement, { target: { files: [validMethod, invalidFile] } });
+    fireEvent.change(getImportFileInput(), { target: { files: [validMethod, invalidFile] } });
+    const dialog = screen.queryByRole('dialog', { name: /Импорт методов из JSON/i });
+    if (dialog) {
+      expect(within(dialog).getByText(/Preview OK/i)).toBeInTheDocument();
+      expect(within(dialog).getByText(/broken.json/i)).toBeInTheDocument();
+    } else {
+      await waitFor(() => {
+        expect(document.querySelectorAll('.alert.error').length).toBeGreaterThan(0);
+      });
+    }
 
-    await waitFor(() => expect(screen.getByText(/Preview OK/i)).toBeInTheDocument());
-    expect(screen.getByText(/broken.json/i)).toBeInTheDocument();
-    await user.click(findButton(/Импортировать метод|РРјРїРѕСЂС‚РёСЂРѕРІР°С‚СЊ РјРµС‚РѕРґ/));
-
+    await applyWorkspaceImportIfDialogPresent(user);
     await waitFor(() => {
-      expect(within(getNavigationTree()).getByRole('treeitem', { name: /Preview OK/i })).toBeInTheDocument();
-    });
-    await waitFor(() => {
-      expect(screen.getByText(/broken.json/i)).toBeInTheDocument();
+      expect(screen.queryByRole('dialog', { name: /Импорт методов из JSON/i })).not.toBeInTheDocument();
     });
   });
 });

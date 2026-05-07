@@ -13,6 +13,15 @@ type FillDescriptionsResponse = {
   descriptions: DescriptionSuggestion[];
 };
 
+type ExampleSuggestion = {
+  field: string;
+  example: string;
+};
+
+type GenerateExamplesResponse = {
+  examples: ExampleSuggestion[];
+};
+
 type MappingSuggestion = {
   serverField: string;
   clientField: string;
@@ -36,7 +45,7 @@ type BuildValidationRulesResponse = {
   rules: ValidationRuleRow[];
 };
 
-type ApiTask = 'repair-json' | 'fill-descriptions' | 'suggest-mappings' | 'mask-fields' | 'build-validation-rules';
+type ApiTask = 'repair-json' | 'fill-descriptions' | 'generate-examples' | 'suggest-mappings' | 'mask-fields' | 'build-validation-rules';
 
 type ApiRequestBody = {
   task: ApiTask;
@@ -153,6 +162,21 @@ export async function suggestMappingsWithAi(payload: {
 }): Promise<MappingSuggestion[]> {
   const result = await callAiApi<SuggestMappingsResponse>('suggest-mappings', payload);
   return result.mappings;
+}
+
+export async function generateExamplesWithAi(payload: {
+  sectionType: 'request' | 'response' | 'generic';
+  rows: Array<{
+    field: string;
+    type: string;
+    required: string;
+    description: string;
+    source?: string;
+    example?: string;
+  }>;
+}): Promise<ExampleSuggestion[]> {
+  const result = await callAiApi<GenerateExamplesResponse>('generate-examples', payload);
+  return result.examples;
 }
 
 export async function suggestMaskFieldsWithAi(payload: {

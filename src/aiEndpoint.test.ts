@@ -37,6 +37,7 @@ function createResponse(): TestResponse {
 describe('ai endpoint auth', () => {
   beforeEach(() => {
     vi.resetModules();
+    vi.unstubAllGlobals();
     dbMock.getUserBySessionToken.mockReset();
     httpMock.getSessionToken.mockReset();
     httpMock.getSessionToken.mockReturnValue(undefined);
@@ -60,5 +61,40 @@ describe('ai endpoint auth', () => {
     await aiHandler({ method: 'OPTIONS' }, res);
 
     expect(res.statusCode).toBe(204);
+  });
+
+  it('supports generate-examples task', async () => {
+    const { default: aiHandler } = await import('../api/ai');
+    process.env.OPENAI_API_KEY = 'test-key';
+    dbMock.getUserBySessionToken.mockResolvedValue({ id: 'u_1', login: 'tester' });
+    httpMock.getSessionToken.mockReturnValue('session-token');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: '{"examples":[{"field":"orderId","example":"12345"}]}' } }]
+        })
+      })
+    );
+
+    const res = createResponse();
+    await aiHandler(
+      {
+        method: 'POST',
+        body: {
+          task: 'generate-examples',
+          payload: { sectionType: 'request', rows: [{ field: 'orderId', type: 'string', required: '+', description: '' }] }
+        }
+      },
+      res
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(res.payload).toEqual({
+      data: {
+        examples: [{ field: 'orderId', example: '12345' }]
+      }
+    });
   });
 });

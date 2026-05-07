@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import type { ParsedRow } from '../../types';
 import { ReqDot, TypeChip } from '../primitives/WorkbenchPrimitives';
 
@@ -18,7 +18,7 @@ const ROW_TYPES = [
 type TableProps = {
   rows: ParsedRow[];
   onUpdateRow?: (row: ParsedRow, patch: Partial<ParsedRow>) => void;
-  onAddRow?: () => void;
+  onAddRow?: (fieldName?: string, fieldType?: string) => void;
   onRowMenu?: (row: ParsedRow) => void;
   editable?: boolean;
 };
@@ -93,6 +93,102 @@ function TypeSelect({
   );
 }
 
+function AddRowInline({
+  onAdd
+}: {
+  onAdd?: (fieldName?: string, fieldType?: string) => void;
+}): ReactNode {
+  const [field, setField] = useState('');
+  const [type, setType] = useState('string');
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  function commit(): void {
+    const trimmed = field.trim();
+    if (!trimmed || !onAdd) return;
+    onAdd(trimmed, type);
+    setField('');
+    setType('string');
+    inputRef.current?.focus();
+  }
+
+  return (
+    <div
+      className="wb-table-classic-row"
+      style={{
+        borderTop: '1px solid var(--wb-border-soft)',
+        background: 'var(--wb-bg-soft)',
+        padding: '6px 10px',
+        gap: 8,
+        alignItems: 'center'
+      }}
+    >
+      <input
+        ref={inputRef}
+        value={field}
+        placeholder="имя_поля"
+        onChange={(event) => setField(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') commit();
+          if (event.key === 'Escape') {
+            setField('');
+            setType('string');
+          }
+        }}
+        aria-label="Новое поле"
+        style={{
+          fontFamily: 'var(--wb-font-mono)',
+          fontSize: 12.5,
+          border: '1px solid var(--wb-border)',
+          background: 'var(--wb-bg-surface)',
+          color: 'var(--wb-text)',
+          borderRadius: 4,
+          padding: '3px 6px',
+          width: '100%'
+        }}
+      />
+      <select
+        value={type}
+        onChange={(event) => setType(event.target.value)}
+        aria-label="Тип нового поля"
+        style={{
+          fontFamily: 'var(--wb-font-mono)',
+          fontSize: 11,
+          border: '1px solid var(--wb-border-soft)',
+          background: 'var(--wb-bg-soft)',
+          color: 'var(--wb-text-soft)',
+          borderRadius: 3,
+          padding: '2px 4px',
+          width: 90
+        }}
+      >
+        {ROW_TYPES.map((item) => (
+          <option key={item.value} value={item.value}>
+            {item.label}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        onClick={commit}
+        disabled={!field.trim()}
+        aria-label="Добавить поле"
+        style={{
+          background: 'var(--wb-accent)',
+          color: 'var(--wb-accent-fg)',
+          border: 0,
+          borderRadius: 4,
+          padding: '3px 10px',
+          fontSize: 12,
+          cursor: 'pointer',
+          opacity: field.trim() ? 1 : 0.4
+        }}
+      >
+        ↵
+      </button>
+    </div>
+  );
+}
+
 export function TableClassic({ rows, onUpdateRow, onAddRow, onRowMenu, editable = false }: TableProps): ReactNode {
   return (
     <div style={{ display: 'grid', gap: 0, border: '1px solid var(--wb-border-soft)', borderRadius: 'var(--wb-radius)', overflow: 'hidden' }}>
@@ -139,9 +235,7 @@ export function TableClassic({ rows, onUpdateRow, onAddRow, onRowMenu, editable 
       ))}
       {rows.length === 0 && <div style={{ padding: 14, color: 'var(--wb-text-muted)', fontSize: 13 }}>Поля не добавлены.</div>}
       {editable && (
-        <button type="button" onClick={onAddRow} style={{ border: 0, borderTop: '1px solid var(--wb-border-soft)', background: 'var(--wb-bg-soft)', color: 'var(--wb-text-soft)', padding: 9, cursor: 'pointer', fontFamily: 'var(--wb-font-sans)', fontSize: 13 }}>
-          + Добавить поле
-        </button>
+        <AddRowInline onAdd={onAddRow} />
       )}
     </div>
   );
@@ -172,7 +266,7 @@ export function TableGallery({ rows, onUpdateRow, onAddRow, editable = false }: 
           )}
         </div>
       ))}
-      {editable && <button type="button" onClick={onAddRow} style={{ border: '1px dashed var(--wb-border-strong)', background: 'transparent', color: 'var(--wb-text-muted)', borderRadius: 'var(--wb-radius)', padding: 10, cursor: 'pointer' }}>+ Добавить поле</button>}
+      {editable && <AddRowInline onAdd={onAddRow} />}
     </div>
   );
 }
@@ -198,7 +292,7 @@ export function TableMiniCards({ rows, onUpdateRow, onAddRow, editable = false }
           )}
         </div>
       ))}
-      {editable && <button type="button" onClick={onAddRow} style={{ minHeight: 110, border: '1px dashed var(--wb-border-strong)', background: 'transparent', color: 'var(--wb-text-muted)', borderRadius: 'var(--wb-radius)', padding: 10, cursor: 'pointer' }}>+ Добавить поле</button>}
+      {editable && <AddRowInline onAdd={onAddRow} />}
     </div>
   );
 }

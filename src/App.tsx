@@ -121,6 +121,7 @@ import { WikiScreen } from './screens/WikiScreen';
 import { useRemoteProjectAutosave } from './hooks/useRemoteProjectAutosave';
 import { useServerSync } from './hooks/useServerSync';
 import { useWorkspaceHistory } from './hooks/useWorkspaceHistory';
+import { hashWorkspace } from './workspaceHash';
 import {
   loginWithPassword,
   listServerProjects,
@@ -165,7 +166,7 @@ const DELETE_UNDO_WINDOW_MS = 8000;
 const HISTORY_LIMIT = 20;
 const HISTORY_COALESCE_MS = 700;
 const REMOTE_SAVE_CHANGE_THRESHOLD = 10;
-const REMOTE_SAVE_IDLE_MS = 20000;
+const REMOTE_SAVE_IDLE_MS = 30000;
 const LOCAL_AUTOSAVE_DEBOUNCE_MS = 320;
 const PROJECT_CACHE_TTL_MS = 3 * 60 * 1000;
 const PROJECT_PRELOAD_CONCURRENCY = 1;
@@ -4529,14 +4530,19 @@ export default function App() {
     });
   }
 
-  function addManualRow(section: ParsedSection, target: ParseTarget = 'server'): void {
-    const nextField = `newField${Date.now()}`;
+  function addManualRow(
+    section: ParsedSection,
+    target: ParseTarget = 'server',
+    fieldName?: string,
+    fieldType?: string
+  ): void {
+    const nextField = fieldName?.trim() || `newField${Date.now()}`;
     const requestMethod = target === 'client' ? section.externalRequestMethod : section.requestMethod;
     const manualRow: ParsedRow = {
       field: nextField,
       sourceField: nextField,
       origin: 'manual',
-      type: 'string',
+      type: fieldType || 'string',
       required: '+',
       description: '',
       example: '',
@@ -6919,7 +6925,7 @@ export default function App() {
       if (!remoteSaveInFlightRef.current) {
         remoteSaveInFlightRef.current = true;
         const nextProjectName = normalizedProjectName;
-        const workspaceHash = JSON.stringify(workspace);
+        const workspaceHash = hashWorkspace(workspace);
 
         try {
           const saved = await saveServerProjectWithFallback({
@@ -7103,7 +7109,7 @@ export default function App() {
       rows: section.rows,
       editable: true,
       onUpdateRow: (row: ParsedRow, patch: Partial<ParsedRow>) => updateWorkbenchRow(section, row, patch),
-      onAddRow: () => addManualRow(section)
+      onAddRow: (fieldName?: string, fieldType?: string) => addManualRow(section, 'server', fieldName, fieldType)
     };
     const rows = section.rows;
     void rows;

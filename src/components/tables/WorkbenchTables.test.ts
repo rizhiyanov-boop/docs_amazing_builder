@@ -35,4 +35,41 @@ describe('WorkbenchTables isRequired', () => {
     expect(onUpdateRow).toHaveBeenCalledTimes(1);
     expect(onUpdateRow.mock.calls[0]?.[1]).toEqual({ type: 'int' });
   });
+
+  it('adds row from inline form with entered field and selected type', () => {
+    const onAddRow = vi.fn();
+    render(React.createElement(TableClassic, {
+      rows: [makeParsedRow({ field: 'id', type: 'string', required: '+' })],
+      editable: true,
+      onAddRow
+    }));
+
+    const addButton = screen.getByRole('button', { name: 'Добавить поле' });
+    expect(addButton).toBeDisabled();
+
+    const fieldInput = screen.getByRole('textbox', { name: 'Новое поле' });
+    fireEvent.change(fieldInput, { target: { value: 'orderId' } });
+    const typeSelect = screen.getByRole('combobox', { name: 'Тип нового поля' });
+    fireEvent.change(typeSelect, { target: { value: 'int' } });
+    fireEvent.keyDown(fieldInput, { key: 'Enter' });
+
+    expect(onAddRow).toHaveBeenCalledTimes(1);
+    expect(onAddRow).toHaveBeenCalledWith('orderId', 'int');
+  });
+
+  it('clears add row inline form on Escape without adding row', () => {
+    const onAddRow = vi.fn();
+    render(React.createElement(TableClassic, {
+      rows: [makeParsedRow({ field: 'id', type: 'string', required: '+' })],
+      editable: true,
+      onAddRow
+    }));
+
+    const fieldInput = screen.getByRole('textbox', { name: 'Новое поле' }) as HTMLInputElement;
+    fireEvent.change(fieldInput, { target: { value: 'tmpField' } });
+    fireEvent.keyDown(fieldInput, { key: 'Escape' });
+
+    expect(fieldInput.value).toBe('');
+    expect(onAddRow).not.toHaveBeenCalled();
+  });
 });

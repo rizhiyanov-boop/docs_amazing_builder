@@ -28,18 +28,64 @@ export function isRequired(value: string): boolean {
   return value === '+' || value === 'Да' || normalized === 'true' || value === '1' || normalized === 'required';
 }
 
-function FieldInput({ row, onUpdateRow }: { row: ParsedRow; onUpdateRow?: (row: ParsedRow, patch: Partial<ParsedRow>) => void }): ReactNode {
+function moveFocus(current: HTMLElement, direction: 'next' | 'prev'): void {
+  const scope = current.closest('.wb-table-focus-scope');
+  if (!scope) return;
+  const focusables = Array.from(scope.querySelectorAll<HTMLElement>('[data-table-focusable="true"]'));
+  const currentIndex = focusables.indexOf(current);
+  if (currentIndex < 0) return;
+  const next = direction === 'next' ? focusables[currentIndex + 1] : focusables[currentIndex - 1];
+  next?.focus();
+}
+
+function FieldInput({
+  row,
+  onUpdateRow
+}: {
+  row: ParsedRow;
+  onUpdateRow?: (row: ParsedRow, patch: Partial<ParsedRow>) => void;
+}): ReactNode {
   return (
     <input
       value={row.field || row.sourceField || ''}
       onChange={(event) => onUpdateRow?.(row, { field: event.target.value, sourceField: event.target.value })}
+      onKeyDown={(event) => {
+        if (event.key === 'Tab' && !event.shiftKey) {
+          event.preventDefault();
+          moveFocus(event.currentTarget, 'next');
+          return;
+        }
+        if (event.key === 'Tab' && event.shiftKey) {
+          event.preventDefault();
+          moveFocus(event.currentTarget, 'prev');
+        }
+      }}
       aria-label="Имя поля"
-      style={{ width: '100%', border: '1px solid var(--wb-border-soft)', background: 'var(--wb-bg-surface)', color: 'var(--wb-text)', borderRadius: 5, padding: '4px 6px', fontFamily: 'var(--wb-font-mono)', fontSize: 12.5, fontWeight: 600 }}
+      data-table-focusable="true"
+      style={{
+        width: '100%',
+        border: '1px solid var(--wb-border-soft)',
+        background: 'var(--wb-bg-surface)',
+        color: 'var(--wb-text)',
+        borderRadius: 5,
+        padding: '4px 6px',
+        fontFamily: 'var(--wb-font-mono)',
+        fontSize: 12.5,
+        fontWeight: 600
+      }}
     />
   );
 }
 
-function DescriptionInput({ row, onUpdateRow, rows = 2 }: { row: ParsedRow; onUpdateRow?: (row: ParsedRow, patch: Partial<ParsedRow>) => void; rows?: number }): ReactNode {
+function DescriptionInput({
+  row,
+  onUpdateRow,
+  rows = 2
+}: {
+  row: ParsedRow;
+  onUpdateRow?: (row: ParsedRow, patch: Partial<ParsedRow>) => void;
+  rows?: number;
+}): ReactNode {
   return (
     <textarea
       value={row.description}
@@ -47,11 +93,33 @@ function DescriptionInput({ row, onUpdateRow, rows = 2 }: { row: ParsedRow; onUp
       onKeyDown={(event) => {
         if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
           event.currentTarget.blur();
+          return;
+        }
+        if (event.key === 'Tab' && !event.shiftKey) {
+          event.preventDefault();
+          moveFocus(event.currentTarget, 'next');
+          return;
+        }
+        if (event.key === 'Tab' && event.shiftKey) {
+          event.preventDefault();
+          moveFocus(event.currentTarget, 'prev');
         }
       }}
       rows={rows}
       aria-label="Описание поля"
-      style={{ width: '100%', resize: 'vertical', border: '1px solid var(--wb-border-soft)', background: 'var(--wb-bg-soft)', color: 'var(--wb-text)', borderRadius: 5, padding: '4px 6px', fontFamily: 'var(--wb-font-sans)', fontSize: 12.5, lineHeight: 1.45 }}
+      data-table-focusable="true"
+      style={{
+        width: '100%',
+        resize: 'vertical',
+        border: '1px solid var(--wb-border-soft)',
+        background: 'var(--wb-bg-soft)',
+        color: 'var(--wb-text)',
+        borderRadius: 5,
+        padding: '4px 6px',
+        fontFamily: 'var(--wb-font-sans)',
+        fontSize: 12.5,
+        lineHeight: 1.45
+      }}
     />
   );
 }
@@ -71,7 +139,19 @@ function TypeSelect({
     <select
       value={row.type || 'string'}
       onChange={(event) => onUpdateRow(row, { type: event.target.value })}
+      onKeyDown={(event) => {
+        if (event.key === 'Tab' && !event.shiftKey) {
+          event.preventDefault();
+          moveFocus(event.currentTarget, 'next');
+          return;
+        }
+        if (event.key === 'Tab' && event.shiftKey) {
+          event.preventDefault();
+          moveFocus(event.currentTarget, 'prev');
+        }
+      }}
       aria-label="Тип поля"
+      data-table-focusable="true"
       style={{
         fontFamily: 'var(--wb-font-mono)',
         fontSize: 11,
@@ -132,9 +212,20 @@ function AddRowInline({
           if (event.key === 'Escape') {
             setField('');
             setType('string');
+            return;
+          }
+          if (event.key === 'Tab' && !event.shiftKey) {
+            event.preventDefault();
+            moveFocus(event.currentTarget, 'next');
+            return;
+          }
+          if (event.key === 'Tab' && event.shiftKey) {
+            event.preventDefault();
+            moveFocus(event.currentTarget, 'prev');
           }
         }}
         aria-label="Новое поле"
+        data-table-focusable="true"
         style={{
           fontFamily: 'var(--wb-font-mono)',
           fontSize: 12.5,
@@ -149,7 +240,19 @@ function AddRowInline({
       <select
         value={type}
         onChange={(event) => setType(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Tab' && !event.shiftKey) {
+            event.preventDefault();
+            moveFocus(event.currentTarget, 'next');
+            return;
+          }
+          if (event.key === 'Tab' && event.shiftKey) {
+            event.preventDefault();
+            moveFocus(event.currentTarget, 'prev');
+          }
+        }}
         aria-label="Тип нового поля"
+        data-table-focusable="true"
         style={{
           fontFamily: 'var(--wb-font-mono)',
           fontSize: 11,
@@ -172,6 +275,7 @@ function AddRowInline({
         onClick={commit}
         disabled={!field.trim()}
         aria-label="Добавить поле"
+        data-table-focusable="true"
         style={{
           background: 'var(--wb-accent)',
           color: 'var(--wb-accent-fg)',
@@ -191,7 +295,7 @@ function AddRowInline({
 
 export function TableClassic({ rows, onUpdateRow, onAddRow, onRowMenu, editable = false }: TableProps): ReactNode {
   return (
-    <div style={{ display: 'grid', gap: 0, border: '1px solid var(--wb-border-soft)', borderRadius: 'var(--wb-radius)', overflow: 'hidden' }}>
+    <div className="wb-table-focus-scope" style={{ display: 'grid', gap: 0, border: '1px solid var(--wb-border-soft)', borderRadius: 'var(--wb-radius)', overflow: 'hidden' }}>
       {rows.map((row) => (
         <div
           key={row.id ?? row.field}
@@ -234,16 +338,14 @@ export function TableClassic({ rows, onUpdateRow, onAddRow, onRowMenu, editable 
         </div>
       ))}
       {rows.length === 0 && <div style={{ padding: 14, color: 'var(--wb-text-muted)', fontSize: 13 }}>Поля не добавлены.</div>}
-      {editable && (
-        <AddRowInline onAdd={onAddRow} />
-      )}
+      {editable && <AddRowInline onAdd={onAddRow} />}
     </div>
   );
 }
 
 export function TableGallery({ rows, onUpdateRow, onAddRow, editable = false }: TableProps): ReactNode {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div className="wb-table-focus-scope" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {rows.map((row) => (
         <div key={row.id ?? row.field} style={{ background: 'var(--wb-bg-soft)', border: '1px solid var(--wb-border-soft)', borderRadius: 'var(--wb-radius)', padding: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -273,7 +375,7 @@ export function TableGallery({ rows, onUpdateRow, onAddRow, editable = false }: 
 
 export function TableMiniCards({ rows, onUpdateRow, onAddRow, editable = false }: TableProps): ReactNode {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8 }}>
+    <div className="wb-table-focus-scope" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8 }}>
       {rows.map((row) => (
         <div key={row.id ?? row.field} style={{ background: 'var(--wb-bg-soft)', border: '1px solid var(--wb-border-soft)', borderRadius: 'var(--wb-radius)', padding: 10 }}>
           {editable ? (

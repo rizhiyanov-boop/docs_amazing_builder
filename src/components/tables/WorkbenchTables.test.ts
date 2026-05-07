@@ -72,4 +72,31 @@ describe('WorkbenchTables isRequired', () => {
     expect(fieldInput.value).toBe('');
     expect(onAddRow).not.toHaveBeenCalled();
   });
+
+  it('moves focus with Tab in row order and with Shift+Tab backwards', () => {
+    render(React.createElement(TableClassic, {
+      rows: [makeParsedRow({ field: 'id', type: 'string', required: '+', description: '' })],
+      editable: true,
+      onUpdateRow: vi.fn(),
+      onAddRow: vi.fn()
+    }));
+
+    const fieldInput = screen.getByRole('textbox', { name: 'Имя поля' });
+    const typeSelect = screen.getByRole('combobox', { name: 'Тип поля' });
+    const descriptionInput = screen.getByRole('textbox', { name: 'Описание поля' });
+    const newFieldInput = screen.getByRole('textbox', { name: 'Новое поле' });
+
+    fieldInput.focus();
+    fireEvent.keyDown(fieldInput, { key: 'Tab' });
+    expect(typeSelect).toHaveFocus();
+
+    fireEvent.keyDown(typeSelect, { key: 'Tab' });
+    expect(descriptionInput).toHaveFocus();
+
+    fireEvent.keyDown(descriptionInput, { key: 'Tab' });
+    expect(newFieldInput).toHaveFocus();
+
+    fireEvent.keyDown(newFieldInput, { key: 'Tab', shiftKey: true });
+    expect(descriptionInput).toHaveFocus();
+  });
 });

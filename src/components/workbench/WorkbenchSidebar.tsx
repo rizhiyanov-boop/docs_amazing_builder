@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import React, { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { DocSection, MethodDocument, MethodGroup, RequestMethod } from '../../types';
 import { HttpChip, SidebarItem, WBButton } from '../primitives/WorkbenchPrimitives';
 
@@ -9,11 +9,18 @@ type ServerProjectPreview = {
 
 type ProjectSwitcherProps = {
   projectName: string;
+  editingProjectName: boolean;
+  editingProjectNameDraft: string;
+  projectNameInputRef: RefObject<HTMLInputElement | null>;
   currentProjectId: string | null;
   serverProjects: ServerProjectPreview[];
   switchingProjectId: string | null;
   methodCounts: Record<string, number>;
   onSelectProject: (projectId: string | null) => void;
+  onStartProjectRename: () => void;
+  onProjectNameDraftChange: (value: string) => void;
+  onFinishProjectRename: () => void;
+  onCancelProjectRename: () => void;
 };
 
 type WorkbenchSidebarProps = {
@@ -27,11 +34,25 @@ type WorkbenchSidebarProps = {
   currentProjectId: string | null;
   switchingProjectId: string | null;
   methodCounts: Record<string, number>;
+  editingProjectName: boolean;
+  editingProjectNameDraft: string;
+  projectNameInputRef: RefObject<HTMLInputElement | null>;
+  editingMethodId: string | null;
+  editingMethodNameDraft: string;
+  methodNameInputRef: RefObject<HTMLInputElement | null>;
   getMethodHttpMethod: (method: MethodDocument) => RequestMethod;
   onSwitchMethod: (method: MethodDocument) => void;
   onSelectSection: (sectionId: string) => void;
   resolveSectionTitle: (section: DocSection) => string;
   onSelectProject: (projectId: string | null) => void;
+  onStartProjectRename: () => void;
+  onProjectNameDraftChange: (value: string) => void;
+  onFinishProjectRename: () => void;
+  onCancelProjectRename: () => void;
+  onStartMethodRename: (method: MethodDocument) => void;
+  onMethodNameDraftChange: (value: string) => void;
+  onFinishMethodRename: () => void;
+  onCancelMethodRename: () => void;
   onCreateMethod: () => void;
   onCreateProject: () => void;
   onOpenSearch: () => void;
@@ -53,11 +74,18 @@ function groupMethods(methods: MethodDocument[], groups: MethodGroup[]): Array<{
 
 function ProjectSwitcher({
   projectName,
+  editingProjectName,
+  editingProjectNameDraft,
+  projectNameInputRef,
   currentProjectId,
   serverProjects,
   switchingProjectId,
   methodCounts,
-  onSelectProject
+  onSelectProject,
+  onStartProjectRename,
+  onProjectNameDraftChange,
+  onFinishProjectRename,
+  onCancelProjectRename
 }: ProjectSwitcherProps): ReactNode {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -85,6 +113,47 @@ function ProjectSwitcher({
     onSelectProject(projectId);
   }
 
+  if (editingProjectName) {
+    return (
+      <div ref={ref} style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+        <input
+          ref={projectNameInputRef}
+          type="text"
+          value={editingProjectNameDraft}
+          onChange={(event) => onProjectNameDraftChange(event.target.value)}
+          onBlur={onFinishProjectRename}
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
+            event.stopPropagation();
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              onFinishProjectRename();
+            }
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              onCancelProjectRename();
+            }
+          }}
+          aria-label="Project name"
+          style={{
+            width: '100%',
+            minWidth: 0,
+            border: '1px solid var(--wb-border)',
+            borderRadius: 'var(--wb-radius)',
+            background: 'var(--wb-bg-surface)',
+            color: 'var(--wb-text)',
+            fontFamily: 'var(--wb-font-sans)',
+            fontSize: 13,
+            fontWeight: 700,
+            padding: '5px 7px',
+            outline: 'none'
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div ref={ref} style={{ position: 'relative', flex: 1, minWidth: 0 }}>
       <button
@@ -92,6 +161,11 @@ function ProjectSwitcher({
         onClick={() => {
           if (!hasProjects) return;
           setOpen((value) => !value);
+        }}
+        onDoubleClick={(event) => {
+          event.preventDefault();
+          setOpen(false);
+          onStartProjectRename();
         }}
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -207,11 +281,25 @@ export const WorkbenchSidebar = React.memo(function WorkbenchSidebar({
   currentProjectId,
   switchingProjectId,
   methodCounts,
+  editingProjectName,
+  editingProjectNameDraft,
+  projectNameInputRef,
+  editingMethodId,
+  editingMethodNameDraft,
+  methodNameInputRef,
   getMethodHttpMethod,
   onSwitchMethod,
   onSelectSection,
   resolveSectionTitle,
   onSelectProject,
+  onStartProjectRename,
+  onProjectNameDraftChange,
+  onFinishProjectRename,
+  onCancelProjectRename,
+  onStartMethodRename,
+  onMethodNameDraftChange,
+  onFinishMethodRename,
+  onCancelMethodRename,
   onCreateMethod,
   onCreateProject,
   onOpenSearch
@@ -235,11 +323,18 @@ export const WorkbenchSidebar = React.memo(function WorkbenchSidebar({
         <div style={{ width: 22, height: 22, borderRadius: 6, background: 'var(--wb-text)', color: 'var(--wb-bg-surface)', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>D</div>
         <ProjectSwitcher
           projectName={projectName}
+          editingProjectName={editingProjectName}
+          editingProjectNameDraft={editingProjectNameDraft}
+          projectNameInputRef={projectNameInputRef}
           currentProjectId={currentProjectId}
           serverProjects={serverProjects}
           switchingProjectId={switchingProjectId}
           methodCounts={methodCounts}
           onSelectProject={onSelectProject}
+          onStartProjectRename={onStartProjectRename}
+          onProjectNameDraftChange={onProjectNameDraftChange}
+          onFinishProjectRename={onFinishProjectRename}
+          onCancelProjectRename={onCancelProjectRename}
         />
         <button type="button" onClick={onOpenSearch} style={{ border: 0, background: 'transparent', color: 'var(--wb-text-muted)', cursor: 'pointer', fontSize: 14 }}>⌘K</button>
       </div>
@@ -307,13 +402,76 @@ export const WorkbenchSidebar = React.memo(function WorkbenchSidebar({
                 <div role="treeitem" aria-expanded="true">
                   <SidebarItem emoji="▣" expandable expanded>{group.name}</SidebarItem>
                 </div>
-                {group.methods.map((method) => (
-                  <div key={method.id}>
-                    <div role="treeitem" aria-selected={method.id === activeMethodId}>
-                      <SidebarItem depth={1} http={getMethodHttpMethod(method)} active={method.id === activeMethodId} onClick={() => onSwitchMethod(method)}>
-                        {method.name}
-                      </SidebarItem>
-                    </div>
+                {group.methods.map((method) => {
+                  const isActiveMethod = method.id === activeMethodId;
+                  const isEditingMethod = editingMethodId === method.id;
+
+                  return (
+                    <div key={method.id}>
+                      <div role="treeitem" aria-selected={isActiveMethod}>
+                        {isEditingMethod ? (
+                          <div
+                            style={{
+                              width: 'calc(100% - 8px)',
+                              padding: '5px 10px 5px 24px',
+                              fontSize: 13,
+                              color: 'var(--wb-text)',
+                              background: isActiveMethod ? 'var(--wb-bg-active)' : 'transparent',
+                              borderRadius: 'var(--wb-radius-sm)',
+                              margin: '0 4px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              fontFamily: 'var(--wb-font-sans)'
+                            }}
+                          >
+                            <HttpChip method={getMethodHttpMethod(method)} size="sm" />
+                            <input
+                              ref={methodNameInputRef}
+                              type="text"
+                              value={editingMethodNameDraft}
+                              onChange={(event) => onMethodNameDraftChange(event.target.value)}
+                              onBlur={onFinishMethodRename}
+                              onMouseDown={(event) => event.stopPropagation()}
+                              onClick={(event) => event.stopPropagation()}
+                              onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
+                                event.stopPropagation();
+                                if (event.key === 'Enter') {
+                                  event.preventDefault();
+                                  onFinishMethodRename();
+                                }
+                                if (event.key === 'Escape') {
+                                  event.preventDefault();
+                                  onCancelMethodRename();
+                                }
+                              }}
+                              aria-label="Method name"
+                              style={{
+                                minWidth: 0,
+                                flex: 1,
+                                border: '1px solid var(--wb-border)',
+                                borderRadius: 'var(--wb-radius-sm)',
+                                background: 'var(--wb-bg-surface)',
+                                color: 'var(--wb-text)',
+                                fontFamily: 'var(--wb-font-sans)',
+                                fontSize: 13,
+                                padding: '3px 6px',
+                                outline: 'none'
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <SidebarItem
+                            depth={1}
+                            http={getMethodHttpMethod(method)}
+                            active={isActiveMethod}
+                            onClick={() => onSwitchMethod(method)}
+                            onDoubleClick={() => onStartMethodRename(method)}
+                          >
+                            {method.name}
+                          </SidebarItem>
+                        )}
+                      </div>
                     {method.id === activeMethodId && sections.map((section) => (
                       <div key={section.id} role="treeitem" aria-selected={section.id === selectedSectionId}>
                         <SidebarItem depth={2} active={section.id === selectedSectionId} dim={!section.enabled} onClick={() => onSelectSection(section.id)}>
@@ -321,8 +479,9 @@ export const WorkbenchSidebar = React.memo(function WorkbenchSidebar({
                         </SidebarItem>
                       </div>
                     ))}
-                  </div>
-                ))}
+                    </div>
+                  );
+                })}
               </div>
             ))
           )}

@@ -177,6 +177,7 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
             borderRadius: 999,
             padding: '3px 7px',
             background: 'var(--wb-bg-soft)',
+            color: 'var(--wb-text)',
             fontSize: 12
           }}
         >

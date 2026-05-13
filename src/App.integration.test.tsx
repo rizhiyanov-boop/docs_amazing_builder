@@ -21,6 +21,27 @@ function getStoredProject(): Record<string, unknown> | null {
   return JSON.parse(raw) as Record<string, unknown>;
 }
 
+function seedSingleMethodWorkspace(section: Record<string, unknown>): void {
+  window.localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({
+      version: 3,
+      updatedAt: '2026-05-07T10:00:00.000Z',
+      projectName: 'Review Project',
+      activeMethodId: 'm_review',
+      methods: [
+        {
+          id: 'm_review',
+          name: 'Review Method',
+          updatedAt: '2026-05-07T10:00:00.000Z',
+          sections: [section]
+        }
+      ],
+      groups: []
+    })
+  );
+}
+
 function getTopbar(): HTMLElement {
   const topbar = document.querySelector('.wb-topbar');
   expect(topbar).not.toBeNull();
@@ -79,6 +100,65 @@ describe('App integration', () => {
       expect(raw).toContain('"version":3');
       expect(raw).toContain('"methods"');
     });
+  });
+
+  it('opens add section picker upward and shows all section types', async () => {
+    const user = userEvent.setup();
+    seedSingleMethodWorkspace({ id: 's_goal', title: 'Goal', enabled: true, kind: 'text', value: 'A' });
+    renderApp();
+
+    await user.click(screen.getByRole('button', { name: '+ Добавить секцию' }));
+
+    const menu = screen.getByRole('menu', { name: 'Section type' });
+    expect(menu).toHaveStyle({
+      top: 'auto',
+      bottom: 'calc(100% + 8px)',
+      transform: 'translateX(-50%)',
+      zIndex: '100'
+    });
+    ['Text', 'Request', 'Response', 'Errors', 'Diagram'].forEach((name) => {
+      expect(within(menu).getByRole('menuitem', { name: new RegExp(name, 'i') })).toBeInTheDocument();
+    });
+  });
+
+  it('offers section deletion from Workbench section action menu', async () => {
+    const user = userEvent.setup();
+    seedSingleMethodWorkspace({ id: 's_goal', title: 'Goal', enabled: true, kind: 'text', value: 'A' });
+    renderApp();
+
+    await user.click(screen.getByRole('button', { name: 'Дополнительные действия секции' }));
+    const deleteItem = screen.getByRole('menuitem', { name: 'Удалить раздел' });
+
+    expect(deleteItem).toHaveStyle({ color: 'var(--wb-required)' });
+    await user.click(deleteItem);
+
+    const dialog = screen.getByRole('dialog', { name: 'Подтверждение удаления раздела' });
+    expect(within(dialog).getByRole('heading', { name: 'Удалить раздел?' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Удалить раздел' })).toBeInTheDocument();
+  });
+
+  it('edits section title by double click without visible edit icon', async () => {
+    const user = userEvent.setup();
+    seedSingleMethodWorkspace({ id: 's_goal', title: 'Editable Title', enabled: true, kind: 'text', value: 'A' });
+    renderApp();
+
+    const main = screen.getByRole('main');
+    expect(screen.queryByRole('button', { name: 'Редактировать название блока' })).not.toBeInTheDocument();
+
+    await user.dblClick(within(main).getByText('Editable Title'));
+    const titleInput = screen.getByDisplayValue('Editable Title');
+    await user.clear(titleInput);
+    await user.type(titleInput, 'Renamed Title{Enter}');
+
+    expect(within(main).getByText('Renamed Title')).toBeInTheDocument();
+
+    await user.dblClick(within(main).getByText('Renamed Title'));
+    const cancelInput = screen.getByDisplayValue('Renamed Title');
+    await user.clear(cancelInput);
+    await user.type(cancelInput, 'Cancelled Title{Escape}');
+
+    expect(within(main).getByText('Renamed Title')).toBeInTheDocument();
+    expect(within(main).queryByText('Cancelled Title')).not.toBeInTheDocument();
   });
 
   it('topbar html and wiki buttons open preview tabs without downloading', async () => {

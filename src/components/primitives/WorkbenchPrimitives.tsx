@@ -169,13 +169,15 @@ type SidebarItemProps = {
   expandable?: boolean;
   expanded?: boolean;
   onClick?: () => void;
+  onDoubleClick?: () => void;
 };
 
-export function SidebarItem({ depth = 0, emoji, http, children, active, dim, expandable, expanded, onClick }: SidebarItemProps): ReactNode {
+export function SidebarItem({ depth = 0, emoji, http, children, active, dim, expandable, expanded, onClick, onDoubleClick }: SidebarItemProps): ReactNode {
   return (
     <button
       type="button"
       onClick={onClick}
+      onDoubleClick={onDoubleClick}
       style={{
         width: 'calc(100% - 8px)',
         padding: `5px 10px 5px ${10 + depth * 14}px`,

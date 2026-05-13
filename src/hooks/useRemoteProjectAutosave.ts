@@ -95,10 +95,15 @@ export function useRemoteProjectAutosave({
     remoteSaveInFlightRef.current = true;
     cancelPendingRemoteSave();
 
-    const latestWorkspace = buildWorkspace();
-    const workspaceHash = hashWorkspace(latestWorkspace);
-
     try {
+      const latestWorkspace = buildWorkspace();
+      const workspaceHash = hashWorkspace(latestWorkspace);
+
+      if (workspaceHash === remoteLastSavedHashRef.current) {
+        remotePendingChangesRef.current = 0;
+        return;
+      }
+
       const saved = await saveWorkspace({
         projectId: serverProjectId ?? undefined,
         name: normalizedProjectName,

@@ -1,5 +1,6 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { createRef } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DocSection, MethodDocument } from '../../types';
 import { WorkbenchSidebar } from './WorkbenchSidebar';
@@ -29,6 +30,8 @@ const sections: DocSection[] = [
 
 function renderSidebar(overrides: Partial<Parameters<typeof WorkbenchSidebar>[0]> = {}) {
   const onSelectProject = vi.fn();
+  const onStartProjectRename = vi.fn();
+  const onStartMethodRename = vi.fn();
   const props: Parameters<typeof WorkbenchSidebar>[0] = {
     projectName: 'Документация для партнёров',
     methods,
@@ -48,11 +51,25 @@ function renderSidebar(overrides: Partial<Parameters<typeof WorkbenchSidebar>[0]
       'project-2': 12,
       'project-3': 0
     },
+    editingProjectName: false,
+    editingProjectNameDraft: '',
+    projectNameInputRef: createRef<HTMLInputElement>(),
+    editingMethodId: null,
+    editingMethodNameDraft: '',
+    methodNameInputRef: createRef<HTMLInputElement>(),
     getMethodHttpMethod: () => 'POST',
     onSwitchMethod: vi.fn(),
     onSelectSection: vi.fn(),
     resolveSectionTitle: (section) => section.title,
     onSelectProject,
+    onStartProjectRename,
+    onProjectNameDraftChange: vi.fn(),
+    onFinishProjectRename: vi.fn(),
+    onCancelProjectRename: vi.fn(),
+    onStartMethodRename,
+    onMethodNameDraftChange: vi.fn(),
+    onFinishMethodRename: vi.fn(),
+    onCancelMethodRename: vi.fn(),
     onCreateMethod: vi.fn(),
     onCreateProject: vi.fn(),
     onOpenSearch: vi.fn(),
@@ -61,7 +78,9 @@ function renderSidebar(overrides: Partial<Parameters<typeof WorkbenchSidebar>[0]
 
   return {
     ...render(<WorkbenchSidebar {...props} />),
-    onSelectProject
+    onSelectProject,
+    onStartProjectRename,
+    onStartMethodRename
   };
 }
 
@@ -132,11 +151,25 @@ describe('WorkbenchSidebar project switcher', () => {
         currentProjectId="project-2"
         switchingProjectId={null}
         methodCounts={{ 'project-1': 4, 'project-2': 12, 'project-3': 0 }}
+        editingProjectName={false}
+        editingProjectNameDraft=""
+        projectNameInputRef={createRef<HTMLInputElement>()}
+        editingMethodId={null}
+        editingMethodNameDraft=""
+        methodNameInputRef={createRef<HTMLInputElement>()}
         getMethodHttpMethod={() => 'POST'}
         onSwitchMethod={vi.fn()}
         onSelectSection={vi.fn()}
         resolveSectionTitle={(section) => section.title}
         onSelectProject={view.onSelectProject}
+        onStartProjectRename={vi.fn()}
+        onProjectNameDraftChange={vi.fn()}
+        onFinishProjectRename={vi.fn()}
+        onCancelProjectRename={vi.fn()}
+        onStartMethodRename={vi.fn()}
+        onMethodNameDraftChange={vi.fn()}
+        onFinishMethodRename={vi.fn()}
+        onCancelMethodRename={vi.fn()}
         onCreateMethod={vi.fn()}
         onCreateProject={vi.fn()}
         onOpenSearch={vi.fn()}
@@ -144,5 +177,18 @@ describe('WorkbenchSidebar project switcher', () => {
     );
 
     await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument());
+  });
+
+  it('starts rename from double click on project and active method names', async () => {
+    const user = userEvent.setup();
+    const { onStartProjectRename, onStartMethodRename } = renderSidebar();
+    const projectButton = screen.getAllByRole('button').find((button) => button.getAttribute('aria-haspopup') === 'listbox');
+
+    expect(projectButton).toBeDefined();
+    await user.dblClick(projectButton as HTMLButtonElement);
+    expect(onStartProjectRename).toHaveBeenCalledTimes(1);
+
+    await user.dblClick(screen.getByRole('button', { name: /Create order/i }));
+    expect(onStartMethodRename).toHaveBeenCalledWith(methods[0]);
   });
 });

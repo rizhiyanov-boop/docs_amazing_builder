@@ -114,6 +114,7 @@ import { Toast } from './components/Toast';
 import { AiTableButton } from './components/primitives/WorkbenchPrimitives';
 import { WorkbenchSidebar } from './components/workbench/WorkbenchSidebar';
 import { MethodMetaPanel } from './components/workbench/MethodMetaPanel';
+import { WorkbenchDiagramPreview } from './components/workbench/WorkbenchDiagramPreview';
 import { WorkbenchTopbar, type WorkbenchAccent, type WorkbenchLayout, type WorkbenchMode } from './components/workbench/WorkbenchTopbar';
 import { WorkspaceHome } from './components/workbench/WorkspaceHome';
 import { TableClassic, TableGallery, TableMiniCards } from './components/tables/WorkbenchTables';
@@ -182,6 +183,13 @@ const COMPACT_LAYOUT_MEDIA_QUERY = '(max-width: 64rem)';
 const EMPTY_SECTIONS: DocSection[] = [];
 const ENABLE_MULTI_METHODS = true;
 const DEFAULT_RICH_TEXT_HIGHLIGHT = '#fef08a';
+const WORKBENCH_SECTION_OPTIONS: Array<{ type: AddableBlockType; label: string; description: string }> = [
+  { type: 'text', label: 'Text', description: 'Freeform notes and rich text' },
+  { type: 'request', label: 'Request', description: 'Request fields and examples' },
+  { type: 'response', label: 'Response', description: 'Response schema and examples' },
+  { type: 'error-logic', label: 'Errors', description: 'Errors and validation rules' },
+  { type: 'diagram', label: 'Diagram', description: 'Mermaid or PlantUML process' }
+];
 
 function clampTableFieldColumnWidth(value: number): number {
   return Math.min(MAX_TABLE_FIELD_COLUMN_WIDTH, Math.max(MIN_TABLE_FIELD_COLUMN_WIDTH, Math.round(value)));
@@ -637,6 +645,7 @@ export default function App() {
   const diagramTextRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const methodNameInputRef = useRef<HTMLInputElement | null>(null);
   const projectNameInputRef = useRef<HTMLInputElement | null>(null);
+  const addSectionMenuRef = useRef<HTMLDivElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const previousMethodIdRef = useRef<string | null>(null);
   const initialWorkspace = useMemo(() => loadWorkspaceProject(), []);
@@ -705,6 +714,7 @@ export default function App() {
   const [internalCodePopoverState, setInternalCodePopoverState] = useState<InternalCodePopoverState | null>(null);
   const [isAddEntityMenuOpen, setIsAddEntityMenuOpen] = useState(false);
   const [isDeleteEntityMenuOpen, setIsDeleteEntityMenuOpen] = useState(false);
+  const [isAddSectionMenuOpen, setIsAddSectionMenuOpen] = useState(false);
   const [isOnboardingNavVisible, setIsOnboardingNavVisible] = useState(false);
   const [pendingMethodNameFocus, setPendingMethodNameFocus] = useState(false);
   const [pendingProjectNameFocus, setPendingProjectNameFocus] = useState(false);
@@ -2649,6 +2659,20 @@ export default function App() {
               >
                 <span className="add-block-option-title">Добавить ошибки</span>
               </button>
+              <div style={{ borderTop: '1px solid var(--wb-border-soft)', margin: '4px 0' }} />
+              <button
+                className="add-block-option"
+                type="button"
+                role="menuitem"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  requestDeleteSection(section.id);
+                  setOpenSectionActionsMenuId(null);
+                }}
+                style={{ color: 'var(--wb-required)' }}
+              >
+                <span className="add-block-option-title">Удалить раздел</span>
+              </button>
             </div>
           )}
         </div>
@@ -2696,6 +2720,20 @@ export default function App() {
     document.addEventListener('mousedown', handleOutsideClick, true);
     return () => document.removeEventListener('mousedown', handleOutsideClick, true);
   }, [isAddEntityMenuOpen, isDeleteEntityMenuOpen]);
+
+  useEffect(() => {
+    if (!isAddSectionMenuOpen) return;
+
+    const handleOutsideClick = (event: MouseEvent): void => {
+      const target = event.target;
+      if (!(target instanceof Node) || !addSectionMenuRef.current?.contains(target)) {
+        setIsAddSectionMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick, true);
+    return () => document.removeEventListener('mousedown', handleOutsideClick, true);
+  }, [isAddSectionMenuOpen]);
 
   const onboardingEntryOptions: Array<{
     id: OnboardingEntryPath;
@@ -5685,11 +5723,14 @@ export default function App() {
     }
 
     return (
-      <div className="field-display title-display" onDoubleClick={() => startTitleEditing(section)}>
-        <span>{resolveSectionTitle(section.title)}</span>
-        <button className="icon-button" type="button" onClick={() => startTitleEditing(section)} aria-label="Редактировать название блока">
-          ✎
-        </button>
+      <div className="field-display title-display">
+        <span
+          onDoubleClick={() => startTitleEditing(section)}
+          title="Двойной клик — переименовать"
+          style={{ cursor: 'text' }}
+        >
+          {resolveSectionTitle(section.title)}
+        </span>
       </div>
     );
   }
@@ -7312,10 +7353,11 @@ export default function App() {
     setIsSearchPaletteOpen(false);
   }, []);
 
-  const handleAddWorkbenchSection = useCallback(() => {
-    const nextSection = createSectionFromBlockType('text');
+  const handleAddWorkbenchSection = useCallback((blockType: AddableBlockType = 'text') => {
+    const nextSection = createSectionFromBlockType(blockType);
     setSections((prev) => [...prev, nextSection]);
     setSelectedId(nextSection.id);
+    setIsAddSectionMenuOpen(false);
     setToastMessage('Раздел добавлен');
   }, [setSections]);
 
@@ -7367,12 +7409,33 @@ export default function App() {
       return (
         <div style={{ display: 'grid', gap: 8 }}>
           {section.diagrams.length === 0 && <div style={{ color: 'var(--wb-text-muted)', fontSize: 13 }}>Диаграммы не добавлены.</div>}
-          {section.diagrams.map((diagram) => (
-            <div key={diagram.id} style={{ background: 'var(--wb-bg-soft)', border: '1px solid var(--wb-border-soft)', borderRadius: 'var(--wb-radius)', padding: 10 }}>
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>{diagram.title}</div>
-              <pre style={{ margin: 0, fontFamily: 'var(--wb-font-mono)', fontSize: 11.5, whiteSpace: 'pre-wrap', color: 'var(--wb-text-soft)' }}>{diagram.code}</pre>
-            </div>
-          ))}
+          {section.diagrams.map((diagram, index) => {
+            const code = diagram.code.trim();
+            const title = diagram.title.trim() || `Диаграмма ${index + 1}`;
+            const engine = resolveDiagramEngine(code, diagram.engine);
+
+            return (
+              <div key={diagram.id} style={{ background: 'var(--wb-bg-soft)', border: '1px solid var(--wb-border-soft)', borderRadius: 'var(--wb-radius)', padding: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+                  <div style={{ fontWeight: 600 }}>{title}</div>
+                  {code && (
+                    <span style={{ color: 'var(--wb-text-muted)', fontFamily: 'var(--wb-font-mono)', fontSize: 10, letterSpacing: 0 }}>
+                      {engine === 'plantuml' ? 'PLANTUML' : 'MERMAID'}
+                    </span>
+                  )}
+                </div>
+                {!code && <div style={{ color: 'var(--wb-text-muted)', fontSize: 13 }}>Код диаграммы не заполнен.</div>}
+                {code && <WorkbenchDiagramPreview code={code} engine={engine} title={title} />}
+                {diagram.description?.trim() && (
+                  <div
+                    className="wb-rich-preview"
+                    style={{ marginTop: 10 }}
+                    dangerouslySetInnerHTML={{ __html: richTextToHtml(diagram.description) }}
+                  />
+                )}
+              </div>
+            );
+          })}
         </div>
       );
     }
@@ -7442,20 +7505,23 @@ export default function App() {
                 }
               }}
               actions={
-                section.kind === 'parsed' ? (
-                  <>
-                    <button type="button" className="wb-table-view-btn" onClick={() => setWorkbenchTableView('classic')}>classic</button>
-                    <button type="button" className="wb-table-view-btn" onClick={() => setWorkbenchTableView('gallery')}>gallery</button>
-                    <button type="button" className="wb-table-view-btn" onClick={() => setWorkbenchTableView('mini')}>mini</button>
-                    <AiTableButton kind="fill" onClick={() => void fillFieldDescriptionsWithAi(section)} />
-                    <AiTableButton kind="examples" onClick={() => void generateExamplesWithAiForSection(section)} />
-                    {(section.sectionType === 'request' || section.sectionType === 'response') && (
-                      <button type="button" className="wb-table-view-btn" onClick={() => openInlineImport(section)}>
-                        ↓ Импорт
-                      </button>
-                    )}
-                  </>
-                ) : undefined
+                <>
+                  {section.kind === 'parsed' && (
+                    <>
+                      <button type="button" className="wb-table-view-btn" onClick={() => setWorkbenchTableView('classic')}>classic</button>
+                      <button type="button" className="wb-table-view-btn" onClick={() => setWorkbenchTableView('gallery')}>gallery</button>
+                      <button type="button" className="wb-table-view-btn" onClick={() => setWorkbenchTableView('mini')}>mini</button>
+                      <AiTableButton kind="fill" onClick={() => void fillFieldDescriptionsWithAi(section)} />
+                      <AiTableButton kind="examples" onClick={() => void generateExamplesWithAiForSection(section)} />
+                      {(section.sectionType === 'request' || section.sectionType === 'response') && (
+                        <button type="button" className="wb-table-view-btn" onClick={() => openInlineImport(section)}>
+                          ↓ Импорт
+                        </button>
+                      )}
+                    </>
+                  )}
+                  {renderSectionActionCluster(section, 'header')}
+                </>
               }
             >
               {section.kind === 'parsed' && inlineImportSectionId === section.id && (
@@ -7490,27 +7556,81 @@ export default function App() {
             </Card>
           );
         })}
-        <button
-          type="button"
-          onClick={handleAddWorkbenchSection}
-          className="wb-add-card"
-          style={{
-            border: '1px dashed var(--wb-border-strong)',
-            borderRadius: 'var(--wb-radius-lg)',
-            padding: 18,
-            minHeight: 100,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: 'var(--wb-text-muted)',
-            fontSize: 13,
-            cursor: 'pointer',
-            background: 'transparent',
-            fontFamily: 'var(--wb-font-sans)'
-          }}
-        >
-          + Добавить секцию
-        </button>
+        <div ref={addSectionMenuRef} style={{ position: 'relative' }}>
+          <button
+            type="button"
+            onClick={() => setIsAddSectionMenuOpen((current) => !current)}
+            className="wb-add-card"
+            aria-haspopup="menu"
+            aria-expanded={isAddSectionMenuOpen}
+            style={{
+              border: '1px dashed var(--wb-border-strong)',
+              borderRadius: 'var(--wb-radius-lg)',
+              padding: 18,
+              minHeight: 100,
+              width: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--wb-text-muted)',
+              fontSize: 13,
+              cursor: 'pointer',
+              background: 'transparent',
+              fontFamily: 'var(--wb-font-sans)'
+            }}
+          >
+            + Добавить секцию
+          </button>
+          {isAddSectionMenuOpen && (
+            <div
+              role="menu"
+              aria-label="Section type"
+              style={{
+                position: 'absolute',
+                top: 'auto',
+                bottom: 'calc(100% + 8px)',
+                left: '50%',
+                right: 'auto',
+                transform: 'translateX(-50%)',
+                minWidth: 240,
+                width: 260,
+                zIndex: 100,
+                display: 'grid',
+                gap: 2,
+                padding: 6,
+                border: '1px solid var(--wb-border)',
+                borderRadius: 'var(--wb-radius-lg)',
+                background: 'var(--wb-bg-surface)',
+                boxShadow: 'var(--wb-shadow-pop)'
+              }}
+            >
+              {WORKBENCH_SECTION_OPTIONS.map((option) => (
+                <button
+                  key={option.type}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => handleAddWorkbenchSection(option.type)}
+                  style={{
+                    display: 'grid',
+                    gap: 2,
+                    width: '100%',
+                    border: 0,
+                    borderRadius: 'var(--wb-radius)',
+                    background: 'transparent',
+                    color: 'var(--wb-text)',
+                    cursor: 'pointer',
+                    padding: '8px 10px',
+                    textAlign: 'left',
+                    fontFamily: 'var(--wb-font-sans)'
+                  }}
+                >
+                  <span style={{ fontSize: 13, fontWeight: 700 }}>{option.label}</span>
+                  <span style={{ fontSize: 11, color: 'var(--wb-text-muted)' }}>{option.description}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     );
   }
@@ -8113,11 +8233,25 @@ export default function App() {
         currentProjectId={serverProjectId}
         switchingProjectId={switchingProjectId}
         methodCounts={projectMethodCounts}
+        editingProjectName={editingProjectName}
+        editingProjectNameDraft={editingProjectNameDraft}
+        projectNameInputRef={projectNameInputRef}
+        editingMethodId={editingMethodId}
+        editingMethodNameDraft={editingMethodNameDraft}
+        methodNameInputRef={methodNameInputRef}
         getMethodHttpMethod={getMethodHttpMethod}
         onSwitchMethod={handleSwitchMethod}
         onSelectSection={handleSelectSection}
         resolveSectionTitle={(section) => resolveSectionTitle(section.title)}
         onSelectProject={handleSelectProject}
+        onStartProjectRename={startProjectRename}
+        onProjectNameDraftChange={setEditingProjectNameDraft}
+        onFinishProjectRename={finishProjectRename}
+        onCancelProjectRename={cancelProjectRename}
+        onStartMethodRename={startMethodRename}
+        onMethodNameDraftChange={setEditingMethodNameDraft}
+        onFinishMethodRename={finishMethodRename}
+        onCancelMethodRename={cancelMethodRename}
         onCreateMethod={createMethod}
         onCreateProject={createProject}
         onOpenSearch={handleOpenSearchPalette}

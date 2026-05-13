@@ -22,6 +22,7 @@ function renderWiki(wiki: string): string {
       output.push('__TOC__');
       continue;
     }
+
     const heading = line.match(/^h([1-6])\.\s+(.+)$/);
     if (heading) {
       if (tableOpen) {
@@ -35,6 +36,7 @@ function renderWiki(wiki: string): string {
       output.push(`<h${level} id="${id}">${escapeHtml(text)}</h${level}>`);
       continue;
     }
+
     if (line.startsWith('||')) {
       if (!tableOpen) {
         output.push('<table><tbody>');
@@ -44,6 +46,7 @@ function renderWiki(wiki: string): string {
       output.push(`<tr>${cols.map((col) => `<th>${escapeHtml(col.trim())}</th>`).join('')}</tr>`);
       continue;
     }
+
     if (line.startsWith('|')) {
       if (!tableOpen) {
         output.push('<table><tbody>');
@@ -53,12 +56,14 @@ function renderWiki(wiki: string): string {
       output.push(`<tr>${cols.map((col) => `<td>${escapeHtml(col.trim())}</td>`).join('')}</tr>`);
       continue;
     }
+
     if (tableOpen) {
       output.push('</tbody></table>');
       tableOpen = false;
     }
     if (line.trim()) output.push(`<p>${escapeHtml(line)}</p>`);
   }
+
   if (tableOpen) output.push('</tbody></table>');
 
   const toc = `<nav class="wb-wiki-toc">${headings.map((heading) => `<a href="#${heading.id}" data-level="${heading.level}">${escapeHtml(heading.text)}</a>`).join('')}</nav>`;
@@ -79,8 +84,8 @@ export function WikiScreen({ wiki, onCopy, onDownload }: WikiScreenProps): React
             <TabPill value="preview" active={mode === 'preview'} onSelect={setMode}>preview</TabPill>
           </TabsPill>
           <span style={{ flex: 1 }} />
-          <WBButton size="sm" variant="ghost" onClick={onCopy}>Скопировать</WBButton>
-          <WBButton size="sm" variant="accent" onClick={onDownload}>Скачать</WBButton>
+          <WBButton size="sm" variant="ghost" onClick={onCopy}>Copy all</WBButton>
+          <WBButton size="sm" variant="accent" onClick={onDownload}>Download .txt</WBButton>
         </div>
         {mode === 'source' ? (
           <textarea

@@ -1,141 +1,100 @@
 # ARCHITECTURE
 
-**Актуализация:** 2026-04-29
+Updated: 2026-05-08
 
-## Назначение
-Документ описывает актуальную архитектуру `doc-builder`: модель данных, ключевые потоки, границы MVP и оценку необходимости рефакторинга.
+## Purpose
 
-## Технический контур
-- SPA на React + TypeScript + Vite с клиентским UI и используемым API-слоем для auth и server sync.
-- Точка входа: [src/main.tsx](src/main.tsx).
-- Основная оркестрация состояния и use-case действий сосредоточена в [src/App.tsx](src/App.tsx); shell-UI поэтапно выносится в `components/`.
-- В проекте используются API-маршруты из `api/` и клиент `src/serverSyncClient.ts`; серверный слой больше не является только заготовкой.
-- Для full-stack локальной разработки используется `vercel dev` (маршрутизация SPA + `/api/*`).
+`doc-builder` is a React + TypeScript workbench for building API method documentation. The app combines structured method sections, request/response tables, source import, AI helpers, and HTML/Wiki export.
 
-## Внутренний формат проекта
-Состояние проекта хранится и экспортируется как `ProjectData` (см. [src/types.ts](src/types.ts)):
+## Runtime Shape
 
-```json
-{
-  "version": 2,
-  "updatedAt": "2026-03-17T10:00:00.000Z",
-  "sections": [
-    {
-      "id": "goal",
-      "title": "Цель",
-      "enabled": true,
-      "kind": "text",
-      "value": "Описание цели"
-    },
-    {
-      "id": "request",
-      "title": "Request",
-      "enabled": true,
-      "kind": "parsed",
-      "sectionType": "request",
-      "format": "curl",
-      "input": "curl -X POST ...",
-      "rows": [],
-      "error": "",
-      "domainModelEnabled": true,
-      "clientFormat": "json",
-      "clientInput": "{\"id\":123}",
-      "clientRows": [],
-      "clientError": "",
-      "clientMappings": {},
-      "requestMethod": "POST",
-      "requestUrl": "https://api.example.com/method",
-      "authType": "none"
-    }
-  ]
-}
-```
+- Frontend: React, TypeScript, Vite.
+- Full-stack local mode: `npx vercel dev`, which serves the SPA and `/api/*` endpoints together.
+- Local-only mode: Vite can render the UI, but auth, server sync, and AI endpoints require the full-stack mode.
+- Main entry: `src/main.tsx`.
+- Main orchestration layer: `src/App.tsx`.
 
-Ключевые сущности:
-- `DocSection` — секция документа (`text` или `parsed`).
-- `ParsedSection` — секция с источником для парсинга и табличными строками.
-- `ParsedRow` — строка таблицы (`field`, `type`, `required`, `description`, `example`) с метаданными происхождения (`origin`, `source`, `sourceField`).
+## API Integration
 
-## Форматы источников
-Поддерживаемые форматы парсинга (см. [src/types.ts](src/types.ts), [src/parsers.ts](src/parsers.ts)):
-- `json`
-- `curl`
+Backend endpoints live in `api/` and are consumed through `src/serverSyncClient.ts` and feature hooks.
 
-XML в текущей версии не поддерживается.
+- Auth: login/register/session checks use cookie-backed API routes.
+- Server project sync: project list/load/save/delete goes through `/api/projects`.
+- Autosave: `useRemoteProjectAutosave` builds a `WorkspaceProjectData` snapshot and posts it to the backend after idle delay and hash dedupe.
+- AI: `/api/ai` requires an authenticated session and delegates model calls through `api/_lib/openrouterClient.ts`.
+- Import/export: JSON import is handled client-side; HTML/Wiki renderers run in the client and downloads are triggered from preview screens.
 
-## Основные потоки
+## Data Model
 
-### 1) Инициализация и нормализация
-- Приложение загружает проект из `localStorage` (`doc-builder-project-v2`) в [src/App.tsx](src/App.tsx).
-- Данные проходят через `sanitizeSections` в [src/sectionTitles.ts](src/sectionTitles.ts):
-  - нормализуются названия,
-  - заполняются значения по умолчанию,
-  - выполняется совместимость со старыми секциями (`body` -> `response`).
+The workspace is stored as `WorkspaceProjectData`:
 
-### 2) Парсинг источника в rows
-- Парсинг запускается из `runParser` в [src/App.tsx](src/App.tsx).
-- `parseToRows` в [src/parsers.ts](src/parsers.ts):
-  - JSON: flatten структуры в пути вида `a.b[0].c`;
-  - cURL: извлечение body (`--data*`), headers (`-H/--header`), URL и метода.
+- `projectName`: workspace/service label.
+- `methods`: array of `MethodDocument`.
+- `methodGroups`: service/group tree for methods.
+- `projectSections`: project-level documentation sections.
+- `flows`: project flow definitions.
+- `activeMethodId`: current method selection.
 
-### 3) Табличное редактирование и синхронизация
-- В dual-model секциях (`request`, `response`) применяется логика маппинга и объединения server/client строк из [src/requestHeaders.ts](src/requestHeaders.ts).
-- Обратная синхронизация `rows -> input` выполняется в [src/sourceSync.ts](src/sourceSync.ts) через `buildInputFromRows`.
-- Контроль drift и дубликатов реализован в [src/App.tsx](src/App.tsx) + утилитах `getInputDriftRows`.
+`MethodDocument` owns method metadata and `sections`. `DocSection` is either a text section, parsed request/response-like section, diagram section, or errors section. `ParsedRow` is the normalized table row with `field`, `type`, `required`, `description`, `example`, and source metadata.
 
-### 4) Экспорт
-- HTML документ строится через `renderHtmlDocument` в [src/renderHtml.ts](src/renderHtml.ts).
-- Wiki Markup строится через `renderWikiDocument` в [src/renderWiki.ts](src/renderWiki.ts).
-- Экспорт проекта в JSON выполняется из [src/App.tsx](src/App.tsx) (`asProjectData`).
+## Component Architecture
 
-## Слои и ответственность модулей
-- `App.tsx`: orchestration layer (state, use-case actions, wiring of feature components).
-- `components/AppTopbar.tsx`: topbar shell (import/export actions, history controls, auth entry points, onboarding stepbar).
-- `components/WorkspaceTabs.tsx`: workspace mode navigation (`editor/html/wiki`).
-- `components/MethodSectionSidebar.tsx`: sidebar shell (project/method tree, section list, add block entrypoint, resize handle trigger).
-- `components/ParsedSectionEditor.tsx`: wrapper of parsed section rendering flow (`request/response` editor vs generic parsed source/table).
-- `components/DiagramSectionEditor.tsx`: diagram section feature shell (diagram list, source input, preview, rich-text description actions).
-- `components/ErrorsSectionEditor.tsx`: error matrix feature shell (internalCode picker, formatting helpers, validation rules table).
-- `components/MermaidLivePreview.tsx`: isolated Mermaid preview renderer with fallback image flow.
-- `types.ts`: доменные типы и контракт состояния.
-- `parsers.ts`: преобразование входа в `ParsedRow[]`.
-- `requestHeaders.ts` / `requestColumns.ts`: прикладная логика request/response представления.
-- `sourceSync.ts`: генерация JSON/cURL из таблицы.
-- `renderHtml.ts` / `renderWiki.ts`: форматные адаптеры документа.
-- `theme.ts`: управление токенами темы.
-- `richText.ts`: преобразование rich text <-> wiki-подобный текст.
+### Screens
 
-## Ограничения MVP
-- Локальный режим (`npm run dev`) работает без backend и сохраняет данные в localStorage + JSON import/export.
-- Серверные сценарии (auth, облачное сохранение проектов, AI endpoint) требуют запуска через Vercel Dev/деплой с настроенными env-переменными и Neon Postgres.
-- Покрытие автотестами внедрено на MVP-уровне (unit + integration), но требует дальнейшего расширения при росте функционала.
-- `App.tsx` остается крупным и все еще содержит большой объем UI и бизнес-логики, но shell-часть верхней панели, workspace tabs, sidebar, parsed-section wrapper, diagram editor и errors editor уже вынесены в `components/`.
-- Эвристики парсинга cURL и определения типов покрывают типовые кейсы, но не являются строгим парсером спецификаций.
+- `src/screens/HtmlExportScreen.tsx`: rendered HTML preview, TOC/search, copy and download actions.
+- `src/screens/WikiScreen.tsx`: Wiki source/preview modes with copy and download.
+- Project docs and flows remain separate editor surfaces inside the workspace.
 
-## Оценка рефакторинга на текущем этапе
+### Workbench Shell
 
-### Нужен ли рефакторинг сейчас
-Да, но поэтапный, без полной переработки архитектуры.
+- `src/components/workbench/WorkbenchSidebar.tsx`: project/service switcher, method tree, section tree, search entry.
+- `src/components/workbench/WorkbenchTopbar.tsx`: current method context, Workbench/Editor mode, layout toggle, import, preview/export actions, user/theme menu.
+- `src/components/workbench/MethodMetaPanel.tsx`: right-side method metadata editor.
 
-Причины:
-- Высокая концентрация ответственности в [src/App.tsx](src/App.tsx) усложняет сопровождение и регрессионное тестирование.
-- Дублирование похожих веток для server/client сценариев повышает риск расхождений поведения.
-- Логика бизнес-правил и UI-рендеринг тесно связаны.
+### Cards and Tables
 
-### Приоритет рефакторинга
-1. Высокий: декомпозиция `App.tsx` на hooks + feature-компоненты.
-2. Высокий: выделение use-case функций работы с `ParsedSection` (parse/sync/map/validate).
-3. Средний: добавление минимального тестового покрытия для `parsers`, `sourceSync`, `requestHeaders`.
-4. Средний: упростить и централизовать правила server/client ветвлений.
+- `src/components/cards/Card.tsx`: Kraft card primitive.
+- `src/components/cards/MethodHeaderCard.tsx`: method header card with HTTP method, path, and description.
+- `src/components/tables/WorkbenchTables.tsx`: classic/gallery/mini table views, inline editing, required marker, type selector, row grouping, and row copy affordances.
+- `src/components/primitives/WorkbenchPrimitives.tsx`: HTTP chips, type chips, required marker, buttons, inputs, tabs, sidebar rows, and AI action buttons.
 
-### Что можно отложить
-- Полный переход на state machine/library для всего экрана.
-- Перенос в отдельный backend до появления требований совместной работы пользователей.
+## Theme & Design System
 
-## Рекомендуемый план без остановки разработки
-1. Выделить `useProjectState` (load/save/import/export/reset + sanitize).
-2. Выделить `useParsedSections` (parse, sync, drift, mapping, auth/meta).
-3. Продолжить декомпозицию UI: вынести `TextSectionEditor` и `RequestSectionEditor` (часть parsed/request use-case), затем сократить прокидывание props через feature-level hooks.
-4. Добавить тесты на чистые функции: `parseToRows`, `buildInputFromRows`, `getRequestRows`.
+The UI uses Kraft Workbench tokens:
 
-Такой подход снижает риск регрессий и не блокирует поставку новых функций.
+- `src/tokens-workbench.css` defines `--wb-*` tokens for `blue`, `warm`, and `violet` accents.
+- `warm` is the default Kraft accent.
+- `src/theme.ts` keeps the legacy `--bg`, `--card`, `--panel`, and related variables aligned with Kraft colors for older editor surfaces.
+- Fonts: `Inter Tight` for UI and `JetBrains Mono` for code, methods, endpoints, and table field names.
+
+New UI should prefer `var(--wb-*)` tokens. Legacy variables should only be used where old editor code still depends on them.
+
+## Editing and Source Flow
+
+- Source import supports JSON and cURL.
+- `src/parsers.ts` turns source text into `ParsedRow[]`.
+- `src/sourceSync.ts` rebuilds JSON/cURL source from table rows.
+- Drift alerts compare rows against last synced source.
+- Request/response sections support inline import, table row editing, AI descriptions, and AI examples.
+
+## Export Flow
+
+- Topbar `HTML` and `Wiki` open preview tabs.
+- HTML/Wiki preview screens provide explicit copy/download actions.
+- JSON remains a direct project/workspace download.
+- Lazy preview rendering is used so HTML/Wiki renderers do not run on every editor keystroke.
+
+## Mobile Behavior
+
+On narrow viewports, the sidebar behaves as a drawer:
+
+- Hidden by default when entering compact layout.
+- Opened from the topbar menu button.
+- Closed by backdrop click or after selecting a method/section.
+- Desktop keeps the persistent left sidebar.
+
+## Deprecated Patterns
+
+- The old flat shell is no longer the primary layout.
+- Legacy editor mode remains as a fallback for advanced editing, but must visually use Kraft tokens.
+- New design work should not add more UI directly to `App.tsx` unless the state coupling makes extraction impractical.

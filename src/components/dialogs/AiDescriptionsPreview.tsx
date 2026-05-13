@@ -14,6 +14,9 @@ type AiDescriptionsPreviewProps = {
   onSelectNone: () => void;
   onConfirm: () => void;
   onCancel: () => void;
+  title?: string;
+  applyLabel?: string;
+  lockedHint?: string;
 };
 
 export function AiDescriptionsPreview({
@@ -22,14 +25,17 @@ export function AiDescriptionsPreview({
   onSelectAll,
   onSelectNone,
   onConfirm,
-  onCancel
+  onCancel,
+  title = 'AI предлагает значения',
+  applyLabel = 'Применить',
+  lockedHint = 'Уже заполнено — не изменяется'
 }: AiDescriptionsPreviewProps): ReactNode {
   const selectedCount = suggestions.filter((item) => item.accepted && !item.locked).length;
 
   return (
-    <div className="import-routing-backdrop" role="dialog" aria-modal="true" aria-label="Предпросмотр AI описаний">
+    <div className="import-routing-backdrop" role="dialog" aria-modal="true" aria-label={title}>
       <div className="import-routing-card">
-        <h2>AI предлагает описания ({suggestions.length})</h2>
+        <h2>{title} ({suggestions.length})</h2>
         <div style={{ display: 'grid', gap: 8, maxHeight: 340, overflowY: 'auto', marginTop: 8 }}>
           {suggestions.map((item) => (
             <label
@@ -55,7 +61,7 @@ export function AiDescriptionsPreview({
               <code style={{ fontFamily: 'var(--wb-font-mono)', fontSize: 12 }}>{item.field}</code>
               <div style={{ fontSize: 12.5, lineHeight: 1.45, color: item.locked ? 'var(--wb-text-muted)' : 'var(--wb-text-soft)' }}>
                 {item.description}
-                {item.locked && <div style={{ marginTop: 3, fontSize: 11 }}>Уже заполнено — не изменяется</div>}
+                {item.locked && <div style={{ marginTop: 3, fontSize: 11 }}>{lockedHint}</div>}
               </div>
             </label>
           ))}
@@ -68,7 +74,7 @@ export function AiDescriptionsPreview({
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button type="button" className="ghost" onClick={onCancel}>Отмена</button>
-            <button type="button" onClick={onConfirm} disabled={selectedCount === 0}>Применить {selectedCount}</button>
+            <button type="button" onClick={onConfirm} disabled={selectedCount === 0}>{applyLabel} {selectedCount}</button>
           </div>
         </div>
       </div>

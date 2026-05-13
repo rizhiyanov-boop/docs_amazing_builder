@@ -200,11 +200,7 @@ function deepClone<T>(value: T): T {
 }
 
 function loadOnboardingEntrySuppressed(): boolean {
-  try {
-    return localStorage.getItem(ONBOARDING_ENTRY_SUPPRESS_KEY) === '1';
-  } catch {
-    return false;
-  }
+  return true;
 }
 
 function saveOnboardingEntrySuppressed(value: boolean): void {
@@ -451,6 +447,10 @@ type AiDescriptionsPreviewState = {
   sectionId: string;
   suggestions: AiDescriptionSuggestion[];
 };
+type AiExamplesPreviewState = {
+  sectionId: string;
+  suggestions: AiDescriptionSuggestion[];
+};
 type AuthDialogState = {
   mode: AuthDialogMode;
   login: string;
@@ -691,6 +691,7 @@ export default function App() {
   const [aiRequestStatus, setAiRequestStatus] = useState<AiRequestStatus | null>(null);
   const [aiBusyKey, setAiBusyKey] = useState<string | null>(null);
   const [aiDescriptionsPreview, setAiDescriptionsPreview] = useState<AiDescriptionsPreviewState | null>(null);
+  const [aiExamplesPreview, setAiExamplesPreview] = useState<AiExamplesPreviewState | null>(null);
   const [inlineImportSectionId, setInlineImportSectionId] = useState<string | null>(null);
   const [inlineImportText, setInlineImportText] = useState('');
   const [inlineImportError, setInlineImportError] = useState('');
@@ -833,15 +834,6 @@ export default function App() {
 
   function markWorkspaceChanged(): void {
     workspaceVersionRef.current += 1;
-  }
-
-  function setAiStatus(message: string): void {
-    clearAiStatusResetTimeout();
-    setAiRequestStatus({ state: 'success', message });
-    aiStatusResetTimeoutRef.current = setTimeout(() => {
-      setAiRequestStatus((current) => (current?.message === message ? null : current));
-      aiStatusResetTimeoutRef.current = null;
-    }, 2200);
   }
 
   function clearAuthStatusResetTimeout(): void {
@@ -2750,7 +2742,11 @@ export default function App() {
 
     const mediaQuery = window.matchMedia(COMPACT_LAYOUT_MEDIA_QUERY);
     const updateCompactLayout = (event?: MediaQueryListEvent): void => {
-      setIsCompactLayout(event ? event.matches : mediaQuery.matches);
+      const nextIsCompact = event ? event.matches : mediaQuery.matches;
+      setIsCompactLayout(nextIsCompact);
+      if (nextIsCompact) {
+        setIsSidebarHidden(true);
+      }
     };
 
     updateCompactLayout();
@@ -3510,13 +3506,11 @@ export default function App() {
     try {
       const suggestions = await generateExamplesWithAi({
         sectionType: section.sectionType ?? 'generic',
-        rows: targetRows.map((row) => ({
+        rows: rowsWithoutExample.map((row) => ({
           field: row.field,
           type: row.type,
-          required: row.required,
           description: row.description,
-          source: row.source,
-          example: row.example
+          required: row.required
         }))
       });
 
@@ -3526,33 +3520,65 @@ export default function App() {
           .filter((item) => item[0] && item[1])
       );
 
-      let updatedCount = 0;
-      updateSection(section.id, (current) => {
-        if (current.kind !== 'parsed') return current;
-        const rows = current.rows.map((row) => {
-          if (row.example.trim()) return row;
-          const nextExample = suggestionsByField.get(row.field.trim().toLowerCase());
-          if (!nextExample) return row;
-          updatedCount += 1;
-          return { ...row, example: nextExample };
+      const previewSuggestions: AiDescriptionSuggestion[] = [];
+      for (const row of rowsWithoutExample) {
+        const suggested = suggestionsByField.get(row.field.trim().toLowerCase());
+        if (!suggested) continue;
+        previewSuggestions.push({
+          field: row.field,
+          description: suggested,
+          accepted: true,
+          locked: false
         });
-        return { ...current, rows };
-      });
+      }
 
-      if (updatedCount === 0) {
+      if (previewSuggestions.length === 0) {
         setToastMessage('AI не предложил новых примеров');
         completeAiRequestStatus('AI: примеры не изменены');
         return;
       }
 
-      setToastMessage(`AI заполнил примеры: ${updatedCount}`);
-      completeAiRequestStatus('AI: примеры применены');
+      setAiExamplesPreview({
+        sectionId: section.id,
+        suggestions: previewSuggestions
+      });
+      completeAiRequestStatus('AI: открыл предпросмотр примеров');
     } catch (error) {
       setAiRequestStatus(null);
       setAiErrorMessage(error instanceof Error ? error.message : 'Не удалось сгенерировать примеры через AI');
     } finally {
       setAiBusyKey(null);
     }
+  }
+
+  function applyAiExamplesPreviewSelection(): void {
+    if (!aiExamplesPreview) return;
+    const selectedByField = new Map(
+      aiExamplesPreview.suggestions
+        .filter((item) => item.accepted && !item.locked)
+        .map((item) => [item.field.trim().toLowerCase(), item.description] as const)
+    );
+    const selectedCount = selectedByField.size;
+
+    if (selectedCount === 0) {
+      setAiExamplesPreview(null);
+      setToastMessage('Нет выбранных примеров для применения');
+      return;
+    }
+
+    updateSection(aiExamplesPreview.sectionId, (current) => {
+      if (current.kind !== 'parsed') return current;
+      const rows = current.rows.map((row) => {
+        if (row.example.trim()) return row;
+        const suggested = selectedByField.get(row.field.trim().toLowerCase());
+        return suggested ? { ...row, example: suggested } : row;
+      });
+      return { ...current, rows };
+    });
+
+    setAiExamplesPreview(null);
+    setToastMessage(`AI применил примеры: ${selectedCount}`);
+    completeAiRequestStatus('AI: примеры применены');
   }
 
   function openInlineImport(section: ParsedSection): void {
@@ -7182,6 +7208,21 @@ export default function App() {
     void handleServerProjectSelect(projectId);
   }, [serverProjectId, isProjectSwitching, handleServerProjectSelect]);
 
+  const projectMethodCounts = useMemo(() => {
+    const next: Record<string, number> = {};
+    for (const project of serverProjects) {
+      const preview = projectMethodPreviews[project.id];
+      if (preview) {
+        next[project.id] = preview.length;
+      } else if (project.id === serverProjectId) {
+        next[project.id] = methods.length;
+      } else {
+        next[project.id] = 0;
+      }
+    }
+    return next;
+  }, [methods.length, projectMethodPreviews, serverProjectId, serverProjects]);
+
   const handleToggleProjectExpanded = useCallback((projectId: string | null) => {
     if (!projectId) return;
     setExpandedProjectIds((current) => {
@@ -7407,7 +7448,7 @@ export default function App() {
                     <button type="button" className="wb-table-view-btn" onClick={() => setWorkbenchTableView('gallery')}>gallery</button>
                     <button type="button" className="wb-table-view-btn" onClick={() => setWorkbenchTableView('mini')}>mini</button>
                     <AiTableButton kind="fill" onClick={() => void fillFieldDescriptionsWithAi(section)} />
-                    <AiTableButton kind="json" onClick={() => void generateExamplesWithAiForSection(section)} />
+                    <AiTableButton kind="examples" onClick={() => void generateExamplesWithAiForSection(section)} />
                     {(section.sectionType === 'request' || section.sectionType === 'response') && (
                       <button type="button" className="wb-table-view-btn" onClick={() => openInlineImport(section)}>
                         ↓ Импорт
@@ -7440,8 +7481,8 @@ export default function App() {
                   />
                   {inlineImportError && <div style={{ color: 'var(--wb-required)', fontSize: 12 }}>{inlineImportError}</div>}
                   <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                    <button type="button" className="wb-table-view-btn" onClick={cancelInlineImport}>Cancel</button>
-                    <button type="button" className="wb-table-view-btn" onClick={() => applyInlineImport(section)}>Apply</button>
+                    <button type="button" className="wb-table-view-btn" onClick={cancelInlineImport}>Отмена</button>
+                    <button type="button" className="wb-table-view-btn" onClick={() => applyInlineImport(section)}>Применить</button>
                   </div>
                 </div>
               )}
@@ -7519,7 +7560,7 @@ export default function App() {
   void activeOnboardingStep;
 
   return (
-    <div className="wb-app-root" data-wb-accent={wbAccent}>
+    <div className={`wb-app-root ${isCompactLayout ? 'wb-compact' : ''} ${isSidebarHidden ? 'wb-sidebar-hidden' : ''}`} data-wb-accent={wbAccent}>
       {ONBOARDING_FEATURES.onboardingV1 && showOnboardingEntry && (
         <div
           className="onboarding-entry-backdrop"
@@ -7598,6 +7639,48 @@ export default function App() {
           }}
           onConfirm={applyAiDescriptionPreviewSelection}
           onCancel={() => setAiDescriptionsPreview(null)}
+        />
+      )}
+
+      {aiExamplesPreview && (
+        <AiDescriptionsPreview
+          suggestions={aiExamplesPreview.suggestions}
+          title="AI предлагает примеры"
+          applyLabel="Применить примеры"
+          lockedHint="Пример уже заполнен"
+          onToggle={(field, accepted) => {
+            setAiExamplesPreview((current) => {
+              if (!current) return current;
+              return {
+                ...current,
+                suggestions: current.suggestions.map((item) => (
+                  item.field === field && !item.locked
+                    ? { ...item, accepted }
+                    : item
+                ))
+              };
+            });
+          }}
+          onSelectAll={() => {
+            setAiExamplesPreview((current) => {
+              if (!current) return current;
+              return {
+                ...current,
+                suggestions: current.suggestions.map((item) => (item.locked ? item : { ...item, accepted: true }))
+              };
+            });
+          }}
+          onSelectNone={() => {
+            setAiExamplesPreview((current) => {
+              if (!current) return current;
+              return {
+                ...current,
+                suggestions: current.suggestions.map((item) => (item.locked ? item : { ...item, accepted: false }))
+              };
+            });
+          }}
+          onConfirm={applyAiExamplesPreviewSelection}
+          onCancel={() => setAiExamplesPreview(null)}
         />
       )}
 
@@ -7905,20 +7988,30 @@ export default function App() {
         <div className="import-routing-backdrop" role="dialog" aria-modal="true" aria-label="Импорт проекта из текста">
           <div className="import-routing-card">
             <h2>Импорт JSON</h2>
-            <p className="import-routing-file">Вставьте JSON или cURL</p>
 
             <div className="row gap import-routing-actions-start">
               <button
                 type="button"
-                className="ghost"
                 onClick={() => importInputRef.current?.click()}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '6px 14px',
+                  background: 'var(--wb-bg-soft)',
+                  border: '1px solid var(--wb-border)',
+                  borderRadius: 'var(--wb-radius)',
+                  color: 'var(--wb-text)',
+                  fontSize: 13,
+                  cursor: 'pointer',
+                  fontFamily: 'var(--wb-font-sans)'
+                }}
               >
-                Выбрать файл
+                ↑ Выбрать файл
               </button>
             </div>
 
             <label className="field">
-              <div className="label">Текст для импорта</div>
               <textarea
                 className="source-edit"
                 rows={10}
@@ -7944,7 +8037,7 @@ export default function App() {
                 onClick={() => processImportedText(projectTextImport.rawText, 'Вставленный JSON')}
                 disabled={!projectTextImport.rawText.trim()}
               >
-                Импортировать текст
+                Импортировать
               </button>
             </div>
           </div>
@@ -8018,6 +8111,8 @@ export default function App() {
         selectedSectionId={selectedSection?.id}
         serverProjects={serverProjects}
         currentProjectId={serverProjectId}
+        switchingProjectId={switchingProjectId}
+        methodCounts={projectMethodCounts}
         getMethodHttpMethod={getMethodHttpMethod}
         onSwitchMethod={handleSwitchMethod}
         onSelectSection={handleSelectSection}
@@ -8047,9 +8142,16 @@ export default function App() {
           onAccentChange={handleWbAccentChange}
           onOpenProjectImport={handleOpenProjectImport}
           onImportProjectJson={handleImportProjectJsonFiles}
-          onExportHtml={() => void handleExportHtml()}
-          onExportWiki={handleExportWiki}
+          onExportHtml={() => {
+            setTab('html');
+            if (isCompactLayout) setIsSidebarHidden(true);
+          }}
+          onExportWiki={() => {
+            setTab('wiki');
+            if (isCompactLayout) setIsSidebarHidden(true);
+          }}
           onExportJson={exportProjectJson}
+          onToggleSidebar={handleToggleSidebar}
           onUndo={undoWorkspace}
           onRedo={redoWorkspace}
           onManualSave={handleManualSaveClick}
@@ -8169,14 +8271,6 @@ export default function App() {
               {tab === 'editor' && workspaceScope === 'methods' && workbenchMode === 'workbench' && renderWorkbenchEditor()}
               {tab === 'editor' && workspaceScope === 'methods' && workbenchMode === 'editor' && (
                 <div className="editor-stream">
-                  <section className="panel ai-action-bar-panel" aria-label="AI действия">
-                    <div className="panel-title">AI Actions</div>
-                    <div className="row gap">
-                      <button type="button" className="ghost small" onClick={() => setAiStatus('AI: генерирую подсказки...')}>Подсказки</button>
-                      <button type="button" className="ghost small" onClick={() => setAiStatus('AI: проверяю соответствие секций...')}>Проверка</button>
-                      <button type="button" className="ghost small" onClick={() => setAiStatus('AI: готово')}>Сброс</button>
-                    </div>
-                  </section>
                   {sections.length === 0 && (
                     <section className="panel empty-state-panel" aria-label="Нет секций">
                       <div className="panel-title">Нет секций</div>
@@ -8511,19 +8605,19 @@ export default function App() {
           ) : (
             <section className="panel empty-state-panel" aria-label="Метод не выбран">
               <div className="panel-title">Метод не выбран</div>
-              <div className="muted">Выберите метод слева или создайте новый проект.</div>
+              <div className="muted">Выберите метод слева или создайте новый метод.</div>
             </section>
           )}
         </main>
+        {activeMethod && tab === 'editor' && workspaceScope === 'methods' && (
+          <MethodMetaPanel
+            method={activeMethod}
+            methodHttpMethod={getMethodHttpMethod(activeMethod)}
+            methodPath={getMethodPath(activeMethod)}
+            onUpdate={handleMethodMetaUpdate}
+          />
+        )}
       </div>
-      {activeMethod && tab === 'editor' && workspaceScope === 'methods' && (
-        <MethodMetaPanel
-          method={activeMethod}
-          methodHttpMethod={getMethodHttpMethod(activeMethod)}
-          methodPath={getMethodPath(activeMethod)}
-          onUpdate={handleMethodMetaUpdate}
-        />
-      )}
         </div>
       </div>
     </div>

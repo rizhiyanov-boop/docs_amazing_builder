@@ -1,6 +1,7 @@
 import { useRef, useState, type ReactNode } from 'react';
 import type { ParsedRow } from '../../types';
 import { ReqDot, TypeChip } from '../primitives/WorkbenchPrimitives';
+import { isRequired } from './WorkbenchTables.utils';
 
 const ROW_TYPES = [
   { value: 'string', label: 'string' },
@@ -23,11 +24,6 @@ type TableProps = {
   editable?: boolean;
 };
 
-export function isRequired(value: string): boolean {
-  const normalized = value.trim().toLowerCase();
-  return value === '+' || value === 'Да' || normalized === 'true' || value === '1' || normalized === 'required';
-}
-
 function moveFocus(current: HTMLElement, direction: 'next' | 'prev'): void {
   const scope = current.closest('.wb-table-focus-scope');
   if (!scope) return;
@@ -38,13 +34,57 @@ function moveFocus(current: HTMLElement, direction: 'next' | 'prev'): void {
   next?.focus();
 }
 
-function FieldInput({
-  row,
-  onUpdateRow
-}: {
-  row: ParsedRow;
-  onUpdateRow?: (row: ParsedRow, patch: Partial<ParsedRow>) => void;
-}): ReactNode {
+function groupRowsByPrefix(rows: ParsedRow[]): Array<{ prefix: string | null; rows: ParsedRow[] }> {
+  const groups: Array<{ prefix: string | null; rows: ParsedRow[] }> = [];
+  let currentPrefix: string | null = null;
+  let currentGroup: ParsedRow[] = [];
+
+  for (const row of rows) {
+    const dotIndex = row.field.indexOf('.');
+    const prefix = dotIndex > 0 ? row.field.slice(0, dotIndex) : null;
+
+    if (prefix !== currentPrefix) {
+      if (currentGroup.length > 0) groups.push({ prefix: currentPrefix, rows: currentGroup });
+      currentPrefix = prefix;
+      currentGroup = [row];
+    } else {
+      currentGroup.push(row);
+    }
+  }
+
+  if (currentGroup.length > 0) groups.push({ prefix: currentPrefix, rows: currentGroup });
+  return groups;
+}
+
+function getRowCopyText(row: ParsedRow): string {
+  if (row.example?.trim()) return row.example.trim();
+  return JSON.stringify({
+    field: row.field || row.sourceField || '',
+    type: row.type || 'string',
+    required: row.required || '',
+    description: row.description || ''
+  }, null, 2);
+}
+
+function copyRow(row: ParsedRow): void {
+  if (typeof navigator !== 'undefined' && navigator.clipboard) {
+    void navigator.clipboard.writeText(getRowCopyText(row));
+  }
+}
+
+function getTypeAccent(type: string): string {
+  const normalized = type.toLowerCase();
+  if (normalized.includes('array') || normalized.endsWith('[]')) return 'var(--wb-table-type-array)';
+  if (normalized.includes('object') || normalized.includes('map')) return 'var(--wb-table-type-object)';
+  if (normalized.includes('bool')) return 'var(--wb-table-type-boolean)';
+  if (normalized.includes('int') || normalized.includes('long') || normalized.includes('number') || normalized.includes('float') || normalized.includes('double')) {
+    return 'var(--wb-table-type-number)';
+  }
+  if (normalized.includes('null')) return 'var(--wb-table-type-null)';
+  return 'var(--wb-table-type-string)';
+}
+
+function FieldInput({ row, onUpdateRow }: { row: ParsedRow; onUpdateRow?: (row: ParsedRow, patch: Partial<ParsedRow>) => void }): ReactNode {
   return (
     <input
       value={row.field || row.sourceField || ''}
@@ -124,16 +164,8 @@ function DescriptionInput({
   );
 }
 
-function TypeSelect({
-  row,
-  onUpdateRow
-}: {
-  row: ParsedRow;
-  onUpdateRow?: (row: ParsedRow, patch: Partial<ParsedRow>) => void;
-}): ReactNode {
-  if (!onUpdateRow) {
-    return <TypeChip type={row.type} />;
-  }
+function TypeSelect({ row, onUpdateRow }: { row: ParsedRow; onUpdateRow?: (row: ParsedRow, patch: Partial<ParsedRow>) => void }): ReactNode {
+  if (!onUpdateRow) return <TypeChip type={row.type} />;
 
   return (
     <select
@@ -173,11 +205,7 @@ function TypeSelect({
   );
 }
 
-function AddRowInline({
-  onAdd
-}: {
-  onAdd?: (fieldName?: string, fieldType?: string) => void;
-}): ReactNode {
+function AddRowInline({ onAdd }: { onAdd?: (fieldName?: string, fieldType?: string) => void }): ReactNode {
   const [field, setField] = useState('');
   const [type, setType] = useState('string');
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -293,48 +321,93 @@ function AddRowInline({
   );
 }
 
+function GroupHeader({ prefix, withTopGap }: { prefix: string; withTopGap?: boolean }): ReactNode {
+  return (
+    <div
+      style={{
+        padding: '4px 10px',
+        fontSize: 10,
+        fontWeight: 600,
+        color: 'var(--wb-text-muted)',
+        letterSpacing: '0.08em',
+        textTransform: 'uppercase',
+        background: 'var(--wb-bg-soft)',
+        borderBottom: '1px solid var(--wb-border-soft)',
+        borderTop: withTopGap ? '1px solid var(--wb-border-soft)' : undefined,
+        marginTop: withTopGap ? 4 : 0
+      }}
+    >
+      {prefix}
+    </div>
+  );
+}
+
 export function TableClassic({ rows, onUpdateRow, onAddRow, onRowMenu, editable = false }: TableProps): ReactNode {
+  const groups = rows.length > 8 ? groupRowsByPrefix(rows) : [{ prefix: null as string | null, rows }];
+
   return (
     <div className="wb-table-focus-scope" style={{ display: 'grid', gap: 0, border: '1px solid var(--wb-border-soft)', borderRadius: 'var(--wb-radius)', overflow: 'hidden' }}>
-      {rows.map((row) => (
-        <div
-          key={row.id ?? row.field}
-          className="wb-table-classic-row"
-          style={{
-            gap: 8,
-            alignItems: 'start',
-            padding: '8px 10px',
-            borderBottom: '1px solid var(--wb-border-soft)',
-            background: 'var(--wb-bg-surface)'
-          }}
-        >
-          <div style={{ minWidth: 0 }}>
-            {editable ? (
-              <FieldInput row={row} onUpdateRow={onUpdateRow} />
-            ) : (
-              <code style={{ fontFamily: 'var(--wb-font-mono)', fontSize: 12.5, fontWeight: 500, color: 'var(--wb-text)', overflowWrap: 'anywhere' }}>
-                {row.field || row.sourceField || 'field'}
-              </code>
-            )}
-            <ReqDot required={isRequired(row.required)} />
-          </div>
-          <TypeSelect row={row} onUpdateRow={onUpdateRow} />
-          {editable ? (
-            <DescriptionInput row={row} onUpdateRow={onUpdateRow} />
-          ) : (
-            <div style={{ fontSize: 12.5, lineHeight: 1.45, color: row.description ? 'var(--wb-text-soft)' : 'var(--wb-text-muted)' }}>
-              {row.description || 'Описание не заполнено'}
-            </div>
-          )}
-          {onRowMenu && (
-            <button
-              type="button"
-              onClick={() => onRowMenu(row)}
-              style={{ border: 0, background: 'transparent', color: 'var(--wb-text-muted)', cursor: 'pointer', fontSize: 16 }}
+      {groups.map((group, groupIndex) => (
+        <div key={`classic-${group.prefix ?? 'plain'}-${groupIndex}`}>
+          {group.prefix && <GroupHeader prefix={group.prefix} withTopGap={groupIndex > 0} />}
+          {group.rows.map((row, rowIndex) => (
+            <div
+              key={row.id ?? row.field}
+              className="wb-table-classic-row"
+              style={{
+                gap: 8,
+                alignItems: 'start',
+                padding: '8px 10px',
+                borderBottom: '1px solid var(--wb-border-soft)',
+                borderLeft: `4px solid ${getTypeAccent(row.type || 'string')}`,
+                background: rowIndex % 2 === 0 ? 'var(--wb-table-stripe-even)' : 'var(--wb-table-stripe-odd)'
+              }}
             >
-              ⋯
-            </button>
-          )}
+              <div style={{ minWidth: 0 }}>
+                {editable ? (
+                  <FieldInput row={row} onUpdateRow={onUpdateRow} />
+                ) : (
+                  <code style={{ fontFamily: 'var(--wb-font-mono)', fontSize: 12.5, fontWeight: 500, color: 'var(--wb-text)', overflowWrap: 'anywhere' }}>
+                    {row.field || row.sourceField || 'field'}
+                  </code>
+                )}
+                <ReqDot required={isRequired(row.required)} />
+              </div>
+              <TypeSelect row={row} onUpdateRow={onUpdateRow} />
+              {editable ? (
+                <DescriptionInput row={row} onUpdateRow={onUpdateRow} />
+              ) : (
+                <div style={{ fontSize: 12.5, lineHeight: 1.45, color: row.description ? 'var(--wb-text-soft)' : 'var(--wb-text-muted)' }}>
+                  {row.description || 'Описание не заполнено'}
+                  {row.example && (
+                    <code style={{ display: 'block', marginTop: 6, fontFamily: 'var(--wb-font-mono)', fontSize: 11.5, color: 'var(--wb-text)', overflowWrap: 'anywhere' }}>
+                      {row.example}
+                    </code>
+                  )}
+                </div>
+              )}
+              <button
+                type="button"
+                className="wb-table-copy-btn"
+                onClick={() => copyRow(row)}
+                title={row.example ? 'Скопировать пример' : 'Скопировать строку'}
+                aria-label={row.example ? 'Скопировать пример' : 'Скопировать строку'}
+              >
+                ⧉
+              </button>
+              {onRowMenu && (
+                <button
+                  type="button"
+                  onClick={() => onRowMenu(row)}
+                  title="Меню строки"
+                  aria-label="Меню строки"
+                  style={{ border: 0, background: 'transparent', color: 'var(--wb-text-muted)', cursor: 'pointer', fontSize: 16 }}
+                >
+                  ⋯
+                </button>
+              )}
+            </div>
+          ))}
         </div>
       ))}
       {rows.length === 0 && <div style={{ padding: 14, color: 'var(--wb-text-muted)', fontSize: 13 }}>Поля не добавлены.</div>}
@@ -344,28 +417,61 @@ export function TableClassic({ rows, onUpdateRow, onAddRow, onRowMenu, editable 
 }
 
 export function TableGallery({ rows, onUpdateRow, onAddRow, editable = false }: TableProps): ReactNode {
+  const groups = rows.length > 8 ? groupRowsByPrefix(rows) : [{ prefix: null as string | null, rows }];
+
   return (
     <div className="wb-table-focus-scope" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {rows.map((row) => (
-        <div key={row.id ?? row.field} style={{ background: 'var(--wb-bg-soft)', border: '1px solid var(--wb-border-soft)', borderRadius: 'var(--wb-radius)', padding: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            {editable ? (
-              <div style={{ minWidth: 140, flex: 1 }}>
-                <FieldInput row={row} onUpdateRow={onUpdateRow} />
+      {groups.map((group, groupIndex) => (
+        <div key={`gallery-${group.prefix ?? 'plain'}-${groupIndex}`}>
+          {group.prefix && <GroupHeader prefix={group.prefix} withTopGap={groupIndex > 0} />}
+          {group.rows.map((row) => (
+            <div
+              key={row.id ?? row.field}
+              style={{
+                background: 'var(--wb-bg-soft)',
+                border: '1px solid var(--wb-border-soft)',
+                borderLeft: `4px solid ${getTypeAccent(row.type || 'string')}`,
+                borderRadius: 'var(--wb-radius)',
+                padding: 10,
+                marginBottom: 8
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                {editable ? (
+                  <div style={{ minWidth: 140, flex: 1 }}>
+                    <FieldInput row={row} onUpdateRow={onUpdateRow} />
+                  </div>
+                ) : (
+                  <code style={{ fontFamily: 'var(--wb-font-mono)', fontSize: 13, fontWeight: 600 }}>{row.field || row.sourceField || 'field'}</code>
+                )}
+                <TypeSelect row={row} onUpdateRow={onUpdateRow} />
+                <ReqDot required={isRequired(row.required)} />
+                <button
+                  type="button"
+                  className="wb-table-copy-btn"
+                  onClick={() => copyRow(row)}
+                  title={row.example ? 'Скопировать пример' : 'Скопировать строку'}
+                  aria-label={row.example ? 'Скопировать пример' : 'Скопировать строку'}
+                >
+                  ⧉
+                </button>
               </div>
-            ) : (
-              <code style={{ fontFamily: 'var(--wb-font-mono)', fontSize: 13, fontWeight: 600 }}>{row.field || row.sourceField || 'field'}</code>
-            )}
-            <TypeSelect row={row} onUpdateRow={onUpdateRow} />
-            <ReqDot required={isRequired(row.required)} />
-          </div>
-          {editable ? (
-            <div style={{ marginTop: 8 }}>
-              <DescriptionInput row={row} onUpdateRow={onUpdateRow} />
+              {editable ? (
+                <div style={{ marginTop: 8 }}>
+                  <DescriptionInput row={row} onUpdateRow={onUpdateRow} />
+                </div>
+              ) : (
+                <div style={{ marginTop: 6, fontSize: 13, lineHeight: 1.5, color: 'var(--wb-text-soft)' }}>
+                  {row.description || 'Описание не заполнено'}
+                  {row.example && (
+                    <code style={{ display: 'block', marginTop: 6, fontFamily: 'var(--wb-font-mono)', fontSize: 11.5, color: 'var(--wb-text)', overflowWrap: 'anywhere' }}>
+                      {row.example}
+                    </code>
+                  )}
+                </div>
+              )}
             </div>
-          ) : (
-            <div style={{ marginTop: 6, fontSize: 13, lineHeight: 1.5, color: 'var(--wb-text-soft)' }}>{row.description || 'Описание не заполнено'}</div>
-          )}
+          ))}
         </div>
       ))}
       {editable && <AddRowInline onAdd={onAddRow} />}
@@ -377,7 +483,16 @@ export function TableMiniCards({ rows, onUpdateRow, onAddRow, editable = false }
   return (
     <div className="wb-table-focus-scope" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8 }}>
       {rows.map((row) => (
-        <div key={row.id ?? row.field} style={{ background: 'var(--wb-bg-soft)', border: '1px solid var(--wb-border-soft)', borderRadius: 'var(--wb-radius)', padding: 10 }}>
+        <div
+          key={row.id ?? row.field}
+          style={{
+            background: 'var(--wb-bg-soft)',
+            border: '1px solid var(--wb-border-soft)',
+            borderLeft: `4px solid ${getTypeAccent(row.type || 'string')}`,
+            borderRadius: 'var(--wb-radius)',
+            padding: 10
+          }}
+        >
           {editable ? (
             <FieldInput row={row} onUpdateRow={onUpdateRow} />
           ) : (
@@ -386,11 +501,27 @@ export function TableMiniCards({ rows, onUpdateRow, onAddRow, editable = false }
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '6px 0' }}>
             <TypeSelect row={row} onUpdateRow={onUpdateRow} />
             <ReqDot required={isRequired(row.required)} />
+            <button
+              type="button"
+              className="wb-table-copy-btn"
+              onClick={() => copyRow(row)}
+              title={row.example ? 'Скопировать пример' : 'Скопировать строку'}
+              aria-label={row.example ? 'Скопировать пример' : 'Скопировать строку'}
+            >
+              ⧉
+            </button>
           </div>
           {editable ? (
             <DescriptionInput row={row} onUpdateRow={onUpdateRow} rows={3} />
           ) : (
-            <div style={{ fontSize: 12.5, lineHeight: 1.45, color: 'var(--wb-text-soft)' }}>{row.description || 'Описание не заполнено'}</div>
+            <div style={{ fontSize: 12.5, lineHeight: 1.45, color: 'var(--wb-text-soft)' }}>
+              {row.description || 'Описание не заполнено'}
+              {row.example && (
+                <code style={{ display: 'block', marginTop: 6, fontFamily: 'var(--wb-font-mono)', fontSize: 11.5, color: 'var(--wb-text)', overflowWrap: 'anywhere' }}>
+                  {row.example}
+                </code>
+              )}
+            </div>
           )}
         </div>
       ))}

@@ -81,7 +81,7 @@ describe('App integration', () => {
     });
   });
 
-  it('topbar html and wiki buttons export without switching active tab', async () => {
+  it('topbar html and wiki buttons open preview tabs without downloading', async () => {
     const user = userEvent.setup();
     const createObjectURL = vi.spyOn(window.URL, 'createObjectURL').mockReturnValue('blob:mock');
     const revokeObjectURL = vi.spyOn(window.URL, 'revokeObjectURL').mockImplementation(() => {});
@@ -92,13 +92,13 @@ describe('App integration', () => {
     expect(screen.queryByRole('heading', { name: /^Wiki$/i })).not.toBeInTheDocument();
 
     await user.click(findTopbarButton(/^HTML$/));
-    await user.click(findTopbarButton(/^Wiki$/));
+    expect(screen.getByText(/Published HTML/i)).toBeInTheDocument();
 
-    expect(screen.queryByText(/Published HTML/i)).not.toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: /^Wiki$/i })).not.toBeInTheDocument();
-    expect(createObjectURL).toHaveBeenCalledTimes(2);
-    expect(revokeObjectURL).toHaveBeenCalledTimes(2);
-    expect(clickSpy).toHaveBeenCalledTimes(2);
+    await user.click(findTopbarButton(/^Wiki$/));
+    expect(screen.getByRole('heading', { name: /^Wiki$/i })).toBeInTheDocument();
+    expect(createObjectURL).not.toHaveBeenCalled();
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+    expect(clickSpy).not.toHaveBeenCalled();
   });
 
   it('opens and closes project import dialog from Workbench topbar', async () => {
@@ -230,7 +230,7 @@ describe('App integration', () => {
       }
     });
 
-    await user.click(getDialogButton(dialog, /Импортировать текст|Import text/i));
+    await user.click(getDialogButton(dialog, /Импортировать|Import text/i));
     const previewDialog = getWorkspaceImportPreviewDialog();
     expect(within(previewDialog).getByText(/Customer Lookup/i)).toBeInTheDocument();
 
@@ -257,7 +257,7 @@ describe('App integration', () => {
       }
     });
 
-    await user.click(getDialogButton(dialog, /Импортировать текст|Import text/i));
+    await user.click(getDialogButton(dialog, /Импортировать|Import text/i));
     const previewDialog = getWorkspaceImportPreviewDialog();
     expect(within(previewDialog).getByText(/Partial Rows Method/i)).toBeInTheDocument();
 
@@ -351,7 +351,7 @@ describe('App integration', () => {
     await user.click(screen.getByRole('button', { name: /↓ Импорт/i }));
     const textarea = screen.getByPlaceholderText('Вставьте cURL или JSON');
     fireEvent.change(textarea, { target: { value: '{"orderId":"123"}' } });
-    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    await user.click(screen.getByRole('button', { name: 'Применить' }));
 
     await waitFor(() => {
       const project = getStoredProject();
@@ -402,10 +402,10 @@ describe('App integration', () => {
     await user.click(screen.getByRole('button', { name: /↓ Импорт/i }));
     const textarea = screen.getByPlaceholderText('Вставьте cURL или JSON');
     fireEvent.change(textarea, { target: { value: '{' } });
-    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    await user.click(screen.getByRole('button', { name: 'Применить' }));
     expect(screen.getByText(/Ошибка/i)).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await user.click(screen.getByRole('button', { name: 'Отмена' }));
     expect(screen.queryByPlaceholderText('Вставьте cURL или JSON')).not.toBeInTheDocument();
   });
 

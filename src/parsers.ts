@@ -121,6 +121,8 @@ type JsonSchema = {
   properties?: Record<string, JsonSchema>;
   required?: string[];
   items?: JsonSchema;
+  oneOf?: JsonSchema[];
+  anyOf?: JsonSchema[];
   enum?: unknown[];
   example?: unknown;
   default?: unknown;
@@ -128,12 +130,32 @@ type JsonSchema = {
   description?: string;
 };
 
+function resolveSchemaVariant(schema: JsonSchema): JsonSchema {
+  const variants = [...(schema.oneOf ?? []), ...(schema.anyOf ?? [])];
+  if (variants.length === 0) return schema;
+
+  const priorities = ['object', 'array', 'string', 'number', 'integer', 'boolean', 'null'];
+  for (const typeName of priorities) {
+    const matched = variants.find((candidate) => {
+      const candidateType = Array.isArray(candidate.type) ? candidate.type[0] : candidate.type;
+      if (candidateType === typeName) return true;
+      if (!candidateType && typeName === 'object' && candidate.properties && typeof candidate.properties === 'object') return true;
+      if (!candidateType && typeName === 'array' && candidate.items) return true;
+      return false;
+    });
+    if (matched) return matched;
+  }
+
+  return variants[0];
+}
+
 function normalizeSchemaType(schema: JsonSchema): string {
-  const schemaType = Array.isArray(schema.type) ? schema.type[0] : schema.type;
+  const resolvedSchema = resolveSchemaVariant(schema);
+  const schemaType = Array.isArray(resolvedSchema.type) ? resolvedSchema.type[0] : resolvedSchema.type;
 
   if (!schemaType) {
-    if (schema.properties && typeof schema.properties === 'object') return 'object';
-    if (schema.items) return 'array';
+    if (resolvedSchema.properties && typeof resolvedSchema.properties === 'object') return 'object';
+    if (resolvedSchema.items) return 'array';
     return 'string';
   }
 
@@ -152,7 +174,8 @@ function normalizeSchemaType(schema: JsonSchema): string {
 }
 
 function schemaExample(schema: JsonSchema, resolvedType: string): string {
-  const explicit = schema.example ?? schema.default ?? (Array.isArray(schema.enum) ? schema.enum[0] : undefined);
+  const resolvedSchema = resolveSchemaVariant(schema);
+  const explicit = resolvedSchema.example ?? resolvedSchema.default ?? (Array.isArray(resolvedSchema.enum) ? resolvedSchema.enum[0] : undefined);
 
   if (explicit !== undefined) {
     if (typeof explicit === 'string') return explicit;
@@ -169,24 +192,25 @@ function schemaExample(schema: JsonSchema, resolvedType: string): string {
 }
 
 function flattenJsonSchemaNode(schema: JsonSchema, basePath: string, required: boolean): ParsedRow[] {
+  const resolvedSchema = resolveSchemaVariant(schema);
   const rows: ParsedRow[] = [];
-  const normalizedType = normalizeSchemaType(schema);
+  const normalizedType = normalizeSchemaType(resolvedSchema);
   const requiredMark = required ? '+' : OPTIONAL_MARK;
 
   if (normalizedType === 'array') {
-    const itemType = schema.items ? normalizeSchemaType(schema.items) : 'string';
+    const itemType = resolvedSchema.items ? normalizeSchemaType(resolvedSchema.items) : 'string';
     rows.push(
       createParsedRow({
         field: basePath || '$',
         type: itemType === 'object' ? 'array_object' : 'array',
         required: requiredMark,
-        description: schema.description ?? '',
-        example: schemaExample(schema, itemType === 'object' ? 'array_object' : 'array')
+        description: resolvedSchema.description ?? '',
+        example: schemaExample(resolvedSchema, itemType === 'object' ? 'array_object' : 'array')
       })
     );
 
-    if (schema.items) {
-      rows.push(...flattenJsonSchemaNode(schema.items, `${basePath || '$'}[0]`, true));
+    if (resolvedSchema.items) {
+      rows.push(...flattenJsonSchemaNode(resolvedSchema.items, `${basePath || '$'}[0]`, true));
     }
     return rows;
   }
@@ -198,14 +222,14 @@ function flattenJsonSchemaNode(schema: JsonSchema, basePath: string, required: b
           field: basePath,
           type: 'object',
           required: requiredMark,
-          description: schema.description ?? '',
-          example: schemaExample(schema, 'object')
+          description: resolvedSchema.description ?? '',
+          example: schemaExample(resolvedSchema, 'object')
         })
       );
     }
 
-    const requiredProps = new Set(schema.required ?? []);
-    const properties = schema.properties ?? {};
+    const requiredProps = new Set(resolvedSchema.required ?? []);
+    const properties = resolvedSchema.properties ?? {};
 
     for (const [key, childSchema] of Object.entries(properties)) {
       const childPath = basePath ? `${basePath}.${key}` : key;
@@ -220,8 +244,8 @@ function flattenJsonSchemaNode(schema: JsonSchema, basePath: string, required: b
       field: basePath || '$',
       type: normalizedType,
       required: requiredMark,
-      description: schema.description ?? '',
-      example: schemaExample(schema, normalizedType)
+      description: resolvedSchema.description ?? '',
+      example: schemaExample(resolvedSchema, normalizedType)
     })
   );
 
@@ -455,6 +479,17 @@ export function parseCurlMeta(input: string): ParsedCurlMeta {
 export function wrapNonDomainResponseJson(input: string): string {
   try {
     const parsed = JSON.parse(input);
+    if (
+      parsed
+      && typeof parsed === 'object'
+      && !Array.isArray(parsed)
+      && 'data' in parsed
+      && 'techData' in parsed
+      && 'warnings' in parsed
+    ) {
+      return JSON.stringify(parsed, null, 2);
+    }
+
     return JSON.stringify({
       data: parsed,
       techData: {

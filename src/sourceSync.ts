@@ -32,6 +32,9 @@ type JsonContainer = Record<string, unknown> | unknown[];
 function tokenizePath(path: string): string[] {
   return path
     .replaceAll(/\[(\d+)\]/g, '.$1')
+    .replace(/^\$\./, '')
+    .replace(/^\$/, '')
+    .replace(/^\./, '')
     .split('.')
     .filter(Boolean);
 }
@@ -112,11 +115,28 @@ function setJsonPath(root: JsonContainer, path: string, value: unknown): void {
   }
 }
 
+function shouldUseArrayRoot(rows: ParsedRow[]): boolean {
+  return rows.some((row) => {
+    const field = row.field.trim();
+    if (!field) return false;
+    if (field === '$') return row.type === 'array' || row.type === 'array_object';
+    return field.startsWith('$[') || field.startsWith('[');
+  });
+}
+
 function buildJsonObject(rows: ParsedRow[]): unknown {
   const bodyRows = rows.filter((row) => row.field.trim() && row.source !== 'header' && row.source !== 'url' && row.source !== 'query');
-  const root: Record<string, unknown> = {};
+  let root: JsonContainer = shouldUseArrayRoot(bodyRows) ? [] : {};
 
   for (const row of bodyRows) {
+    const field = row.field.trim();
+    if (field === '$') {
+      const nextRoot = parseExampleValue(row);
+      if (Array.isArray(nextRoot) || (nextRoot && typeof nextRoot === 'object')) {
+        root = nextRoot as JsonContainer;
+      }
+      continue;
+    }
     setJsonPath(root, row.field, parseExampleValue(row));
   }
 

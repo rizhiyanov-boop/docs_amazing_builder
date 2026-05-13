@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
-import { isRequired } from './WorkbenchTables';
+import { isRequired } from './WorkbenchTables.utils';
 import { TableClassic } from './WorkbenchTables';
 import { makeParsedRow } from '../../test/fixtures';
 
@@ -16,7 +16,7 @@ describe('WorkbenchTables isRequired', () => {
 
   it('hides row menu button when onRowMenu is not passed', () => {
     render(React.createElement(TableClassic, { rows: [makeParsedRow({ field: 'id', type: 'string', required: '+' })] }));
-    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Меню строки' })).not.toBeInTheDocument();
   });
 
   it('renders readonly type chip when row update handler is not passed', () => {

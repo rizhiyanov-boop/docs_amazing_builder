@@ -33,7 +33,12 @@ function getJsonSizeBytes(value: unknown): number {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
-  res.setHeader('Cache-Control', 'no-store');
+  if (req.method === 'GET') {
+    res.setHeader('Cache-Control', 'private, s-maxage=30, stale-while-revalidate=60');
+    res.setHeader('Vary', 'Cookie');
+  } else {
+    res.setHeader('Cache-Control', 'no-store');
+  }
 
   const user = await getUserBySessionToken(getSessionToken(req));
   if (!user) {

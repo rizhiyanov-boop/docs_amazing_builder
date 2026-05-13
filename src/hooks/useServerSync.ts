@@ -10,6 +10,7 @@ import {
   type ProjectListItem
 } from '../serverSyncClient';
 import type { WorkspaceProjectData } from '../types';
+import { hashWorkspace } from '../workspaceHash';
 
 export type ServerProjectPayload = {
   id: string;
@@ -165,7 +166,7 @@ export function useServerSync({
     applyPersistedHistoryState(null);
     setServerProjectId(payload.id);
     upsertProjectCache(payload.id, cached);
-    const loadedHash = JSON.stringify(normalizedWorkspace);
+    const loadedHash = hashWorkspace(normalizedWorkspace);
     remoteLastObservedHashRef.current = loadedHash;
     remoteLastSavedHashRef.current = loadedHash;
     remotePendingChangesRef.current = 0;
@@ -185,7 +186,7 @@ export function useServerSync({
     applyWorkspaceState(cachedWorkspace);
     applyPersistedHistoryState(null);
     setServerProjectId(projectId);
-    const loadedHash = JSON.stringify(cachedWorkspace);
+    const loadedHash = hashWorkspace(cachedWorkspace);
     remoteLastObservedHashRef.current = loadedHash;
     remoteLastSavedHashRef.current = loadedHash;
     remotePendingChangesRef.current = 0;

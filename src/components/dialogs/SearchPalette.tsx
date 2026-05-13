@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import type { MethodDocument, RequestMethod } from '../../types';
 import { HttpChip, WBButton } from '../primitives/WorkbenchPrimitives';
 
@@ -20,13 +20,7 @@ export function SearchPalette({ open, methods, getMethodHttpMethod, onClose, onS
     return methods.filter((method) => method.name.toLowerCase().includes(normalized)).slice(0, 12);
   }, [methods, query]);
 
-  useEffect(() => {
-    if (results.length === 0) {
-      setActiveIndex(0);
-      return;
-    }
-    setActiveIndex((current) => (current >= results.length ? 0 : current));
-  }, [results.length]);
+  const visibleActiveIndex = results.length === 0 ? 0 : Math.min(activeIndex, results.length - 1);
 
   if (!open) return null;
 
@@ -61,14 +55,14 @@ export function SearchPalette({ open, methods, getMethodHttpMethod, onClose, onS
               if (event.key === 'Escape') onClose();
               if (event.key === 'ArrowDown') {
                 event.preventDefault();
-                setActiveIndex((current) => (results.length === 0 ? 0 : (current + 1) % results.length));
+                setActiveIndex(results.length === 0 ? 0 : (visibleActiveIndex + 1) % results.length);
               }
               if (event.key === 'ArrowUp') {
                 event.preventDefault();
-                setActiveIndex((current) => (results.length === 0 ? 0 : (current - 1 + results.length) % results.length));
+                setActiveIndex(results.length === 0 ? 0 : (visibleActiveIndex - 1 + results.length) % results.length);
               }
-              if (event.key === 'Enter' && results[activeIndex]) {
-                onSelectMethod(results[activeIndex]);
+              if (event.key === 'Enter' && results[visibleActiveIndex]) {
+                onSelectMethod(results[visibleActiveIndex]);
                 onClose();
               }
             }}
@@ -86,7 +80,7 @@ export function SearchPalette({ open, methods, getMethodHttpMethod, onClose, onS
                 onSelectMethod(method);
                 onClose();
               }}
-              style={{ width: '100%', border: 0, background: index === activeIndex ? 'var(--wb-bg-active)' : 'transparent', borderRadius: 'var(--wb-radius-sm)', padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: 'var(--wb-text)', fontFamily: 'var(--wb-font-sans)', textAlign: 'left' }}
+              style={{ width: '100%', border: 0, background: index === visibleActiveIndex ? 'var(--wb-bg-active)' : 'transparent', borderRadius: 'var(--wb-radius-sm)', padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: 'var(--wb-text)', fontFamily: 'var(--wb-font-sans)', textAlign: 'left' }}
             >
               <HttpChip method={getMethodHttpMethod(method)} size="sm" />
               <span style={{ fontFamily: 'var(--wb-font-mono)', fontSize: 13, fontWeight: 600 }}>{method.name}</span>

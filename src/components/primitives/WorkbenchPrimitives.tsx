@@ -1,8 +1,6 @@
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react';
 import type { RequestMethod } from '../../types';
 
-type Accent = 'get' | 'post' | 'put' | 'del' | 'patch';
-
 const HTTP_STYLES: Record<RequestMethod, { bg: string; fg: string }> = {
   GET: { bg: 'var(--wb-get-bg)', fg: 'var(--wb-get-fg)' },
   POST: { bg: 'var(--wb-post-bg)', fg: 'var(--wb-post-fg)' },
@@ -11,19 +9,21 @@ const HTTP_STYLES: Record<RequestMethod, { bg: string; fg: string }> = {
   DELETE: { bg: 'var(--wb-del-bg)', fg: 'var(--wb-del-fg)' }
 };
 
-export function httpMethodToAccent(method: RequestMethod | string | null | undefined): Accent {
-  const normalized = String(method ?? '').toUpperCase();
-  if (normalized === 'GET') return 'get';
-  if (normalized === 'PUT') return 'put';
-  if (normalized === 'PATCH') return 'patch';
-  if (normalized === 'DELETE') return 'del';
-  return 'post';
+function normalizeTypeKind(type: string): 'string' | 'number' | 'boolean' | 'object' | 'array' | 'null' {
+  const normalized = type.toLowerCase();
+  if (normalized.includes('array') || normalized.endsWith('[]')) return 'array';
+  if (normalized.includes('object') || normalized.includes('map')) return 'object';
+  if (normalized.includes('bool')) return 'boolean';
+  if (normalized.includes('int') || normalized.includes('long') || normalized.includes('number') || normalized.includes('float') || normalized.includes('double')) return 'number';
+  if (normalized.includes('null')) return 'null';
+  return 'string';
 }
 
 export function HttpChip({ method = 'POST', size = 'md' }: { method?: RequestMethod | string; size?: 'sm' | 'md' }): ReactNode {
   const normalized = String(method || 'POST').toUpperCase() as RequestMethod;
   const colors = HTTP_STYLES[normalized] ?? HTTP_STYLES.POST;
   const compact = size === 'sm';
+
   return (
     <span
       className="wb-http-chip"
@@ -35,7 +35,7 @@ export function HttpChip({ method = 'POST', size = 'md' }: { method?: RequestMet
         fontFamily: 'var(--wb-font-mono)',
         fontWeight: 600,
         fontSize: compact ? 10 : 11,
-        letterSpacing: '0.04em',
+        letterSpacing: 0,
         padding: compact ? '2px 5px' : '2px 7px',
         borderRadius: 4,
         lineHeight: 1.35,
@@ -48,16 +48,21 @@ export function HttpChip({ method = 'POST', size = 'md' }: { method?: RequestMet
 }
 
 export function TypeChip({ type }: { type: string }): ReactNode {
+  const typeKind = normalizeTypeKind(type || 'string');
+
   return (
     <span
+      className={`wb-type-chip wb-type-chip-${typeKind}`}
       style={{
         fontFamily: 'var(--wb-font-mono)',
         fontSize: 11,
         color: 'var(--wb-text-soft)',
         background: 'var(--wb-bg-soft)',
         border: '1px solid var(--wb-border-soft)',
-        borderRadius: 3,
-        padding: '1px 6px'
+        borderLeft: `4px solid var(--wb-table-type-${typeKind})`,
+        borderRadius: 4,
+        padding: '1px 6px',
+        whiteSpace: 'nowrap'
       }}
     >
       {type || 'string'}
@@ -81,28 +86,33 @@ type WBButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   fullWidth?: boolean;
 };
 
-export function WBButton({ variant = 'secondary', size = 'md', icon, children, fullWidth, style, ...props }: WBButtonProps): ReactNode {
+export function WBButton({ variant = 'secondary', size = 'md', icon, children, fullWidth, style, className, ...props }: WBButtonProps): ReactNode {
   const palette = {
-    primary: { bg: 'var(--wb-text)', fg: 'var(--wb-bg-surface)', border: 'var(--wb-text)' },
-    secondary: { bg: 'var(--wb-bg-surface)', fg: 'var(--wb-text)', border: 'var(--wb-border-strong)' },
+    primary: { bg: 'var(--wb-accent)', fg: 'var(--wb-accent-fg)', border: 'var(--wb-accent)' },
+    secondary: { bg: 'var(--wb-bg-surface)', fg: 'var(--wb-text)', border: 'var(--wb-border)' },
     ghost: { bg: 'transparent', fg: 'var(--wb-text-soft)', border: 'transparent' },
     accent: { bg: 'var(--wb-accent)', fg: 'var(--wb-accent-fg)', border: 'var(--wb-accent)' },
-    danger: { bg: 'var(--wb-bg-surface)', fg: 'var(--wb-required)', border: 'var(--wb-border-strong)' }
+    danger: { bg: 'var(--wb-danger-soft)', fg: 'var(--wb-danger)', border: 'var(--wb-danger)' }
   }[variant];
-  const sizing = { sm: { padding: '4px 10px', fontSize: 12 }, md: { padding: '6px 12px', fontSize: 13 }, lg: { padding: '8px 16px', fontSize: 14 } }[size];
+  const sizing = {
+    sm: { padding: '4px 10px', fontSize: 12 },
+    md: { padding: '6px 12px', fontSize: 13 },
+    lg: { padding: '8px 16px', fontSize: 14 }
+  }[size];
 
   return (
     <button
       type="button"
       {...props}
+      className={['wb-button', `wb-button-${variant}`, className].filter(Boolean).join(' ')}
       style={{
         background: palette.bg,
         color: palette.fg,
         border: `1px solid ${palette.border}`,
         padding: sizing.padding,
         fontSize: sizing.fontSize,
-        fontWeight: 500,
-        borderRadius: 6,
+        fontWeight: 600,
+        borderRadius: 'var(--wb-button-radius)',
         cursor: props.disabled ? 'not-allowed' : 'pointer',
         display: 'inline-flex',
         alignItems: 'center',
@@ -230,7 +240,7 @@ export function TabsPill({ children }: { children: ReactNode }): ReactNode {
         display: 'flex',
         background: 'var(--wb-bg-soft)',
         border: '1px solid var(--wb-border-soft)',
-        borderRadius: 7,
+        borderRadius: 8,
         padding: 2,
         gap: 2
       }}
@@ -240,12 +250,13 @@ export function TabsPill({ children }: { children: ReactNode }): ReactNode {
   );
 }
 
-export function AiTableButton({ kind, onClick }: { kind: 'fill' | 'json' | 'fromex'; onClick?: () => void }): ReactNode {
+export function AiTableButton({ kind, onClick }: { kind: 'fill' | 'json' | 'fromex' | 'examples'; onClick?: () => void }): ReactNode {
   const labels = {
     fill: 'Заполнить',
     json: '{ } JSON',
     fromex: 'Из примера'
   };
+
   return (
     <button
       type="button"
@@ -262,7 +273,7 @@ export function AiTableButton({ kind, onClick }: { kind: 'fill' | 'json' | 'from
         fontFamily: 'var(--wb-font-sans)'
       }}
     >
-      {labels[kind]}
+      {kind === 'examples' ? '✦ Примеры' : labels[kind as 'fill' | 'json' | 'fromex']}
     </button>
   );
 }

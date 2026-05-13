@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { WBButton } from '../components/primitives/WorkbenchPrimitives';
+import { HttpChip, WBButton } from '../components/primitives/WorkbenchPrimitives';
 import type { WorkbenchAccent } from '../components/workbench/WorkbenchTopbar';
 
 type HtmlExportScreenProps = {
@@ -15,21 +15,30 @@ type HtmlExportScreenProps = {
 };
 
 const ACCENTS: Array<{ id: WorkbenchAccent; label: string }> = [
-  { id: 'blue', label: 'blue' },
-  { id: 'warm', label: 'warm' },
-  { id: 'violet', label: 'violet' }
+  { id: 'blue', label: 'Daylight' },
+  { id: 'warm', label: 'Kraft' },
+  { id: 'violet', label: 'Dusk' }
 ];
 
 function extractBody(html: string): string {
+  const mainMatch = html.match(/<main[^>]*id=["']content["'][^>]*>([\s\S]*?)<\/main>/i);
+  if (mainMatch) return mainMatch[1];
   const match = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
   return match ? match[1] : html;
 }
 
 function extractHeadings(body: string): Array<{ id: string; text: string }> {
-  const matches = [...body.matchAll(/<h([23])[^>]*id=["']?([^"'>\s]+)["']?[^>]*>([\s\S]*?)<\/h\1>/gi)];
-  return matches.map((match, index) => ({
+  const matches = [...body.matchAll(/<h([1-6])[^>]*id=["']?([^"'>\s]+)["']?[^>]*>([\s\S]*?)<\/h\1>/gi)];
+  const headings = matches.map((match, index) => ({
     id: match[2] || `section-${index}`,
-    text: match[3].replace(/<[^>]*>/g, '').trim() || `Раздел ${index + 1}`
+    text: match[3].replace(/<[^>]*>/g, '').trim() || `Section ${index + 1}`
+  }));
+  if (headings.length > 0) return headings;
+
+  const cardMatches = [...body.matchAll(/<section[^>]*class=["'][^"']*\bcard\b[^"']*["'][^>]*id=["']?([^"'>\s]+)["']?[^>]*>[\s\S]*?<h2[^>]*>([\s\S]*?)<\/h2>/gi)];
+  return cardMatches.map((match, index) => ({
+    id: match[1] || `section-${index}`,
+    text: match[2].replace(/<[^>]*>/g, '').trim() || `Section ${index + 1}`
   }));
 }
 
@@ -40,29 +49,58 @@ function highlight(body: string, query: string): string {
   return body.replace(new RegExp(escaped, 'gi'), (match) => `<mark class="wb-html-search-mark">${match}</mark>`);
 }
 
-export function HtmlExportScreen({ html, projectName, methodName, requestUrl = '/', requestMethod = 'POST', accent, onAccentChange, onCopy, onDownload }: HtmlExportScreenProps): ReactNode {
+function extractRequestVariables(requestUrl: string): string[] {
+  const variables = new Set<string>();
+  for (const match of requestUrl.matchAll(/\{([^}]+)\}|:([A-Za-z][\w-]*)/g)) {
+    const name = (match[1] || match[2] || '').trim();
+    if (name) variables.add(name);
+  }
+  return [...variables];
+}
+
+export function HtmlExportScreen({
+  html,
+  projectName,
+  methodName,
+  requestUrl = '/',
+  requestMethod = 'POST',
+  accent,
+  onAccentChange,
+  onCopy,
+  onDownload
+}: HtmlExportScreenProps): ReactNode {
   const [query, setQuery] = useState('');
   const [snippetMode, setSnippetMode] = useState<'curl' | 'fetch' | 'httpie'>('curl');
+  const [variablesOpen, setVariablesOpen] = useState(false);
   const body = useMemo(() => extractBody(html), [html]);
   const headings = useMemo(() => extractHeadings(body), [body]);
   const highlightedBody = useMemo(() => highlight(body, query), [body, query]);
+  const requestVariables = useMemo(() => extractRequestVariables(requestUrl), [requestUrl]);
   const normalizedMethod = requestMethod.toUpperCase();
   const snippet = snippetMode === 'fetch'
     ? `fetch('${requestUrl}', { method: '${normalizedMethod}' })`
     : snippetMode === 'httpie'
       ? `http ${normalizedMethod} ${requestUrl}`
       : `curl -X ${normalizedMethod} ${requestUrl}`;
+  const snippetLines = snippet.split('\n');
 
   return (
     <section style={{ minHeight: '100%', background: 'var(--wb-bg-canvas)', color: 'var(--wb-text)', fontFamily: 'var(--wb-font-sans)' }}>
       <header className="wb-html-export-header">
         <div style={{ width: 24, height: 24, borderRadius: 6, background: 'var(--wb-text)', color: 'var(--wb-bg-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>D</div>
-        <div style={{ fontSize: 13, color: 'var(--wb-text-soft)' }}>doc-builder · Published HTML</div>
-        <div style={{ fontSize: 12, color: 'var(--wb-text-muted)' }}>{projectName} / {methodName}</div>
+        <div className="wb-html-export-label">doc-builder · Published HTML</div>
+        <nav className="wb-html-export-breadcrumbs" aria-label="HTML export breadcrumbs">
+          <button type="button" className="wb-html-export-breadcrumb" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>API</button>
+          <span aria-hidden="true">/</span>
+          <button type="button" className="wb-html-export-breadcrumb" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>{projectName}</button>
+          <span aria-hidden="true">/</span>
+          <HttpChip method={normalizedMethod} size="sm" />
+          <span className="wb-html-export-current">{methodName}</span>
+        </nav>
         <input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Поиск"
+          placeholder="Search"
           className="wb-html-export-search"
           style={{ background: 'var(--wb-bg-soft)', border: '1px solid var(--wb-border-soft)', borderRadius: 'var(--wb-radius-sm)', padding: '6px 9px', color: 'var(--wb-text)', fontFamily: 'var(--wb-font-sans)' }}
         />
@@ -86,13 +124,15 @@ export function HtmlExportScreen({ html, projectName, methodName, requestUrl = '
             </button>
           ))}
         </div>
-        <WBButton size="sm" variant="ghost" onClick={onCopy}>Скопировать</WBButton>
-        <WBButton size="sm" variant="accent" onClick={onDownload}>Скачать</WBButton>
+        <WBButton size="sm" variant="ghost" onClick={onCopy}>Copy</WBButton>
+        <WBButton size="sm" variant="accent" onClick={onDownload}>Download</WBButton>
       </header>
       <div className="wb-html-export-grid">
-        <nav className="wb-html-export-toc">
-          {headings.map((heading) => (
-            <a key={heading.id} href={`#${heading.id}`} style={{ color: 'var(--wb-text-soft)', textDecoration: 'none', borderLeft: '2px solid var(--wb-border)', padding: '4px 0 4px 8px' }}>{heading.text}</a>
+        <nav className="wb-html-export-toc" aria-label="HTML table of contents">
+          <div className="wb-html-export-toc-label">On this page</div>
+          {headings.length === 0 && <div className="wb-html-export-toc-empty">No sections</div>}
+          {headings.map((heading, index) => (
+            <a key={heading.id} href={`#${heading.id}`} className={`wb-html-export-toc-link${index === 0 ? ' is-active' : ''}`}>{heading.text}</a>
           ))}
         </nav>
         <article
@@ -101,14 +141,43 @@ export function HtmlExportScreen({ html, projectName, methodName, requestUrl = '
           dangerouslySetInnerHTML={{ __html: highlightedBody }}
         />
         <aside className="wb-html-export-try">
-          <div style={{ fontWeight: 700, marginBottom: 8 }}>Try it</div>
-          <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+          <div className="wb-html-export-try-header">
+            <div>
+              <div className="wb-html-export-try-title">Try it</div>
+              <div className="wb-html-export-try-subtitle">{normalizedMethod} {requestUrl}</div>
+            </div>
+            <HttpChip method={normalizedMethod} size="sm" />
+          </div>
+          <div className="wb-html-export-snippet-tabs">
             {(['curl', 'fetch', 'httpie'] as const).map((mode) => (
               <WBButton key={mode} size="sm" variant={snippetMode === mode ? 'secondary' : 'ghost'} onClick={() => setSnippetMode(mode)}>{mode}</WBButton>
             ))}
           </div>
-          <pre style={{ margin: 0, padding: 10, background: 'var(--wb-bg-soft)', borderRadius: 'var(--wb-radius)', overflow: 'auto', fontFamily: 'var(--wb-font-mono)', fontSize: 11 }}>{snippet}</pre>
-          <WBButton style={{ marginTop: 10 }} size="sm" variant="accent" fullWidth>Выполнить</WBButton>
+          <pre className="wb-html-export-code">
+            {snippetLines.map((line, index) => (
+              <code key={`${line}-${index}`} className="wb-html-export-code-line">
+                <span>{index + 1}</span>
+                <span>{line || ' '}</span>
+              </code>
+            ))}
+          </pre>
+          <button type="button" className="wb-html-export-vars-toggle" onClick={() => setVariablesOpen((open) => !open)}>
+            <span>Variables ({requestVariables.length})</span>
+            <span aria-hidden="true">{variablesOpen ? '▴' : '▾'}</span>
+          </button>
+          {variablesOpen && (
+            <div className="wb-html-export-vars">
+              {requestVariables.length > 0 ? requestVariables.map((variable) => (
+                <div key={variable} className="wb-html-export-var-row">
+                  <code>{variable}</code>
+                  <span>path</span>
+                </div>
+              )) : (
+                <div className="wb-html-export-vars-empty">No variables detected</div>
+              )}
+            </div>
+          )}
+          <WBButton style={{ marginTop: 10 }} size="sm" variant="accent" fullWidth>Run</WBButton>
         </aside>
       </div>
     </section>

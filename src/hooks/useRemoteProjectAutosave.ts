@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type { MutableRefObject } from 'react';
 import type { MethodDocument, MethodGroup, ProjectFlow, ProjectSection, WorkspaceProjectData } from '../types';
 import type { AuthUser as ServerAuthUser } from '../serverSyncClient';
+import { hashWorkspace } from '../workspaceHash';
 
 type SaveResult = {
   id: string;
@@ -85,11 +86,56 @@ export function useRemoteProjectAutosave({
     remoteLastSavedHashRef.current = '';
   }
 
+  const flushRemoteSave = useCallback(async (): Promise<void> => {
+    if (!authUser || !remoteHydratedRef.current) return;
+    if (remoteSaveInFlightRef.current) return;
+    if (remotePendingChangesRef.current <= 0) return;
+    if (typeof document !== 'undefined' && document.hidden) return;
+
+    remoteSaveInFlightRef.current = true;
+    cancelPendingRemoteSave();
+
+    const latestWorkspace = buildWorkspace();
+    const workspaceHash = hashWorkspace(latestWorkspace);
+
+    try {
+      const saved = await saveWorkspace({
+        projectId: serverProjectId ?? undefined,
+        name: normalizedProjectName,
+        workspace: latestWorkspace
+      });
+      onSaved({
+        saved,
+        workspace: latestWorkspace,
+        projectName: normalizedProjectName,
+        workspaceHash
+      });
+      remoteLastSavedHashRef.current = workspaceHash;
+      remotePendingChangesRef.current = 0;
+    } catch (error) {
+      onError(error instanceof Error ? error.message : 'РћС€РёР±РєР° СЃРѕС…СЂР°РЅРµРЅРёСЏ РЅР° СЃРµСЂРІРµСЂ');
+    } finally {
+      remoteSaveInFlightRef.current = false;
+    }
+  }, [
+    authUser,
+    buildWorkspace,
+    normalizedProjectName,
+    onError,
+    onSaved,
+    remoteHydratedRef,
+    remotePendingChangesRef,
+    remoteSaveInFlightRef,
+    saveWorkspace,
+    serverProjectId,
+    remoteLastSavedHashRef
+  ]);
+
   useEffect(() => {
     if (!authUser || !remoteHydratedRef.current) return;
 
     const workspace = buildWorkspace();
-    const currentHash = JSON.stringify(workspace);
+    const currentHash = hashWorkspace(workspace);
 
     if (currentHash === remoteLastObservedHashRef.current) {
       return;
@@ -98,37 +144,7 @@ export function useRemoteProjectAutosave({
     remoteLastObservedHashRef.current = currentHash;
     remotePendingChangesRef.current += 1;
 
-    const flushRemoteSave = async (): Promise<void> => {
-      if (!authUser || !remoteHydratedRef.current) return;
-      if (remoteSaveInFlightRef.current) return;
-      if (remotePendingChangesRef.current <= 0) return;
-
-      remoteSaveInFlightRef.current = true;
-      cancelPendingRemoteSave();
-
-      const latestWorkspace = buildWorkspace();
-      const workspaceHash = JSON.stringify(latestWorkspace);
-
-      try {
-        const saved = await saveWorkspace({
-          projectId: serverProjectId ?? undefined,
-          name: normalizedProjectName,
-          workspace: latestWorkspace
-        });
-        onSaved({
-          saved,
-          workspace: latestWorkspace,
-          projectName: normalizedProjectName,
-          workspaceHash
-        });
-        remoteLastSavedHashRef.current = workspaceHash;
-        remotePendingChangesRef.current = 0;
-      } catch (error) {
-        onError(error instanceof Error ? error.message : 'Ошибка сохранения на сервер');
-      } finally {
-        remoteSaveInFlightRef.current = false;
-      }
-    };
+    if (typeof document !== 'undefined' && document.hidden) return;
 
     if (!serverProjectId || remotePendingChangesRef.current >= remoteSaveChangeThreshold) {
       void flushRemoteSave();
@@ -153,16 +169,39 @@ export function useRemoteProjectAutosave({
     flows,
     serverProjectId,
     remoteHydratedRef,
-    remoteSaveInFlightRef,
     remotePendingChangesRef,
     remoteLastObservedHashRef,
-    remoteLastSavedHashRef,
     remoteSaveChangeThreshold,
     remoteSaveIdleMs,
     buildWorkspace,
-    saveWorkspace,
-    onSaved,
-    onError
+    flushRemoteSave
+  ]);
+
+  useEffect(() => {
+    if (!authUser || !remoteHydratedRef.current) return;
+
+    const handleVisibilityChange = (): void => {
+      if (document.hidden) return;
+      if (remotePendingChangesRef.current <= 0) return;
+      if (remoteSaveInFlightRef.current) return;
+
+      cancelPendingRemoteSave();
+      remoteSaveTimerRef.current = window.setTimeout(() => {
+        void flushRemoteSave();
+      }, remoteSaveIdleMs);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [
+    authUser,
+    remoteHydratedRef,
+    remotePendingChangesRef,
+    remoteSaveInFlightRef,
+    flushRemoteSave,
+    remoteSaveIdleMs
   ]);
 
   return {

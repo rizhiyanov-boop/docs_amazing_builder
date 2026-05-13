@@ -89,4 +89,27 @@ describe('sourceSync', () => {
     const curl = buildInputFromRows('curl', [makeParsedRow({ field: 'id', type: 'int', example: '1' })]);
     expect(curl).toContain('"https://example.com"');
   });
+
+  it('builds root array json from $[index] fields', () => {
+    const rows = [
+      makeParsedRow({ field: '$[0].id', type: 'int', example: '1' }),
+      makeParsedRow({ field: '$[0].name', type: 'string', example: 'Alpha' }),
+      makeParsedRow({ field: '$[1].id', type: 'int', example: '2' })
+    ];
+
+    const parsed = JSON.parse(buildInputFromRows('json', rows)) as Array<{ id: number; name?: string }>;
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed[0]).toEqual({ id: 1, name: 'Alpha' });
+    expect(parsed[1]).toEqual({ id: 2 });
+  });
+
+  it('builds root array json from [index] shorthand fields', () => {
+    const rows = [
+      makeParsedRow({ field: '[0].name', type: 'string', example: 'One' }),
+      makeParsedRow({ field: '[1].name', type: 'string', example: 'Two' })
+    ];
+
+    const parsed = JSON.parse(buildInputFromRows('json', rows)) as Array<{ name: string }>;
+    expect(parsed).toEqual([{ name: 'One' }, { name: 'Two' }]);
+  });
 });

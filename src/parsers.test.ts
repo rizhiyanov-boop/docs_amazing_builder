@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseCurlMeta, parseJsonSchemaToRows, parseToRows } from './parsers';
+import { parseCurlMeta, parseJsonSchemaToRows, parseToRows, wrapNonDomainResponseJson } from './parsers';
 
 describe('parsers', () => {
   it('parses nested json to flattened rows', () => {
@@ -120,5 +120,53 @@ describe('parsers', () => {
     expect(rows.some((row) => row.field === 'items[0]' && row.type === 'object')).toBe(true);
     expect(rows.some((row) => row.field === 'items[0].id' && row.type === 'int')).toBe(true);
     expect(rows.some((row) => row.field === 'items[0].active' && row.type === 'boolean')).toBe(true);
+  });
+
+  it('keeps wrapped response json idempotent', () => {
+    const wrappedOnce = wrapNonDomainResponseJson('{"code":"OK"}');
+    const wrappedTwice = wrapNonDomainResponseJson(wrappedOnce);
+
+    expect(wrappedTwice).toBe(wrappedOnce);
+  });
+
+  it('supports oneOf object branch in json schema', () => {
+    const schema = JSON.stringify({
+      oneOf: [
+        { type: 'string' },
+        {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'integer' },
+            note: { type: 'string' }
+          }
+        }
+      ]
+    });
+
+    const rows = parseJsonSchemaToRows(schema);
+    expect(rows.some((row) => row.field === 'id' && row.type === 'int' && row.required === '+')).toBe(true);
+    expect(rows.some((row) => row.field === 'note' && row.type === 'string')).toBe(true);
+  });
+
+  it('supports anyOf array branch in json schema', () => {
+    const schema = JSON.stringify({
+      anyOf: [
+        { type: 'null' },
+        {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              code: { type: 'string' }
+            }
+          }
+        }
+      ]
+    });
+
+    const rows = parseJsonSchemaToRows(schema);
+    expect(rows.some((row) => row.field === '$' && row.type === 'array_object')).toBe(true);
+    expect(rows.some((row) => row.field === '$[0].code' && row.type === 'string')).toBe(true);
   });
 });

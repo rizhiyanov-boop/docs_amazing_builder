@@ -153,7 +153,19 @@ function renderProseValue(value: string): string {
 }
 
 function renderTag(label: string, kind = ''): string {
-  return `<span class="tag ${kind}">${escapeHtml(label)}</span>`;
+  const normalized = label.toLowerCase();
+  const inferredKind = ['get', 'post', 'put', 'patch', 'delete'].includes(normalized) ? normalized : '';
+  return `<span class="tag ${kind || inferredKind}">${escapeHtml(label)}</span>`;
+}
+
+function getTypeClass(type: string): string {
+  const normalized = type.toLowerCase();
+  if (normalized.includes('array') || normalized.endsWith('[]')) return 'type-array';
+  if (normalized.includes('object') || normalized.includes('map')) return 'type-object';
+  if (normalized.includes('bool')) return 'type-boolean';
+  if (normalized.includes('int') || normalized.includes('long') || normalized.includes('number') || normalized.includes('float') || normalized.includes('double')) return 'type-number';
+  if (normalized.includes('null')) return 'type-null';
+  return 'type-string';
 }
 
 function renderButton(label: string, href: string, kind = 'ghost', interactive = true): string {
@@ -196,7 +208,7 @@ function renderDefaultTable(rows: ParsedRow[]): string {
   const body = rows
     .map(
       (row) =>
-        `<tr><td>${renderCell(normalizeArrayFieldPath(row.field))}</td><td>${renderCell(row.type)}</td><td>${renderCell(row.required)}</td><td>${renderCell(row.description)}</td><td>${renderCell(row.example)}</td></tr>`
+        `<tr class="${getTypeClass(row.type)}"><td>${renderCell(normalizeArrayFieldPath(row.field))}</td><td>${renderCell(row.type)}</td><td>${renderCell(row.required)}</td><td>${renderCell(row.description)}</td><td>${renderCell(row.example)}</td></tr>`
     )
     .join('');
 
@@ -218,7 +230,7 @@ function renderStructuredTable(rows: ParsedRow[], section: ParsedSection): strin
         example: row.example || '—'
       };
 
-      return `<tr>${columns.map((column) => `<td>${renderCell(cellMap[column])}</td>`).join('')}</tr>`;
+      return `<tr class="${getTypeClass(row.type)}">${columns.map((column) => `<td>${renderCell(cellMap[column])}</td>`).join('')}</tr>`;
     })
     .join('');
 
@@ -565,6 +577,13 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
         --preview-table-head:${themeConfig[initialTheme].previewTableHead};
         --font-sans:"Segoe UI Variable Text", "Segoe UI", "Noto Sans", "Helvetica Neue", system-ui, -apple-system, sans-serif;
         --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        --toc-width:240px;
+        --type-string:#3b82f6;
+        --type-number:#8b5cf6;
+        --type-boolean:#f59e0b;
+        --type-object:#b8562a;
+        --type-array:#10b981;
+        --type-null:#9ca3af;
       }
       *{box-sizing:border-box}
       html,body{height:100%}
@@ -629,7 +648,7 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
       .toolbar-meta,.toolbar-nav{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:flex-end}
       .doc-btn, .smallbtn{
         border:none;
-        border-radius:10px;
+        border-radius:6px;
         padding:10px 14px;
         font-size:14px;
         font-weight:600;
@@ -788,7 +807,7 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
         white-space:nowrap;
         border:0;
       }
-      .layout{display:grid;grid-template-columns:280px 1fr;gap:16px}
+      .layout{display:grid;grid-template-columns:var(--toc-width) minmax(0, 1fr);gap:16px}
       .sidebar{
         background:var(--panel);
         border:1px solid var(--border);
@@ -803,11 +822,13 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
         height:fit-content;
         max-height:calc(100vh - 112px);
         overflow:auto;
+        width:var(--toc-width);
       }
       .sidebar-head{display:flex;justify-content:space-between;align-items:center;padding:2px 2px 6px}
       .section-list{display:flex;flex-direction:column;gap:8px}
       .section-item{
         border:1px solid var(--border);
+        border-left:3px solid transparent;
         border-radius:10px;
         padding:9px 10px;
         background:var(--card);
@@ -822,6 +843,7 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
       .section-item:hover{border-color:var(--accent-solid);transform:translateY(-1px)}
       .section-item.current{
         border-color:var(--active-bg);
+        border-left-color:var(--accent-solid);
         background:var(--active-bg);
         color:var(--active-text);
         box-shadow:var(--button-shadow);
@@ -849,6 +871,9 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
         gap:12px;
       }
       .summary-row{display:flex;flex-direction:column;gap:12px}
+      .summary-row .card + .card{
+        margin-top:20px;
+      }
       .card{
         background:var(--card);
         border:1px solid var(--border);
@@ -864,7 +889,12 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
         gap:12px;
       }
       .methodtitle{display:flex;flex-direction:column;gap:8px}
-      .methodtitle h2{margin:0;font-size:16px;line-height:1.25;font-weight:600}
+      .methodtitle h2{
+        margin:0;
+        font-size:28px;
+        line-height:1.18;
+        font-weight:600;
+      }
       .methodmeta{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
       .tag{
         font-size:11px;
@@ -874,7 +904,11 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
         background:var(--panel);
         color:var(--muted);
       }
-      .tag.get,.tag.post{color:var(--text)}
+      .tag.get{background:#3b82f6;color:#fff;border-color:#3b82f6}
+      .tag.post{background:#b8562a;color:#fff;border-color:#b8562a}
+      .tag.put{background:#8b5cf6;color:#fff;border-color:#8b5cf6}
+      .tag.patch{background:#f59e0b;color:#1f1300;border-color:#f59e0b}
+      .tag.delete{background:#ef4444;color:#fff;border-color:#ef4444}
       .section{display:flex;flex-direction:column;gap:12px}
       .section{padding:12px 14px 14px}
       .section-text{
@@ -1062,9 +1096,19 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
         top:0;
         z-index:3;
       }
+      tbody tr:nth-child(even) td{
+        background:var(--card);
+      }
       tbody tr:nth-child(odd) td{
         background:color-mix(in srgb, var(--card) 96%, transparent);
       }
+      tbody tr[class*="type-"] td:first-child{border-left-width:4px}
+      tbody tr.type-string td:first-child{border-left-color:var(--type-string)}
+      tbody tr.type-number td:first-child{border-left-color:var(--type-number)}
+      tbody tr.type-boolean td:first-child{border-left-color:var(--type-boolean)}
+      tbody tr.type-object td:first-child{border-left-color:var(--type-object)}
+      tbody tr.type-array td:first-child{border-left-color:var(--type-array)}
+      tbody tr.type-null td:first-child{border-left-color:var(--type-null)}
       .table-shell{
         border-top:1px solid var(--border);
         overflow:auto;
@@ -1197,13 +1241,14 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
       }
       @media (max-width: 1024px){
         .layout{grid-template-columns:1fr}
-        .sidebar{position:static;min-height:auto}
+        .sidebar{position:static;min-height:auto;width:100%}
         .actions,.toolbar-stack,.toolbar-meta,.toolbar-nav{justify-content:flex-start;align-items:center}
       }
       @media (max-width: 720px){
         .shell{padding:14px 12px 24px}
         .topbar{top:8px;padding:12px}
         .cardhead{align-items:flex-start;flex-direction:column}
+        .methodtitle h2{font-size:24px}
       }
     </style>`,
     '</head>',

@@ -1,4 +1,4 @@
-import React, { type ReactNode, type RefObject } from 'react';
+import React, { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import type { RequestMethod } from '../../types';
 import { HttpChip, TabPill, TabsPill, WBButton } from '../primitives/WorkbenchPrimitives';
 
@@ -27,6 +27,7 @@ type WorkbenchTopbarProps = {
   onExportHtml: () => void;
   onExportWiki: () => void;
   onExportJson: () => void;
+  onToggleSidebar: () => void;
   onUndo: () => void;
   onRedo: () => void;
   onManualSave: () => void;
@@ -62,6 +63,7 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
   onExportHtml,
   onExportWiki,
   onExportJson,
+  onToggleSidebar,
   onUndo,
   onRedo,
   onManualSave,
@@ -69,6 +71,29 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
   onOpenLogin,
   onOpenRegister
 }: WorkbenchTopbarProps): ReactNode {
+  const [themeOpen, setThemeOpen] = useState(false);
+  const themePanelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!themeOpen) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (themePanelRef.current && !themePanelRef.current.contains(e.target as Node)) {
+        setThemeOpen(false);
+      }
+    }
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setThemeOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [themeOpen]);
+
   return (
     <header
       ref={topbarRef}
@@ -86,6 +111,15 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
         fontFamily: 'var(--wb-font-sans)'
       }}
     >
+      <button
+        type="button"
+        className="wb-mobile-menu-button"
+        aria-label="Открыть навигацию"
+        title="Открыть навигацию"
+        onClick={onToggleSidebar}
+      >
+        ☰
+      </button>
       <HttpChip method={methodHttpMethod} size="sm" />
       <code style={{ fontFamily: 'var(--wb-font-mono)', fontSize: 13, fontWeight: 600, color: 'var(--wb-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 240 }}>
         {methodName || 'Untitled method'}
@@ -130,10 +164,11 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
         <WBButton variant="ghost" size="sm" onClick={onManualSave} title="Сохранить">Сохранить</WBButton>
       </div>
 
-      <details style={{ position: 'relative' }}>
-        <summary
+      <div style={{ position: 'relative' }} ref={themePanelRef}>
+        <button
+          type="button"
+          onClick={() => setThemeOpen((current) => !current)}
           style={{
-            listStyle: 'none',
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
@@ -149,54 +184,59 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
             {(authUserLogin ?? 'U').slice(0, 1).toUpperCase()}
           </span>
           <span style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{authUserLogin ?? 'Гость'}</span>
-        </summary>
-        <div
-          style={{
-            position: 'absolute',
-            top: 34,
-            right: 0,
-            zIndex: 20,
-            width: 220,
-            background: 'var(--wb-bg-surface)',
-            border: '1px solid var(--wb-border)',
-            borderRadius: 'var(--wb-radius)',
-            boxShadow: 'var(--wb-shadow-pop)',
-            padding: 10,
-            display: 'grid',
-            gap: 8
-          }}
-        >
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--wb-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Тема</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 4 }}>
-            {ACCENTS.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => onAccentChange(item.id)}
-                style={{
-                  border: `1px solid ${accent === item.id ? 'var(--wb-accent)' : 'var(--wb-border-soft)'}`,
-                  background: accent === item.id ? 'var(--wb-accent-soft)' : 'var(--wb-bg-soft)',
-                  color: 'var(--wb-text)',
-                  borderRadius: 5,
-                  padding: '5px 4px',
-                  fontSize: 11,
-                  cursor: 'pointer'
-                }}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-          {authUserLogin ? (
-            <WBButton variant="danger" size="sm" onClick={onLogout} disabled={isLogoutBusy} fullWidth>{isLogoutBusy ? 'Выход...' : 'Logout'}</WBButton>
-          ) : (
-            <div style={{ display: 'flex', gap: 6 }}>
-              <WBButton variant="secondary" size="sm" onClick={onOpenLogin} fullWidth>Войти</WBButton>
-              <WBButton variant="accent" size="sm" onClick={onOpenRegister} fullWidth>Регистрация</WBButton>
+        </button>
+        {themeOpen && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 34,
+              right: 0,
+              zIndex: 20,
+              width: 220,
+              background: 'var(--wb-bg-surface)',
+              border: '1px solid var(--wb-border)',
+              borderRadius: 'var(--wb-radius)',
+              boxShadow: 'var(--wb-shadow-pop)',
+              padding: 10,
+              display: 'grid',
+              gap: 8
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--wb-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Тема</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 4 }}>
+              {ACCENTS.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => {
+                    onAccentChange(item.id);
+                    setThemeOpen(false);
+                  }}
+                  style={{
+                    border: `1px solid ${accent === item.id ? 'var(--wb-accent)' : 'var(--wb-border-soft)'}`,
+                    background: accent === item.id ? 'var(--wb-accent-soft)' : 'var(--wb-bg-soft)',
+                    color: 'var(--wb-text)',
+                    borderRadius: 5,
+                    padding: '5px 4px',
+                    fontSize: 11,
+                    cursor: 'pointer'
+                  }}
+                >
+                  {item.label}
+                </button>
+              ))}
             </div>
-          )}
-        </div>
-      </details>
+            {authUserLogin ? (
+              <WBButton variant="danger" size="sm" onClick={onLogout} disabled={isLogoutBusy} fullWidth>{isLogoutBusy ? 'Выход...' : 'Logout'}</WBButton>
+            ) : (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <WBButton variant="secondary" size="sm" onClick={onOpenLogin} fullWidth>Войти</WBButton>
+                <WBButton variant="accent" size="sm" onClick={onOpenRegister} fullWidth>Регистрация</WBButton>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </header>
   );
 });

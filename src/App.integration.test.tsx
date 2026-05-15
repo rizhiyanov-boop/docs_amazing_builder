@@ -42,6 +42,33 @@ function seedSingleMethodWorkspace(section: Record<string, unknown>): void {
   );
 }
 
+function seedTwoMethodWorkspace(): void {
+  window.localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({
+      version: 3,
+      updatedAt: '2026-05-07T10:00:00.000Z',
+      projectName: 'Review Project',
+      activeMethodId: 'm_first',
+      methods: [
+        {
+          id: 'm_first',
+          name: 'First Method',
+          updatedAt: '2026-05-07T10:00:00.000Z',
+          sections: [{ id: 's_first', title: 'Goal', enabled: true, kind: 'text', value: 'A' }]
+        },
+        {
+          id: 'm_second',
+          name: 'Second Method',
+          updatedAt: '2026-05-07T10:00:00.000Z',
+          sections: [{ id: 's_second', title: 'Goal', enabled: true, kind: 'text', value: 'B' }]
+        }
+      ],
+      groups: []
+    })
+  );
+}
+
 function getTopbar(): HTMLElement {
   const topbar = document.querySelector('.wb-topbar');
   expect(topbar).not.toBeNull();
@@ -135,6 +162,23 @@ describe('App integration', () => {
     const dialog = screen.getByRole('dialog', { name: 'Подтверждение удаления раздела' });
     expect(within(dialog).getByRole('heading', { name: 'Удалить раздел?' })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Удалить раздел' })).toBeInTheDocument();
+  });
+
+  it('opens method delete confirmation from topbar actions', async () => {
+    const user = userEvent.setup();
+    seedTwoMethodWorkspace();
+    renderApp();
+
+    await user.click(findTopbarButton(/Действия с методом/));
+    const deleteItem = screen.getByRole('menuitem', { name: 'Удалить метод' });
+
+    expect(deleteItem).toHaveStyle({ color: 'var(--wb-required)' });
+    await user.click(deleteItem);
+
+    const dialog = screen.getByRole('dialog', { name: 'Подтверждение удаления метода' });
+    expect(within(dialog).getByRole('heading', { name: 'Удалить метод?' })).toBeInTheDocument();
+    expect(within(dialog).getByText(/First Method/)).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Удалить метод' })).toBeInTheDocument();
   });
 
   it('edits section title by double click without visible edit icon', async () => {

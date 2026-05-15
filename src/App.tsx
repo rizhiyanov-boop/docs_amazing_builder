@@ -713,7 +713,6 @@ export default function App() {
   const [highlightedInternalCodeIndex, setHighlightedInternalCodeIndex] = useState(0);
   const [internalCodePopoverState, setInternalCodePopoverState] = useState<InternalCodePopoverState | null>(null);
   const [isAddEntityMenuOpen, setIsAddEntityMenuOpen] = useState(false);
-  const [isDeleteEntityMenuOpen, setIsDeleteEntityMenuOpen] = useState(false);
   const [isAddSectionMenuOpen, setIsAddSectionMenuOpen] = useState(false);
   const [isOnboardingNavVisible, setIsOnboardingNavVisible] = useState(false);
   const [pendingMethodNameFocus, setPendingMethodNameFocus] = useState(false);
@@ -1328,7 +1327,6 @@ export default function App() {
   }
 
   function requestDeleteCurrentProject(): void {
-    setIsDeleteEntityMenuOpen(false);
     if (!serverProjectId) {
       setToastMessage('Удаление доступно только для сохраненного проекта.');
       return;
@@ -1661,7 +1659,6 @@ export default function App() {
     setPendingMethodNameFocus(true);
     setTab('editor');
     setIsAddEntityMenuOpen(false);
-    setIsDeleteEntityMenuOpen(false);
   }
 
   function createProject(): void {
@@ -1671,7 +1668,6 @@ export default function App() {
     setServerProjectId(null);
     setServerSyncError('');
     setIsAddEntityMenuOpen(false);
-    setIsDeleteEntityMenuOpen(false);
     setToastMessage('Создан новый пустой проект.');
   }
 
@@ -1765,7 +1761,6 @@ export default function App() {
   }
 
   function deleteActiveMethod(): void {
-    setIsDeleteEntityMenuOpen(false);
     if (!activeMethod) return;
     if (methods.length <= 1) {
       setToastMessage('Нельзя удалить последний метод. Сначала создайте еще один метод.');
@@ -2699,27 +2694,25 @@ export default function App() {
   }, [openSectionActionsMenuId]);
 
   useEffect(() => {
-    if (!isAddEntityMenuOpen && !isDeleteEntityMenuOpen) return;
+    if (!isAddEntityMenuOpen) return;
 
     const handleOutsideClick = (event: MouseEvent): void => {
       const target = event.target;
       if (!(target instanceof Element)) {
         setIsAddEntityMenuOpen(false);
-        setIsDeleteEntityMenuOpen(false);
         return;
       }
 
-      if (target.closest('.add-entity-menu') || target.closest('.delete-entity-menu')) {
+      if (target.closest('.add-entity-menu')) {
         return;
       }
 
       setIsAddEntityMenuOpen(false);
-      setIsDeleteEntityMenuOpen(false);
     };
 
     document.addEventListener('mousedown', handleOutsideClick, true);
     return () => document.removeEventListener('mousedown', handleOutsideClick, true);
-  }, [isAddEntityMenuOpen, isDeleteEntityMenuOpen]);
+  }, [isAddEntityMenuOpen]);
 
   useEffect(() => {
     if (!isAddSectionMenuOpen) return;
@@ -7332,13 +7325,7 @@ export default function App() {
   }, []);
 
   const handleToggleAddEntityMenu = useCallback(() => {
-    setIsDeleteEntityMenuOpen(false);
     setIsAddEntityMenuOpen((current) => !current);
-  }, []);
-
-  const handleToggleDeleteEntityMenu = useCallback(() => {
-    setIsAddEntityMenuOpen(false);
-    setIsDeleteEntityMenuOpen((current) => !current);
   }, []);
 
   const handleWbAccentChange = useCallback((accent: WorkbenchAccent) => {
@@ -7648,7 +7635,6 @@ export default function App() {
     handleExportFullProjectHtmlClick,
     handleExportFullProjectWiki,
     handleToggleAddEntityMenu,
-    handleToggleDeleteEntityMenu,
     handleToggleProjectExpanded,
     handleToggleSidebar,
     isOnboardingHeaderAvailable,
@@ -8274,6 +8260,13 @@ export default function App() {
           onModeChange={setWorkbenchMode}
           onLayoutChange={setWorkbenchLayout}
           onAccentChange={handleWbAccentChange}
+          onRenameMethod={() => {
+            if (activeMethod) {
+              startMethodRename(activeMethod);
+            }
+          }}
+          onDeleteMethod={deleteActiveMethod}
+          canDeleteMethod={methods.length > 1}
           onOpenProjectImport={handleOpenProjectImport}
           onImportProjectJson={handleImportProjectJsonFiles}
           onExportHtml={() => {

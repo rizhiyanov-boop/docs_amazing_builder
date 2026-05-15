@@ -28,6 +28,9 @@ type WorkbenchTopbarProps = {
   onExportWiki: () => void;
   onExportJson: () => void;
   onToggleSidebar: () => void;
+  onRenameMethod: () => void;
+  onDeleteMethod: () => void;
+  canDeleteMethod: boolean;
   onUndo: () => void;
   onRedo: () => void;
   onManualSave: () => void;
@@ -64,6 +67,9 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
   onExportWiki,
   onExportJson,
   onToggleSidebar,
+  onRenameMethod,
+  onDeleteMethod,
+  canDeleteMethod,
   onUndo,
   onRedo,
   onManualSave,
@@ -72,7 +78,9 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
   onOpenRegister
 }: WorkbenchTopbarProps): ReactNode {
   const [themeOpen, setThemeOpen] = useState(false);
+  const [isMethodMenuOpen, setIsMethodMenuOpen] = useState(false);
   const themePanelRef = useRef<HTMLDivElement>(null);
+  const methodMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!themeOpen) return;
@@ -93,6 +101,26 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
       document.removeEventListener('keydown', handleEscape);
     };
   }, [themeOpen]);
+
+  useEffect(() => {
+    if (!isMethodMenuOpen) return;
+    function handleClickOutside(event: MouseEvent) {
+      if (methodMenuRef.current && !methodMenuRef.current.contains(event.target as Node)) {
+        setIsMethodMenuOpen(false);
+      }
+    }
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setIsMethodMenuOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [isMethodMenuOpen]);
 
   return (
     <header
@@ -121,9 +149,105 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
         ☰
       </button>
       <HttpChip method={methodHttpMethod} size="sm" />
-      <code style={{ fontFamily: 'var(--wb-font-mono)', fontSize: 13, fontWeight: 600, color: 'var(--wb-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 240 }}>
-        {methodName || 'Untitled method'}
-      </code>
+      <div ref={methodMenuRef} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+        <code style={{ fontFamily: 'var(--wb-font-mono)', fontSize: 13, fontWeight: 600, color: 'var(--wb-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 240 }}>
+          {methodName || 'Untitled method'}
+        </code>
+        <button
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={isMethodMenuOpen}
+          aria-label="Действия с методом"
+          title="Действия с методом"
+          onClick={() => setIsMethodMenuOpen((current) => !current)}
+          style={{
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            color: 'var(--wb-text-muted)',
+            fontSize: 16,
+            lineHeight: 1,
+            padding: '2px 6px',
+            borderRadius: 'var(--wb-radius)',
+            opacity: 0.68
+          }}
+          onMouseEnter={(event) => {
+            event.currentTarget.style.opacity = '1';
+          }}
+          onMouseLeave={(event) => {
+            event.currentTarget.style.opacity = '0.68';
+          }}
+        >
+          ⋯
+        </button>
+        {isMethodMenuOpen && (
+          <div
+            role="menu"
+            style={{
+              position: 'absolute',
+              top: '100%',
+              left: 0,
+              marginTop: 4,
+              zIndex: 100,
+              minWidth: 180,
+              background: 'var(--wb-bg-surface)',
+              border: '1px solid var(--wb-border)',
+              borderRadius: 'var(--wb-radius-lg)',
+              boxShadow: 'var(--wb-shadow-pop)',
+              overflow: 'hidden'
+            }}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setIsMethodMenuOpen(false);
+                onRenameMethod();
+              }}
+              style={{
+                display: 'block',
+                width: '100%',
+                padding: '8px 12px',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: 13,
+                color: 'var(--wb-text)',
+                textAlign: 'left',
+                fontFamily: 'var(--wb-font-sans)'
+              }}
+            >
+              Переименовать
+            </button>
+            <div style={{ borderTop: '1px solid var(--wb-border-soft)', margin: '4px 0' }} />
+            <button
+              type="button"
+              role="menuitem"
+              disabled={!canDeleteMethod}
+              title={canDeleteMethod ? '' : 'Нельзя удалить последний метод'}
+              onClick={() => {
+                setIsMethodMenuOpen(false);
+                onDeleteMethod();
+              }}
+              style={{
+                display: 'block',
+                width: '100%',
+                padding: '8px 12px',
+                background: 'none',
+                border: 'none',
+                cursor: canDeleteMethod ? 'pointer' : 'not-allowed',
+                fontSize: 13,
+                color: canDeleteMethod ? 'var(--wb-required)' : 'var(--wb-text-muted)',
+                textAlign: 'left',
+                fontFamily: 'var(--wb-font-sans)',
+                opacity: canDeleteMethod ? 1 : 0.5
+              }}
+            >
+              Удалить метод
+            </button>
+          </div>
+        )}
+      </div>
       <span style={{ width: 1, height: 20, background: 'var(--wb-border)' }} />
       <span style={{ fontFamily: 'var(--wb-font-mono)', fontSize: 11, color: 'var(--wb-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 260 }}>{methodPath || '/'}</span>
 

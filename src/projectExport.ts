@@ -3,6 +3,7 @@ import { buildFlowMermaid } from './flowDiagram';
 import { normalizeArrayFieldPath } from './fieldPath';
 import { getThemeTokens } from './theme';
 import { resolveSectionTitle } from './sectionTitles';
+import { renderWikiDocument } from './renderWiki';
 import type { ThemeName } from './theme';
 import type { DocSection, MethodDocument, ProjectFlow, ProjectSection } from './types';
 
@@ -55,6 +56,69 @@ function slugify(value: string): string {
 
 function enabledMethodSections(method: MethodDocument): DocSection[] {
   return method.sections.filter((section) => section.enabled);
+}
+
+function renderProjectSectionHtml(section: ProjectSection): string {
+  if (section.type === 'diagram') {
+    const code = section.diagramCode?.trim() ?? '';
+    const caption = section.content.trim()
+      ? `<p class="project-prose">${escapeHtml(section.content).replaceAll('\n', '<br/>')}</p>`
+      : '';
+    const image = code
+      ? `<img class="flow-image" src="${escapeHtml(getDiagramImageUrl(resolveDiagramEngine(code, section.diagramEngine ?? 'mermaid'), code, 'svg'))}" alt="${escapeHtml(section.title)}" loading="lazy"/>`
+      : '<p class="muted">Пусто</p>';
+    return [
+      `<article class="project-card" id="project-doc-${escapeHtml(section.id)}">`,
+      `<h4>${escapeHtml(section.title)}</h4>`,
+      image,
+      caption,
+      '</article>'
+    ].join('');
+  }
+
+  return [
+    `<article class="project-card" id="project-doc-${escapeHtml(section.id)}">`,
+    `<h4>${escapeHtml(section.title)}</h4>`,
+    `<div class="project-prose">${escapeHtml(section.content).replaceAll('\n', '<br/>') || '<span class="muted">Пусто</span>'}</div>`,
+    '</article>'
+  ].join('');
+}
+
+function pushProjectSectionWiki(lines: string[], section: ProjectSection): void {
+  lines.push('');
+  lines.push(`h3. ${escapeWiki(section.title)}`);
+
+  if (section.type === 'diagram') {
+    const code = section.diagramCode?.trim() ?? '';
+    if (code) {
+      const imageUrl = getDiagramImageUrl(resolveDiagramEngine(code, section.diagramEngine ?? 'mermaid'), code, 'svg');
+      lines.push(`!${escapeWiki(imageUrl)}!`);
+      if (section.content.trim()) {
+        lines.push('');
+        lines.push(...section.content.split(/\r?\n/).map((line) => escapeWiki(line)));
+      }
+    } else {
+      lines.push('_Пусто_');
+    }
+    return;
+  }
+
+  lines.push(...(section.content.trim() ? section.content.split(/\r?\n/).map((line) => escapeWiki(line)) : ['_Пусто_']));
+}
+
+function getMethodStatusLabel(status: MethodDocument['status']): string {
+  if (status === 'review') return 'На ревью';
+  if (status === 'done') return 'Готово';
+  return 'Черновик';
+}
+
+function getMethodRequestLine(method: MethodDocument): { httpMethod?: string; path?: string } {
+  const request = method.sections.find((section) => section.kind === 'parsed' && section.sectionType === 'request');
+  if (!request || request.kind !== 'parsed') return {};
+  return {
+    httpMethod: request.requestMethod,
+    path: request.requestUrl
+  };
 }
 
 export function getFlowExportFileName(flow: ProjectFlow, index: number, ext: 'svg' | 'jpeg' = 'svg'): string {
@@ -217,9 +281,7 @@ export function renderProjectHtmlDocument(input: ProjectHtmlExportInput): string
 
   const projectDocs = enabledProjectSections
     .sort((a, b) => a.order - b.order)
-    .map((section) => (
-      `<article class="project-card" id="project-doc-${escapeHtml(section.id)}"><h4>${escapeHtml(section.title)}</h4><div class="project-prose">${escapeHtml(section.content).replaceAll('\n', '<br/>') || '<span class="muted">Пусто</span>'}</div></article>`
-    ))
+    .map((section) => renderProjectSectionHtml(section))
     .join('');
 
   const methodsHtml = enabledMethods.map((method) => renderMethodHtml(method, input.methodDiagramImageMap)).join('');
@@ -289,9 +351,7 @@ export function renderProjectWikiDocument(params: {
     lines.push('_Нет активных проектных секций_');
   } else {
     for (const section of docs) {
-      lines.push('');
-      lines.push(`h3. ${escapeWiki(section.title)}`);
-      lines.push(...(section.content.trim() ? section.content.split(/\r?\n/).map((line) => escapeWiki(line)) : ['_Пусто_']));
+      pushProjectSectionWiki(lines, section);
     }
   }
 
@@ -312,6 +372,53 @@ export function renderProjectWikiDocument(params: {
       lines.push(
         `|${toWikiCell(String(row.step))}|${toWikiCell(row.actor)}|${toWikiCell(row.action)}|${toWikiCell(row.method)}|${toWikiCell(row.inputs)}|${toWikiCell(row.outputs)}|${toWikiCell(row.condition)}|${toWikiCell(row.result)}|`
       );
+    }
+  }
+
+  lines.push('');
+  lines.push('h2. Методы');
+
+  const enabledMethods = params.methods.map((method) => ({
+    ...method,
+    sections: enabledMethodSections(method)
+  })).filter((method) => method.sections.length > 0);
+
+  if (enabledMethods.length === 0) {
+    lines.push('_Нет активных секций методов_');
+  } else {
+    for (const method of enabledMethods) {
+      lines.push('');
+      lines.push(`h3. ${escapeWiki(method.name)}`);
+
+      const methodMeta: string[] = [];
+      if (method.jiraTicket) methodMeta.push(`*Jira:* ${escapeWiki(method.jiraTicket)}`);
+      if (method.epic) methodMeta.push(`*Epic:* ${escapeWiki(method.epic)}`);
+      if (method.responsible) methodMeta.push(`*Ответственный:* ${escapeWiki(method.responsible)}`);
+      methodMeta.push(`*Статус:* ${escapeWiki(getMethodStatusLabel(method.status))}`);
+      lines.push(methodMeta.join(' • '));
+
+      const requestLine = getMethodRequestLine(method);
+      const methodWiki = renderWikiDocument(
+        method.sections,
+        {
+          httpMethod: requestLine.httpMethod,
+          path: requestLine.path,
+          jiraTicket: method.jiraTicket,
+          epic: method.epic,
+          initiators: method.initiators,
+          responsible: method.responsible,
+          externalUrl: method.externalUrl,
+          updatedAt: method.updatedAt
+        },
+        {
+          includeToc: false,
+          includeTemplateIntro: false,
+          headingOffset: 2
+        }
+      );
+      if (methodWiki.trim()) {
+        lines.push(methodWiki);
+      }
     }
   }
 

@@ -26,6 +26,8 @@ type WorkbenchTopbarProps = {
   onImportProjectJson: (files: File[]) => void;
   onExportHtml: () => void;
   onExportWiki: () => void;
+  onExportFullProjectHtml: () => void;
+  onExportFullProjectWiki: () => void;
   onExportJson: () => void;
   onToggleSidebar: () => void;
   onRenameMethod: () => void;
@@ -44,6 +46,136 @@ const ACCENTS: Array<{ id: WorkbenchAccent; label: string }> = [
   { id: 'warm', label: 'Kraft' },
   { id: 'violet', label: 'Dusk' }
 ];
+
+function ExportSplitButton({
+  label,
+  onExportMethod,
+  onExportProject
+}: {
+  label: string;
+  onExportMethod: () => void;
+  onExportProject: () => void;
+}): ReactNode {
+  const [isOpen, setIsOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    function handleClickOutside(event: MouseEvent) {
+      if (ref.current && !ref.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [isOpen]);
+
+  return (
+    <div ref={ref} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+      <WBButton variant="ghost" size="sm" onClick={onExportMethod} title={`${label}: текущий метод`}>
+        {label}
+      </WBButton>
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
+        aria-label={`Опции экспорта ${label}`}
+        title={`Опции экспорта ${label}`}
+        onClick={() => setIsOpen((current) => !current)}
+        style={{
+          background: 'transparent',
+          color: 'var(--wb-text-soft)',
+          border: '1px solid transparent',
+          padding: '4px 6px',
+          fontSize: 12,
+          fontWeight: 600,
+          borderRadius: 'var(--wb-button-radius)',
+          cursor: 'pointer',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontFamily: 'var(--wb-font-sans)',
+          whiteSpace: 'nowrap'
+        }}
+      >
+        ▾
+      </button>
+      {isOpen && (
+        <div
+          role="menu"
+          aria-label={`Меню экспорта ${label}`}
+          style={{
+            position: 'absolute',
+            top: '100%',
+            right: 0,
+            marginTop: 4,
+            zIndex: 100,
+            minWidth: 180,
+            background: 'var(--wb-bg-surface)',
+            border: '1px solid var(--wb-border)',
+            borderRadius: 'var(--wb-radius-lg)',
+            boxShadow: 'var(--wb-shadow-pop)',
+            overflow: 'hidden'
+          }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setIsOpen(false);
+              onExportMethod();
+            }}
+            style={{
+              display: 'block',
+              width: '100%',
+              padding: '8px 12px',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: 13,
+              color: 'var(--wb-text)',
+              textAlign: 'left',
+              fontFamily: 'var(--wb-font-sans)'
+            }}
+          >
+            Текущий метод
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setIsOpen(false);
+              onExportProject();
+            }}
+            style={{
+              display: 'block',
+              width: '100%',
+              padding: '8px 12px',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: 13,
+              color: 'var(--wb-text)',
+              textAlign: 'left',
+              fontFamily: 'var(--wb-font-sans)'
+            }}
+          >
+            Весь проект
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
   topbarRef,
@@ -65,6 +197,8 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
   onImportProjectJson,
   onExportHtml,
   onExportWiki,
+  onExportFullProjectHtml,
+  onExportFullProjectWiki,
   onExportJson,
   onToggleSidebar,
   onRenameMethod,
@@ -277,8 +411,8 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
             event.currentTarget.value = '';
           }}
         />
-        <WBButton variant="ghost" size="sm" onClick={onExportHtml}>HTML</WBButton>
-        <WBButton variant="ghost" size="sm" onClick={onExportWiki}>Wiki</WBButton>
+        <ExportSplitButton label="HTML" onExportMethod={onExportHtml} onExportProject={onExportFullProjectHtml} />
+        <ExportSplitButton label="Wiki" onExportMethod={onExportWiki} onExportProject={onExportFullProjectWiki} />
         <WBButton variant="secondary" size="sm" onClick={onExportJson}>JSON</WBButton>
       </div>
 

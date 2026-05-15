@@ -19,6 +19,12 @@ export interface WikiRenderMeta {
   updatedAt?: string;
 }
 
+export interface WikiRenderOptions {
+  includeToc?: boolean;
+  includeTemplateIntro?: boolean;
+  headingOffset?: number;
+}
+
 function escapeWiki(value: string): string {
   return value.replaceAll('|', '&#124;');
 }
@@ -704,8 +710,25 @@ function renderWikiTemplateIntro(meta: WikiRenderMeta): string[] {
   ];
 }
 
-export function renderWikiDocument(sections: DocSection[], meta: WikiRenderMeta = {}): string {
-  const lines: string[] = ['{toc}', '', ...renderWikiTemplateIntro(meta)];
+function shiftWikiHeadingLine(line: string, offset: number): string {
+  if (offset === 0) return line;
+  const match = /^h([1-6])\. (.*)$/.exec(line);
+  if (!match) return line;
+  const level = Math.min(6, Math.max(1, Number(match[1]) + offset));
+  return `h${level}. ${match[2]}`;
+}
+
+export function renderWikiDocument(sections: DocSection[], meta: WikiRenderMeta = {}, options: WikiRenderOptions = {}): string {
+  const includeToc = options.includeToc ?? true;
+  const includeTemplateIntro = options.includeTemplateIntro ?? true;
+  const headingOffset = options.headingOffset ?? 0;
+  const lines: string[] = [];
+  if (includeToc) {
+    lines.push('{toc}', '');
+  }
+  if (includeTemplateIntro) {
+    lines.push(...renderWikiTemplateIntro(meta));
+  }
 
   for (const section of sections) {
     const rendered =
@@ -727,7 +750,7 @@ export function renderWikiDocument(sections: DocSection[], meta: WikiRenderMeta 
 
     if (rendered.length > 0) {
       lines.push('');
-      lines.push(...rendered);
+      lines.push(...rendered.map((line) => shiftWikiHeadingLine(line, headingOffset)));
     }
   }
 

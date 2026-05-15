@@ -1671,14 +1671,20 @@ export default function App() {
     setToastMessage('Создан новый пустой проект.');
   }
 
-  function createProjectDocSection(): void {
+  function createProjectDocSection(type: ProjectSection['type'] = 'text'): void {
     const nextSection: ProjectSection = {
       id: createProjectSectionId(),
       title: `Раздел ${projectSections.length + 1}`,
       enabled: true,
-      type: 'text',
+      type,
       content: '',
-      order: projectSections.length
+      order: projectSections.length,
+      ...(type === 'diagram'
+        ? {
+            diagramEngine: 'mermaid' as const,
+            diagramCode: 'graph LR\n  A[Start] --> B[End]'
+          }
+        : {})
     };
     markWorkspaceChanged();
     setProjectSections((prev) => [...prev, nextSection]);
@@ -7632,8 +7638,6 @@ export default function App() {
     exportTitle,
     handleActiveOnboardingHintAction,
     handleDragStartSection,
-    handleExportFullProjectHtmlClick,
-    handleExportFullProjectWiki,
     handleToggleAddEntityMenu,
     handleToggleProjectExpanded,
     handleToggleSidebar,
@@ -8277,6 +8281,8 @@ export default function App() {
             setTab('wiki');
             if (isCompactLayout) setIsSidebarHidden(true);
           }}
+          onExportFullProjectHtml={handleExportFullProjectHtmlClick}
+          onExportFullProjectWiki={handleExportFullProjectWiki}
           onExportJson={exportProjectJson}
           onToggleSidebar={handleToggleSidebar}
           onUndo={undoWorkspace}

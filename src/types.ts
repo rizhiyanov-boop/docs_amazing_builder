@@ -165,9 +165,11 @@ export interface ProjectSection {
   id: string;
   title: string;
   enabled: boolean;
-  type: 'text' | 'markdown' | 'note' | 'checklist';
+  type: 'text' | 'markdown' | 'note' | 'checklist' | 'diagram';
   content: string;
   order: number;
+  diagramEngine?: DiagramEngine;
+  diagramCode?: string;
 }
 
 export interface FlowFieldRef {

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { renderHtmlDocument } from './renderHtml';
+import { renderProjectHtmlDocument, renderProjectWikiDocument } from './projectExport';
 import { renderWikiDocument } from './renderWiki';
 import { makeRequestSection, makeSectionsForRender } from './test/fixtures';
-import type { DocSection } from './types';
+import type { DocSection, MethodDocument, ProjectSection } from './types';
 
 describe('renderers', () => {
   it('renders html document shell and section data', () => {
@@ -256,5 +257,71 @@ describe('renderers', () => {
   it('keeps empty cells when meta is empty', () => {
     const wiki = renderWikiDocument([], {});
     expect(wiki).toContain('\u00A0');
+  });
+
+  it('renders wiki sections without toc/intro and shifts headings for project export composition', () => {
+    const wiki = renderWikiDocument(makeSectionsForRender(), {}, {
+      includeToc: false,
+      includeTemplateIntro: false,
+      headingOffset: 2
+    });
+
+    expect(wiki).not.toContain('{toc}');
+    expect(wiki).not.toContain('h2. История изменений');
+    expect(wiki).toContain('h4. Цель');
+    expect(wiki).toContain('Тестовая цель');
+  });
+
+  it('renders project diagrams in html and wiki exports and includes methods in project wiki', () => {
+    const projectSections: ProjectSection[] = [
+      {
+        id: 'project-diagram',
+        title: 'Project Diagram',
+        enabled: true,
+        type: 'diagram',
+        content: 'Diagram caption',
+        order: 0,
+        diagramEngine: 'mermaid',
+        diagramCode: 'graph LR\n  A --> B'
+      }
+    ];
+    const methods: MethodDocument[] = [
+      {
+        id: 'method-1',
+        name: 'Save Claim',
+        updatedAt: '2026-05-13T10:00:00.000Z',
+        jiraTicket: 'GRKI-77',
+        epic: 'Claims',
+        responsible: 'Team A',
+        status: 'review',
+        sections: makeSectionsForRender()
+      }
+    ];
+
+    const html = renderProjectHtmlDocument({
+      projectName: 'Project A',
+      updatedAt: '2026-05-13T10:00:00.000Z',
+      projectSections,
+      flows: [],
+      methods,
+      theme: 'light'
+    });
+    const wiki = renderProjectWikiDocument({
+      projectName: 'Project A',
+      updatedAt: '2026-05-13T10:00:00.000Z',
+      projectSections,
+      flows: [],
+      methods
+    });
+
+    expect(html).toContain('Project Diagram');
+    expect(html).toContain('Diagram caption');
+    expect(html).toContain('mermaid.ink');
+    expect(wiki).toContain('h2. Методы');
+    expect(wiki).toContain('h3. Save Claim');
+    expect(wiki).toContain('*Jira:* GRKI-77');
+    expect(wiki).toContain('*Статус:* На ревью');
+    expect(wiki).toContain('h4. Цель');
+    expect(wiki).toContain('!https://mermaid.ink');
   });
 });

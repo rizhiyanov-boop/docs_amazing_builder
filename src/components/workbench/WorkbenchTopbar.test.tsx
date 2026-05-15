@@ -29,6 +29,8 @@ function renderTopbar(overrides: Partial<React.ComponentProps<typeof WorkbenchTo
     onImportProjectJson: vi.fn(),
     onExportHtml: vi.fn(),
     onExportWiki: vi.fn(),
+    onExportFullProjectHtml: vi.fn(),
+    onExportFullProjectWiki: vi.fn(),
     onExportJson: vi.fn(),
     onToggleSidebar: vi.fn(),
     onRenameMethod: vi.fn(),
@@ -104,6 +106,54 @@ describe('WorkbenchTopbar method actions menu', () => {
 
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('menuitem', { name: 'Переименовать' })).not.toBeInTheDocument();
+  });
+});
+
+describe('WorkbenchTopbar export split buttons', () => {
+  it('keeps primary html/wiki export actions on the main buttons', async () => {
+    const user = userEvent.setup();
+    const onExportHtml = vi.fn();
+    const onExportWiki = vi.fn();
+    renderTopbar({ onExportHtml, onExportWiki });
+
+    await user.click(screen.getByRole('button', { name: 'HTML' }));
+    await user.click(screen.getByRole('button', { name: 'Wiki' }));
+
+    expect(onExportHtml).toHaveBeenCalledTimes(1);
+    expect(onExportWiki).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs full project export from split button menus', async () => {
+    const user = userEvent.setup();
+    const onExportFullProjectHtml = vi.fn();
+    const onExportFullProjectWiki = vi.fn();
+    renderTopbar({ onExportFullProjectHtml, onExportFullProjectWiki });
+
+    await user.click(screen.getByRole('button', { name: 'Опции экспорта HTML' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Весь проект' }));
+    expect(onExportFullProjectHtml).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('menu', { name: 'Меню экспорта HTML' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Опции экспорта Wiki' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Весь проект' }));
+    expect(onExportFullProjectWiki).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes export split menu on outside click and Escape', async () => {
+    const user = userEvent.setup();
+    renderTopbar();
+
+    await user.click(screen.getByRole('button', { name: 'Опции экспорта HTML' }));
+    expect(screen.getByRole('menu', { name: 'Меню экспорта HTML' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Outside target' }));
+    expect(screen.queryByRole('menu', { name: 'Меню экспорта HTML' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Опции экспорта Wiki' }));
+    expect(screen.getByRole('menu', { name: 'Меню экспорта Wiki' })).toBeInTheDocument();
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('menu', { name: 'Меню экспорта Wiki' })).not.toBeInTheDocument();
   });
 });
 

@@ -181,6 +181,26 @@ describe('App integration', () => {
     expect(within(dialog).getByRole('button', { name: 'Удалить метод' })).toBeInTheDocument();
   });
 
+  it('creates a diagram section in Project Docs', async () => {
+    const user = userEvent.setup();
+    seedSingleMethodWorkspace({ id: 's_goal', title: 'Goal', enabled: true, kind: 'text', value: 'A' });
+    renderApp();
+
+    await user.click(screen.getByRole('tab', { name: 'Project Docs' }));
+    await user.click(screen.getByRole('button', { name: '+ Секция' }));
+
+    const menu = screen.getByRole('menu', { name: 'Project docs section type' });
+    expect(within(menu).getByRole('menuitem', { name: 'Диаграмма' })).toBeInTheDocument();
+
+    await user.click(within(menu).getByRole('menuitem', { name: 'Диаграмма' }));
+    await waitFor(() => {
+      expect(screen.getByText('Раздел 3')).toBeInTheDocument();
+      expect(screen.getByText('diagram')).toBeInTheDocument();
+      expect(getStoredProjectRaw()).toContain('"type":"diagram"');
+      expect(getStoredProjectRaw()).toContain('"diagramCode":"graph LR\\n  A[Start] --> B[End]"');
+    });
+  });
+
   it('edits section title by double click without visible edit icon', async () => {
     const user = userEvent.setup();
     seedSingleMethodWorkspace({ id: 's_goal', title: 'Editable Title', enabled: true, kind: 'text', value: 'A' });

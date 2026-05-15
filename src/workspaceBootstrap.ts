@@ -109,14 +109,22 @@ export function sanitizeProjectSections(rawSections: ProjectSection[] | undefine
   if (!Array.isArray(rawSections)) return createDefaultProjectSections();
   const sections = rawSections
     .filter(Boolean)
-    .map((section, index) => ({
-      id: section.id || createProjectSectionId(),
-      title: section.title?.trim() || `Раздел ${index + 1}`,
-      enabled: section.enabled ?? true,
-      type: section.type ?? 'text',
-      content: section.content ?? '',
-      order: Number.isFinite(section.order) ? section.order : index
-    }))
+    .map((section, index) => {
+      const type = section.type ?? 'text';
+      const sanitized: ProjectSection = {
+        id: section.id || createProjectSectionId(),
+        title: section.title?.trim() || `Раздел ${index + 1}`,
+        enabled: section.enabled ?? true,
+        type,
+        content: section.content ?? '',
+        order: Number.isFinite(section.order) ? section.order : index
+      };
+      if (type === 'diagram') {
+        sanitized.diagramEngine = section.diagramEngine === 'plantuml' ? 'plantuml' : 'mermaid';
+        sanitized.diagramCode = section.diagramCode ?? '';
+      }
+      return sanitized;
+    })
     .sort((left, right) => left.order - right.order)
     .map((section, index) => ({ ...section, order: index }));
   return sections.length > 0 ? sections : createDefaultProjectSections();

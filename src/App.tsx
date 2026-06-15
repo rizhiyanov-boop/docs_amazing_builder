@@ -30,6 +30,7 @@ import {
 } from './requestHeaders';
 import { renderHtmlDocument } from './renderHtml';
 import { getFlowExportFileName, renderProjectHtmlDocument, renderProjectWikiDocument } from './projectExport';
+import type { ProjectExportDetailMode } from './projectExport';
 import { editorElementToWikiText, editorHtmlToWikiText, escapeRichTextHtml, richTextToHtml } from './richText';
 import { renderWikiDocument } from './renderWiki';
 import type { WikiRenderMeta } from './renderWiki';
@@ -668,6 +669,8 @@ export default function App() {
   const [activeMethodId, setActiveMethodId] = useState<string>(() => initialWorkspace.activeMethodId ?? initialWorkspace.methods[0]?.id ?? createMethodId());
   const [selectedId, setSelectedId] = useState<string>(() => initialWorkspace.methods[0]?.sections[0]?.id ?? createInitialSections()[0].id);
   const [tab, setTab] = useState<TabKey>('editor');
+  const [exportPreviewScope, setExportPreviewScope] = useState<'method' | 'project'>('method');
+  const [projectExportDetailMode, setProjectExportDetailMode] = useState<ProjectExportDetailMode>('full');
   const [workspaceScope, setWorkspaceScope] = useState<WorkspaceScope>('methods');
   const [workbenchMode, setWorkbenchMode] = useState<WorkbenchMode>('workbench');
   const [workbenchLayout, setWorkbenchLayout] = useState<WorkbenchLayout>('vertical');
@@ -1497,7 +1500,12 @@ export default function App() {
         try {
           const shouldWrap = targetFormat === 'json' && section.sectionType === 'response' && !section.domainModelEnabled;
           const inputToParse = shouldWrap ? wrapNonDomainResponseJson(jsonImportRouting.rawText) : jsonImportRouting.rawText;
-          parsedRows = normalizeParsedRowsForSection(section, parseToRows(targetFormat, inputToParse));
+          const curlMeta = isRequestSection(section) && targetFormat === 'curl' ? parseCurlMeta(jsonImportRouting.rawText) : null;
+          const requestMethod =
+            jsonImportRouting.targetSide === 'client'
+              ? curlMeta?.method ?? section.externalRequestMethod ?? 'POST'
+              : curlMeta?.method ?? section.requestMethod ?? 'POST';
+          parsedRows = normalizeParsedRowsForSection(section, parseToRows(targetFormat, inputToParse), { requestMethod });
         } catch (error) {
           parseError = error instanceof Error ? error.message : 'Ошибка парсинга';
         }
@@ -2230,10 +2238,29 @@ export default function App() {
 
   const htmlPreviewCacheRef = useRef<{ sectionsRef: DocSection[]; theme: ThemeName; output: string } | null>(null);
   const wikiPreviewCacheRef = useRef<{ sectionsRef: DocSection[]; output: string } | null>(null);
+  const projectHtmlPreviewCacheRef = useRef<{
+    projectSectionsRef: ProjectSection[];
+    flowsRef: ProjectFlow[];
+    methodsRef: MethodDocument[];
+    groupsRef: MethodGroup[];
+    theme: ThemeName;
+    detailMode: ProjectExportDetailMode;
+    output: string;
+  } | null>(null);
+  const projectWikiPreviewCacheRef = useRef<{
+    projectSectionsRef: ProjectSection[];
+    flowsRef: ProjectFlow[];
+    methodsRef: MethodDocument[];
+    groupsRef: MethodGroup[];
+    detailMode: ProjectExportDetailMode;
+    output: string;
+  } | null>(null);
 
   function clearPreviewCaches(): void {
     htmlPreviewCacheRef.current = null;
     wikiPreviewCacheRef.current = null;
+    projectHtmlPreviewCacheRef.current = null;
+    projectWikiPreviewCacheRef.current = null;
   }
 
   function getHtmlPreview(): string {
@@ -2269,6 +2296,72 @@ export default function App() {
     };
     const output = renderWikiDocument(sections, meta);
     wikiPreviewCacheRef.current = { sectionsRef: sections, output };
+    return output;
+  }
+
+  function getProjectHtmlPreview(): string {
+    const cached = projectHtmlPreviewCacheRef.current;
+    if (
+      cached &&
+      cached.projectSectionsRef === projectSections &&
+      cached.flowsRef === flows &&
+      cached.methodsRef === methods &&
+      cached.groupsRef === methodGroups &&
+      cached.theme === theme &&
+      cached.detailMode === projectExportDetailMode
+    ) {
+      return cached.output;
+    }
+    const output = renderProjectHtmlDocument({
+      projectName: normalizedProjectName,
+      updatedAt: new Date().toISOString(),
+      projectSections: projectSections.filter((section) => section.enabled),
+      flows,
+      methods: methods.map((method) => ({ ...method, sections: method.sections.filter((section) => section.enabled) })),
+      groups: methodGroups,
+      theme,
+      detailMode: projectExportDetailMode
+    });
+    projectHtmlPreviewCacheRef.current = {
+      projectSectionsRef: projectSections,
+      flowsRef: flows,
+      methodsRef: methods,
+      groupsRef: methodGroups,
+      theme,
+      detailMode: projectExportDetailMode,
+      output
+    };
+    return output;
+  }
+
+  function getProjectWikiPreview(): string {
+    const cached = projectWikiPreviewCacheRef.current;
+    if (
+      cached &&
+      cached.projectSectionsRef === projectSections &&
+      cached.flowsRef === flows &&
+      cached.methodsRef === methods &&
+      cached.groupsRef === methodGroups &&
+      cached.detailMode === projectExportDetailMode
+    ) {
+      return cached.output;
+    }
+    const output = renderProjectWikiDocument({
+      projectName: normalizedProjectName,
+      updatedAt: new Date().toISOString(),
+      projectSections: projectSections.filter((section) => section.enabled),
+      flows,
+      methods: methods.map((method) => ({ ...method, sections: method.sections.filter((section) => section.enabled) })),
+      detailMode: projectExportDetailMode
+    });
+    projectWikiPreviewCacheRef.current = {
+      projectSectionsRef: projectSections,
+      flowsRef: flows,
+      methodsRef: methods,
+      groupsRef: methodGroups,
+      detailMode: projectExportDetailMode,
+      output
+    };
     return output;
   }
   const onboardingStepCompleted = useMemo<Record<OnboardingStepId, boolean>>(
@@ -3110,20 +3203,29 @@ export default function App() {
     startAiRequestStatus('AI: формирую таблицу валидации...');
     setAiBusyKey(busyKey);
 
-    let generatedRules: ValidationRuleRow[];
+    let generatedRules: ValidationRuleRow[] = [];
+    let usedFallback = false;
     try {
       generatedRules = await buildValidationRulesWithAi({
         schemaInput: normalizedSchemaInput,
         allowedValidationCases: [...VALIDATION_CASE_OPTIONS]
       });
     } catch (error) {
-      setAiRequestStatus(null);
-      setAiErrorMessage(error instanceof Error ? error.message : 'Не удалось сгенерировать правила валидации через AI');
-      setAiBusyKey(null);
-      return;
+      try {
+        generatedRules = buildValidationRulesFromSchemaInput(normalizedSchemaInput);
+        usedFallback = generatedRules.length > 0;
+      } catch {
+        // Keep empty result and show the AI error below.
+      }
+
+      if (!usedFallback) {
+        setAiRequestStatus(null);
+        setAiErrorMessage(error instanceof Error ? error.message : 'Не удалось сгенерировать правила валидации через AI');
+        setAiBusyKey(null);
+        return;
+      }
     }
 
-    let usedFallback = false;
     if (generatedRules.length === 0) {
       try {
         generatedRules = buildValidationRulesFromSchemaInput(normalizedSchemaInput);
@@ -3281,8 +3383,13 @@ export default function App() {
       const shouldWrap = section.sectionType === 'response' && !section.domainModelEnabled && !useSchemaPriority && format === 'json';
       const inputToParse = shouldWrap ? wrapNonDomainResponseJson(input) : input;
       const parsedRows = useSchemaPriority ? parseJsonSchemaToRows(normalizedSchema) : parseToRows(format, inputToParse);
-      const rows = normalizeParsedRowsForSection(section, parsedRows);
       const curlMeta = isRequestSection(section) && !useSchemaPriority && format === 'curl' ? parseCurlMeta(input) : null;
+      const requestMethod = isRequestSection(section)
+        ? target === 'client'
+          ? curlMeta?.method ?? section.externalRequestMethod ?? 'POST'
+          : curlMeta?.method ?? section.requestMethod ?? 'POST'
+        : undefined;
+      const rows = normalizeParsedRowsForSection(section, parsedRows, { requestMethod });
       updateSection(section.id, (current) => {
         if (current.kind !== 'parsed') return current;
         if (target === 'client' && isDualModelSection(current)) {
@@ -3376,7 +3483,12 @@ export default function App() {
       const shouldWrap = section.sectionType === 'response' && !section.domainModelEnabled;
       const inputToParse = shouldWrap ? wrapNonDomainResponseJson(normalized) : normalized;
       const parsedRows = parseToRows('json', inputToParse);
-      const rows = normalizeParsedRowsForSection(section, parsedRows);
+      const requestMethod = isRequestSection(section)
+        ? target === 'client'
+          ? section.externalRequestMethod ?? 'POST'
+          : section.requestMethod ?? 'POST'
+        : undefined;
+      const rows = normalizeParsedRowsForSection(section, parsedRows, { requestMethod });
 
       if (editingSource?.sectionId === section.id && editingSource.target === target) {
         setEditingSource((current) => (current ? { ...current, draft: normalized } : current));
@@ -3643,8 +3755,9 @@ export default function App() {
       const shouldWrap = section.sectionType === 'response' && !section.domainModelEnabled && format === 'json';
       const inputToParse = shouldWrap ? wrapNonDomainResponseJson(rawText) : rawText;
       const parsedRows = parseToRows(format, inputToParse);
-      const rows = normalizeParsedRowsForSection(section, parsedRows);
       const curlMeta = isRequestSection(section) && format === 'curl' ? parseCurlMeta(rawText) : null;
+      const requestMethod = isRequestSection(section) ? curlMeta?.method ?? section.requestMethod ?? 'POST' : undefined;
+      const rows = normalizeParsedRowsForSection(section, parsedRows, { requestMethod });
 
       updateSection(section.id, (current) => {
         if (current.kind !== 'parsed') return current;
@@ -3932,24 +4045,28 @@ export default function App() {
 
   async function handleExportFullProjectHtml(): Promise<void> {
     const projectSlug = slugifyMethodFileName(normalizedProjectName);
+    const detailMode = projectExportDetailMode;
+    const detailSuffix = detailMode === 'brief' ? '.brief' : '';
     const flowImageMap = await buildEmbeddedProjectFlowImageMap();
     const methodDiagramImageMap: Record<string, string> = {};
-    for (const method of methods) {
-      const diagramSections = method.sections.filter((section): section is DiagramSection => section.kind === 'diagram' && section.enabled);
-      for (const section of diagramSections) {
-        const diagrams = section.diagrams.filter((diagram) => diagram.code.trim());
-        for (let index = 0; index < diagrams.length; index += 1) {
-          const diagram = diagrams[index];
-          const fileName = getDiagramExportFileName(resolveSectionTitle(section.title), section.id, diagram.title, index, 'svg');
-          if (methodDiagramImageMap[fileName]) continue;
-          try {
-            const imageUrl = getDiagramImageUrl(resolveDiagramEngine(diagram.code, diagram.engine), diagram.code, 'svg');
-            const response = await fetch(imageUrl);
-            if (!response.ok) continue;
-            const blob = await response.blob();
-            methodDiagramImageMap[fileName] = await blobToDataUrl(blob);
-          } catch {
-            // Keep remote fallback if embedding fails.
+    if (detailMode === 'full') {
+      for (const method of methods) {
+        const diagramSections = method.sections.filter((section): section is DiagramSection => section.kind === 'diagram' && section.enabled);
+        for (const section of diagramSections) {
+          const diagrams = section.diagrams.filter((diagram) => diagram.code.trim());
+          for (let index = 0; index < diagrams.length; index += 1) {
+            const diagram = diagrams[index];
+            const fileName = getDiagramExportFileName(resolveSectionTitle(section.title), section.id, diagram.title, index, 'svg');
+            if (methodDiagramImageMap[fileName]) continue;
+            try {
+              const imageUrl = getDiagramImageUrl(resolveDiagramEngine(diagram.code, diagram.engine), diagram.code, 'svg');
+              const response = await fetch(imageUrl);
+              if (!response.ok) continue;
+              const blob = await response.blob();
+              methodDiagramImageMap[fileName] = await blobToDataUrl(blob);
+            } catch {
+              // Keep remote fallback if embedding fails.
+            }
           }
         }
       }
@@ -3961,24 +4078,28 @@ export default function App() {
       projectSections: projectSections.filter((section) => section.enabled),
       flows,
       methods: methods.map((method) => ({ ...method, sections: method.sections.filter((section) => section.enabled) })),
+      groups: methodGroups,
       theme,
+      detailMode,
       flowImageMap,
       methodDiagramImageMap
     });
-    downloadText(`${projectSlug}.project.documentation.html`, html);
+    downloadText(`${projectSlug}.project${detailSuffix}.documentation.html`, html);
     markOnboardingExportTouched();
   }
 
   function handleExportFullProjectWiki(): void {
     const projectSlug = slugifyMethodFileName(normalizedProjectName);
+    const detailSuffix = projectExportDetailMode === 'brief' ? '.brief' : '';
     const wiki = renderProjectWikiDocument({
       projectName: normalizedProjectName,
       updatedAt: new Date().toISOString(),
       projectSections: projectSections.filter((section) => section.enabled),
       flows,
-      methods: methods.map((method) => ({ ...method, sections: method.sections.filter((section) => section.enabled) }))
+      methods: methods.map((method) => ({ ...method, sections: method.sections.filter((section) => section.enabled) })),
+      detailMode: projectExportDetailMode
     });
-    downloadText(`${projectSlug}.project.documentation.wiki.txt`, wiki);
+    downloadText(`${projectSlug}.project${detailSuffix}.documentation.wiki.txt`, wiki);
     markOnboardingExportTouched();
   }
 
@@ -7218,9 +7339,33 @@ export default function App() {
     importProjectJsonFiles(files);
   }, [importProjectJsonFiles]);
 
-  const handleExportFullProjectHtmlClick = useCallback(() => {
-    void handleExportFullProjectHtml();
-  }, [handleExportFullProjectHtml]);
+  const handleOpenMethodHtmlPreview = useCallback(() => {
+    setExportPreviewScope('method');
+    setWorkspaceScope('methods');
+    setTab('html');
+    if (isCompactLayout) setIsSidebarHidden(true);
+  }, [isCompactLayout]);
+
+  const handleOpenMethodWikiPreview = useCallback(() => {
+    setExportPreviewScope('method');
+    setWorkspaceScope('methods');
+    setTab('wiki');
+    if (isCompactLayout) setIsSidebarHidden(true);
+  }, [isCompactLayout]);
+
+  const handleOpenProjectHtmlPreview = useCallback(() => {
+    setExportPreviewScope('project');
+    setWorkspaceScope('methods');
+    setTab('html');
+    if (isCompactLayout) setIsSidebarHidden(true);
+  }, [isCompactLayout]);
+
+  const handleOpenProjectWikiPreview = useCallback(() => {
+    setExportPreviewScope('project');
+    setWorkspaceScope('methods');
+    setTab('wiki');
+    if (isCompactLayout) setIsSidebarHidden(true);
+  }, [isCompactLayout]);
 
   const handleLogoutClick = useCallback(() => {
     void handleLogout();
@@ -8273,16 +8418,10 @@ export default function App() {
           canDeleteMethod={methods.length > 1}
           onOpenProjectImport={handleOpenProjectImport}
           onImportProjectJson={handleImportProjectJsonFiles}
-          onExportHtml={() => {
-            setTab('html');
-            if (isCompactLayout) setIsSidebarHidden(true);
-          }}
-          onExportWiki={() => {
-            setTab('wiki');
-            if (isCompactLayout) setIsSidebarHidden(true);
-          }}
-          onExportFullProjectHtml={handleExportFullProjectHtmlClick}
-          onExportFullProjectWiki={handleExportFullProjectWiki}
+          onExportHtml={handleOpenMethodHtmlPreview}
+          onExportWiki={handleOpenMethodWikiPreview}
+          onExportFullProjectHtml={handleOpenProjectHtmlPreview}
+          onExportFullProjectWiki={handleOpenProjectWikiPreview}
           onExportJson={exportProjectJson}
           onToggleSidebar={handleToggleSidebar}
           onUndo={undoWorkspace}
@@ -8702,37 +8841,51 @@ export default function App() {
                 />
               )}
 
-              {tab === 'html' && workspaceScope === 'methods' && (
-                <>
+              {tab === 'html' && workspaceScope === 'methods' && (() => {
+                const isProjectPreview = exportPreviewScope === 'project';
+                const htmlPreview = isProjectPreview ? getProjectHtmlPreview() : getHtmlPreview();
+                return (
                   <HtmlExportScreen
-                    html={getHtmlPreview()}
+                    html={htmlPreview}
                     projectName={normalizedProjectName}
-                    methodName={activeMethod?.name ?? DEFAULT_METHOD_NAME}
-                    requestUrl={activeMethod ? getMethodPath(activeMethod) : '/'}
-                    requestMethod={activeMethod ? getMethodHttpMethod(activeMethod) : 'POST'}
+                    methodName={isProjectPreview ? 'Весь проект' : activeMethod?.name ?? DEFAULT_METHOD_NAME}
+                    requestUrl={isProjectPreview ? '/' : activeMethod ? getMethodPath(activeMethod) : '/'}
+                    requestMethod={isProjectPreview ? 'GET' : activeMethod ? getMethodHttpMethod(activeMethod) : 'POST'}
                     accent={wbAccent}
+                    projectDetailMode={isProjectPreview ? projectExportDetailMode : undefined}
+                    onProjectDetailModeChange={isProjectPreview ? setProjectExportDetailMode : undefined}
                     onAccentChange={handleWbAccentChange}
                     onCopy={() => {
-                      void copyToClipboard(getHtmlPreview());
+                      void copyToClipboard(htmlPreview);
                       setToastMessage('Скопировано');
                     }}
-                    onDownload={() => void handleExportHtml()}
+                    onDownload={() => {
+                      if (isProjectPreview) {
+                        void handleExportFullProjectHtml();
+                      } else {
+                        void handleExportHtml();
+                      }
+                    }}
                   />
-                </>
-              )}
+                );
+              })()}
 
-              {tab === 'wiki' && workspaceScope === 'methods' && (
-                <>
+              {tab === 'wiki' && workspaceScope === 'methods' && (() => {
+                const isProjectPreview = exportPreviewScope === 'project';
+                const wikiPreview = isProjectPreview ? getProjectWikiPreview() : getWikiPreview();
+                return (
                   <WikiScreen
-                    wiki={getWikiPreview()}
+                    wiki={wikiPreview}
+                    projectDetailMode={isProjectPreview ? projectExportDetailMode : undefined}
+                    onProjectDetailModeChange={isProjectPreview ? setProjectExportDetailMode : undefined}
                     onCopy={() => {
-                      void copyToClipboard(getWikiPreview());
+                      void copyToClipboard(wikiPreview);
                       setToastMessage('Скопировано');
                     }}
-                    onDownload={handleExportWiki}
+                    onDownload={isProjectPreview ? handleExportFullProjectWiki : handleExportWiki}
                   />
-                </>
-              )}
+                );
+              })()}
               </div>
             </>
           ) : (

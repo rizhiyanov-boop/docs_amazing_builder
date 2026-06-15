@@ -1,8 +1,11 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { TabPill, TabsPill, WBButton } from '../components/primitives/WorkbenchPrimitives';
+import type { ProjectExportDetailMode } from '../projectExport';
 
 type WikiScreenProps = {
   wiki: string;
+  projectDetailMode?: ProjectExportDetailMode;
+  onProjectDetailModeChange?: (mode: ProjectExportDetailMode) => void;
   onCopy: () => void;
   onDownload: () => void;
 };
@@ -70,7 +73,7 @@ function renderWiki(wiki: string): string {
   return output.join('\n').replace('__TOC__', toc);
 }
 
-export function WikiScreen({ wiki, onCopy, onDownload }: WikiScreenProps): ReactNode {
+export function WikiScreen({ wiki, projectDetailMode, onProjectDetailModeChange, onCopy, onDownload }: WikiScreenProps): ReactNode {
   const [mode, setMode] = useState<'source' | 'preview'>('source');
   const html = useMemo(() => renderWiki(wiki), [wiki]);
 
@@ -83,6 +86,12 @@ export function WikiScreen({ wiki, onCopy, onDownload }: WikiScreenProps): React
             <TabPill value="source" active={mode === 'source'} onSelect={setMode}>source</TabPill>
             <TabPill value="preview" active={mode === 'preview'} onSelect={setMode}>preview</TabPill>
           </TabsPill>
+          {projectDetailMode && onProjectDetailModeChange && (
+            <TabsPill>
+              <TabPill value="full" active={projectDetailMode === 'full'} onSelect={onProjectDetailModeChange}>Полный</TabPill>
+              <TabPill value="brief" active={projectDetailMode === 'brief'} onSelect={onProjectDetailModeChange}>Краткий</TabPill>
+            </TabsPill>
+          )}
           <span style={{ flex: 1 }} />
           <WBButton size="sm" variant="ghost" onClick={onCopy}>Copy all</WBButton>
           <WBButton size="sm" variant="accent" onClick={onDownload}>Download .txt</WBButton>

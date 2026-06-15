@@ -53,10 +53,15 @@ type ApiRequestBody = {
 };
 
 const AI_API_CANDIDATES = ['/api/ai', '/api/openrouter'];
+const AI_REQUEST_TIMEOUT_MS = 90_000;
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
 
 async function callAiApi<T>(task: ApiTask, payload: Record<string, unknown>): Promise<T> {
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 30_000);
+  const timeout = window.setTimeout(() => controller.abort(), AI_REQUEST_TIMEOUT_MS);
 
   try {
     let lastError: Error | null = null;
@@ -108,8 +113,8 @@ async function callAiApi<T>(task: ApiTask, payload: Record<string, unknown>): Pr
 
         return data.data;
       } catch (error) {
-        if (error instanceof DOMException && error.name === 'AbortError') {
-          throw new Error('AI запрос превысил лимит ожидания (30с). Повторите попытку.');
+        if (isAbortError(error)) {
+          throw new Error(`AI запрос превысил лимит ожидания (${AI_REQUEST_TIMEOUT_MS / 1000}с). Повторите попытку или уменьшите входные данные.`);
         }
 
         const resolvedError = error instanceof Error ? error : new Error('AI сервис временно недоступен');
@@ -128,8 +133,8 @@ async function callAiApi<T>(task: ApiTask, payload: Record<string, unknown>): Pr
 
     throw new Error('AI сервис временно недоступен');
   } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error('AI запрос превысил лимит ожидания (30с). Повторите попытку.');
+    if (isAbortError(error)) {
+      throw new Error(`AI запрос превысил лимит ожидания (${AI_REQUEST_TIMEOUT_MS / 1000}с). Повторите попытку или уменьшите входные данные.`);
     }
     throw error;
   } finally {

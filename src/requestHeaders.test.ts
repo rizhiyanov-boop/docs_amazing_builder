@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  getEditorRequestRows,
   getInputDriftRows,
   getMappingOptions,
   getRequestAuthInfo,
@@ -8,6 +9,7 @@ import {
   requestHasRows,
   splitRequestRows
 } from './requestHeaders';
+import { normalizeParsedRowsForSection } from './sectionHelpers';
 import { makeParsedRow, makeRequestSection, makeResponseSection } from './test/fixtures';
 
 describe('requestHeaders', () => {
@@ -58,6 +60,47 @@ describe('requestHeaders', () => {
 
     const options = getMappingOptions(section, 'customerId');
     expect(options[0]?.field).toBe('customerId');
+  });
+
+  it('normalizes json request rows by server and client http methods', () => {
+    const section = makeRequestSection({
+      requestMethod: 'GET',
+      externalRequestMethod: 'POST'
+    });
+
+    const serverRows = normalizeParsedRowsForSection(section, [makeParsedRow({ field: 'employeeId', source: undefined })], { requestMethod: 'GET' });
+    const clientRows = normalizeParsedRowsForSection(section, [makeParsedRow({ field: 'employeeId', source: undefined })], { requestMethod: 'POST' });
+
+    expect(serverRows[0]?.source).toBe('query');
+    expect(clientRows[0]?.source).toBe('body');
+  });
+
+  it('keeps get server to post client mapping rows visible', () => {
+    const section = makeRequestSection({
+      requestMethod: 'GET',
+      externalRequestMethod: 'POST',
+      rows: [
+        makeParsedRow({ field: 'employeeId', sourceField: 'employeeId', source: 'query' })
+      ],
+      clientRows: [
+        makeParsedRow({ field: 'employeeId', sourceField: 'employeeId', source: 'body' }),
+        makeParsedRow({ field: 'includeInactive', sourceField: 'includeInactive', source: 'body' })
+      ],
+      clientMappings: {
+        employeeId: 'employeeId'
+      }
+    });
+
+    const rows = getEditorRequestRows(section);
+
+    expect(rows.find((row) => row.field === 'employeeId')).toMatchObject({
+      source: 'query',
+      clientField: 'employeeId'
+    });
+    expect(rows.find((row) => row.clientField === 'includeInactive')).toMatchObject({
+      field: '',
+      source: 'body'
+    });
   });
 
   it('injects default request headers', () => {

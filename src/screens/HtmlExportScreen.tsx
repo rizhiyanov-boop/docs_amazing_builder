@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { HttpChip, WBButton } from '../components/primitives/WorkbenchPrimitives';
 import type { WorkbenchAccent } from '../components/workbench/WorkbenchTopbar';
+import type { ProjectExportDetailMode } from '../projectExport';
 
 type HtmlExportScreenProps = {
   html: string;
@@ -9,6 +10,8 @@ type HtmlExportScreenProps = {
   requestUrl?: string;
   requestMethod?: string;
   accent: WorkbenchAccent;
+  projectDetailMode?: ProjectExportDetailMode;
+  onProjectDetailModeChange?: (mode: ProjectExportDetailMode) => void;
   onAccentChange: (accent: WorkbenchAccent) => void;
   onCopy: () => void;
   onDownload: () => void;
@@ -65,6 +68,8 @@ export function HtmlExportScreen({
   requestUrl = '/',
   requestMethod = 'POST',
   accent,
+  projectDetailMode,
+  onProjectDetailModeChange,
   onAccentChange,
   onCopy,
   onDownload
@@ -105,6 +110,28 @@ export function HtmlExportScreen({
           style={{ background: 'var(--wb-bg-soft)', border: '1px solid var(--wb-border-soft)', borderRadius: 'var(--wb-radius-sm)', padding: '6px 9px', color: 'var(--wb-text)', fontFamily: 'var(--wb-font-sans)' }}
         />
         <div className="wb-html-export-theme">
+          {projectDetailMode && onProjectDetailModeChange && (
+            <div role="group" aria-label="Режим экспорта проекта" style={{ display: 'flex', gap: 4 }}>
+              {(['full', 'brief'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => onProjectDetailModeChange(mode)}
+                  style={{
+                    border: `1px solid ${projectDetailMode === mode ? 'var(--wb-accent)' : 'var(--wb-border-soft)'}`,
+                    background: projectDetailMode === mode ? 'var(--wb-accent-soft)' : 'var(--wb-bg-soft)',
+                    color: 'var(--wb-text)',
+                    borderRadius: 999,
+                    padding: '4px 8px',
+                    fontSize: 11,
+                    cursor: 'pointer'
+                  }}
+                >
+                  {mode === 'full' ? 'Полный' : 'Краткий'}
+                </button>
+              ))}
+            </div>
+          )}
           {ACCENTS.map((item) => (
             <button
               key={item.id}

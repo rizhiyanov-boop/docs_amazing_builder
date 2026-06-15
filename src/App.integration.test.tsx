@@ -55,6 +55,43 @@ function seedTwoMethodWorkspace(): void {
           id: 'm_first',
           name: 'First Method',
           updatedAt: '2026-05-07T10:00:00.000Z',
+          sections: [{ id: 's_first', title: 'Goal', enabled: true, kind: 'text', value: 'Detailed first method body' }]
+        },
+        {
+          id: 'm_second',
+          name: 'Second Method',
+          updatedAt: '2026-05-07T10:00:00.000Z',
+          sections: [{ id: 's_second', title: 'Goal', enabled: true, kind: 'text', value: 'Detailed second method body' }]
+        }
+      ],
+      groups: []
+    })
+  );
+}
+
+function seedProjectPreviewWorkspace(): void {
+  window.localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({
+      version: 3,
+      updatedAt: '2026-05-07T10:00:00.000Z',
+      projectName: 'Preview Project',
+      activeMethodId: 'm_first',
+      projectSections: [
+        {
+          id: 'project-summary',
+          title: 'Project Summary',
+          enabled: true,
+          type: 'text',
+          content: 'Full project overview',
+          order: 0
+        }
+      ],
+      methods: [
+        {
+          id: 'm_first',
+          name: 'First Method',
+          updatedAt: '2026-05-07T10:00:00.000Z',
           sections: [{ id: 's_first', title: 'Goal', enabled: true, kind: 'text', value: 'A' }]
         },
         {
@@ -64,7 +101,8 @@ function seedTwoMethodWorkspace(): void {
           sections: [{ id: 's_second', title: 'Goal', enabled: true, kind: 'text', value: 'B' }]
         }
       ],
-      groups: []
+      groups: [{ id: 'group-main', name: 'Main Group', methodIds: ['m_second', 'm_first'], links: [] }],
+      flows: []
     })
   );
 }
@@ -77,6 +115,13 @@ function getTopbar(): HTMLElement {
 
 function findTopbarButton(name: RegExp): HTMLButtonElement {
   return within(getTopbar()).getByRole('button', { name }) as HTMLButtonElement;
+}
+
+function findTopbarIconButton(name: RegExp, textToExclude: string): HTMLButtonElement {
+  const buttons = within(getTopbar()).getAllByRole('button', { name }) as HTMLButtonElement[];
+  const button = buttons.find((item) => item.textContent !== textToExclude);
+  expect(button).toBeDefined();
+  return button as HTMLButtonElement;
 }
 
 function getNavigationTree(): HTMLElement {
@@ -110,6 +155,7 @@ async function applyWorkspaceImportIfDialogPresent(user: ReturnType<typeof userE
 describe('App integration', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     window.localStorage.clear();
     cleanup();
   });
@@ -243,6 +289,102 @@ describe('App integration', () => {
     expect(createObjectURL).not.toHaveBeenCalled();
     expect(revokeObjectURL).not.toHaveBeenCalled();
     expect(clickSpy).not.toHaveBeenCalled();
+  });
+
+  it('opens full project HTML preview from export split menu', async () => {
+    const user = userEvent.setup();
+    seedProjectPreviewWorkspace();
+    renderApp();
+
+    await user.click(findTopbarIconButton(/HTML/, 'HTML'));
+    await user.click(screen.getByRole('menuitem', { name: 'Весь проект' }));
+
+    expect(screen.getByText(/Published HTML/i)).toBeInTheDocument();
+    expect(screen.getByText('Весь проект')).toBeInTheDocument();
+    expect(screen.getAllByText('Project Summary').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Main Group').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('First Method').length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole('button', { name: 'Краткий' }));
+
+    expect(screen.getAllByText('First Method').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'Краткий' })).toBeInTheDocument();
+  });
+
+  it('keeps main HTML button scoped to the current method preview', async () => {
+    const user = userEvent.setup();
+    seedProjectPreviewWorkspace();
+    renderApp();
+
+    await user.click(findTopbarButton(/^HTML$/));
+
+    expect(screen.getByText(/Published HTML/i)).toBeInTheDocument();
+    expect(screen.getAllByText('First Method').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Project Summary')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Краткий' })).not.toBeInTheDocument();
+  });
+
+  it('opens full project Wiki preview from export split menu', async () => {
+    const user = userEvent.setup();
+    seedProjectPreviewWorkspace();
+    renderApp();
+
+    await user.click(findTopbarIconButton(/Wiki/, 'Wiki'));
+    await user.click(screen.getByRole('menuitem', { name: 'Весь проект' }));
+
+    expect(screen.getByRole('heading', { name: /^Wiki$/i })).toBeInTheDocument();
+    const wikiSource = screen.getAllByRole('textbox').find((element): element is HTMLTextAreaElement => element instanceof HTMLTextAreaElement);
+    if (!wikiSource) throw new Error('Wiki source textarea not found');
+    expect(wikiSource.value).toContain('h2. Методы');
+    expect(wikiSource.value).toContain('First Method');
+
+    await user.click(screen.getByRole('button', { name: 'Краткий' }));
+    await waitFor(() => {
+      expect(wikiSource.value).toContain('First Method');
+      expect(wikiSource.value).not.toContain('Detailed first method body');
+    });
+  });
+
+  it('downloads project HTML and Wiki from project preview screens', async () => {
+    const user = userEvent.setup();
+    const downloads: string[] = [];
+    const originalCreateElement = document.createElement.bind(document);
+    vi.spyOn(window.URL, 'createObjectURL').mockReturnValue('blob:mock');
+    vi.spyOn(window.URL, 'revokeObjectURL').mockImplementation(() => {});
+    vi.spyOn(document, 'createElement').mockImplementation((tagName: string, options?: ElementCreationOptions) => {
+      const element = originalCreateElement(tagName, options);
+      if (tagName.toLowerCase() === 'a') {
+        element.click = () => {
+          downloads.push((element as HTMLAnchorElement).download);
+        };
+      }
+      return element;
+    });
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('skip embedding')));
+    seedProjectPreviewWorkspace();
+    renderApp();
+
+    await user.click(findTopbarIconButton(/HTML/, 'HTML'));
+    await user.click(screen.getByRole('menuitem', { name: 'Весь проект' }));
+    await user.click(screen.getByRole('button', { name: 'Download' }));
+
+    await waitFor(() => {
+      expect(downloads).toContain('preview-project.project.documentation.html');
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Краткий' }));
+    await user.click(screen.getByRole('button', { name: 'Download' }));
+
+    await waitFor(() => {
+      expect(downloads).toContain('preview-project.project.brief.documentation.html');
+    });
+
+    await user.click(findTopbarIconButton(/Wiki/, 'Wiki'));
+    await user.click(screen.getByRole('menuitem', { name: 'Весь проект' }));
+    await user.click(screen.getByRole('button', { name: 'Полный' }));
+    await user.click(screen.getByRole('button', { name: 'Download .txt' }));
+
+    expect(downloads).toContain('preview-project.project.documentation.wiki.txt');
   });
 
   it('opens and closes project import dialog from Workbench topbar', async () => {

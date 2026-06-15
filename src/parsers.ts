@@ -117,6 +117,9 @@ function parseJson(input: string): ParsedRow[] {
 }
 
 type JsonSchema = {
+  $ref?: string;
+  $defs?: Record<string, JsonSchema>;
+  definitions?: Record<string, JsonSchema>;
   type?: string | string[];
   properties?: Record<string, JsonSchema>;
   required?: string[];
@@ -125,14 +128,70 @@ type JsonSchema = {
   anyOf?: JsonSchema[];
   enum?: unknown[];
   example?: unknown;
+  examples?: unknown[];
   default?: unknown;
   format?: string;
   description?: string;
 };
 
-function resolveSchemaVariant(schema: JsonSchema): JsonSchema {
-  const variants = [...(schema.oneOf ?? []), ...(schema.anyOf ?? [])];
-  if (variants.length === 0) return schema;
+type SchemaExampleValue = {
+  found: boolean;
+  value: unknown;
+};
+
+type JsonSchemaContext = {
+  root: JsonSchema;
+};
+
+const NO_SCHEMA_EXAMPLE: SchemaExampleValue = { found: false, value: undefined };
+
+function hasOwnProperty(value: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function decodeJsonPointerSegment(segment: string): string {
+  return decodeURIComponent(segment).replace(/~1/g, '/').replace(/~0/g, '~');
+}
+
+function resolveLocalSchemaRef(root: JsonSchema, ref: string): JsonSchema {
+  if (ref === '#') return root;
+  if (!ref.startsWith('#/')) {
+    throw new Error(`Unsupported JSON Schema $ref: ${ref}`);
+  }
+
+  let current: unknown = root;
+  const segments = ref.slice(2).split('/').map(decodeJsonPointerSegment);
+  for (const segment of segments) {
+    if (!current || typeof current !== 'object' || Array.isArray(current) || !hasOwnProperty(current, segment)) {
+      throw new Error(`Unresolved JSON Schema $ref: ${ref}`);
+    }
+    current = (current as Record<string, unknown>)[segment];
+  }
+
+  if (!current || typeof current !== 'object' || Array.isArray(current)) {
+    throw new Error(`JSON Schema $ref does not point to an object: ${ref}`);
+  }
+
+  return current as JsonSchema;
+}
+
+function resolveSchemaRef(schema: JsonSchema, context: JsonSchemaContext, seenRefs = new Set<string>()): JsonSchema {
+  if (!schema.$ref) return schema;
+  if (seenRefs.has(schema.$ref)) {
+    throw new Error(`Circular JSON Schema $ref: ${schema.$ref}`);
+  }
+
+  const nextSeenRefs = new Set(seenRefs);
+  nextSeenRefs.add(schema.$ref);
+  const targetSchema = resolveSchemaRef(resolveLocalSchemaRef(context.root, schema.$ref), context, nextSeenRefs);
+  const { $ref: _ref, ...siblingSchema } = schema;
+  return { ...targetSchema, ...siblingSchema };
+}
+
+function resolveSchemaVariant(schema: JsonSchema, context: JsonSchemaContext): JsonSchema {
+  const resolvedSchema = resolveSchemaRef(schema, context);
+  const variants = [...(resolvedSchema.oneOf ?? []), ...(resolvedSchema.anyOf ?? [])].map((variant) => resolveSchemaRef(variant, context));
+  if (variants.length === 0) return resolvedSchema;
 
   const priorities = ['object', 'array', 'string', 'number', 'integer', 'boolean', 'null'];
   for (const typeName of priorities) {
@@ -149,8 +208,8 @@ function resolveSchemaVariant(schema: JsonSchema): JsonSchema {
   return variants[0];
 }
 
-function normalizeSchemaType(schema: JsonSchema): string {
-  const resolvedSchema = resolveSchemaVariant(schema);
+function normalizeSchemaType(schema: JsonSchema, context: JsonSchemaContext): string {
+  const resolvedSchema = resolveSchemaVariant(schema, context);
   const schemaType = Array.isArray(resolvedSchema.type) ? resolvedSchema.type[0] : resolvedSchema.type;
 
   if (!schemaType) {
@@ -159,29 +218,61 @@ function normalizeSchemaType(schema: JsonSchema): string {
     return 'string';
   }
 
-  if (schemaType === 'integer') return 'int';
+  if (schemaType === 'integer') return resolvedSchema.format === 'int64' ? 'long' : 'int';
   if (schemaType === 'number') return 'number';
   if (schemaType === 'boolean') return 'boolean';
   if (schemaType === 'object') return 'object';
   if (schemaType === 'array') return 'array';
   if (schemaType === 'string') {
-    if (schema.format === 'date-time') return 'datetime';
-    if (schema.format === 'date') return 'date';
+    if (resolvedSchema.format === 'date-time') return 'datetime';
+    if (resolvedSchema.format === 'date') return 'date';
     return 'string';
   }
 
   return 'string';
 }
 
-function schemaExample(schema: JsonSchema, resolvedType: string): string {
-  const resolvedSchema = resolveSchemaVariant(schema);
-  const explicit = resolvedSchema.example ?? resolvedSchema.default ?? (Array.isArray(resolvedSchema.enum) ? resolvedSchema.enum[0] : undefined);
+function getOwnSchemaExample(schema: JsonSchema, context: JsonSchemaContext): SchemaExampleValue {
+  const resolvedSchema = resolveSchemaVariant(schema, context);
+  if (hasOwnProperty(resolvedSchema, 'example')) return { found: true, value: resolvedSchema.example };
+  if (Array.isArray(resolvedSchema.examples) && resolvedSchema.examples.length > 0) return { found: true, value: resolvedSchema.examples[0] };
+  if (hasOwnProperty(resolvedSchema, 'default')) return { found: true, value: resolvedSchema.default };
+  if (Array.isArray(resolvedSchema.enum) && resolvedSchema.enum.length > 0) return { found: true, value: resolvedSchema.enum[0] };
+  return NO_SCHEMA_EXAMPLE;
+}
 
-  if (explicit !== undefined) {
-    if (typeof explicit === 'string') return explicit;
-    if (typeof explicit === 'number' || typeof explicit === 'boolean') return String(explicit);
+function getSchemaExample(schema: JsonSchema, context: JsonSchemaContext, fallback = NO_SCHEMA_EXAMPLE): SchemaExampleValue {
+  const ownExample = getOwnSchemaExample(schema, context);
+  return ownExample.found ? ownExample : fallback;
+}
+
+function getObjectChildExample(parentExample: SchemaExampleValue, key: string): SchemaExampleValue {
+  if (!parentExample.found || !parentExample.value || typeof parentExample.value !== 'object' || Array.isArray(parentExample.value)) {
+    return NO_SCHEMA_EXAMPLE;
+  }
+
+  const record = parentExample.value as Record<string, unknown>;
+  if (!hasOwnProperty(record, key)) return NO_SCHEMA_EXAMPLE;
+  return { found: true, value: record[key] };
+}
+
+function getArrayItemExample(parentExample: SchemaExampleValue): SchemaExampleValue {
+  if (!parentExample.found || !Array.isArray(parentExample.value) || parentExample.value.length === 0) {
+    return NO_SCHEMA_EXAMPLE;
+  }
+
+  return { found: true, value: parentExample.value[0] };
+}
+
+function schemaExample(schema: JsonSchema, context: JsonSchemaContext, resolvedType: string, fallback = NO_SCHEMA_EXAMPLE): string {
+  const explicit = getSchemaExample(schema, context, fallback);
+
+  if (explicit.found) {
+    if (typeof explicit.value === 'string') return explicit.value;
+    if (typeof explicit.value === 'number' || typeof explicit.value === 'boolean') return String(explicit.value);
     try {
-      return JSON.stringify(explicit);
+      const serialized = JSON.stringify(explicit.value);
+      return typeof serialized === 'string' ? serialized : STRUCTURED_EXAMPLE_PLACEHOLDER;
     } catch {
       return STRUCTURED_EXAMPLE_PLACEHOLDER;
     }
@@ -191,26 +282,33 @@ function schemaExample(schema: JsonSchema, resolvedType: string): string {
   return '';
 }
 
-function flattenJsonSchemaNode(schema: JsonSchema, basePath: string, required: boolean): ParsedRow[] {
-  const resolvedSchema = resolveSchemaVariant(schema);
+function flattenJsonSchemaNode(
+  schema: JsonSchema,
+  context: JsonSchemaContext,
+  basePath: string,
+  required: boolean,
+  fallbackExample = NO_SCHEMA_EXAMPLE
+): ParsedRow[] {
+  const resolvedSchema = resolveSchemaVariant(schema, context);
   const rows: ParsedRow[] = [];
-  const normalizedType = normalizeSchemaType(resolvedSchema);
+  const normalizedType = normalizeSchemaType(resolvedSchema, context);
   const requiredMark = required ? '+' : OPTIONAL_MARK;
+  const nodeExample = getSchemaExample(resolvedSchema, context, fallbackExample);
 
   if (normalizedType === 'array') {
-    const itemType = resolvedSchema.items ? normalizeSchemaType(resolvedSchema.items) : 'string';
+    const itemType = resolvedSchema.items ? normalizeSchemaType(resolvedSchema.items, context) : 'string';
     rows.push(
       createParsedRow({
         field: basePath || '$',
         type: itemType === 'object' ? 'array_object' : 'array',
         required: requiredMark,
         description: resolvedSchema.description ?? '',
-        example: schemaExample(resolvedSchema, itemType === 'object' ? 'array_object' : 'array')
+        example: schemaExample(resolvedSchema, context, itemType === 'object' ? 'array_object' : 'array', fallbackExample)
       })
     );
 
     if (resolvedSchema.items) {
-      rows.push(...flattenJsonSchemaNode(resolvedSchema.items, `${basePath || '$'}[0]`, true));
+      rows.push(...flattenJsonSchemaNode(resolvedSchema.items, context, `${basePath || '$'}[0]`, true, getArrayItemExample(nodeExample)));
     }
     return rows;
   }
@@ -223,7 +321,7 @@ function flattenJsonSchemaNode(schema: JsonSchema, basePath: string, required: b
           type: 'object',
           required: requiredMark,
           description: resolvedSchema.description ?? '',
-          example: schemaExample(resolvedSchema, 'object')
+          example: schemaExample(resolvedSchema, context, 'object', fallbackExample)
         })
       );
     }
@@ -233,7 +331,7 @@ function flattenJsonSchemaNode(schema: JsonSchema, basePath: string, required: b
 
     for (const [key, childSchema] of Object.entries(properties)) {
       const childPath = basePath ? `${basePath}.${key}` : key;
-      rows.push(...flattenJsonSchemaNode(childSchema, childPath, requiredProps.has(key)));
+      rows.push(...flattenJsonSchemaNode(childSchema, context, childPath, requiredProps.has(key), getObjectChildExample(nodeExample, key)));
     }
 
     return rows;
@@ -245,7 +343,7 @@ function flattenJsonSchemaNode(schema: JsonSchema, basePath: string, required: b
       type: normalizedType,
       required: requiredMark,
       description: resolvedSchema.description ?? '',
-      example: schemaExample(resolvedSchema, normalizedType)
+      example: schemaExample(resolvedSchema, context, normalizedType, fallbackExample)
     })
   );
 
@@ -258,7 +356,7 @@ export function parseJsonSchemaToRows(input: string): ParsedRow[] {
     throw new Error('JSON Schema должен быть объектом');
   }
 
-  return flattenJsonSchemaNode(parsed, '', true);
+  return flattenJsonSchemaNode(parsed, { root: parsed }, '', true);
 }
 
 function inferPrimitiveType(value: string): string {

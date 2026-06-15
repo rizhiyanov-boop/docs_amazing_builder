@@ -107,11 +107,16 @@ export function getExternalSourceRows(section: ParsedSection): ParsedRow[] {
   return nextRows;
 }
 
-export function normalizeParsedRowsForSection(section: ParsedSection, rows: ParsedRow[]): ParsedRow[] {
+export function normalizeParsedRowsForSection(
+  section: ParsedSection,
+  rows: ParsedRow[],
+  options?: { requestMethod?: RequestMethod }
+): ParsedRow[] {
   if (isDualModelSection(section)) {
+    const defaultSource = isRequestSection(section) && (options?.requestMethod ?? section.requestMethod) === 'GET' ? 'query' : 'body';
     return rows.map((row) => ({
       ...row,
-      source: row.source ?? 'body'
+      source: row.source ?? defaultSource
     }));
   }
 

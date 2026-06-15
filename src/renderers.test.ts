@@ -3,7 +3,7 @@ import { renderHtmlDocument } from './renderHtml';
 import { renderProjectHtmlDocument, renderProjectWikiDocument } from './projectExport';
 import { renderWikiDocument } from './renderWiki';
 import { makeRequestSection, makeSectionsForRender } from './test/fixtures';
-import type { DocSection, MethodDocument, ProjectSection } from './types';
+import type { DocSection, MethodDocument, MethodGroup, ProjectSection } from './types';
 
 describe('renderers', () => {
   it('renders html document shell and section data', () => {
@@ -304,6 +304,7 @@ describe('renderers', () => {
       projectSections,
       flows: [],
       methods,
+      groups: [],
       theme: 'light'
     });
     const wiki = renderProjectWikiDocument({
@@ -323,5 +324,97 @@ describe('renderers', () => {
     expect(wiki).toContain('*Статус:* На ревью');
     expect(wiki).toContain('h4. Цель');
     expect(wiki).toContain('!https://mermaid.ink');
+  });
+
+  it('renders nested project html navigation by method groups and method sections', () => {
+    const methodASections: DocSection[] = [
+      { id: 'goal-a', title: 'Goal A', enabled: true, kind: 'text', value: 'A' },
+      { id: 'hidden-a', title: 'Hidden A', enabled: false, kind: 'text', value: 'Hidden' }
+    ];
+    const methodBSections: DocSection[] = [
+      { id: 'goal-b', title: 'Goal B', enabled: true, kind: 'text', value: 'B' }
+    ];
+    const methodCSections: DocSection[] = [
+      { id: 'goal-c', title: 'Goal C', enabled: true, kind: 'text', value: 'C' }
+    ];
+    const methods: MethodDocument[] = [
+      { id: 'method-a', name: 'Method A', updatedAt: '2026-05-13T10:00:00.000Z', sections: methodASections },
+      { id: 'method-b', name: 'Method B', updatedAt: '2026-05-13T10:00:00.000Z', sections: methodBSections },
+      { id: 'method-c', name: 'Method C', updatedAt: '2026-05-13T10:00:00.000Z', sections: methodCSections }
+    ];
+    const groups: MethodGroup[] = [
+      { id: 'group-claims', name: 'Claims', methodIds: ['method-b', 'method-a'], links: [] },
+      { id: 'group-duplicate', name: 'Duplicate Group', methodIds: ['method-a'], links: [] }
+    ];
+
+    const html = renderProjectHtmlDocument({
+      projectName: 'Project A',
+      updatedAt: '2026-05-13T10:00:00.000Z',
+      projectSections: [],
+      flows: [],
+      methods,
+      groups,
+      theme: 'light'
+    });
+
+    expect(html).toContain('href="#method-group-group-claims"');
+    expect(html).toContain('id="method-group-group-claims"');
+    expect(html).toContain('href="#method-method-a"');
+    expect(html).toContain('href="#method-method-b"');
+    expect(html).toContain('href="#method-method-a-section-goal-a"');
+    expect(html).toContain('id="method-method-a-section-goal-a"');
+    expect(html).toContain('href="#method-group-ungrouped"');
+    expect(html).toContain('href="#method-method-c"');
+    expect(html.indexOf('href="#method-method-b"')).toBeLessThan(html.indexOf('href="#method-method-a"'));
+    expect(html).not.toContain('Hidden A');
+    expect(html).not.toContain('Duplicate Group');
+  });
+
+  it('renders brief project exports with method declarations only', () => {
+    const methods: MethodDocument[] = [
+      {
+        id: 'method-a',
+        name: 'Method A',
+        updatedAt: '2026-05-13T10:00:00.000Z',
+        jiraTicket: 'GRKI-1',
+        sections: [{ id: 'goal-a', title: 'Goal A', enabled: true, kind: 'text', value: 'Detailed body A' }]
+      },
+      {
+        id: 'method-empty',
+        name: 'Empty Method',
+        updatedAt: '2026-05-13T10:00:00.000Z',
+        sections: []
+      }
+    ];
+
+    const html = renderProjectHtmlDocument({
+      projectName: 'Project A',
+      updatedAt: '2026-05-13T10:00:00.000Z',
+      projectSections: [],
+      flows: [],
+      methods,
+      groups: [],
+      theme: 'light',
+      detailMode: 'brief'
+    });
+    const wiki = renderProjectWikiDocument({
+      projectName: 'Project A',
+      updatedAt: '2026-05-13T10:00:00.000Z',
+      projectSections: [],
+      flows: [],
+      methods,
+      detailMode: 'brief'
+    });
+
+    expect(html).toContain('Method A');
+    expect(html).toContain('Empty Method');
+    expect(html).toContain('Jira');
+    expect(html).not.toContain('Detailed body A');
+    expect(html).not.toContain('method-method-a-section-goal-a');
+    expect(wiki).toContain('h3. Method A');
+    expect(wiki).toContain('h3. Empty Method');
+    expect(wiki).toContain('*Jira:* GRKI-1');
+    expect(wiki).not.toContain('Detailed body A');
+    expect(wiki).not.toContain('h4. Goal A');
   });
 });

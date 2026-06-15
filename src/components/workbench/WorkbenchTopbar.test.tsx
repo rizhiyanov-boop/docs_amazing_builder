@@ -110,7 +110,7 @@ describe('WorkbenchTopbar method actions menu', () => {
 });
 
 describe('WorkbenchTopbar export split buttons', () => {
-  it('keeps primary html/wiki export actions on the main buttons', async () => {
+  it('keeps primary html/wiki preview actions on the main buttons', async () => {
     const user = userEvent.setup();
     const onExportHtml = vi.fn();
     const onExportWiki = vi.fn();
@@ -123,7 +123,7 @@ describe('WorkbenchTopbar export split buttons', () => {
     expect(onExportWiki).toHaveBeenCalledTimes(1);
   });
 
-  it('runs full project export from split button menus', async () => {
+  it('opens full project preview actions from split button menus', async () => {
     const user = userEvent.setup();
     const onExportFullProjectHtml = vi.fn();
     const onExportFullProjectWiki = vi.fn();

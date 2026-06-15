@@ -56,6 +56,35 @@ function formatConditionBrackets(value: string): string {
 }
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
+const DEFAULT_OPENAI_TIMEOUT_MS = 75_000;
+const DEFAULT_OPENAI_MAX_OUTPUT_TOKENS = 2_500;
+const DEFAULT_VALIDATION_RULES_MAX_OUTPUT_TOKENS = 6_000;
+
+class AiTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`OpenAI не ответил за ${Math.round(timeoutMs / 1000)}с. Повторите попытку или уменьшите входные данные.`);
+    this.name = 'AiTimeoutError';
+  }
+}
+
+function readPositiveIntegerEnv(name: string, fallback: number, max: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(parsed, max);
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
+function getMaxOutputTokens(task: RequestTask): number {
+  const fallback = task === 'build-validation-rules'
+    ? DEFAULT_VALIDATION_RULES_MAX_OUTPUT_TOKENS
+    : DEFAULT_OPENAI_MAX_OUTPUT_TOKENS;
+  return readPositiveIntegerEnv('OPENAI_MAX_OUTPUT_TOKENS', fallback, 12_000);
+}
 
 function extractJsonObject(raw: string): unknown {
   const trimmed = raw.trim();
@@ -144,36 +173,51 @@ function buildTaskPrompt(task: RequestTask, payload: Record<string, unknown>): s
   ].join('\n');
 }
 
-async function callOpenAi(prompt: string): Promise<unknown> {
+async function callOpenAi(task: RequestTask, prompt: string): Promise<unknown> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error('OPENAI_API_KEY не настроен на сервере');
   }
 
   const model = process.env.OPENAI_MODEL?.trim() || 'gpt-4.1-nano';
+  const timeoutMs = readPositiveIntegerEnv('OPENAI_TIMEOUT_MS', DEFAULT_OPENAI_TIMEOUT_MS, 180_000);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-  const response = await fetch(OPENAI_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0.1,
-      response_format: { type: 'json_object' },
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a strict API helper. Return JSON only.'
-        },
-        {
-          role: 'user',
-          content: prompt
-        }
-      ]
-    })
-  });
+  let response: Response;
+  try {
+    response = await fetch(OPENAI_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model,
+        temperature: 0.1,
+        max_tokens: getMaxOutputTokens(task),
+        response_format: { type: 'json_object' },
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a strict API helper. Return JSON only.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ]
+      })
+    });
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw new AiTimeoutError(timeoutMs);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   const body = await response.json() as {
     error?: { message?: string };
@@ -368,7 +412,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     }
 
     const prompt = buildTaskPrompt(task, payload);
-    const raw = await callOpenAi(prompt);
+    const raw = await callOpenAi(task, prompt);
 
     if (task === 'repair-json') {
       res.status(200).json({ data: normalizeRepairJsonResult(raw) });
@@ -398,6 +442,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     res.status(200).json({ data: normalizeMappingsResult(raw) });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Внутренняя ошибка AI интеграции';
-    res.status(500).json({ error: message });
+    res.status(error instanceof AiTimeoutError ? 504 : 500).json({ error: message });
   }
 }

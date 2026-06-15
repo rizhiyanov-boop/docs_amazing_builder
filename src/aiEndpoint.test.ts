@@ -41,6 +41,10 @@ describe('ai endpoint auth', () => {
     dbMock.getUserBySessionToken.mockReset();
     httpMock.getSessionToken.mockReset();
     httpMock.getSessionToken.mockReturnValue(undefined);
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_MODEL;
+    delete process.env.OPENAI_TIMEOUT_MS;
+    delete process.env.OPENAI_MAX_OUTPUT_TOKENS;
   });
 
   it('returns 401 when session is missing or invalid', async () => {
@@ -95,6 +99,38 @@ describe('ai endpoint auth', () => {
       data: {
         examples: [{ field: 'orderId', example: '12345' }]
       }
+    });
+  });
+
+  it('returns 504 when OpenAI does not answer before the server timeout', async () => {
+    const { default: aiHandler } = await import('../api/ai');
+    process.env.OPENAI_API_KEY = 'test-key';
+    process.env.OPENAI_TIMEOUT_MS = '1000';
+    dbMock.getUserBySessionToken.mockResolvedValue({ id: 'u_1', login: 'tester' });
+    httpMock.getSessionToken.mockReturnValue('session-token');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockRejectedValue(Object.assign(new Error('aborted'), { name: 'AbortError' }))
+    );
+
+    const res = createResponse();
+    await aiHandler(
+      {
+        method: 'POST',
+        body: {
+          task: 'build-validation-rules',
+          payload: {
+            schemaInput: '{"type":"object","required":["id"],"properties":{"id":{"type":"string"}}}',
+            allowedValidationCases: ['NotNull', 'NotBlank', 'NotEmpty', 'Size', 'Pattern', 'Custom']
+          }
+        }
+      },
+      res
+    );
+
+    expect(res.statusCode).toBe(504);
+    expect(res.payload).toEqual({
+      error: 'OpenAI не ответил за 1с. Повторите попытку или уменьшите входные данные.'
     });
   });
 });

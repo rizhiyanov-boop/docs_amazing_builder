@@ -5,7 +5,9 @@ import { getThemeTokens } from './theme';
 import { resolveSectionTitle } from './sectionTitles';
 import { renderWikiDocument } from './renderWiki';
 import type { ThemeName } from './theme';
-import type { DocSection, MethodDocument, ProjectFlow, ProjectSection } from './types';
+import type { DocSection, MethodDocument, MethodGroup, ProjectFlow, ProjectSection } from './types';
+
+export type ProjectExportDetailMode = 'full' | 'brief';
 
 type ProjectHtmlExportInput = {
   projectName: string;
@@ -13,9 +15,17 @@ type ProjectHtmlExportInput = {
   projectSections: ProjectSection[];
   flows: ProjectFlow[];
   methods: MethodDocument[];
+  groups: MethodGroup[];
   theme: ThemeName;
+  detailMode?: ProjectExportDetailMode;
   flowImageMap?: Record<string, string>;
   methodDiagramImageMap?: Record<string, string>;
+};
+
+type ProjectMethodTreeGroup = {
+  id: string;
+  name: string;
+  methods: MethodDocument[];
 };
 
 type UseCaseRow = {
@@ -56,6 +66,45 @@ function slugify(value: string): string {
 
 function enabledMethodSections(method: MethodDocument): DocSection[] {
   return method.sections.filter((section) => section.enabled);
+}
+
+function getMethodAnchor(method: MethodDocument): string {
+  return `method-${method.id}`;
+}
+
+function getMethodGroupAnchor(group: { id: string }): string {
+  return `method-group-${group.id}`;
+}
+
+function getMethodSectionAnchor(method: MethodDocument, section: DocSection): string {
+  return `${getMethodAnchor(method)}-section-${section.id}`;
+}
+
+function getProjectMethodTree(methods: MethodDocument[], groups: MethodGroup[]): ProjectMethodTreeGroup[] {
+  const byId = new Map(methods.map((method) => [method.id, method]));
+  const used = new Set<string>();
+  const tree: ProjectMethodTreeGroup[] = [];
+
+  for (const group of groups) {
+    const groupMethods: MethodDocument[] = [];
+    for (const methodId of group.methodIds) {
+      if (used.has(methodId)) continue;
+      const method = byId.get(methodId);
+      if (!method) continue;
+      used.add(methodId);
+      groupMethods.push(method);
+    }
+    if (groupMethods.length > 0) {
+      tree.push({ id: group.id, name: group.name, methods: groupMethods });
+    }
+  }
+
+  const ungrouped = methods.filter((method) => !used.has(method.id));
+  if (ungrouped.length > 0) {
+    tree.push({ id: 'ungrouped', name: 'Methods', methods: ungrouped });
+  }
+
+  return tree;
 }
 
 function renderProjectSectionHtml(section: ProjectSection): string {
@@ -173,11 +222,12 @@ function buildFlowUseCaseRows(flow: ProjectFlow, methods: MethodDocument[]): Use
   });
 }
 
-function renderSectionHtml(section: DocSection, methodDiagramImageMap?: Record<string, string>): string {
+function renderSectionHtml(section: DocSection, methodDiagramImageMap?: Record<string, string>, method?: MethodDocument): string {
   const title = resolveSectionTitle(section.title);
+  const sectionAnchor = method ? getMethodSectionAnchor(method, section) : `section-${section.id}`;
   if (section.kind === 'text') {
     return [
-      `<article class="project-card" id="section-${escapeHtml(section.id)}">`,
+      `<article class="project-card" id="${escapeHtml(sectionAnchor)}">`,
       `<h4>${escapeHtml(title)}</h4>`,
       `<div class="project-prose">${escapeHtml(section.value || '').replaceAll('\n', '<br/>') || '<span class="muted">Пусто</span>'}</div>`,
       '</article>'
@@ -190,7 +240,7 @@ function renderSectionHtml(section: DocSection, methodDiagramImageMap?: Record<s
       `<tr><td>${escapeHtml(normalizeArrayFieldPath(row.field))}</td><td>${escapeHtml(row.type)}</td><td>${escapeHtml(row.required)}</td><td>${escapeHtml(row.description)}</td><td>${escapeHtml(row.example)}</td></tr>`
     )).join('');
     return [
-      `<article class="project-card" id="section-${escapeHtml(section.id)}">`,
+      `<article class="project-card" id="${escapeHtml(sectionAnchor)}">`,
       `<h4>${escapeHtml(title)}</h4>`,
       body
         ? `<div class="table-shell"><table><thead><tr><th>Поле</th><th>Тип</th><th>Обяз.</th><th>Описание</th><th>Пример</th></tr></thead><tbody>${body}</tbody></table></div>`
@@ -214,7 +264,7 @@ function renderSectionHtml(section: DocSection, methodDiagramImageMap?: Record<s
     }).join('');
 
     return [
-      `<article class="project-card" id="section-${escapeHtml(section.id)}">`,
+      `<article class="project-card" id="${escapeHtml(sectionAnchor)}">`,
       `<h4>${escapeHtml(title)}</h4>`,
       items || '<p class="muted">Нет диаграмм.</p>',
       '</article>'
@@ -226,7 +276,7 @@ function renderSectionHtml(section: DocSection, methodDiagramImageMap?: Record<s
     `<tr><td>${index + 1}</td><td>${escapeHtml(row.clientHttpStatus)}</td><td>${escapeHtml(row.trigger)}</td><td>${escapeHtml(row.errorType)}</td><td>${escapeHtml(row.serverHttpStatus)}</td><td>${escapeHtml(row.internalCode)}</td></tr>`
   )).join('');
   return [
-    `<article class="project-card" id="section-${escapeHtml(section.id)}">`,
+    `<article class="project-card" id="${escapeHtml(sectionAnchor)}">`,
     `<h4>${escapeHtml(title)}</h4>`,
     body
       ? `<div class="table-shell"><table><thead><tr><th>#</th><th>Client HTTP</th><th>Trigger</th><th>Error type</th><th>Server HTTP</th><th>Code</th></tr></thead><tbody>${body}</tbody></table></div>`
@@ -235,32 +285,121 @@ function renderSectionHtml(section: DocSection, methodDiagramImageMap?: Record<s
   ].join('');
 }
 
-function renderMethodHtml(method: MethodDocument, methodDiagramImageMap?: Record<string, string>): string {
-  const enabled = enabledMethodSections(method);
-  const sections = enabled.map((section) => renderSectionHtml(section, methodDiagramImageMap)).join('');
+function renderMethodSummaryHtml(method: MethodDocument): string {
+  const requestLine = getMethodRequestLine(method);
+  const meta: Array<{ label: string; value: string }> = [
+    { label: 'Статус', value: getMethodStatusLabel(method.status) }
+  ];
+  if (requestLine.httpMethod || requestLine.path) {
+    meta.push({ label: 'Endpoint', value: [requestLine.httpMethod, requestLine.path].filter(Boolean).join(' ') });
+  }
+  if (method.jiraTicket) meta.push({ label: 'Jira', value: method.jiraTicket });
+  if (method.epic) meta.push({ label: 'Epic', value: method.epic });
+  if (method.responsible) meta.push({ label: 'Ответственный', value: method.responsible });
+
   return [
-    `<section class="method-block" id="method-${escapeHtml(method.id)}">`,
+    '<dl class="method-meta">',
+    ...meta.map((item) => `<div><dt>${escapeHtml(item.label)}</dt><dd>${escapeHtml(item.value)}</dd></div>`),
+    '</dl>'
+  ].join('');
+}
+
+function renderMethodHtml(
+  method: MethodDocument,
+  methodDiagramImageMap?: Record<string, string>,
+  detailMode: ProjectExportDetailMode = 'full'
+): string {
+  const enabled = enabledMethodSections(method);
+  const body = detailMode === 'brief'
+    ? renderMethodSummaryHtml(method)
+    : enabled.map((section) => renderSectionHtml(section, methodDiagramImageMap, method)).join('');
+  return [
+    `<section class="method-block" id="${escapeHtml(getMethodAnchor(method))}">`,
     `<h3>${escapeHtml(method.name)}</h3>`,
-    sections || '<p class="muted">Нет активных секций.</p>',
+    body || '<p class="muted">Нет активных секций.</p>',
     '</section>'
+  ].join('');
+}
+
+function renderMethodGroupHtml(
+  group: ProjectMethodTreeGroup,
+  methodDiagramImageMap?: Record<string, string>,
+  detailMode: ProjectExportDetailMode = 'full'
+): string {
+  return [
+    `<section class="method-group-block" id="${escapeHtml(getMethodGroupAnchor(group))}">`,
+    `<h3>${escapeHtml(group.name)}</h3>`,
+    group.methods.map((method) => renderMethodHtml(method, methodDiagramImageMap, detailMode)).join(''),
+    '</section>'
+  ].join('');
+}
+
+function renderProjectHtmlNav(
+  projectSections: ProjectSection[],
+  flows: ProjectFlow[],
+  methodTree: ProjectMethodTreeGroup[],
+  detailMode: ProjectExportDetailMode
+): string {
+  const projectDocsNav = projectSections
+    .map((section) => `<li><a href="#project-doc-${escapeHtml(section.id)}">${escapeHtml(section.title)}</a></li>`)
+    .join('');
+  const flowsNav = flows
+    .map((flow) => `<li><a href="#flow-${escapeHtml(flow.id)}">${escapeHtml(flow.name)}</a></li>`)
+    .join('');
+  const methodsNav = methodTree
+    .map((group) => {
+      const groupMethods = group.methods
+        .map((method) => {
+          const sections = detailMode === 'brief'
+            ? ''
+            : enabledMethodSections(method)
+              .map((section) => `<li><a href="#${escapeHtml(getMethodSectionAnchor(method, section))}">${escapeHtml(resolveSectionTitle(section.title))}</a></li>`)
+              .join('');
+          return [
+            `<li><a href="#${escapeHtml(getMethodAnchor(method))}">${escapeHtml(method.name)}</a>`,
+            sections ? `<ul class="nav-level-3">${sections}</ul>` : '',
+            '</li>'
+          ].join('');
+        })
+        .join('');
+      return [
+        `<li><a href="#${escapeHtml(getMethodGroupAnchor(group))}">${escapeHtml(group.name)}</a>`,
+        groupMethods ? `<ul class="nav-level-2">${groupMethods}</ul>` : '',
+        '</li>'
+      ].join('');
+    })
+    .join('');
+
+  return [
+    '<nav class="sidebar-nav" aria-label="Навигация по проекту">',
+    '<ul>',
+    '<li><a href="#project-overview">О проекте</a></li>',
+    '<li><a href="#project-docs">Project Docs</a>',
+    projectDocsNav ? `<ul class="nav-level-1">${projectDocsNav}</ul>` : '',
+    '</li>',
+    '<li><a href="#project-flows">Flows</a>',
+    flowsNav ? `<ul class="nav-level-1">${flowsNav}</ul>` : '',
+    '</li>',
+    '<li><a href="#project-methods">Методы</a>',
+    methodsNav ? `<ul class="nav-level-1">${methodsNav}</ul>` : '',
+    '</li>',
+    '</ul>',
+    '</nav>'
   ].join('');
 }
 
 export function renderProjectHtmlDocument(input: ProjectHtmlExportInput): string {
   const tokens = getThemeTokens(input.theme);
+  const detailMode = input.detailMode ?? 'full';
   const enabledProjectSections = input.projectSections.filter((section) => section.enabled);
   const enabledMethods = input.methods.map((method) => ({
     ...method,
     sections: enabledMethodSections(method)
-  })).filter((method) => method.sections.length > 0);
+  })).filter((method) => detailMode === 'brief' || method.sections.length > 0);
   const flows = input.flows;
-  const tocItems = [
-    '<li><a href="#project-overview">О проекте</a></li>',
-    '<li><a href="#project-docs">Project Docs</a></li>',
-    '<li><a href="#project-flows">Flows</a></li>',
-    '<li><a href="#project-methods">Методы</a></li>',
-    ...enabledMethods.map((method) => `<li><a href="#method-${escapeHtml(method.id)}">${escapeHtml(method.name)}</a></li>`)
-  ].join('');
+  const methodTree = getProjectMethodTree(enabledMethods, input.groups);
+  const sortedProjectSections = enabledProjectSections.slice().sort((a, b) => a.order - b.order);
+  const projectNav = renderProjectHtmlNav(sortedProjectSections, flows, methodTree, detailMode);
 
   const flowBlocks = flows.map((flow, index) => {
     const fileName = getFlowExportFileName(flow, index, 'svg');
@@ -279,12 +418,11 @@ export function renderProjectHtmlDocument(input: ProjectHtmlExportInput): string
     ].join('');
   }).join('');
 
-  const projectDocs = enabledProjectSections
-    .sort((a, b) => a.order - b.order)
+  const projectDocs = sortedProjectSections
     .map((section) => renderProjectSectionHtml(section))
     .join('');
 
-  const methodsHtml = enabledMethods.map((method) => renderMethodHtml(method, input.methodDiagramImageMap)).join('');
+  const methodsHtml = methodTree.map((group) => renderMethodGroupHtml(group, input.methodDiagramImageMap, detailMode)).join('');
 
   return [
     '<!doctype html>',
@@ -292,20 +430,30 @@ export function renderProjectHtmlDocument(input: ProjectHtmlExportInput): string
     '<head>',
     '<meta charset="utf-8"/>',
     '<meta name="viewport" content="width=device-width, initial-scale=1"/>',
-    `<title>${escapeHtml(input.projectName)}. full documentation</title>`,
+    `<title>${escapeHtml(input.projectName)}. ${detailMode === 'brief' ? 'brief' : 'full'} documentation</title>`,
     `<style>
       :root{--bg:${tokens.bg};--panel:${tokens.panel};--card:${tokens.card};--text:${tokens.previewText};--muted:${tokens.muted};--border:${tokens.border};--accent:${tokens.accentSolid};}
       body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text);}
       .layout{display:grid;grid-template-columns:18rem 1fr;gap:1rem;padding:1rem;min-height:100vh}
       .sidebar{position:sticky;top:1rem;height:calc(100vh - 2rem);overflow:auto;background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:1rem}
       .sidebar h2{font-size:1rem;margin:0 0 .5rem}
-      .sidebar ul{margin:0;padding-left:1rem}
-      .sidebar li{margin:.25rem 0}
+      .sidebar-nav ul{list-style:none;margin:0;padding:0}
+      .sidebar-nav li{margin:.15rem 0}
+      .sidebar-nav a{display:block;padding:.2rem .35rem;border-radius:6px;color:var(--text);text-decoration:none}
+      .sidebar-nav a:hover,.sidebar-nav a:focus{background:var(--card);outline:none}
+      .sidebar-nav .nav-level-1{padding-left:.65rem}
+      .sidebar-nav .nav-level-2{padding-left:1rem;font-size:.9rem}
+      .sidebar-nav .nav-level-3{padding-left:1rem;font-size:.82rem;color:var(--muted)}
       .content{display:flex;flex-direction:column;gap:1rem}
       .section{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:1rem}
       .project-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:.75rem;margin-bottom:.75rem}
       .project-card h4{margin:.1rem 0 .5rem}
       .method-block{margin-bottom:1rem}
+      .method-group-block{margin-bottom:1.25rem}
+      .method-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(10rem,1fr));gap:.45rem;margin:.4rem 0 0}
+      .method-meta div{border:1px solid var(--border);border-radius:8px;padding:.45rem .55rem;background:color-mix(in srgb,var(--panel) 70%, var(--card))}
+      .method-meta dt{font-size:.72rem;color:var(--muted);margin:0 0 .15rem}
+      .method-meta dd{margin:0;font-weight:600}
       .table-shell{overflow:auto}
       table{border-collapse:collapse;width:100%;font-size:.86rem}
       th,td{border:1px solid var(--border);padding:.4rem;vertical-align:top;text-align:left}
@@ -317,7 +465,7 @@ export function renderProjectHtmlDocument(input: ProjectHtmlExportInput): string
     '</head>',
     '<body>',
     '<div class="layout">',
-    `<aside class="sidebar"><h2>${escapeHtml(input.projectName)}</h2><ul>${tocItems}</ul></aside>`,
+    `<aside class="sidebar"><h2>${escapeHtml(input.projectName)}</h2>${projectNav}</aside>`,
     '<main class="content">',
     `<section class="section" id="project-overview"><h1>${escapeHtml(input.projectName)}</h1><p>Обновлено: ${escapeHtml(new Date(input.updatedAt).toLocaleString())}</p></section>`,
     `<section class="section" id="project-docs"><h2>Project Docs</h2>${projectDocs || '<p class="muted">Нет активных секций проекта.</p>'}</section>`,
@@ -336,7 +484,9 @@ export function renderProjectWikiDocument(params: {
   projectSections: ProjectSection[];
   flows: ProjectFlow[];
   methods: MethodDocument[];
+  detailMode?: ProjectExportDetailMode;
 }): string {
+  const detailMode = params.detailMode ?? 'full';
   const lines: string[] = [
     '{toc}',
     '',
@@ -381,7 +531,7 @@ export function renderProjectWikiDocument(params: {
   const enabledMethods = params.methods.map((method) => ({
     ...method,
     sections: enabledMethodSections(method)
-  })).filter((method) => method.sections.length > 0);
+  })).filter((method) => detailMode === 'brief' || method.sections.length > 0);
 
   if (enabledMethods.length === 0) {
     lines.push('_Нет активных секций методов_');
@@ -396,6 +546,10 @@ export function renderProjectWikiDocument(params: {
       if (method.responsible) methodMeta.push(`*Ответственный:* ${escapeWiki(method.responsible)}`);
       methodMeta.push(`*Статус:* ${escapeWiki(getMethodStatusLabel(method.status))}`);
       lines.push(methodMeta.join(' • '));
+
+      if (detailMode === 'brief') {
+        continue;
+      }
 
       const requestLine = getMethodRequestLine(method);
       const methodWiki = renderWikiDocument(

@@ -122,6 +122,96 @@ describe('parsers', () => {
     expect(rows.some((row) => row.field === 'items[0].active' && row.type === 'boolean')).toBe(true);
   });
 
+  it('uses examples from json schema for flattened rows', () => {
+    const schema = JSON.stringify({
+      type: 'object',
+      examples: [
+        {
+          globId: 'GLOB-100',
+          amount: 2500,
+          items: [
+            {
+              id: 10,
+              status: 'ACTIVE'
+            }
+          ]
+        }
+      ],
+      properties: {
+        globId: { type: 'string' },
+        amount: { type: 'integer' },
+        currency: { type: 'string', examples: ['UZS'] },
+        items: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'integer' },
+              status: { type: 'string' }
+            }
+          }
+        }
+      }
+    });
+
+    const rows = parseJsonSchemaToRows(schema);
+
+    expect(rows.find((row) => row.field === 'globId')?.example).toBe('GLOB-100');
+    expect(rows.find((row) => row.field === 'amount')?.example).toBe('2500');
+    expect(rows.find((row) => row.field === 'currency')?.example).toBe('UZS');
+    expect(rows.find((row) => row.field === 'items[0].id')?.example).toBe('10');
+    expect(rows.find((row) => row.field === 'items[0].status')?.example).toBe('ACTIVE');
+  });
+
+  it('resolves local json schema refs from $defs', () => {
+    const schema = JSON.stringify({
+      type: 'array',
+      items: {
+        $ref: '#/$defs/EmployeeResponse'
+      },
+      examples: [
+        [
+          {
+            id: 1001,
+            account: '22618000900000000001',
+            mfo: '00444',
+            fio: 'Ivanov Ivan'
+          }
+        ]
+      ],
+      $defs: {
+        EmployeeResponse: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            id: {
+              type: 'integer',
+              format: 'int64'
+            },
+            account: {
+              type: 'string'
+            },
+            mfo: {
+              type: 'string'
+            },
+            fio: {
+              type: 'string'
+            }
+          }
+        }
+      }
+    });
+
+    const rows = parseJsonSchemaToRows(schema);
+
+    expect(rows.find((row) => row.field === '$')?.type).toBe('array_object');
+    expect(rows.find((row) => row.field === '$[0]')?.type).toBe('object');
+    expect(rows.find((row) => row.field === '$[0].id')).toMatchObject({ type: 'long', example: '1001' });
+    expect(rows.find((row) => row.field === '$[0].account')).toMatchObject({ type: 'string', example: '22618000900000000001' });
+    expect(rows.find((row) => row.field === '$[0].mfo')).toMatchObject({ type: 'string', example: '00444' });
+    expect(rows.find((row) => row.field === '$[0].fio')).toMatchObject({ type: 'string', example: 'Ivanov Ivan' });
+  });
+
   it('keeps wrapped response json idempotent', () => {
     const wrappedOnce = wrapNonDomainResponseJson('{"code":"OK"}');
     const wrappedTwice = wrapNonDomainResponseJson(wrappedOnce);

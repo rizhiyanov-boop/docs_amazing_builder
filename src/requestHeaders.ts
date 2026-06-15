@@ -270,10 +270,11 @@ export function getRequestRows(section: ParsedSection): ParsedRow[] {
 export function getEditorRequestRows(section: ParsedSection): ParsedRow[] {
   if (!isDualModelSection(section)) return section.rows;
   const mergedRows = mergeRequestRows(section).filter((row) => row.source !== 'header' && row.source !== 'url');
+  const isClientOnlyRow = (row: ParsedRow): boolean => !row.field.trim() && Boolean(row.clientField?.trim());
   if (section.sectionType === 'request' && section.requestMethod === 'GET') {
-    return mergedRows.filter((row) => row.source === 'query');
+    return mergedRows.filter((row) => row.source === 'query' || isClientOnlyRow(row));
   }
-  return mergedRows.filter((row) => row.source !== 'query');
+  return mergedRows.filter((row) => row.source !== 'query' || isClientOnlyRow(row));
 }
 
 export function getRequestHeaderRows(section: ParsedSection): ParsedRow[] {

@@ -6,10 +6,15 @@ const dbMock = vi.hoisted(() => ({
   verifyUser: vi.fn()
 }));
 
-vi.mock('../api/_lib/db.js', () => dbMock);
-vi.mock('../api/_lib/http.js', () => ({
+const httpMock = vi.hoisted(() => ({
+  sendInternalServerError: vi.fn((res: TestResponse) => {
+    res.status(500).json({ error: 'internal' });
+  }),
   setSessionCookie: vi.fn()
 }));
+
+vi.mock('../api/_lib/db.js', () => dbMock);
+vi.mock('../api/_lib/http.js', () => httpMock);
 
 type TestResponse = {
   statusCode: number;
@@ -44,6 +49,8 @@ describe('auth endpoints', () => {
     dbMock.createSession.mockReset();
     dbMock.registerUser.mockReset();
     dbMock.verifyUser.mockReset();
+    httpMock.sendInternalServerError.mockClear();
+    httpMock.setSessionCookie.mockClear();
   });
 
   it('rejects registration passwords shorter than 8 characters', async () => {
@@ -118,5 +125,21 @@ describe('auth endpoints', () => {
       }, res);
       expect(res.statusCode).toBe(401);
     }
+  });
+
+  it('returns JSON 500 when login persistence fails', async () => {
+    const { default: loginHandler } = await import('../api/auth/login');
+    dbMock.verifyUser.mockRejectedValue(new Error('database down'));
+    const res = createResponse();
+
+    await loginHandler({
+      method: 'POST',
+      headers: { 'x-forwarded-for': '203.0.113.9' },
+      body: { login: 'user', password: 'correct-password' }
+    }, res);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.payload).toEqual({ error: 'internal' });
+    expect(httpMock.sendInternalServerError).toHaveBeenCalledWith(res, 'auth/login', expect.any(Error));
   });
 });

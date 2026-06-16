@@ -38,8 +38,9 @@ export class ApiError extends Error {
   }
 }
 
-const API_MODE_HINT =
-  'Для auth/синхронизации запустите full-stack режим через `npx vercel dev` и откройте http://localhost:3001 (не только Vite на http://localhost:5173).';
+const API_MODE_HINT = import.meta.env.DEV
+  ? 'Для auth/синхронизации запустите full-stack режим через `npx vercel dev` и откройте http://localhost:3001 (не только Vite на http://localhost:5173).'
+  : 'Проверьте Vercel Function Logs и переменные окружения DATABASE_URL/POSTGRES_URL.';
 
 function isLikelyHtmlResponse(body: string, contentType: string): boolean {
   if (contentType.toLowerCase().includes('text/html')) return true;

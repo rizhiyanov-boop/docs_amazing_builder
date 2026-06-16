@@ -32,7 +32,7 @@ let lastSessionCleanupAt = 0;
 let sqlClient: ReturnType<typeof neon> | null = null;
 
 function getSqlClient(): ReturnType<typeof neon> {
-  const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  const connectionString = process.env.docbuilder_DATABASE_URL || process.env.DATABASE_URL || process.env.POSTGRES_URL;
   if (!connectionString) {
     throw new Error('Не настроен DATABASE_URL или POSTGRES_URL для подключения к Neon');
   }
@@ -88,7 +88,7 @@ async function hashProjectPayload(payload: { name: string; workspace: unknown; h
 async function ensureSchema(): Promise<void> {
   if (schemaReady) return;
 
-  if (!process.env.DATABASE_URL && !process.env.POSTGRES_URL) {
+  if (!process.env.docbuilder_DATABASE_URL && !process.env.DATABASE_URL && !process.env.POSTGRES_URL) {
     throw new Error('Не настроен DATABASE_URL или POSTGRES_URL для подключения к Neon');
   }
 
@@ -104,7 +104,52 @@ async function ensureSchema(): Promise<void> {
     )
   `;
 
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS login TEXT`;
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_salt TEXT`;
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_algorithm TEXT NOT NULL DEFAULT 'sha256'`;
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now()`;
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`;
+  await sql`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'users'
+          AND column_name = 'username'
+      ) THEN
+        EXECUTE 'UPDATE users SET login = lower(nullif(trim(username), '''')) WHERE (login IS NULL OR trim(login) = '''') AND username IS NOT NULL AND trim(username) <> ''''';
+      END IF;
+
+      IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'users'
+          AND column_name = 'email'
+      ) THEN
+        EXECUTE 'UPDATE users SET login = lower(nullif(trim(email), '''')) WHERE (login IS NULL OR trim(login) = '''') AND email IS NOT NULL AND trim(email) <> ''''';
+      END IF;
+    END $$;
+  `;
+  await sql`UPDATE users SET login = id WHERE login IS NULL OR trim(login) = ''`;
+  await sql`UPDATE users SET password_salt = '' WHERE password_salt IS NULL`;
+  await sql`
+    WITH duplicates AS (
+      SELECT id, login, row_number() OVER (PARTITION BY lower(login) ORDER BY id) AS duplicate_index
+      FROM users
+    )
+    UPDATE users
+    SET login = duplicates.login || '-' || right(users.id, 8)
+    FROM duplicates
+    WHERE users.id = duplicates.id
+      AND duplicates.duplicate_index > 1
+  `;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS users_login_unique_idx ON users(login)`;
+  await sql`ALTER TABLE users ALTER COLUMN login SET NOT NULL`;
+  await sql`ALTER TABLE users ALTER COLUMN password_salt SET DEFAULT ''`;
+  await sql`ALTER TABLE users ALTER COLUMN password_salt SET NOT NULL`;
 
   await sql`
     CREATE TABLE IF NOT EXISTS sessions (
@@ -130,6 +175,7 @@ async function ensureSchema(): Promise<void> {
   `;
 
   await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS payload_hash TEXT`;
+  await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS history JSONB`;
 
   await sql`CREATE INDEX IF NOT EXISTS projects_user_id_idx ON projects(user_id)`;
   await sql`CREATE INDEX IF NOT EXISTS sessions_user_id_idx ON sessions(user_id)`;

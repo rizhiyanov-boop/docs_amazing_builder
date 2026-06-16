@@ -1,5 +1,5 @@
 import { createSession, verifyUser } from '../_lib/db.js';
-import { setSessionCookie } from '../_lib/http.js';
+import { sendInternalServerError, setSessionCookie } from '../_lib/http.js';
 
 type VercelRequest = {
   method?: string;
@@ -33,6 +33,7 @@ function getRateLimitRetryAfterSeconds(firstAttemptAt: number): number {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
+  try {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method Not Allowed' });
     return;
@@ -71,4 +72,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   const session = await createSession(user.id);
   setSessionCookie(res, session.token, session.expiresAt);
   res.status(200).json({ data: { user } });
+  } catch (error) {
+    sendInternalServerError(res, 'auth/login', error);
+  }
 }

@@ -11,7 +11,10 @@ const dbMock = vi.hoisted(() => ({
 
 const httpMock = vi.hoisted(() => ({
   getSessionToken: vi.fn(),
-  readQueryString: vi.fn()
+  readQueryString: vi.fn(),
+  sendInternalServerError: vi.fn((res: TestResponse) => {
+    res.status(500).json({ error: 'internal' });
+  })
 }));
 
 vi.mock('../api/_lib/db.js', () => dbMock);
@@ -51,6 +54,7 @@ describe('projects endpoint cache headers', () => {
     dbMock.getProjectsByUser.mockReset();
     httpMock.getSessionToken.mockReset();
     httpMock.readQueryString.mockReset();
+    httpMock.sendInternalServerError.mockClear();
     httpMock.readQueryString.mockReturnValue(undefined);
     dbMock.getUserBySessionToken.mockResolvedValue({ id: 'usr_1', login: 'user' });
   });
@@ -87,5 +91,17 @@ describe('projects endpoint cache headers', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.headers['Cache-Control']).toBe('no-store');
+  });
+
+  it('returns JSON 500 when project persistence fails', async () => {
+    const { default: projectsHandler } = await import('../api/projects');
+    dbMock.getProjectsByUser.mockRejectedValue(new Error('database down'));
+    const res = createResponse();
+
+    await projectsHandler({ method: 'GET' }, res);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.payload).toEqual({ error: 'internal' });
+    expect(httpMock.sendInternalServerError).toHaveBeenCalledWith(res, 'projects', expect.any(Error));
   });
 });

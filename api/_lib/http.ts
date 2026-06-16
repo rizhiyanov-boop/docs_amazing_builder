@@ -104,3 +104,8 @@ export function readQueryString(req: VercelRequest, key: string): string | undef
   if (Array.isArray(value)) return value[0];
   return typeof value === 'string' ? value : undefined;
 }
+
+export function sendInternalServerError(res: Pick<VercelResponse, 'status' | 'json'>, context: string, error: unknown): void {
+  console.error(`[${context}]`, error);
+  res.status(500).json({ error: 'Внутренняя ошибка сервера. Проверьте Vercel Function Logs.' });
+}

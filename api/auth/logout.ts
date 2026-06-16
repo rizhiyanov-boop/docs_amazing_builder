@@ -1,5 +1,5 @@
 import { revokeSession } from '../_lib/db.js';
-import { clearSessionCookie, getSessionToken } from '../_lib/http.js';
+import { clearSessionCookie, getSessionToken, sendInternalServerError } from '../_lib/http.js';
 
 type VercelRequest = {
   method?: string;
@@ -13,13 +13,17 @@ type VercelResponse = {
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
-  if (req.method !== 'POST') {
-    res.status(405).json({ error: 'Method Not Allowed' });
-    return;
-  }
+  try {
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method Not Allowed' });
+      return;
+    }
 
-  const sessionToken = getSessionToken(req);
-  await revokeSession(sessionToken);
-  clearSessionCookie(res);
-  res.status(200).json({ data: { ok: true } });
+    const sessionToken = getSessionToken(req);
+    await revokeSession(sessionToken);
+    clearSessionCookie(res);
+    res.status(200).json({ data: { ok: true } });
+  } catch (error) {
+    sendInternalServerError(res, 'auth/logout', error);
+  }
 }

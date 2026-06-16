@@ -1,5 +1,5 @@
 import { getUserBySessionToken } from '../_lib/db.js';
-import { getSessionToken } from '../_lib/http.js';
+import { getSessionToken, sendInternalServerError } from '../_lib/http.js';
 
 type VercelRequest = {
   method?: string;
@@ -13,14 +13,18 @@ type VercelResponse = {
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
-  res.setHeader('Cache-Control', 'no-store');
+  try {
+    res.setHeader('Cache-Control', 'no-store');
 
-  if (req.method !== 'GET') {
-    res.status(405).json({ error: 'Method Not Allowed' });
-    return;
+    if (req.method !== 'GET') {
+      res.status(405).json({ error: 'Method Not Allowed' });
+      return;
+    }
+
+    const sessionToken = getSessionToken(req);
+    const user = await getUserBySessionToken(sessionToken);
+    res.status(200).json({ data: { user } });
+  } catch (error) {
+    sendInternalServerError(res, 'auth/me', error);
   }
-
-  const sessionToken = getSessionToken(req);
-  const user = await getUserBySessionToken(sessionToken);
-  res.status(200).json({ data: { user } });
 }

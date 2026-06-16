@@ -1,5 +1,5 @@
 import { ProjectNotFoundError, deleteProject, getProjectById, getProjectsByUser, getUserBySessionToken, saveProject } from './_lib/db.js';
-import { getSessionToken, readQueryString } from './_lib/http.js';
+import { getSessionToken, readQueryString, sendInternalServerError } from './_lib/http.js';
 
 type VercelRequest = {
   method?: string;
@@ -33,6 +33,7 @@ function getJsonSizeBytes(value: unknown): number {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
+  try {
   if (req.method === 'GET') {
     res.setHeader('Cache-Control', 'private, s-maxage=30, stale-while-revalidate=60');
     res.setHeader('Vary', 'Cookie');
@@ -139,4 +140,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   }
 
   res.status(405).json({ error: 'Method Not Allowed' });
+  } catch (error) {
+    sendInternalServerError(res, 'projects', error);
+  }
 }

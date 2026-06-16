@@ -15,7 +15,8 @@
     "lint:tokens": "node scripts/check-css-tokens.mjs",
     "lint:all": "npm run lint && npm run lint:tokens",
     "preview": "vite preview",
-    "smoke:test": "node scripts/smoke-test.mjs"
+    "smoke:test": "node scripts/smoke-test.mjs",
+    "db:migrate-projects": "node scripts/migrate-projects-to-new-db.mjs"
   },
   "dependencies": {
     "@neondatabase/serverless": "^0.10.3",

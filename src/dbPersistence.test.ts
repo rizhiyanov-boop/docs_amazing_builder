@@ -1,13 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const sqlMock = vi.hoisted(() => vi.fn());
+const neonMock = vi.hoisted(() => vi.fn(() => sqlMock));
 const bcryptMock = vi.hoisted(() => ({
   hash: vi.fn(),
   compare: vi.fn()
 }));
 
 vi.mock('@neondatabase/serverless', () => ({
-  neon: vi.fn(() => sqlMock)
+  neon: neonMock
 }));
 vi.mock('bcryptjs', () => ({
   default: bcryptMock
@@ -28,8 +29,10 @@ describe('saveProject', () => {
   beforeEach(() => {
     vi.resetModules();
     sqlMock.mockReset();
+    neonMock.mockClear();
     bcryptMock.hash.mockReset();
     bcryptMock.compare.mockReset();
+    delete process.env.docbuilder_DATABASE_URL;
     process.env.DATABASE_URL = 'postgres://test';
   });
 
@@ -61,8 +64,10 @@ describe('user password persistence', () => {
   beforeEach(() => {
     vi.resetModules();
     sqlMock.mockReset();
+    neonMock.mockClear();
     bcryptMock.hash.mockReset();
     bcryptMock.compare.mockReset();
+    delete process.env.docbuilder_DATABASE_URL;
     process.env.DATABASE_URL = 'postgres://test';
   });
 
@@ -110,7 +115,7 @@ describe('user password persistence', () => {
 
     await expect(verifyUser({ login: 'user', password: 'wrong-password' })).resolves.toBeNull();
     expect(bcryptMock.compare).toHaveBeenCalledWith('wrong-password', 'bcrypt-hash');
-    expect(sqlMock.mock.calls.some(([strings]) => queryText(strings as TemplateStringsArray).startsWith('UPDATE users'))).toBe(false);
+    expect(sqlMock.mock.calls.some(([strings]) => queryText(strings as TemplateStringsArray).startsWith('UPDATE users SET password_hash'))).toBe(false);
   });
 
   it('migrates a valid legacy SHA-256 password to bcrypt on login', async () => {
@@ -138,11 +143,49 @@ describe('user password persistence', () => {
     });
     expect(bcryptMock.hash).toHaveBeenCalledWith('correct-password', 12);
 
-    const updateCall = sqlMock.mock.calls.find(([strings]) => queryText(strings as TemplateStringsArray).startsWith('UPDATE users'));
+    const updateCall = sqlMock.mock.calls.find(([strings]) => queryText(strings as TemplateStringsArray).startsWith('UPDATE users SET password_hash'));
     expect(updateCall?.[1]).toBe('migrated-bcrypt-hash');
     expect(updateCall?.[2]).toBe('');
     expect(updateCall?.[3]).toBe('bcrypt');
     expect(updateCall?.[4]).toBe('usr_legacy');
+  });
+
+  it('migrates existing users table to the current login schema', async () => {
+    const { verifyUser } = await import('../api/_lib/db');
+    bcryptMock.compare.mockResolvedValue(false);
+
+    sqlMock.mockImplementation(async (strings: TemplateStringsArray) => {
+      const text = queryText(strings);
+      if (text.startsWith('SELECT id, login, password_hash')) {
+        return [{
+          id: 'usr_1',
+          login: 'user',
+          password_hash: 'bcrypt-hash',
+          password_salt: '',
+          password_algorithm: 'bcrypt'
+        }];
+      }
+      return [];
+    });
+
+    await verifyUser({ login: 'user', password: 'wrong-password' });
+
+    const queries = sqlMock.mock.calls.map(([strings]) => queryText(strings as TemplateStringsArray));
+    expect(queries).toContain('ALTER TABLE users ADD COLUMN IF NOT EXISTS login TEXT');
+    expect(queries).toContain('UPDATE users SET login = id WHERE login IS NULL OR trim(login) = \'\'');
+    expect(queries).toContain('CREATE UNIQUE INDEX IF NOT EXISTS users_login_unique_idx ON users(login)');
+    expect(queries).toContain('ALTER TABLE users ALTER COLUMN login SET NOT NULL');
+  });
+
+  it('prefers the docbuilder database URL when Vercel storage adds prefixed variables', async () => {
+    delete process.env.DATABASE_URL;
+    process.env.docbuilder_DATABASE_URL = 'postgres://docbuilder';
+    const { verifyUser } = await import('../api/_lib/db');
+    sqlMock.mockResolvedValue([]);
+
+    await verifyUser({ login: 'user', password: 'wrong-password' });
+
+    expect(neonMock).toHaveBeenCalledWith('postgres://docbuilder');
   });
 });
 
@@ -150,6 +193,8 @@ describe('session cleanup side effects', () => {
   beforeEach(() => {
     vi.resetModules();
     sqlMock.mockReset();
+    neonMock.mockClear();
+    delete process.env.docbuilder_DATABASE_URL;
     process.env.DATABASE_URL = 'postgres://test';
   });
 

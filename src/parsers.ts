@@ -264,8 +264,14 @@ function getArrayItemExample(parentExample: SchemaExampleValue): SchemaExampleVa
   return { found: true, value: parentExample.value[0] };
 }
 
+function isStructuredSchemaType(type: string): boolean {
+  return type === 'array' || type === 'array_object' || type === 'object';
+}
+
 function schemaExample(schema: JsonSchema, context: JsonSchemaContext, resolvedType: string, fallback = NO_SCHEMA_EXAMPLE): string {
   const explicit = getSchemaExample(schema, context, fallback);
+
+  if (isStructuredSchemaType(resolvedType)) return STRUCTURED_EXAMPLE_PLACEHOLDER;
 
   if (explicit.found) {
     if (typeof explicit.value === 'string') return explicit.value;
@@ -278,7 +284,6 @@ function schemaExample(schema: JsonSchema, context: JsonSchemaContext, resolvedT
     }
   }
 
-  if (resolvedType === 'array' || resolvedType === 'array_object' || resolvedType === 'object') return STRUCTURED_EXAMPLE_PLACEHOLDER;
   return '';
 }
 
@@ -297,18 +302,29 @@ function flattenJsonSchemaNode(
 
   if (normalizedType === 'array') {
     const itemType = resolvedSchema.items ? normalizeSchemaType(resolvedSchema.items, context) : 'string';
-    rows.push(
-      createParsedRow({
-        field: basePath || '$',
-        type: itemType === 'object' ? 'array_object' : 'array',
-        required: requiredMark,
-        description: resolvedSchema.description ?? '',
-        example: schemaExample(resolvedSchema, context, itemType === 'object' ? 'array_object' : 'array', fallbackExample)
-      })
-    );
+    const arrayType = itemType === 'object' ? 'array_object' : 'array';
+    const isRootArrayOfObjects = !basePath && itemType === 'object';
+
+    if (!isRootArrayOfObjects) {
+      rows.push(
+        createParsedRow({
+          field: basePath || '$',
+          type: arrayType,
+          required: requiredMark,
+          description: resolvedSchema.description ?? '',
+          example: schemaExample(resolvedSchema, context, arrayType, fallbackExample)
+        })
+      );
+    }
 
     if (resolvedSchema.items) {
-      rows.push(...flattenJsonSchemaNode(resolvedSchema.items, context, `${basePath || '$'}[0]`, true, getArrayItemExample(nodeExample)));
+      rows.push(...flattenJsonSchemaNode(
+        resolvedSchema.items,
+        context,
+        isRootArrayOfObjects ? '' : `${basePath || '$'}[0]`,
+        true,
+        getArrayItemExample(nodeExample)
+      ));
     }
     return rows;
   }

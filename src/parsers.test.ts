@@ -159,6 +159,8 @@ describe('parsers', () => {
     expect(rows.find((row) => row.field === 'globId')?.example).toBe('GLOB-100');
     expect(rows.find((row) => row.field === 'amount')?.example).toBe('2500');
     expect(rows.find((row) => row.field === 'currency')?.example).toBe('UZS');
+    expect(rows.find((row) => row.field === 'items')?.example).toBe('-');
+    expect(rows.find((row) => row.field === 'items[0]')?.example).toBe('-');
     expect(rows.find((row) => row.field === 'items[0].id')?.example).toBe('10');
     expect(rows.find((row) => row.field === 'items[0].status')?.example).toBe('ACTIVE');
   });
@@ -204,12 +206,12 @@ describe('parsers', () => {
 
     const rows = parseJsonSchemaToRows(schema);
 
-    expect(rows.find((row) => row.field === '$')?.type).toBe('array_object');
-    expect(rows.find((row) => row.field === '$[0]')?.type).toBe('object');
-    expect(rows.find((row) => row.field === '$[0].id')).toMatchObject({ type: 'long', example: '1001' });
-    expect(rows.find((row) => row.field === '$[0].account')).toMatchObject({ type: 'string', example: '22618000900000000001' });
-    expect(rows.find((row) => row.field === '$[0].mfo')).toMatchObject({ type: 'string', example: '00444' });
-    expect(rows.find((row) => row.field === '$[0].fio')).toMatchObject({ type: 'string', example: 'Ivanov Ivan' });
+    expect(rows.some((row) => row.field === '$')).toBe(false);
+    expect(rows.some((row) => row.field === '$[0]')).toBe(false);
+    expect(rows.find((row) => row.field === 'id')).toMatchObject({ type: 'long', example: '1001' });
+    expect(rows.find((row) => row.field === 'account')).toMatchObject({ type: 'string', example: '22618000900000000001' });
+    expect(rows.find((row) => row.field === 'mfo')).toMatchObject({ type: 'string', example: '00444' });
+    expect(rows.find((row) => row.field === 'fio')).toMatchObject({ type: 'string', example: 'Ivanov Ivan' });
   });
 
   it('keeps wrapped response json idempotent', () => {
@@ -256,7 +258,7 @@ describe('parsers', () => {
     });
 
     const rows = parseJsonSchemaToRows(schema);
-    expect(rows.some((row) => row.field === '$' && row.type === 'array_object')).toBe(true);
-    expect(rows.some((row) => row.field === '$[0].code' && row.type === 'string')).toBe(true);
+    expect(rows.some((row) => row.field === '$')).toBe(false);
+    expect(rows.some((row) => row.field === 'code' && row.type === 'string')).toBe(true);
   });
 });

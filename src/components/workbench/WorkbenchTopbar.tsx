@@ -404,7 +404,7 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
           className="hidden-file-input"
           type="file"
           multiple
-          accept="application/json"
+          accept="application/json,application/xml,text/xml,text/plain,.json,.xml,.txt"
           onChange={(event) => {
             const files = Array.from(event.target.files ?? []);
             onImportProjectJson(files);

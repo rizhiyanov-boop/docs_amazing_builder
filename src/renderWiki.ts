@@ -4,7 +4,7 @@ import { buildInputFromRows } from './sourceSync';
 import { resolveSectionTitle } from './sectionTitles';
 import { getDiagramImageUrl, resolveDiagramEngine } from './diagramUtils';
 import { normalizeArrayFieldPath } from './fieldPath';
-import type { DiagramSection, DocSection, ErrorsSection, ParsedRow, ParsedSection, TextSection } from './types';
+import type { DiagramSection, DocSection, ErrorsSection, ParseFormat, ParsedRow, ParsedSection, TextSection } from './types';
 
 const EMPTY_WIKI_CELL = '\u00A0';
 
@@ -65,7 +65,7 @@ function toWikiExampleCell(value: string): string {
   return toWikiCell(trimmed);
 }
 
-function toWikiSourceCodeBlock(value: string, format: 'json' | 'curl'): string[] {
+function toWikiSourceCodeBlock(value: string, format: ParseFormat): string[] {
   const normalized = value
     .replaceAll('\r\n', '\n')
     .replaceAll('\r', '\n')
@@ -82,7 +82,7 @@ function toWikiSourceCodeBlock(value: string, format: 'json' | 'curl'): string[]
     }
   }
 
-  const codeLanguage = format === 'json' ? 'json' : 'bash';
+  const codeLanguage = format === 'json' ? 'json' : format === 'xml' ? 'xml' : 'bash';
 
   return [`{code:${codeLanguage}}`, ...payload.split('\n').map((line) => escapeWiki(line)), '{code}'];
 }
@@ -217,7 +217,7 @@ function toWikiZodSchemaCodeBlock(schemaInput: string, schemaName: string): stri
   }
 }
 
-function toWikiInlineCodeMacro(value: string, format: 'json' | 'curl' = 'json'): string {
+function toWikiInlineCodeMacro(value: string, format: ParseFormat = 'json'): string {
   const normalized = value
     .replaceAll('\r\n', '\n')
     .replaceAll('\r', '\n')
@@ -236,6 +236,10 @@ function toWikiInlineCodeMacro(value: string, format: 'json' | 'curl' = 'json'):
 
   if (format === 'json') {
     return [`{code:json}`, ...payload.split('\n').map((line) => escapeWiki(line)), '{code}'].join('\n');
+  }
+
+  if (format === 'xml') {
+    return [`{code:xml}`, ...payload.split('\n').map((line) => escapeWiki(line)), '{code}'].join('\n');
   }
 
   return `{code:bash}${escapeWiki(payload)}{code}`;
@@ -315,7 +319,7 @@ function renderParsedSourceExamples(section: ParsedSection): string[] {
       {
         requestUrl: section.requestUrl?.trim() || '',
         requestMethod: section.requestMethod,
-        bodyJson: section.format === 'json' ? section.input : undefined
+        bodyText: section.format === 'json' || section.format === 'xml' ? section.input : undefined
       }
     )
     : '';
@@ -330,13 +334,13 @@ function renderParsedSourceExamples(section: ParsedSection): string[] {
       {
         requestUrl: section.externalRequestUrl?.trim() || '',
         requestMethod: section.externalRequestMethod,
-        bodyJson: section.clientFormat === 'json' ? (section.clientInput ?? '') : undefined
+        bodyText: section.clientFormat === 'json' || section.clientFormat === 'xml' ? (section.clientInput ?? '') : undefined
       }
     )
     : '';
 
-  const serverFormatLabel = serverFormat === 'curl' ? 'cURL' : 'JSON';
-  const clientFormatLabel = clientFormat === 'curl' ? 'cURL' : 'JSON';
+  const serverFormatLabel = serverFormat === 'curl' ? 'cURL' : serverFormat === 'xml' ? 'XML' : 'JSON';
+  const clientFormatLabel = clientFormat === 'curl' ? 'cURL' : clientFormat === 'xml' ? 'XML' : 'JSON';
 
   if (serverInput) {
     lines.push('');

@@ -127,7 +127,7 @@ export function normalizeParsedRowsForSection(
 }
 
 export function getRowsRelevantToSourceFormat(rows: ParsedRow[], format: ParseFormat): ParsedRow[] {
-  if (format !== 'json') return rows;
+  if (format !== 'json' && format !== 'xml') return rows;
   return rows.filter((row) => row.source !== 'header' && row.source !== 'url' && row.source !== 'query');
 }
 

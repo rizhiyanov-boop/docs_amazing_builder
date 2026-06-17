@@ -341,12 +341,24 @@ export function getParsedRowKey(row: ParsedRow): string {
   return getRowKey(row);
 }
 
+export function isDisplayFieldForSource(field: string, sourceField?: string): boolean {
+  const normalizedField = field.trim();
+  const normalizedSourceField = sourceField?.trim() ?? '';
+  if (!normalizedField || !normalizedSourceField) return false;
+  if (normalizedField === normalizedSourceField) return true;
+  return normalizedSourceField.endsWith(`.${normalizedField}`);
+}
+
+function isParsedInputDrift(row: ParsedRow): boolean {
+  return row.origin === 'parsed' && Boolean(row.sourceField) && !isDisplayFieldForSource(row.field, row.sourceField);
+}
+
 export function hasInputDrift(rows: ParsedRow[]): boolean {
-  return rows.some((row) => row.origin === 'manual' || (row.origin === 'parsed' && row.sourceField && row.field !== row.sourceField));
+  return rows.some((row) => row.origin === 'manual' || isParsedInputDrift(row));
 }
 
 export function getInputDriftRows(rows: ParsedRow[]): ParsedRow[] {
-  return rows.filter((row) => row.origin === 'manual' || (row.origin === 'parsed' && row.sourceField && row.field !== row.sourceField));
+  return rows.filter((row) => row.origin === 'manual' || isParsedInputDrift(row));
 }
 
 export function getRequestAuthInfo(section: ParsedSection): RequestAuthInfo | null {

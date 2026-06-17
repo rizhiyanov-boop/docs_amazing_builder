@@ -20,6 +20,60 @@ describe('parsers', () => {
     expect(rows.some((row) => row.field === 'amount' && row.type === 'int')).toBe(true);
   });
 
+  it('parses xml attributes, repeated elements and text nodes', () => {
+    const rows = parseToRows(
+      'xml',
+      '<request version="1"><items><item id="100"><name>Alice</name></item><item id="101"><name><![CDATA[Bob]]></name></item></items><active>true</active></request>'
+    );
+
+    expect(rows.some((row) => row.field === 'request' && row.sourceField === 'request' && row.type === 'object')).toBe(true);
+    expect(rows.some((row) => row.field === '@version' && row.sourceField === 'request.@version' && row.type === 'int' && row.example === '1')).toBe(true);
+    expect(rows.some((row) => row.field === 'items.item[0].@id' && row.sourceField === 'request.items.item[0].@id' && row.type === 'int' && row.example === '100')).toBe(true);
+    expect(rows.some((row) => row.field === 'items.item[0].name' && row.sourceField === 'request.items.item[0].name' && row.type === 'string' && row.example === 'Alice')).toBe(true);
+    expect(rows.some((row) => row.field === 'items.item[1].@id' && row.sourceField === 'request.items.item[1].@id' && row.type === 'int' && row.example === '101')).toBe(true);
+    expect(rows.some((row) => row.field === 'items.item[1].name' && row.sourceField === 'request.items.item[1].name' && row.type === 'string' && row.example === 'Bob')).toBe(true);
+    expect(rows.some((row) => row.field === 'active' && row.sourceField === 'request.active' && row.type === 'boolean' && row.example === 'true')).toBe(true);
+  });
+
+  it('parses xsd into business message rows instead of schema internals', () => {
+    const xsd = `<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+  <xs:element name="CustomerInfoRequest">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="Header" type="HeaderType"/>
+        <xs:element name="Customer" type="CustomerType"/>
+        <xs:element name="Tags" type="xs:string" minOccurs="0" maxOccurs="unbounded"/>
+      </xs:sequence>
+      <xs:attribute name="requestId" type="xs:string" use="required"/>
+    </xs:complexType>
+  </xs:element>
+  <xs:complexType name="HeaderType">
+    <xs:sequence>
+      <xs:element name="SourceSystem" type="xs:string"/>
+      <xs:element name="RequestDateTime" type="xs:dateTime"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CustomerType">
+    <xs:sequence>
+      <xs:element name="CustomerId" type="xs:long"/>
+      <xs:element name="IsResident" type="xs:boolean" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+</xs:schema>`;
+
+    const rows = parseToRows('xml', xsd);
+
+    expect(rows.some((row) => row.field === 'xs:schema')).toBe(false);
+    expect(rows.some((row) => row.field === 'CustomerInfoRequest' && row.sourceField === 'CustomerInfoRequest' && row.type === 'object')).toBe(true);
+    expect(rows.some((row) => row.field === '@requestId' && row.sourceField === 'CustomerInfoRequest.@requestId' && row.required === '+' && row.type === 'string')).toBe(true);
+    expect(rows.some((row) => row.field === 'Header.SourceSystem' && row.sourceField === 'CustomerInfoRequest.Header.SourceSystem' && row.type === 'string')).toBe(true);
+    expect(rows.some((row) => row.field === 'Header.RequestDateTime' && row.sourceField === 'CustomerInfoRequest.Header.RequestDateTime' && row.type === 'datetime')).toBe(true);
+    expect(rows.some((row) => row.field === 'Customer.CustomerId' && row.sourceField === 'CustomerInfoRequest.Customer.CustomerId' && row.type === 'long')).toBe(true);
+    expect(rows.some((row) => row.field === 'Customer.IsResident' && row.sourceField === 'CustomerInfoRequest.Customer.IsResident' && row.required === '-' && row.type === 'boolean')).toBe(true);
+    expect(rows.some((row) => row.field === 'Tags' && row.sourceField === 'CustomerInfoRequest.Tags' && row.required === '-' && row.type === 'array')).toBe(true);
+  });
+
   it('parses curl payload, headers and url', () => {
     const curl =
       "curl -X POST \"https://api.example.com/method\" -H \"X-Trace-Id: 123\" -H \"Content-Type: application/json\" --data-raw '{\"id\":123,\"ok\":true}'";

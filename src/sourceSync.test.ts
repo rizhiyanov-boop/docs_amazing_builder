@@ -35,6 +35,42 @@ describe('sourceSync', () => {
     expect(parsed).toEqual({ payload: { id: 7 } });
   });
 
+  it('builds xml from rows with attributes and repeated elements', () => {
+    const rows = [
+      makeParsedRow({ field: 'request.@version', sourceField: 'request.@version', type: 'int', example: '1' }),
+      makeParsedRow({ field: 'request.items.item[0].@id', sourceField: 'request.items.item[0].@id', type: 'int', example: '100' }),
+      makeParsedRow({ field: 'request.items.item[0].name', sourceField: 'request.items.item[0].name', type: 'string', example: 'Alice' }),
+      makeParsedRow({ field: 'request.items.item[1].@id', sourceField: 'request.items.item[1].@id', type: 'int', example: '101' }),
+      makeParsedRow({ field: 'request.items.item[1].name', sourceField: 'request.items.item[1].name', type: 'string', example: 'Bob' }),
+      makeParsedRow({ field: 'request.active', sourceField: 'request.active', type: 'boolean', example: 'true' })
+    ];
+
+    const xml = buildInputFromRows('xml', rows);
+
+    expect(xml).toContain('<request version="1">');
+    expect(xml).toContain('<item id="100">');
+    expect(xml).toContain('<name>Alice</name>');
+    expect(xml).toContain('<item id="101">');
+    expect(xml).toContain('<name>Bob</name>');
+    expect(xml).toContain('<active>true</active>');
+  });
+
+  it('builds xml from full sourceField when display field omits root', () => {
+    const rows = [
+      makeParsedRow({ field: '@requestId', sourceField: 'CustomerInfoRequest.@requestId', type: 'string', example: 'REQ-1' }),
+      makeParsedRow({ field: 'Header.SourceSystem', sourceField: 'CustomerInfoRequest.Header.SourceSystem', type: 'string', example: 'BSS' }),
+      makeParsedRow({ field: 'Customer.FullName.FirstName', sourceField: 'CustomerInfoRequest.Customer.FullName.FirstName', type: 'string', example: 'Ivan' })
+    ];
+
+    const xml = buildInputFromRows('xml', rows);
+
+    expect(xml).toContain('<CustomerInfoRequest requestId="REQ-1">');
+    expect(xml).toContain('<Header>');
+    expect(xml).toContain('<SourceSystem>BSS</SourceSystem>');
+    expect(xml).toContain('<Customer>');
+    expect(xml).toContain('<FirstName>Ivan</FirstName>');
+  });
+
   it('builds curl command with headers, method and url', () => {
     const rows = [
       makeParsedRow({ field: 'X-Trace-Id', source: 'header', example: 'abc-123', type: 'string' }),
@@ -51,6 +87,21 @@ describe('sourceSync', () => {
     expect(curl).toContain('"https://api.example.com/override"');
     expect(curl).toContain('-H "X-Trace-Id: abc-123"');
     expect(curl).toContain('--data-raw');
+  });
+
+  it('uses explicit xml body text when building curl', () => {
+    const curl = buildInputFromRows(
+      'curl',
+      [makeParsedRow({ field: 'request.globId', source: 'body', type: 'string', example: 'abc' })],
+      {
+        requestMethod: 'POST',
+        requestUrl: 'https://api.example.com/xml',
+        bodyText: '<request><globId>abc</globId></request>'
+      }
+    );
+
+    expect(curl).toContain('"https://api.example.com/xml"');
+    expect(curl).toContain("--data-raw '<request><globId>abc</globId></request>'");
   });
 
   it('builds get curl with query params in url and without body', () => {

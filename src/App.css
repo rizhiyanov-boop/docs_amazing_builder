@@ -2594,20 +2594,22 @@ th {
   flex: 1 1 auto;
   min-width: 0;
   white-space: normal;
-  overflow-wrap: normal;
-  word-break: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .field-name-text {
   display: inline;
   white-space: normal;
-  overflow-wrap: normal;
-  word-break: keep-all;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   hyphens: none;
 }
 
 .field-name-part {
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .field-actions {

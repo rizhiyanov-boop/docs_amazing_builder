@@ -8,10 +8,10 @@ export type ParsedCurlMeta = {
 const STRUCTURED_EXAMPLE_PLACEHOLDER = '-';
 const OPTIONAL_MARK = '-';
 
-function createParsedRow(row: Omit<ParsedRow, 'sourceField' | 'origin'>): ParsedRow {
+function createParsedRow(row: Omit<ParsedRow, 'origin'>): ParsedRow {
   return {
     ...row,
-    sourceField: row.field,
+    sourceField: row.sourceField ?? row.field,
     origin: 'parsed'
   };
 }
@@ -407,6 +407,333 @@ function splitUrlAndQuery(rawUrl: string): { baseUrl: string; queryRows: ParsedR
   }
 }
 
+function inferPrimitiveXmlType(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return 'string';
+  if (trimmed.toLowerCase() === 'true' || trimmed.toLowerCase() === 'false') return 'boolean';
+  if (/^-?\d+$/.test(trimmed)) {
+    try {
+      const bigIntValue = BigInt(trimmed);
+      const min = BigInt(-2147483648);
+      const max = BigInt(2147483647);
+      return bigIntValue >= min && bigIntValue <= max ? 'int' : 'long';
+    } catch {
+      return 'long';
+    }
+  }
+  if (!Number.isNaN(Number(trimmed))) return 'number';
+  return 'string';
+}
+
+function getDirectTextContent(element: Element): string {
+  return Array.from(element.childNodes)
+    .filter((node) => node.nodeType === Node.TEXT_NODE || node.nodeType === Node.CDATA_SECTION_NODE)
+    .map((node) => node.textContent ?? '')
+    .join('')
+    .trim();
+}
+
+function getChildElements(element: Element): Element[] {
+  return Array.from(element.children);
+}
+
+function isXsdElement(element: Element, localName: string): boolean {
+  return element.localName === localName && (element.namespaceURI === 'http://www.w3.org/2001/XMLSchema' || element.prefix === 'xs' || element.prefix === 'xsd');
+}
+
+function findDirectXsdChild(element: Element, localName: string): Element | undefined {
+  return getChildElements(element).find((child) => isXsdElement(child, localName));
+}
+
+function findDirectXsdChildren(element: Element, localName: string): Element[] {
+  return getChildElements(element).filter((child) => isXsdElement(child, localName));
+}
+
+function getXsdDocumentation(element: Element): string {
+  const annotation = findDirectXsdChild(element, 'annotation');
+  const documentation = annotation ? findDirectXsdChild(annotation, 'documentation') : undefined;
+  return documentation?.textContent?.trim() ?? '';
+}
+
+function isXsdSchemaDocument(document: Document): boolean {
+  const root = document.documentElement;
+  return Boolean(root && isXsdElement(root, 'schema'));
+}
+
+function stripXmlNamespace(value: string): string {
+  const trimmed = value.trim();
+  const colonIndex = trimmed.indexOf(':');
+  return colonIndex >= 0 ? trimmed.slice(colonIndex + 1) : trimmed;
+}
+
+function xsdTypeToParsedType(typeName: string): string {
+  const localType = stripXmlNamespace(typeName);
+  if (['int', 'integer', 'short', 'byte', 'nonNegativeInteger', 'positiveInteger', 'nonPositiveInteger', 'negativeInteger', 'unsignedInt', 'unsignedShort', 'unsignedByte'].includes(localType)) return 'int';
+  if (['long', 'unsignedLong'].includes(localType)) return 'long';
+  if (['decimal', 'double', 'float'].includes(localType)) return 'number';
+  if (localType === 'boolean') return 'boolean';
+  if (localType === 'date') return 'date';
+  if (localType === 'dateTime') return 'datetime';
+  if (localType === 'time') return 'time';
+  return 'string';
+}
+
+function isBuiltinXsdType(typeName: string): boolean {
+  return /^(xs|xsd):/.test(typeName.trim());
+}
+
+function isRepeatingXsdElement(element: Element): boolean {
+  const maxOccurs = element.getAttribute('maxOccurs');
+  if (!maxOccurs) return false;
+  if (maxOccurs === 'unbounded') return true;
+  const parsed = Number(maxOccurs);
+  return Number.isFinite(parsed) && parsed > 1;
+}
+
+function isRequiredXsdElement(element: Element): boolean {
+  return element.getAttribute('minOccurs') !== '0';
+}
+
+type XsdContext = {
+  complexTypes: Map<string, Element>;
+  simpleTypes: Map<string, Element>;
+};
+
+function buildXsdContext(schemaRoot: Element): XsdContext {
+  const complexTypes = new Map<string, Element>();
+  const simpleTypes = new Map<string, Element>();
+
+  for (const child of getChildElements(schemaRoot)) {
+    if (isXsdElement(child, 'complexType')) {
+      const name = child.getAttribute('name')?.trim();
+      if (name) complexTypes.set(name, child);
+    }
+    if (isXsdElement(child, 'simpleType')) {
+      const name = child.getAttribute('name')?.trim();
+      if (name) simpleTypes.set(name, child);
+    }
+  }
+
+  return { complexTypes, simpleTypes };
+}
+
+function resolveXsdSimpleType(simpleType: Element | undefined): string {
+  if (!simpleType) return 'string';
+  const restriction = findDirectXsdChild(simpleType, 'restriction');
+  const base = restriction?.getAttribute('base');
+  return base ? xsdTypeToParsedType(base) : 'string';
+}
+
+function getXsdElementType(element: Element, context: XsdContext): { parsedType: string; complexType?: Element } {
+  const inlineComplexType = findDirectXsdChild(element, 'complexType');
+  if (inlineComplexType) return { parsedType: 'object', complexType: inlineComplexType };
+
+  const inlineSimpleType = findDirectXsdChild(element, 'simpleType');
+  if (inlineSimpleType) return { parsedType: resolveXsdSimpleType(inlineSimpleType) };
+
+  const declaredType = element.getAttribute('type')?.trim() ?? '';
+  if (!declaredType) return { parsedType: 'string' };
+  if (isBuiltinXsdType(declaredType)) return { parsedType: xsdTypeToParsedType(declaredType) };
+
+  const typeName = stripXmlNamespace(declaredType);
+  const complexType = context.complexTypes.get(typeName);
+  if (complexType) return { parsedType: 'object', complexType };
+  return { parsedType: resolveXsdSimpleType(context.simpleTypes.get(typeName)) };
+}
+
+function getXsdSequenceElements(complexType: Element): Element[] {
+  const sequence = findDirectXsdChild(complexType, 'sequence') ?? findDirectXsdChild(complexType, 'all') ?? findDirectXsdChild(complexType, 'choice');
+  return sequence ? findDirectXsdChildren(sequence, 'element') : [];
+}
+
+function getDisplayPath(fullPath: string, rootPath: string): string {
+  if (fullPath === rootPath) return fullPath;
+  if (fullPath.startsWith(`${rootPath}.`)) return fullPath.slice(rootPath.length + 1);
+  return fullPath;
+}
+
+function flattenXsdAttributes(complexType: Element, sourceBasePath: string, rootPath: string, context: XsdContext): ParsedRow[] {
+  return findDirectXsdChildren(complexType, 'attribute').map((attribute) => {
+    const name = attribute.getAttribute('name')?.trim() || 'attribute';
+    const sourceField = `${sourceBasePath}.@${name}`;
+    const declaredType = attribute.getAttribute('type')?.trim() ?? '';
+    const inlineSimpleType = findDirectXsdChild(attribute, 'simpleType');
+    const namedSimpleType = declaredType && !isBuiltinXsdType(declaredType) ? context.simpleTypes.get(stripXmlNamespace(declaredType)) : undefined;
+    const parsedType = inlineSimpleType
+      ? resolveXsdSimpleType(inlineSimpleType)
+      : declaredType
+        ? isBuiltinXsdType(declaredType)
+          ? xsdTypeToParsedType(declaredType)
+          : resolveXsdSimpleType(namedSimpleType)
+        : 'string';
+
+    return createParsedRow({
+      field: getDisplayPath(sourceField, rootPath),
+      sourceField,
+      type: parsedType,
+      required: attribute.getAttribute('use') === 'required' ? '+' : OPTIONAL_MARK,
+      description: getXsdDocumentation(attribute),
+      example: ''
+    });
+  });
+}
+
+function flattenXsdElement(
+  element: Element,
+  context: XsdContext,
+  rootPath?: string,
+  sourceBasePath = '',
+  seenTypes = new Set<string>()
+): ParsedRow[] {
+  const name = element.getAttribute('name')?.trim() || element.getAttribute('ref')?.trim() || 'element';
+  const localName = stripXmlNamespace(name);
+  const sourceField = sourceBasePath ? `${sourceBasePath}.${localName}` : localName;
+  const effectiveRootPath = rootPath ?? sourceField;
+  const repeating = isRepeatingXsdElement(element);
+  const required = isRequiredXsdElement(element) ? '+' : OPTIONAL_MARK;
+  const { parsedType, complexType } = getXsdElementType(element, context);
+
+  if (complexType) {
+    const declaredType = element.getAttribute('type')?.trim();
+    const typeKey = declaredType ? stripXmlNamespace(declaredType) : `${sourceField}:inline`;
+    const objectType = repeating ? 'array_object' : 'object';
+    const objectRow = createParsedRow({
+      field: getDisplayPath(sourceField, effectiveRootPath),
+      sourceField,
+      type: objectType,
+      required,
+      description: getXsdDocumentation(element),
+      example: STRUCTURED_EXAMPLE_PLACEHOLDER
+    });
+
+    if (seenTypes.has(typeKey)) return [objectRow];
+
+    const nextSeenTypes = new Set(seenTypes);
+    nextSeenTypes.add(typeKey);
+    return [
+      objectRow,
+      ...flattenXsdAttributes(complexType, sourceField, effectiveRootPath, context),
+      ...getXsdSequenceElements(complexType).flatMap((child) =>
+        flattenXsdElement(child, context, effectiveRootPath, repeating ? `${sourceField}[0]` : sourceField, nextSeenTypes)
+      )
+    ];
+  }
+
+  return [
+    createParsedRow({
+      field: getDisplayPath(sourceField, effectiveRootPath),
+      sourceField,
+      type: repeating ? 'array' : parsedType,
+      required,
+      description: getXsdDocumentation(element),
+      example: repeating ? STRUCTURED_EXAMPLE_PLACEHOLDER : ''
+    })
+  ];
+}
+
+function parseXsd(document: Document): ParsedRow[] {
+  const schemaRoot = document.documentElement;
+  const context = buildXsdContext(schemaRoot);
+  const rootElements = findDirectXsdChildren(schemaRoot, 'element');
+  if (rootElements.length === 0) {
+    throw new Error('XSD не содержит корневой xs:element');
+  }
+  return rootElements.flatMap((element) => flattenXsdElement(element, context));
+}
+
+function getXmlElementPath(parentPath: string, child: Element, siblings: Element[]): string {
+  const sameNameBefore = siblings.slice(0, siblings.indexOf(child)).filter((item) => item.nodeName === child.nodeName).length;
+  const sameNameTotal = siblings.filter((item) => item.nodeName === child.nodeName).length;
+  const segment = sameNameTotal > 1 ? `${child.nodeName}[${sameNameBefore}]` : child.nodeName;
+  return parentPath ? `${parentPath}.${segment}` : segment;
+}
+
+function flattenXmlElement(element: Element, sourcePath = element.nodeName, rootPath = sourcePath): ParsedRow[] {
+  const rows: ParsedRow[] = [];
+  const childElements = getChildElements(element);
+  const hasChildren = childElements.length > 0;
+  const textContent = getDirectTextContent(element);
+
+  if (sourcePath && hasChildren) {
+    rows.push(
+      createParsedRow({
+        field: getDisplayPath(sourcePath, rootPath),
+        sourceField: sourcePath,
+        type: 'object',
+        required: '+',
+        description: '',
+        example: STRUCTURED_EXAMPLE_PLACEHOLDER
+      })
+    );
+  }
+
+  for (const attribute of Array.from(element.attributes)) {
+    const sourceField = sourcePath ? `${sourcePath}.@${attribute.name}` : `@${attribute.name}`;
+    rows.push(
+      createParsedRow({
+        field: getDisplayPath(sourceField, rootPath),
+        sourceField,
+        type: inferPrimitiveXmlType(attribute.value),
+        required: '+',
+        description: '',
+        example: attribute.value
+      })
+    );
+  }
+
+  if (textContent) {
+    const sourceField = sourcePath && hasChildren ? `${sourcePath}.#text` : sourcePath || element.nodeName;
+    rows.push(
+      createParsedRow({
+        field: getDisplayPath(sourceField, rootPath),
+        sourceField,
+        type: inferPrimitiveXmlType(textContent),
+        required: '+',
+        description: '',
+        example: textContent
+      })
+    );
+  }
+
+  for (const child of childElements) {
+    rows.push(...flattenXmlElement(child, getXmlElementPath(sourcePath, child, childElements), rootPath));
+  }
+
+  if (!sourcePath && !textContent && childElements.length === 0 && element.attributes.length === 0) {
+    rows.push(
+      createParsedRow({
+        field: element.nodeName,
+        sourceField: element.nodeName,
+        type: 'string',
+        required: '+',
+        description: '',
+        example: ''
+      })
+    );
+  }
+
+  return rows;
+}
+
+function parseXml(input: string): ParsedRow[] {
+  const parser = new DOMParser();
+  const document = parser.parseFromString(input, 'application/xml');
+  const parserError = document.querySelector('parsererror');
+  if (parserError) {
+    throw new Error('Некорректный XML');
+  }
+
+  if (!document.documentElement) {
+    throw new Error('XML не содержит корневой элемент');
+  }
+
+  if (isXsdSchemaDocument(document)) {
+    return parseXsd(document);
+  }
+
+  return flattenXmlElement(document.documentElement);
+}
+
 function parseCurl(input: string): ParsedRow[] {
   const normalized = input.replace(/\\\r?\n/g, ' ').replace(/\r\n/g, ' ').replace(/\n/g, ' ');
   const rows: ParsedRow[] = [];
@@ -632,5 +959,6 @@ export function parseToRows(format: ParseFormat, input: string): ParsedRow[] {
   }
 
   if (format === 'json') return parseJson(input);
+  if (format === 'xml') return parseXml(input);
   return parseCurl(input);
 }

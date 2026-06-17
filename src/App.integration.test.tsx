@@ -635,7 +635,7 @@ describe('App integration', () => {
     renderApp();
 
     await user.click(screen.getByRole('button', { name: /↓ Импорт/i }));
-    const textarea = screen.getByPlaceholderText('Вставьте cURL или JSON');
+    const textarea = screen.getByPlaceholderText('Вставьте JSON, XML или cURL');
     fireEvent.change(textarea, { target: { value: '{"orderId":"123"}' } });
     await user.click(screen.getByRole('button', { name: 'Применить' }));
 
@@ -686,13 +686,13 @@ describe('App integration', () => {
     renderApp();
 
     await user.click(screen.getByRole('button', { name: /↓ Импорт/i }));
-    const textarea = screen.getByPlaceholderText('Вставьте cURL или JSON');
+    const textarea = screen.getByPlaceholderText('Вставьте JSON, XML или cURL');
     fireEvent.change(textarea, { target: { value: '{' } });
     await user.click(screen.getByRole('button', { name: 'Применить' }));
     expect(screen.getByText(/Ошибка/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Отмена' }));
-    expect(screen.queryByPlaceholderText('Вставьте cURL или JSON')).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('Вставьте JSON, XML или cURL')).not.toBeInTheDocument();
   });
 
   it('shows preview with added methods and invalid files before multi import', async () => {

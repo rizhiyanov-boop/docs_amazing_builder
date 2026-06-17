@@ -24,6 +24,16 @@ describe('requestHeaders', () => {
     expect(getInputDriftRows(rows)).toHaveLength(2);
   });
 
+  it('does not treat shortened xml display paths as input drift', () => {
+    const rows = [
+      makeParsedRow({ field: '@requestId', sourceField: 'CustomerInfoRequest.@requestId', origin: 'parsed' }),
+      makeParsedRow({ field: 'Header.SourceSystem', sourceField: 'CustomerInfoRequest.Header.SourceSystem', origin: 'parsed' })
+    ];
+
+    expect(hasInputDrift(rows)).toBe(false);
+    expect(getInputDriftRows(rows)).toHaveLength(0);
+  });
+
   it('splits headers, url and non-header rows', () => {
     const rows = [
       makeParsedRow({ field: 'X-Trace-Id', source: 'header' }),

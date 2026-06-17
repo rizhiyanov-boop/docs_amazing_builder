@@ -81,6 +81,7 @@ function highlightCurlCode(value: string): string {
 
 export function highlightCode(format: ParseFormat, value: string): string {
   if (format === 'json') return highlightJsonCode(value);
+  if (format === 'xml') return escapeCodeHtml(value);
   return highlightCurlCode(value);
 }
 

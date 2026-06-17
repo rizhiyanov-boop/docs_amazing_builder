@@ -26,6 +26,7 @@ import {
   getPreviouslyUsedClientKeys,
   isAuthHeader,
   isDefaultRequestHeader,
+  isDisplayFieldForSource,
   isRequestMappingRow
 } from './requestHeaders';
 import { renderHtmlDocument } from './renderHtml';
@@ -153,6 +154,7 @@ import type {
   RequestAuthType,
   RequestColumnKey,
   RequestMethod,
+  RequestProtocol,
   ValidationRuleRow,
   WorkspaceProjectData
 } from './types';
@@ -406,6 +408,22 @@ type JsonImportRoutingState = {
   domainModelEnabled: boolean;
   targetSide: JsonImportTargetSide;
 };
+
+function getFormatLabel(format: ParseFormat): string {
+  if (format === 'curl') return 'cURL';
+  if (format === 'xml') return 'XML';
+  return 'JSON';
+}
+
+function isXmlLikeSource(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed.startsWith('<') && (trimmed.endsWith('>') || /^<\?xml\b/i.test(trimmed));
+}
+
+function inferRequestProtocol(format: ParseFormat, current?: RequestProtocol): RequestProtocol {
+  if (format === 'xml') return 'SOAP';
+  return current ?? 'REST';
+}
 
 type WorkspaceMethodImportPreviewItem = {
   sourceName: string;
@@ -1550,7 +1568,8 @@ export default function App() {
           lastSyncedFormat: targetFormat,
           input: jsonImportRouting.rawText,
           rows: parsedRows,
-          error: parseError
+          error: parseError,
+          requestProtocol: isRequestSection(section) ? inferRequestProtocol(targetFormat, section.requestProtocol) : section.requestProtocol
         };
       });
 
@@ -1562,7 +1581,7 @@ export default function App() {
     setTab('editor');
     setImportError('');
     setJsonImportRouting(null);
-    const formatLabel = targetFormat === 'curl' ? 'cURL' : 'JSON';
+    const formatLabel = getFormatLabel(targetFormat);
     setToastMessage(
       `${formatLabel} импортирован и распарсен в ${jsonImportRouting.sampleType === 'request' ? 'Request' : 'Response'} (${jsonImportRouting.targetSide === 'client' ? 'Client' : 'Server'}).`
     );
@@ -2544,7 +2563,7 @@ export default function App() {
     if (onboardingNavStep === 'prepare-source') {
       return {
         title: 'Добавьте источник данных',
-        description: 'Откройте request/response и вставьте source (для request: JSON/cURL, для response: JSON), чтобы начать парсинг.',
+        description: 'Откройте request/response и вставьте source (для request: JSON/XML/cURL, для response: JSON/XML), чтобы начать парсинг.',
         actionLabel: 'Открыть source'
       };
     }
@@ -2847,8 +2866,8 @@ export default function App() {
     },
     {
       id: 'import',
-      title: 'Импорт JSON',
-      description: 'Загрузим JSON в нужный раздел.',
+      title: 'Импорт source',
+      description: 'Загрузим JSON, XML или cURL в нужный раздел.',
       action: handleImportOnboarding
     }
   ];
@@ -3401,7 +3420,8 @@ export default function App() {
             clientError: '',
             clientLastSyncedFormat: format,
             externalRequestUrl: isRequestSection(current) ? curlMeta?.url ?? current.externalRequestUrl ?? '' : current.externalRequestUrl,
-            externalRequestMethod: isRequestSection(current) ? curlMeta?.method ?? current.externalRequestMethod ?? 'POST' : current.externalRequestMethod
+            externalRequestMethod: isRequestSection(current) ? curlMeta?.method ?? current.externalRequestMethod ?? 'POST' : current.externalRequestMethod,
+            requestProtocol: isRequestSection(current) ? inferRequestProtocol(format, current.requestProtocol) : current.requestProtocol
           };
         }
         return {
@@ -3412,7 +3432,8 @@ export default function App() {
           error: '',
           lastSyncedFormat: format,
           requestUrl: isRequestSection(current) ? curlMeta?.url ?? current.requestUrl ?? '' : current.requestUrl,
-          requestMethod: isRequestSection(current) ? curlMeta?.method ?? current.requestMethod ?? 'POST' : current.requestMethod
+          requestMethod: isRequestSection(current) ? curlMeta?.method ?? current.requestMethod ?? 'POST' : current.requestMethod,
+          requestProtocol: isRequestSection(current) ? inferRequestProtocol(format, current.requestProtocol) : current.requestProtocol
         };
       });
       if (isEditingCurrentTarget) {
@@ -3745,11 +3766,11 @@ export default function App() {
   function applyInlineImport(section: ParsedSection): void {
     const rawText = inlineImportText.trim();
     if (!rawText) {
-      setInlineImportError('Введите cURL или JSON для импорта');
+      setInlineImportError('Введите JSON, XML или cURL для импорта');
       return;
     }
 
-    const format: ParseFormat = /^\s*curl\b/i.test(rawText) ? 'curl' : 'json';
+    const format = detectSourceFormat(rawText, isRequestSection(section)) ?? 'json';
 
     try {
       const shouldWrap = section.sectionType === 'response' && !section.domainModelEnabled && format === 'json';
@@ -3769,11 +3790,12 @@ export default function App() {
           error: '',
           lastSyncedFormat: format,
           requestUrl: isRequestSection(current) ? curlMeta?.url ?? current.requestUrl ?? '' : current.requestUrl,
-          requestMethod: isRequestSection(current) ? curlMeta?.method ?? current.requestMethod ?? 'POST' : current.requestMethod
+          requestMethod: isRequestSection(current) ? curlMeta?.method ?? current.requestMethod ?? 'POST' : current.requestMethod,
+          requestProtocol: isRequestSection(current) ? inferRequestProtocol(format, current.requestProtocol) : current.requestProtocol
         };
       });
 
-      setToastMessage(format === 'curl' ? 'cURL импортирован в секцию' : 'JSON импортирован в секцию');
+      setToastMessage(`${getFormatLabel(format)} импортирован в секцию`);
       cancelInlineImport();
     } catch (error) {
       setInlineImportError(error instanceof Error ? error.message : 'Ошибка парсинга');
@@ -4120,7 +4142,7 @@ export default function App() {
     try {
       const text = rawText.trim();
       if (!text) {
-        setImportError('Вставьте JSON или cURL.');
+        setImportError('Вставьте JSON, XML или cURL.');
         return;
       }
 
@@ -4132,9 +4154,13 @@ export default function App() {
       }
 
       if (parsed === null) {
-        // Fallback: allow cURL in project import dialog (request sample import flow).
-        parseToRows('curl', text);
-        const linkedSectionId = getParsedSectionIdByType('request');
+        const sourceFormat = detectSourceFormat(text, true);
+        if (sourceFormat !== 'curl' && sourceFormat !== 'xml') {
+          throw new Error('Неподдерживаемый формат: нужен JSON, XML или cURL');
+        }
+        parseToRows(sourceFormat, text);
+        const sampleType: JsonImportSampleType = 'request';
+        const linkedSectionId = getParsedSectionIdByType(sampleType);
         const linkedSection = sections.find(
           (section): section is ParsedSection => section.kind === 'parsed' && section.id === linkedSectionId
         );
@@ -4142,8 +4168,8 @@ export default function App() {
         setJsonImportRouting({
           fileName,
           rawText: text,
-          sourceFormat: 'curl',
-          sampleType: 'request',
+          sourceFormat,
+          sampleType,
           domainModelEnabled,
           targetSide: domainModelEnabled ? 'client' : 'server'
         });
@@ -5127,6 +5153,7 @@ export default function App() {
     if (!trimmed) return null;
 
     if (allowCurl && /^curl(?:\s|$)/i.test(trimmed)) return 'curl';
+    if (isXmlLikeSource(trimmed)) return 'xml';
 
     // Treat JSON-like input as JSON even if draft is not yet valid,
     // so Request source does not fall back to persisted cURL format.
@@ -5155,8 +5182,19 @@ export default function App() {
   }
 
   function validateSourceDraft(format: ParseFormat, draft: string): string {
-    if (format !== 'json') return '';
     if (!draft.trim()) return '';
+
+    if (format === 'xml') {
+      try {
+        const parsed = new DOMParser().parseFromString(draft, 'application/xml');
+        if (parsed.getElementsByTagName('parsererror').length > 0) return 'Некорректный XML';
+        return '';
+      } catch {
+        return 'Некорректный XML';
+      }
+    }
+
+    if (format !== 'json') return '';
 
     try {
       JSON.parse(draft);
@@ -5447,11 +5485,11 @@ export default function App() {
 
     const parts = value.split('.');
     if (parts.length === 1) {
-      return <span className="field-name-text">{value}</span>;
+      return <span className="field-name-text" title={value}>{value}</span>;
     }
 
     return (
-      <span className="field-name-text">
+      <span className="field-name-text" title={value}>
         {parts.map((part, index) => (
           <span key={`${value}-${index}`} className="field-name-part">
             {part}
@@ -6532,10 +6570,11 @@ export default function App() {
     const clientSourceField = row.clientSourceField?.trim();
     const serverMismatch =
       Boolean(row.field.trim()) &&
-      (row.origin === 'manual' || (row.origin === 'parsed' && row.sourceField && row.field !== row.sourceField));
+      (row.origin === 'manual' || (row.origin === 'parsed' && row.sourceField && !isDisplayFieldForSource(row.field, row.sourceField)));
     const clientMismatch =
       Boolean(row.field.trim()) &&
-      (row.clientOrigin === 'manual' || (row.clientOrigin === 'parsed' && row.clientSourceField && row.clientField && row.clientField !== row.clientSourceField));
+      (row.clientOrigin === 'manual' ||
+        (row.clientOrigin === 'parsed' && row.clientSourceField && row.clientField && !isDisplayFieldForSource(row.clientField, row.clientSourceField)));
     const serverDuplicate = Boolean(row.field.trim()) && duplicateFieldSet.has(row.field.trim());
     const clientDuplicate = clientSourceField ? duplicateClientFieldSet.has(clientSourceField) : false;
 
@@ -6560,7 +6599,7 @@ export default function App() {
     const driftRows = getInputDriftRows(rows);
     const canFix = driftRows.length > 0 || formatDrift;
     const expanded = expandedDriftAlerts[alertKey] ?? false;
-    const driftItems = driftRows.map((row) => (row.sourceField && row.field !== row.sourceField ? `${row.sourceField} -> ${row.field}` : row.field));
+    const driftItems = driftRows.map((row) => (row.sourceField && !isDisplayFieldForSource(row.field, row.sourceField) ? `${row.sourceField} -> ${row.field}` : row.field));
     const duplicateItems = duplicateValues.map((value) => `${duplicateLabel}: ${value}`);
     const allItems = [...driftItems, ...duplicateItems];
     const visibleRows = expanded ? allItems : allItems.slice(0, 3);
@@ -6744,7 +6783,7 @@ export default function App() {
     const isExternal = target === 'client';
     const urlLabel = isExternal ? 'Внешний URL' : 'URL метода';
 
-    const applyRequestMeta = (patch: Partial<Pick<ParsedSection, 'requestUrl' | 'requestMethod' | 'externalRequestUrl' | 'externalRequestMethod'>>) => {
+    const applyRequestMeta = (patch: Partial<Pick<ParsedSection, 'requestUrl' | 'requestMethod' | 'requestProtocol' | 'externalRequestUrl' | 'externalRequestMethod'>>) => {
       updateSection(section.id, (current) => {
         if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
 
@@ -6814,7 +6853,13 @@ export default function App() {
             </label>
             <label className="field">
               <div className="label input-label-strong">Протокол</div>
-              <input type="text" value="REST" readOnly />
+              <select
+                value={section.requestProtocol ?? inferRequestProtocol(getSourceFormat(section, target))}
+                onChange={(e) => applyRequestMeta({ requestProtocol: e.target.value as RequestProtocol })}
+              >
+                <option value="REST">REST</option>
+                <option value="SOAP">SOAP</option>
+              </select>
             </label>
           </div>
         </div>
@@ -6830,7 +6875,7 @@ export default function App() {
     const isSchemaEditing = editingSchema?.sectionId === section.id && editingSchema.target === target;
     const currentSchemaValue = isSchemaEditing ? editingSchema.draft : schemaValue;
     const currentValue = isEditing ? editingSource.draft : value;
-    const sourcePlaceholder = isRequestSection(section) ? 'Вставьте JSON или cURL' : 'Вставьте JSON';
+    const sourcePlaceholder = isRequestSection(section) ? 'Вставьте JSON, XML или cURL' : 'Вставьте JSON или XML';
     const shouldOpenEmptyInput = !value.trim() && !isEditing;
     const hasSourceValue = Boolean(currentValue.trim());
     const fixJsonBusy = aiBusyKey === `fix-json:${section.id}:${target}`;
@@ -7670,7 +7715,7 @@ export default function App() {
                       setInlineImportText(event.target.value);
                       if (inlineImportError) setInlineImportError('');
                     }}
-                    placeholder="Вставьте cURL или JSON"
+                    placeholder="Вставьте JSON, XML или cURL"
                     rows={6}
                     style={{
                       width: '100%',
@@ -8157,9 +8202,9 @@ export default function App() {
       )}
 
       {jsonImportRouting && (
-        <div className="import-routing-backdrop" role="dialog" aria-modal="true" aria-label="Маршрутизация JSON импорта">
+        <div className="import-routing-backdrop" role="dialog" aria-modal="true" aria-label="Маршрутизация source импорта">
           <div className="import-routing-card">
-            <h2>Куда импортировать JSON?</h2>
+            <h2>Куда импортировать {getFormatLabel(jsonImportRouting.sourceFormat)}?</h2>
             <p className="import-routing-file">Файл: {jsonImportRouting.fileName}</p>
 
             <label className="field">
@@ -8242,7 +8287,7 @@ export default function App() {
       {projectTextImport && (
         <div className="import-routing-backdrop" role="dialog" aria-modal="true" aria-label="Импорт проекта из текста">
           <div className="import-routing-card">
-            <h2>Импорт JSON</h2>
+            <h2>Импорт source</h2>
 
             <div className="row gap import-routing-actions-start">
               <button
@@ -8281,7 +8326,7 @@ export default function App() {
                       : current
                   )
                 }
-                placeholder="Вставьте JSON или cURL"
+                placeholder="Вставьте JSON, XML или cURL"
               />
             </label>
 
@@ -8289,7 +8334,7 @@ export default function App() {
               <button type="button" className="ghost" onClick={closeProjectImportDialog}>Отмена</button>
               <button
                 type="button"
-                onClick={() => processImportedText(projectTextImport.rawText, 'Вставленный JSON')}
+                onClick={() => processImportedText(projectTextImport.rawText, 'Вставленный source')}
                 disabled={!projectTextImport.rawText.trim()}
               >
                 Импортировать
@@ -8311,7 +8356,7 @@ export default function App() {
               return (
                 <>
             <h2>Импорт в Source</h2>
-            <p className="import-routing-file">{sourceImportAllowsCurl ? 'Поддерживается JSON и cURL' : 'Поддерживается только JSON'}</p>
+            <p className="import-routing-file">{sourceImportAllowsCurl ? 'Поддерживается JSON, XML и cURL' : 'Поддерживается JSON и XML'}</p>
 
             <label className="field">
               <div className="label">Текст source</div>
@@ -8329,7 +8374,7 @@ export default function App() {
                       : current
                   )
                 }
-                placeholder={sourceImportAllowsCurl ? 'Вставьте JSON или cURL' : 'Вставьте JSON'}
+                placeholder={sourceImportAllowsCurl ? 'Вставьте JSON, XML или cURL' : 'Вставьте JSON или XML'}
               />
             </label>
 

@@ -34,6 +34,16 @@ function isDualModelSectionId(id: string): boolean {
   return id === 'request' || id === 'response';
 }
 
+function normalizeParseFormat(format: unknown): 'json' | 'curl' | 'xml' {
+  if (format === 'curl' || format === 'xml') return format;
+  return 'json';
+}
+
+function normalizeRequestProtocol(protocol: unknown): 'REST' | 'SOAP' {
+  if (protocol === 'SOAP') return 'SOAP';
+  return 'REST';
+}
+
 function resolveParsedSectionType(section: Extract<DocSection, { kind: 'parsed' }>): ParsedSectionType {
   if (section.sectionType) return section.sectionType;
   if (section.id === 'request') return 'request';
@@ -147,7 +157,7 @@ export function sanitizeSections(sections: DocSection[]): DocSection[] {
     }
 
     if (!isDualModelSectionId(normalizedSection.id)) {
-      const normalizedFormat = normalizedSection.format === 'curl' ? 'curl' : 'json';
+      const normalizedFormat = normalizeParseFormat(normalizedSection.format);
       const normalizedRows = Array.isArray(normalizedSection.rows) ? normalizedSection.rows.map(normalizeRow) : [];
 
       return {
@@ -164,7 +174,7 @@ export function sanitizeSections(sections: DocSection[]): DocSection[] {
     }
 
     const sectionType = resolveParsedSectionType(normalizedSection);
-    const normalizedFormat = normalizedSection.format === 'curl' ? 'curl' : 'json';
+    const normalizedFormat = normalizeParseFormat(normalizedSection.format);
     const normalizedRows = Array.isArray(normalizedSection.rows) ? normalizedSection.rows.map(normalizeRow) : [];
 
     return {
@@ -178,8 +188,8 @@ export function sanitizeSections(sections: DocSection[]): DocSection[] {
       lastSyncedFormat: normalizedSection.lastSyncedFormat ?? normalizedFormat,
       rows: normalizedRows,
       domainModelEnabled: normalizedSection.domainModelEnabled ?? false,
-      clientFormat: normalizedSection.clientFormat ?? 'json',
-      clientLastSyncedFormat: normalizedSection.clientLastSyncedFormat ?? normalizedSection.clientFormat ?? 'json',
+      clientFormat: normalizeParseFormat(normalizedSection.clientFormat),
+      clientLastSyncedFormat: normalizeParseFormat(normalizedSection.clientLastSyncedFormat ?? normalizedSection.clientFormat),
       clientInput: normalizedSection.clientInput ?? '',
       clientRows: (normalizedSection.clientRows ?? []).map(normalizeRow),
       clientError: normalizedSection.clientError ?? '',
@@ -193,7 +203,7 @@ export function sanitizeSections(sections: DocSection[]): DocSection[] {
       authApiKeyExample: sectionType === 'request' ? normalizedSection.authApiKeyExample ?? DEFAULT_API_KEY_EXAMPLE : undefined,
       requestUrl: sectionType === 'request' ? normalizedSection.requestUrl ?? '' : undefined,
       requestMethod: sectionType === 'request' ? normalizedSection.requestMethod ?? 'POST' : undefined,
-      requestProtocol: sectionType === 'request' ? normalizedSection.requestProtocol ?? 'REST' : undefined,
+      requestProtocol: sectionType === 'request' ? normalizeRequestProtocol(normalizedSection.requestProtocol) : undefined,
       externalRequestUrl: sectionType === 'request' ? normalizedSection.externalRequestUrl ?? '' : undefined,
       externalRequestMethod: sectionType === 'request' ? normalizedSection.externalRequestMethod ?? 'POST' : undefined,
       externalAuthType: sectionType === 'request' ? normalizedSection.externalAuthType ?? 'none' : undefined,

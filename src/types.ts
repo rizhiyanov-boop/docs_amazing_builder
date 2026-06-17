@@ -1,8 +1,8 @@
-export type ParseFormat = 'json' | 'curl';
+export type ParseFormat = 'json' | 'curl' | 'xml';
 export type RequestColumnKey = 'field' | 'type' | 'required' | 'clientField' | 'description' | 'maskInLogs' | 'example';
 export type RequestAuthType = 'none' | 'bearer' | 'basic' | 'api-key';
 export type RequestMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
-export type RequestProtocol = 'REST';
+export type RequestProtocol = 'REST' | 'SOAP';
 export type ParsedSectionType = 'generic' | 'request' | 'response';
 export type DiagramEngine = 'mermaid' | 'plantuml';
 export type ErrorType = 'CommonException' | 'BusinessException' | 'AlertException' | '-';

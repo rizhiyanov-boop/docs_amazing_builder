@@ -110,6 +110,35 @@ describe('renderers', () => {
     expect(wiki).toContain('curl -X POST "https://api.example.com/payments"');
   });
 
+  it('renders SOAP protocol for XML request sections', () => {
+    const sections: DocSection[] = [
+      makeRequestSection({
+        format: 'xml',
+        requestProtocol: 'SOAP',
+        input: '<CreditApplicationRequest><Header /></CreditApplicationRequest>',
+        rows: [
+          {
+            field: 'CreditApplicationRequest.Header',
+            sourceField: 'CreditApplicationRequest.Header',
+            origin: 'parsed',
+            enabled: true,
+            type: 'object',
+            required: '+',
+            description: '',
+            example: '-',
+            source: 'body'
+          }
+        ]
+      })
+    ];
+
+    const wiki = renderWikiDocument(sections);
+    const html = renderHtmlDocument(sections, 'light', { interactive: false });
+
+    expect(wiki).toContain('*Протокол:* SOAP');
+    expect(html).toContain('SOAP');
+  });
+
   it('builds wiki curl body from request JSON example when it exists', () => {
     const sections: DocSection[] = [
       makeRequestSection({

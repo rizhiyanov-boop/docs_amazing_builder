@@ -143,6 +143,7 @@ function highlightCurlCode(value: string): string {
 
 function highlightCode(format: ParseFormat, value: string): string {
   if (format === 'json') return highlightJsonCode(value);
+  if (format === 'xml') return escapeHtml(value);
   return highlightCurlCode(value);
 }
 
@@ -302,7 +303,7 @@ function renderRequestSection(section: ParsedSection, interactive = true): strin
     {
       requestUrl,
       requestMethod: section.requestMethod,
-      bodyJson: section.format === 'json' ? section.input : undefined
+      bodyText: section.format === 'json' || section.format === 'xml' ? section.input : undefined
     }
   );
   const clientCurl =
@@ -310,7 +311,7 @@ function renderRequestSection(section: ParsedSection, interactive = true): strin
       ? buildInputFromRows('curl', externalHeaders.concat((section.clientRows ?? []).filter((row) => row.source !== 'header')), {
         requestUrl: externalRequestUrl,
         requestMethod: section.externalRequestMethod,
-        bodyJson: section.clientFormat === 'json' ? (section.clientInput ?? '') : undefined
+        bodyText: section.clientFormat === 'json' || section.clientFormat === 'xml' ? (section.clientInput ?? '') : undefined
       })
       : '';
   const meta = [renderTag(requestMethod), renderTag(requestProtocol), renderTag(section.format.toUpperCase())].join(' ');

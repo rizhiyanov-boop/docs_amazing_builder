@@ -1,19 +1,35 @@
 import { normalizeArrayFieldPath } from './fieldPath';
 import { getRequestHeaderRows, getRequestRows } from './requestHeaders';
-import type { ErrorRow, ErrorsSection, MethodDocument, ParsedRow, ParsedSection, ValidationRuleRow } from './types';
+import type { ErrorRow, ErrorsSection, MethodDocument, ParseFormat, ParsedRow, ParsedSection, ValidationRuleRow } from './types';
+
+type MockBody = Record<string, unknown> | string;
+
+type MockResponse = {
+  type: 'json' | 'xml';
+  status: number;
+  headers: Record<string, string>;
+  body: MockBody;
+};
 
 type MockRule = {
   comparator: string;
-  errResponse: {
-    type: 'json';
-    status: number;
-    headers: Record<string, string>;
-    body: Record<string, unknown>;
-  };
+  errResponse: MockResponse;
   errorParams: Record<string, string[]>;
   value: string | number | boolean;
   pairs: Array<Record<string, unknown>>;
 };
+
+function isXmlFormat(format: ParseFormat | undefined): boolean {
+  return format === 'xml';
+}
+
+function getMockContentType(format: ParseFormat | undefined): string {
+  return isXmlFormat(format) ? 'application/xml' : 'application/json';
+}
+
+function getMockPayloadType(format: ParseFormat | undefined): MockResponse['type'] {
+  return isXmlFormat(format) ? 'xml' : 'json';
+}
 
 function toScalarExample(row: ParsedRow): string | number | boolean {
   const example = row.example.trim();
@@ -118,15 +134,19 @@ function parseRuleValue(condition: string, fallback: string | number | boolean):
   return trimmed;
 }
 
-function responseFromErrorRow(row: ErrorRow | undefined): { status: number; body: Record<string, unknown> } {
-  if (!row) return { status: 400, body: {} };
+function responseFromErrorRow(row: ErrorRow | undefined, format: ParseFormat | undefined): { status: number; body: MockBody } {
+  if (!row) return { status: 400, body: isXmlFormat(format) ? '' : {} };
 
   const status = Number(row.serverHttpStatus.trim()) || Number(row.clientHttpStatus.trim()) || 400;
-  const json = row.responseCode.trim();
-  if (!json) return { status, body: {} };
+  const payload = row.responseCode.trim();
+  if (!payload) return { status, body: isXmlFormat(format) ? '' : {} };
+
+  if (isXmlFormat(format)) {
+    return { status, body: payload };
+  }
 
   try {
-    const parsed = JSON.parse(json) as Record<string, unknown>;
+    const parsed = JSON.parse(payload) as Record<string, unknown>;
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       return { status, body: parsed };
     }
@@ -140,14 +160,15 @@ function responseFromErrorRow(row: ErrorRow | undefined): { status: number; body
 function buildFieldRules(
   row: ParsedRow,
   relatedValidation: ValidationRuleRow[],
-  validationErrorResponse: { status: number; body: Record<string, unknown> },
-  requiredErrorResponse: { status: number; body: Record<string, unknown> }
+  validationErrorResponse: { status: number; body: MockBody },
+  requiredErrorResponse: { status: number; body: MockBody },
+  responseFormat: ParseFormat | undefined
 ): { required: boolean; rules: MockRule[]; errorRequire: MockRule['errResponse'] } {
   const normalizedType = toMockType(row.type);
   const baseErrResponse: MockRule['errResponse'] = {
-    type: 'json',
+    type: getMockPayloadType(responseFormat),
     status: validationErrorResponse.status,
-    headers: { 'content-Type': 'application/json' },
+    headers: { 'content-Type': getMockContentType(responseFormat) },
     body: validationErrorResponse.body
   };
 
@@ -202,9 +223,9 @@ function buildFieldRules(
     required: row.required === '+',
     rules,
     errorRequire: {
-      type: 'json',
+      type: getMockPayloadType(responseFormat),
       status: requiredErrorResponse.status,
-      headers: { 'content-Type': 'application/json' },
+      headers: { 'content-Type': getMockContentType(responseFormat) },
       body: requiredErrorResponse.body
     }
   };
@@ -255,12 +276,14 @@ export function buildMockServicePayload(method: MethodDocument): Record<string, 
   const requiredErrorRow = errorRows.find((row) => row.trigger.toLowerCase().includes('обяз')) ?? validationErrorRow;
   const defaultFailRow = errorRows.find((row) => row.serverHttpStatus.trim() === '400') ?? errorRows[0];
 
-  const validationErrorResponse = responseFromErrorRow(validationErrorRow);
-  const requiredErrorResponse = responseFromErrorRow(requiredErrorRow);
-  const failResponse = responseFromErrorRow(defaultFailRow);
+  const responseFormat = responseSection?.format;
+  const requestFormat = requestSection?.format;
+  const validationErrorResponse = responseFromErrorRow(validationErrorRow, responseFormat);
+  const requiredErrorResponse = responseFromErrorRow(requiredErrorRow, responseFormat);
+  const failResponse = responseFromErrorRow(defaultFailRow, responseFormat);
 
   const exampleHeaders: Record<string, unknown> = {};
-  const exampleBody: Record<string, unknown> = {};
+  let exampleBody: MockBody = isXmlFormat(requestFormat) ? requestSection?.input.trim() ?? '' : {};
   const bodyRules: Record<string, unknown> = {};
   const headerRules: Record<string, unknown> = {};
 
@@ -276,34 +299,38 @@ export function buildMockServicePayload(method: MethodDocument): Record<string, 
         row,
         findRelatedValidationRules(row.field, validationRules),
         validationErrorResponse,
-        requiredErrorResponse
+        requiredErrorResponse,
+        responseFormat
       );
     }
 
-    const bodyRows = rows.filter((row) => row.source !== 'header' && row.source !== 'url');
+    const bodyRows = rows.filter((row) => row.source !== 'header' && row.source !== 'url' && row.source !== 'query');
     for (const row of bodyRows) {
       const field = normalizeFieldName(row.field);
       if (!field) continue;
 
-      setDeepValue(exampleBody, field, toExampleValue(row));
+      if (!isXmlFormat(requestFormat) && typeof exampleBody !== 'string') {
+        setDeepValue(exampleBody, field, toExampleValue(row));
+      }
       bodyRules[field] = buildFieldRules(
         row,
         findRelatedValidationRules(field, validationRules),
         validationErrorResponse,
-        requiredErrorResponse
+        requiredErrorResponse,
+        responseFormat
       );
     }
   }
 
-  const responseRows = responseSection ? getRequestRows(responseSection).filter((row) => row.source !== 'header' && row.source !== 'url') : [];
+  const responseRows = responseSection ? getRequestRows(responseSection).filter((row) => row.source !== 'header' && row.source !== 'url' && row.source !== 'query') : [];
   const firstResponseRow = responseRows[0];
   const firstBodyRuleField = Object.keys(bodyRules)[0] ?? 'globId';
   const firstBodyRuleType = requestSection
     ? toMockType((getRequestRows(requestSection).find((row) => normalizeFieldName(row.field) === firstBodyRuleField)?.type ?? 'string'))
     : 'string';
 
-  const successBody: Record<string, unknown> = {};
-  if (responseRows.length > 0) {
+  let successBody: MockBody = isXmlFormat(responseFormat) ? responseSection?.input.trim() ?? '' : {};
+  if (!isXmlFormat(responseFormat) && responseRows.length > 0 && typeof successBody !== 'string') {
     for (const row of responseRows) {
       const field = normalizeFieldName(row.field);
       if (!field) continue;
@@ -311,9 +338,11 @@ export function buildMockServicePayload(method: MethodDocument): Record<string, 
     }
   }
 
-  const responseOkBody = Object.keys(successBody).length > 0
+  const responseOkBody = typeof successBody === 'string'
     ? successBody
-    : (firstResponseRow ? { code: toExampleValue(firstResponseRow) } : { code: 'Success' });
+    : Object.keys(successBody).length > 0
+      ? successBody
+      : (firstResponseRow ? { code: toExampleValue(firstResponseRow) } : { code: 'Success' });
 
   return {
     example: {
@@ -341,19 +370,16 @@ export function buildMockServicePayload(method: MethodDocument): Record<string, 
         response: {
           status: 200,
           headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': getMockContentType(responseFormat)
           },
-          body: {
-            ok: true,
-            echo: '$inps'
-          }
+          body: isXmlFormat(responseFormat) ? responseOkBody : { ok: true, echo: '$inps' }
         }
       },
       {
         response: {
           status: failResponse.status,
           headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': getMockContentType(responseFormat)
           },
           body: failResponse.body
         }

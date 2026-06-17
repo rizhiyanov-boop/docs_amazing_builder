@@ -19,7 +19,7 @@ export const ONBOARDING_STEPS: readonly OnboardingStepDefinition[] = [
   {
     id: 'prepare-source',
     title: 'Подготовьте источник',
-    description: 'Вставьте cURL или JSON в блок request/response.'
+    description: 'Вставьте JSON, XML или cURL в блок request/response.'
   },
   {
     id: 'run-parse',

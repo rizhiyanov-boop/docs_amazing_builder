@@ -4,6 +4,7 @@ type BuildInputOptions = {
   requestUrl?: string;
   requestMethod?: RequestMethod;
   bodyJson?: string;
+  bodyText?: string;
 };
 
 function toQueryParamValue(value: unknown): string {
@@ -143,6 +144,115 @@ function buildJsonObject(rows: ParsedRow[]): unknown {
   return root;
 }
 
+type XmlNode = {
+  name: string;
+  attributes: Record<string, string>;
+  children: XmlNode[];
+  text: string;
+};
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function sanitizeXmlName(value: string): string {
+  const trimmed = value.trim();
+  if (/^[A-Za-z_][\w.-]*$/.test(trimmed)) return trimmed;
+  return 'field';
+}
+
+function tokenizeXmlPath(path: string): string[] {
+  return path
+    .replace(/^\$\./, '')
+    .replace(/^\$/, '')
+    .replace(/^\./, '')
+    .split('.')
+    .filter(Boolean);
+}
+
+function parseXmlPathToken(token: string): { name: string; index: number } {
+  const match = token.match(/^(.+?)\[(\d+)\]$/);
+  if (!match) return { name: token, index: 0 };
+  return { name: match[1], index: Number(match[2]) };
+}
+
+function ensureXmlChild(parent: XmlNode, token: string): XmlNode {
+  const { name, index } = parseXmlPathToken(token);
+  const sanitizedName = sanitizeXmlName(name);
+  const existingChildren = parent.children.filter((child) => child.name === sanitizedName);
+  const existing = existingChildren[index];
+  if (existing) return existing;
+  let child: XmlNode = { name: sanitizedName, attributes: {}, children: [], text: '' };
+  for (let childIndex = existingChildren.length; childIndex <= index; childIndex += 1) {
+    child = { name: sanitizedName, attributes: {}, children: [], text: '' };
+    parent.children.push(child);
+  }
+  return child;
+}
+
+function setXmlPath(root: XmlNode, path: string, value: string): void {
+  const tokens = tokenizeXmlPath(path);
+  if (tokens.length === 0) return;
+
+  const startsWithRoot = parseXmlPathToken(tokens[0]).name === root.name;
+  let current = root;
+  const startIndex = startsWithRoot ? 1 : 0;
+
+  for (let index = startIndex; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token.startsWith('@')) {
+      current.attributes[sanitizeXmlName(token.slice(1))] = value;
+      return;
+    }
+    if (token === '#text') {
+      current.text = value;
+      return;
+    }
+    if (index === tokens.length - 1) {
+      const child = ensureXmlChild(current, token);
+      child.text = value;
+      return;
+    }
+    current = ensureXmlChild(current, token);
+  }
+}
+
+function renderXmlNode(node: XmlNode, indent = 0): string {
+  const pad = '  '.repeat(indent);
+  const attributes = Object.entries(node.attributes)
+    .map(([key, value]) => ` ${key}="${escapeXml(value)}"`)
+    .join('');
+
+  if (node.children.length === 0) {
+    return `${pad}<${node.name}${attributes}>${escapeXml(node.text)}</${node.name}>`;
+  }
+
+  const textLine = node.text ? [`${'  '.repeat(indent + 1)}${escapeXml(node.text)}`] : [];
+  const childLines = node.children.map((child) => renderXmlNode(child, indent + 1));
+  return [`${pad}<${node.name}${attributes}>`, ...textLine, ...childLines, `${pad}</${node.name}>`].join('\n');
+}
+
+function buildXmlDocument(rows: ParsedRow[]): string {
+  const getXmlRowPath = (row: ParsedRow): string => row.sourceField?.trim() || row.field.trim();
+  const bodyRows = rows.filter((row) => getXmlRowPath(row) && row.source !== 'header' && row.source !== 'url' && row.source !== 'query');
+  const firstField = bodyRows[0] ? getXmlRowPath(bodyRows[0]) : 'root';
+  const rootName = sanitizeXmlName(parseXmlPathToken(tokenizeXmlPath(firstField)[0] || 'root').name);
+  const root: XmlNode = { name: rootName, attributes: {}, children: [], text: '' };
+
+  for (const row of bodyRows) {
+    const field = getXmlRowPath(row);
+    if (!field || row.type === 'object' || row.type === 'array' || row.type === 'array_object') continue;
+    setXmlPath(root, field, String(parseExampleValue(row)));
+  }
+
+  return renderXmlNode(root);
+}
+
 function buildCurl(rows: ParsedRow[], options?: BuildInputOptions): string {
   const baseUrl = options?.requestUrl?.trim() || rows.find((row) => row.source === 'url')?.example.trim() || 'https://example.com';
   const method = options?.requestMethod?.trim() || 'POST';
@@ -153,7 +263,7 @@ function buildCurl(rows: ParsedRow[], options?: BuildInputOptions): string {
     .filter((row) => row.source === 'header')
     .map((row) => `-H "${row.field}: ${row.example.trim()}"`);
   const bodyRows = rows.filter((row) => row.source !== 'header' && row.source !== 'url' && row.source !== 'query' && row.field.trim());
-  const bodyFromExample = options?.bodyJson?.trim() ?? '';
+  const bodyFromExample = options?.bodyText?.trim() || options?.bodyJson?.trim() || '';
   let body = '';
 
   if (bodyFromExample && normalizedMethod !== 'GET' && normalizedMethod !== 'HEAD') {
@@ -173,5 +283,6 @@ function buildCurl(rows: ParsedRow[], options?: BuildInputOptions): string {
 
 export function buildInputFromRows(format: ParseFormat, rows: ParsedRow[], options?: BuildInputOptions): string {
   if (format === 'json') return JSON.stringify(buildJsonObject(rows), null, 2);
+  if (format === 'xml') return buildXmlDocument(rows);
   return buildCurl(rows, options);
 }

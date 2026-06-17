@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { renderHtmlDocument } from './renderHtml';
 import { renderProjectHtmlDocument, renderProjectWikiDocument } from './projectExport';
 import { renderWikiDocument } from './renderWiki';
-import { makeRequestSection, makeSectionsForRender } from './test/fixtures';
+import { makeRequestSection, makeResponseSection, makeSectionsForRender } from './test/fixtures';
 import type { DocSection, MethodDocument, MethodGroup, ProjectSection } from './types';
 
 describe('renderers', () => {
@@ -108,6 +108,54 @@ describe('renderers', () => {
     const wiki = renderWikiDocument(sections);
     expect(wiki).toContain('{expand:title=Server cURL}');
     expect(wiki).toContain('curl -X POST "https://api.example.com/payments"');
+  });
+
+  it('renders server response example in wiki from json schema examples when source input is empty', () => {
+    const sections: DocSection[] = [
+      makeResponseSection({
+        input: '',
+        schemaInput: JSON.stringify({
+          type: 'array',
+          examples: [
+            [
+              {
+                id: 1001,
+                fio: 'Ivanov Ivan'
+              }
+            ]
+          ],
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'integer' },
+              fio: { type: 'string' }
+            }
+          }
+        }),
+        rows: [
+          {
+            field: 'id',
+            sourceField: 'id',
+            origin: 'parsed',
+            enabled: true,
+            clientField: 'data[].employeeId',
+            type: 'long',
+            required: '+',
+            description: 'Identifier',
+            example: '1001',
+            source: 'parsed'
+          }
+        ],
+        domainModelEnabled: true,
+        clientInput: JSON.stringify({ data: [{ employeeId: 1001 }] }, null, 2)
+      })
+    ];
+
+    const wiki = renderWikiDocument(sections);
+
+    expect(wiki).toContain('{expand:title=Пример JSON (Server response)}');
+    expect(wiki).toContain('"id": 1001');
+    expect(wiki).toContain('{expand:title=Пример JSON (Client response)}');
   });
 
   it('renders SOAP protocol for XML request sections', () => {

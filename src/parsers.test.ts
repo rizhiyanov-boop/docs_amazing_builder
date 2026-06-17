@@ -9,7 +9,7 @@ describe('parsers', () => {
     expect(rows.some((row) => row.field === 'user' && row.type === 'object')).toBe(true);
     expect(rows.some((row) => row.field === 'user.name' && row.type === 'string')).toBe(true);
     expect(rows.some((row) => row.field === 'items' && row.type === 'array_object')).toBe(true);
-    expect(rows.some((row) => row.field === 'items[0]' && row.type === 'object')).toBe(true);
+    expect(rows.some((row) => row.field === 'items[0]' && row.type === 'object')).toBe(false);
     expect(rows.some((row) => row.field === 'items[0].active' && row.type === 'boolean')).toBe(true);
   });
 
@@ -171,7 +171,7 @@ describe('parsers', () => {
     expect(rows.some((row) => row.field === 'globId' && row.type === 'string' && row.required === '+')).toBe(true);
     expect(rows.some((row) => row.field === 'amount' && row.type === 'number' && row.required === '-')).toBe(true);
     expect(rows.some((row) => row.field === 'items' && row.type === 'array_object')).toBe(true);
-    expect(rows.some((row) => row.field === 'items[0]' && row.type === 'object')).toBe(true);
+    expect(rows.some((row) => row.field === 'items[0]' && row.type === 'object')).toBe(false);
     expect(rows.some((row) => row.field === 'items[0].id' && row.type === 'int')).toBe(true);
     expect(rows.some((row) => row.field === 'items[0].active' && row.type === 'boolean')).toBe(true);
   });
@@ -214,7 +214,7 @@ describe('parsers', () => {
     expect(rows.find((row) => row.field === 'amount')?.example).toBe('2500');
     expect(rows.find((row) => row.field === 'currency')?.example).toBe('UZS');
     expect(rows.find((row) => row.field === 'items')?.example).toBe('-');
-    expect(rows.find((row) => row.field === 'items[0]')?.example).toBe('-');
+    expect(rows.find((row) => row.field === 'items[0]')).toBeUndefined();
     expect(rows.find((row) => row.field === 'items[0].id')?.example).toBe('10');
     expect(rows.find((row) => row.field === 'items[0].status')?.example).toBe('ACTIVE');
   });

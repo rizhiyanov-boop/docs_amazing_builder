@@ -87,6 +87,39 @@ function toWikiSourceCodeBlock(value: string, format: ParseFormat): string[] {
   return [`{code:${codeLanguage}}`, ...payload.split('\n').map((line) => escapeWiki(line)), '{code}'];
 }
 
+function getJsonSchemaExampleInput(schemaInput: string): string {
+  if (!schemaInput.trim()) return '';
+
+  try {
+    const schema = JSON.parse(schemaInput) as Record<string, unknown>;
+    let example: unknown;
+    if (Array.isArray(schema.examples) && schema.examples.length > 0) {
+      example = schema.examples[0];
+    } else if (Object.prototype.hasOwnProperty.call(schema, 'example')) {
+      example = schema.example;
+    } else if (Object.prototype.hasOwnProperty.call(schema, 'default')) {
+      example = schema.default;
+    } else {
+      return '';
+    }
+
+    return JSON.stringify(example, null, 2);
+  } catch {
+    return '';
+  }
+}
+
+function getParsedExampleInput(format: ParseFormat, rawInput: string, schemaInput: string, rows: ParsedRow[]): string {
+  const trimmedInput = rawInput.trim();
+  if (trimmedInput) return trimmedInput;
+  if (format === 'json') {
+    const schemaExample = getJsonSchemaExampleInput(schemaInput);
+    if (schemaExample) return schemaExample;
+  }
+  if (rows.length === 0) return '';
+  return buildInputFromRows(format, rows);
+}
+
 type JsonSchemaNode = {
   type?: string | string[];
   properties?: Record<string, JsonSchemaNode>;
@@ -312,6 +345,10 @@ function renderParsedSourceExamples(section: ParsedSection): string[] {
   const sectionLabel = section.sectionType === 'response' ? 'response' : 'request';
   const serverFormat = section.format;
   const clientFormat = section.clientFormat ?? 'json';
+  const serverExampleInput = isRequest ? serverInput : getParsedExampleInput(serverFormat, serverInput, serverSchema, section.rows);
+  const clientExampleInput = section.domainModelEnabled
+    ? isRequest ? clientInput : getParsedExampleInput(clientFormat, clientInput, clientSchema, section.clientRows ?? [])
+    : '';
   const serverCurl = isRequest
     ? buildInputFromRows(
       'curl',
@@ -342,10 +379,10 @@ function renderParsedSourceExamples(section: ParsedSection): string[] {
   const serverFormatLabel = serverFormat === 'curl' ? 'cURL' : serverFormat === 'xml' ? 'XML' : 'JSON';
   const clientFormatLabel = clientFormat === 'curl' ? 'cURL' : clientFormat === 'xml' ? 'XML' : 'JSON';
 
-  if (serverInput) {
+  if (serverExampleInput) {
     lines.push('');
     lines.push(`{expand:title=Пример ${serverFormatLabel} (Server ${sectionLabel})}`);
-    lines.push(...toWikiSourceCodeBlock(serverInput, serverFormat));
+    lines.push(...toWikiSourceCodeBlock(serverExampleInput, serverFormat));
     lines.push('{expand}');
   }
 
@@ -356,10 +393,10 @@ function renderParsedSourceExamples(section: ParsedSection): string[] {
     lines.push('{expand}');
   }
 
-  if (clientInput) {
+  if (clientExampleInput) {
     lines.push('');
     lines.push(`{expand:title=Пример ${clientFormatLabel} (Client ${sectionLabel})}`);
-    lines.push(...toWikiSourceCodeBlock(clientInput, clientFormat));
+    lines.push(...toWikiSourceCodeBlock(clientExampleInput, clientFormat));
     lines.push('{expand}');
   }
 

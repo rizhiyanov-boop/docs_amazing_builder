@@ -34,7 +34,7 @@ function inferType(value: unknown): string {
   return typeof value;
 }
 
-function flattenJson(value: unknown, basePath = ''): ParsedRow[] {
+function flattenJson(value: unknown, basePath = '', suppressObjectRow = false): ParsedRow[] {
   if (value === null || value === undefined) {
     return [];
   }
@@ -64,13 +64,13 @@ function flattenJson(value: unknown, basePath = ''): ParsedRow[] {
       })
     ];
 
-    rows.push(...flattenJson(first, `${basePath}[0]`));
+    rows.push(...flattenJson(first, `${basePath}[0]`, Boolean(isArrayOfObjects)));
     return rows;
   }
 
   if (typeof value === 'object') {
     const rows: ParsedRow[] = [];
-    if (basePath) {
+    if (basePath && !suppressObjectRow) {
       rows.push(
         createParsedRow({
           field: basePath,
@@ -292,7 +292,8 @@ function flattenJsonSchemaNode(
   context: JsonSchemaContext,
   basePath: string,
   required: boolean,
-  fallbackExample = NO_SCHEMA_EXAMPLE
+  fallbackExample = NO_SCHEMA_EXAMPLE,
+  suppressObjectRow = false
 ): ParsedRow[] {
   const resolvedSchema = resolveSchemaVariant(schema, context);
   const rows: ParsedRow[] = [];
@@ -323,14 +324,15 @@ function flattenJsonSchemaNode(
         context,
         isRootArrayOfObjects ? '' : `${basePath || '$'}[0]`,
         true,
-        getArrayItemExample(nodeExample)
+        getArrayItemExample(nodeExample),
+        itemType === 'object'
       ));
     }
     return rows;
   }
 
   if (normalizedType === 'object') {
-    if (basePath) {
+    if (basePath && !suppressObjectRow) {
       rows.push(
         createParsedRow({
           field: basePath,

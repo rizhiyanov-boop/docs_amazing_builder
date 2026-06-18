@@ -23,7 +23,6 @@ export function ParsedSectionEditor({
       <section className="ds-section-card dual-model-section-card">
         <header className="ds-section-card-head">
           <div className="ds-section-card-eyebrow">{section.sectionType === 'request' ? 'REQUEST' : 'RESPONSE'}</div>
-          <h3 className="ds-section-card-title">{section.title}</h3>
         </header>
         <div className="ds-section-card-body">{renderRequestEditor(section)}</div>
       </section>

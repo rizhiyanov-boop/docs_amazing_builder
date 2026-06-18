@@ -1,9 +1,7 @@
 import React, { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import type { RequestMethod } from '../../types';
-import { HttpChip, TabPill, TabsPill, WBButton } from '../primitives/WorkbenchPrimitives';
+import { HttpChip, WBButton } from '../primitives/WorkbenchPrimitives';
 
-export type WorkbenchMode = 'workbench' | 'editor';
-export type WorkbenchLayout = 'vertical' | 'grid';
 export type WorkbenchAccent = 'blue' | 'warm' | 'violet';
 
 type WorkbenchTopbarProps = {
@@ -12,15 +10,11 @@ type WorkbenchTopbarProps = {
   methodName: string;
   methodPath: string;
   methodHttpMethod: RequestMethod;
-  mode: WorkbenchMode;
-  layout: WorkbenchLayout;
   accent: WorkbenchAccent;
   authUserLogin: string | null;
   isLogoutBusy: boolean;
   canUndo: boolean;
   canRedo: boolean;
-  onModeChange: (mode: WorkbenchMode) => void;
-  onLayoutChange: (layout: WorkbenchLayout) => void;
   onAccentChange: (accent: WorkbenchAccent) => void;
   onOpenProjectImport: () => void;
   onImportProjectJson: (files: File[]) => void;
@@ -183,15 +177,11 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
   methodName,
   methodPath,
   methodHttpMethod,
-  mode,
-  layout,
   accent,
   authUserLogin,
   isLogoutBusy,
   canUndo,
   canRedo,
-  onModeChange,
-  onLayoutChange,
   onAccentChange,
   onOpenProjectImport,
   onImportProjectJson,
@@ -384,16 +374,6 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
       </div>
       <span style={{ width: 1, height: 20, background: 'var(--wb-border)' }} />
       <span style={{ fontFamily: 'var(--wb-font-mono)', fontSize: 11, color: 'var(--wb-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 260 }}>{methodPath || '/'}</span>
-
-      <TabsPill>
-        <TabPill value="workbench" active={mode === 'workbench'} onSelect={onModeChange}>Workbench</TabPill>
-        <TabPill value="editor" active={mode === 'editor'} onSelect={onModeChange}>Editor</TabPill>
-      </TabsPill>
-
-      <TabsPill>
-        <TabPill value="vertical" active={layout === 'vertical'} onSelect={onLayoutChange}>☰</TabPill>
-        <TabPill value="grid" active={layout === 'grid'} onSelect={onLayoutChange}>⊞</TabPill>
-      </TabsPill>
 
       <div style={{ flex: 1 }} />
 

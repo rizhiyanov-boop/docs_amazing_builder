@@ -160,11 +160,13 @@ describe('App integration', () => {
     cleanup();
   });
 
-  it('renders Workbench shell and autosaves initial workspace', async () => {
+  it('renders the Editor shell without legacy mode controls and autosaves initial workspace', async () => {
     renderApp();
 
     expect(getNavigationTree()).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Workbench' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Workbench' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Editor' })).not.toBeInTheDocument();
+    expect(screen.getByText('REQUEST')).toBeInTheDocument();
     expect(findTopbarButton(/^HTML$/)).toBeInTheDocument();
 
     await waitFor(() => {
@@ -175,7 +177,7 @@ describe('App integration', () => {
     });
   });
 
-  it('opens add section picker upward and shows all section types', async () => {
+  it('opens the Editor add section picker and shows all section types', async () => {
     const user = userEvent.setup();
     seedSingleMethodWorkspace({ id: 's_goal', title: 'Goal', enabled: true, kind: 'text', value: 'A' });
     renderApp();
@@ -194,7 +196,7 @@ describe('App integration', () => {
     });
   });
 
-  it('offers section deletion from Workbench section action menu', async () => {
+  it('offers section deletion from the Editor section action menu', async () => {
     const user = userEvent.setup();
     seedSingleMethodWorkspace({ id: 's_goal', title: 'Goal', enabled: true, kind: 'text', value: 'A' });
     renderApp();
@@ -256,8 +258,6 @@ describe('App integration', () => {
     });
 
     renderApp();
-    await user.click(screen.getAllByRole('button', { name: 'Editor' })[0]);
-
     const serverTitle = screen.getByText('Server Request');
     const clientTitle = screen.getByText('Client Request');
     const serverZone = serverTitle.closest('details');
@@ -313,13 +313,20 @@ describe('App integration', () => {
     });
 
     renderApp();
-    await user.click(screen.getAllByRole('button', { name: 'Editor' })[0]);
-
-    await user.click(screen.getByRole('button', { name: 'Один контракт' }));
+    const apiModeButton = screen.getByRole('button', { name: 'Простой метод' });
+    const domainModeButton = screen.getByRole('button', { name: 'Оркестрация' });
+    expect(domainModeButton).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('Метод использует отдельные Client и Server модели с маппингом полей.')).toBeInTheDocument();
+    await user.click(apiModeButton);
+    expect(apiModeButton).toHaveAttribute('aria-pressed', 'true');
+    expect(domainModeButton).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByText('Метод состоит из единого контракта запроса или ответа.')).toBeInTheDocument();
     const singleContract = document.querySelector('.contract-side-contract');
     expect(singleContract).not.toBeNull();
     if (!singleContract) throw new Error('Single contract not found');
-    expect(singleContract.querySelector('.contract-side-badge')).toHaveTextContent('CONTRACT');
+    expect(singleContract.querySelector('.contract-side-badge')).not.toBeInTheDocument();
+    expect(apiModeButton.querySelector('.contract-mode-icon')).not.toBeNull();
+    expect(domainModeButton.querySelectorAll('.contract-mode-icon circle')).toHaveLength(4);
     const singleContractTitle = singleContract.querySelector('.contract-side-title');
     expect(singleContractTitle).toHaveTextContent('Response');
     if (!singleContractTitle) throw new Error('Single contract title not found');
@@ -333,7 +340,8 @@ describe('App integration', () => {
     expect(within(singleContract as HTMLElement).getByRole('columnheader', { name: 'Response' })).toBeInTheDocument();
     expect(within(singleContract as HTMLElement).getByRole('button', { name: 'Добавить параметр' })).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Client ↔ Server' }));
+    await user.click(domainModeButton);
+    expect(domainModeButton).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByText('Server Response')).toBeInTheDocument();
     expect(screen.getByText('Client Response')).toBeInTheDocument();
     const clientContract = document.querySelector('.contract-side-client');
@@ -548,7 +556,6 @@ describe('App integration', () => {
     const user = userEvent.setup();
     renderApp();
 
-    await user.click(screen.getAllByRole('button', { name: 'Editor' })[0]);
     await user.click(within(getNavigationTree()).getByRole('treeitem', { name: /Request/i }));
 
     const parseButton = document.querySelector(
@@ -724,7 +731,6 @@ describe('App integration', () => {
     );
     renderApp();
 
-    await user.click(screen.getAllByRole('button', { name: 'Editor' })[0]);
     await user.click(screen.getByRole('button', { name: 'Копировать секцию' }));
     await user.click(within(getNavigationTree()).getByRole('button', { name: /POST Method B/i }));
 
@@ -743,7 +749,7 @@ describe('App integration', () => {
     });
   });
 
-  it('imports inline JSON into request card and updates rows', async () => {
+  it('imports JSON into the request source and parses rows', async () => {
     const user = userEvent.setup();
     window.localStorage.setItem(
       STORAGE_KEY,
@@ -777,10 +783,12 @@ describe('App integration', () => {
     );
     renderApp();
 
-    await user.click(screen.getByRole('button', { name: /↓ Импорт/i }));
-    const textarea = screen.getByPlaceholderText('Вставьте JSON, XML или cURL');
+    await user.click(screen.getByRole('button', { name: 'Импорт текста' }));
+    const importDialog = screen.getByRole('dialog', { name: 'Импорт source текста' });
+    const textarea = within(importDialog).getByPlaceholderText('Вставьте JSON, XML или cURL');
     fireEvent.change(textarea, { target: { value: '{"orderId":"123"}' } });
-    await user.click(screen.getByRole('button', { name: 'Применить' }));
+    await user.click(within(importDialog).getByRole('button', { name: 'Импортировать текст' }));
+    await user.click(screen.getByRole('button', { name: 'Парсить' }));
 
     await waitFor(() => {
       const project = getStoredProject();
@@ -828,14 +836,15 @@ describe('App integration', () => {
     );
     renderApp();
 
-    await user.click(screen.getByRole('button', { name: /↓ Импорт/i }));
-    const textarea = screen.getByPlaceholderText('Вставьте JSON, XML или cURL');
+    await user.click(screen.getByRole('button', { name: 'Импорт текста' }));
+    const importDialog = screen.getByRole('dialog', { name: 'Импорт source текста' });
+    const textarea = within(importDialog).getByPlaceholderText('Вставьте JSON, XML или cURL');
     fireEvent.change(textarea, { target: { value: '{' } });
-    await user.click(screen.getByRole('button', { name: 'Применить' }));
+    await user.click(within(importDialog).getByRole('button', { name: 'Импортировать текст' }));
     expect(screen.getByText(/Ошибка/i)).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Отмена' }));
-    expect(screen.queryByPlaceholderText('Вставьте JSON, XML или cURL')).not.toBeInTheDocument();
+    await user.click(within(importDialog).getByRole('button', { name: 'Отмена' }));
+    expect(screen.queryByRole('dialog', { name: 'Импорт source текста' })).not.toBeInTheDocument();
   });
 
   it('shows preview with added methods and invalid files before multi import', async () => {

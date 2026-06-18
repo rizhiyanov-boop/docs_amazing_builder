@@ -119,7 +119,7 @@ import { AiTableButton } from './components/primitives/WorkbenchPrimitives';
 import { WorkbenchSidebar } from './components/workbench/WorkbenchSidebar';
 import { MethodMetaPanel } from './components/workbench/MethodMetaPanel';
 import { WorkbenchDiagramPreview } from './components/workbench/WorkbenchDiagramPreview';
-import { WorkbenchTopbar, type WorkbenchAccent, type WorkbenchLayout, type WorkbenchMode } from './components/workbench/WorkbenchTopbar';
+import { WorkbenchTopbar, type WorkbenchAccent } from './components/workbench/WorkbenchTopbar';
 import { WorkspaceHome } from './components/workbench/WorkspaceHome';
 import { TableClassic, TableGallery, TableMiniCards } from './components/tables/WorkbenchTables';
 import { HtmlExportScreen } from './screens/HtmlExportScreen';
@@ -692,8 +692,6 @@ export default function App() {
   const [exportPreviewScope, setExportPreviewScope] = useState<'method' | 'project'>('method');
   const [projectExportDetailMode, setProjectExportDetailMode] = useState<ProjectExportDetailMode>('full');
   const [workspaceScope, setWorkspaceScope] = useState<WorkspaceScope>('methods');
-  const [workbenchMode, setWorkbenchMode] = useState<WorkbenchMode>('workbench');
-  const [workbenchLayout, setWorkbenchLayout] = useState<WorkbenchLayout>('vertical');
   const [workbenchTableView, setWorkbenchTableView] = useState<TablePreviewView>('classic');
   const [wbAccent, setWbAccent] = useState<WorkbenchAccent>(() => loadPersistedWbAccent());
   const [isSearchPaletteOpen, setIsSearchPaletteOpen] = useState(false);
@@ -7268,9 +7266,9 @@ export default function App() {
 
     return (
       <div className="stack">
-        <div className="contract-mode-control" role="group" aria-label="Режим контракта">
-          <div className="contract-mode-label">Режим контракта</div>
-          <div className="contract-mode-segments">
+        <div className="contract-mode-control">
+          <div className="contract-mode-label">Режим метода</div>
+          <div className="contract-mode-segments" role="group" aria-label="Режим метода">
             <button
               className={`contract-mode-segment ${!section.domainModelEnabled ? 'active' : ''}`}
               type="button"
@@ -7283,7 +7281,12 @@ export default function App() {
                 )
               }
             >
-              Один контракт
+              <svg className="contract-mode-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="4.5" cy="12" r="2.2" />
+                <circle cx="19.5" cy="12" r="2.2" />
+                <path d="M7 12h10M14 9l3 3-3 3" />
+              </svg>
+              <span>Простой метод</span>
             </button>
             <button
               className={`contract-mode-segment ${section.domainModelEnabled ? 'active' : ''}`}
@@ -7304,8 +7307,23 @@ export default function App() {
                 })
               }
             >
-              Client ↔ Server
+              <svg className="contract-mode-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="4.5" cy="12" r="2.2" />
+                <circle cx="19.5" cy="5" r="2.2" />
+                <circle cx="19.5" cy="12" r="2.2" />
+                <circle cx="19.5" cy="19" r="2.2" />
+                <path d="M7 12h4.5M11.5 5v14M11.5 5h5.8M11.5 12h5.8M11.5 19h5.8" />
+              </svg>
+              <span>Оркестрация</span>
             </button>
+          </div>
+          <div className="contract-mode-hint">
+            <span className="contract-mode-hint-dot" aria-hidden="true" />
+            <span>
+              {section.domainModelEnabled
+                ? 'Метод использует отдельные Client и Server модели с маппингом полей.'
+                : 'Метод состоит из единого контракта запроса или ответа.'}
+            </span>
           </div>
         </div>
 
@@ -7323,10 +7341,7 @@ export default function App() {
             {renderServerContractContent(contractLabel)}
             <section className="contract-parameters-section">
               <div className="contract-mapping-head">
-                <div>
-                  <div className="contract-mapping-eyebrow">CONTRACT</div>
-                  <h4 className="contract-mapping-title">{parametersLabel}</h4>
-                </div>
+                <h4 className="contract-mapping-title">{parametersLabel}</h4>
                 <div className="contract-mapping-count">{serverParameterCount} параметров</div>
               </div>
               {renderParsedTable(section)}
@@ -7745,10 +7760,10 @@ export default function App() {
     }
 
     return (
-      <div className={`wb-card-layout wb-card-layout-${workbenchLayout}`}>
+      <div className="wb-card-layout wb-card-layout-vertical">
         <MethodHeaderCard method={activeMethod} httpMethod={getMethodHttpMethod(activeMethod)} path={getMethodPath(activeMethod)} />
         {sections.length === 0 && <EmptyState kind="no-method" onPrimary={handleOpenProjectImport} onSecondary={handleAddWorkbenchSection} />}
-        {sections.map((section) => {
+                   {sections.map((section) => {
           const meta = getSectionWorkbenchMeta(section);
           return (
             <Card
@@ -7928,6 +7943,7 @@ export default function App() {
     onboardingStepCompleted,
     onboardingStepHint,
     projectMethodPreviews,
+    renderWorkbenchEditor,
     switchingProjectId,
     toggleOnboardingHeaderNavigation,
     toggleTheme,
@@ -8533,15 +8549,11 @@ export default function App() {
           methodName={activeMethod?.name ?? DEFAULT_METHOD_NAME}
           methodPath={getMethodPath(activeMethod)}
           methodHttpMethod={getMethodHttpMethod(activeMethod)}
-          mode={workbenchMode}
-          layout={workbenchLayout}
           accent={wbAccent}
           authUserLogin={authUser?.login ?? null}
           isLogoutBusy={authBusyKey === 'auth:logout'}
           canUndo={canUndo}
           canRedo={canRedo}
-          onModeChange={setWorkbenchMode}
-          onLayoutChange={setWorkbenchLayout}
           onAccentChange={handleWbAccentChange}
           onRenameMethod={() => {
             if (activeMethod) {
@@ -8674,8 +8686,7 @@ export default function App() {
               )}
 
               <div className="panes">
-              {tab === 'editor' && workspaceScope === 'methods' && workbenchMode === 'workbench' && renderWorkbenchEditor()}
-              {tab === 'editor' && workspaceScope === 'methods' && workbenchMode === 'editor' && (
+              {tab === 'editor' && workspaceScope === 'methods' && (
                 <div className="editor-stream">
                   {sections.length === 0 && (
                     <section className="panel empty-state-panel" aria-label="Нет секций">
@@ -8940,8 +8951,83 @@ export default function App() {
                           />
                         )}
                       </section>
-                    );
-                  })}
+                     );
+                   })}
+                  <div ref={addSectionMenuRef} style={{ position: 'relative' }}>
+                    <button
+                      type="button"
+                      onClick={() => setIsAddSectionMenuOpen((current) => !current)}
+                      className="wb-add-card"
+                      aria-haspopup="menu"
+                      aria-expanded={isAddSectionMenuOpen}
+                      style={{
+                        border: '1px dashed var(--wb-border-strong)',
+                        borderRadius: 'var(--wb-radius-lg)',
+                        padding: 18,
+                        minHeight: 100,
+                        width: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: 'var(--wb-text-muted)',
+                        fontSize: 13,
+                        cursor: 'pointer',
+                        background: 'transparent',
+                        fontFamily: 'var(--wb-font-sans)'
+                      }}
+                    >
+                      + Добавить секцию
+                    </button>
+                    {isAddSectionMenuOpen && (
+                      <div
+                        role="menu"
+                        aria-label="Section type"
+                        style={{
+                          position: 'absolute',
+                          top: 'auto',
+                          bottom: 'calc(100% + 8px)',
+                          left: '50%',
+                          right: 'auto',
+                          transform: 'translateX(-50%)',
+                          minWidth: 240,
+                          width: 260,
+                          zIndex: 100,
+                          display: 'grid',
+                          gap: 2,
+                          padding: 6,
+                          border: '1px solid var(--wb-border)',
+                          borderRadius: 'var(--wb-radius-lg)',
+                          background: 'var(--wb-bg-surface)',
+                          boxShadow: 'var(--wb-shadow-pop)'
+                        }}
+                      >
+                        {WORKBENCH_SECTION_OPTIONS.map((option) => (
+                          <button
+                            key={option.type}
+                            type="button"
+                            role="menuitem"
+                            onClick={() => handleAddWorkbenchSection(option.type)}
+                            style={{
+                              display: 'grid',
+                              gap: 2,
+                              width: '100%',
+                              border: 0,
+                              borderRadius: 'var(--wb-radius)',
+                              background: 'transparent',
+                              color: 'var(--wb-text)',
+                              cursor: 'pointer',
+                              padding: '8px 10px',
+                              textAlign: 'left',
+                              fontFamily: 'var(--wb-font-sans)'
+                            }}
+                          >
+                            <span style={{ fontSize: 13, fontWeight: 700 }}>{option.label}</span>
+                            <span style={{ fontSize: 11, color: 'var(--wb-text-muted)' }}>{option.description}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 

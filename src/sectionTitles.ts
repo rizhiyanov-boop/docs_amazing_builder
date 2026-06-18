@@ -187,7 +187,7 @@ export function sanitizeSections(sections: DocSection[]): DocSection[] {
       title: resolveSectionTitle(normalizedSection.title),
       lastSyncedFormat: normalizedSection.lastSyncedFormat ?? normalizedFormat,
       rows: normalizedRows,
-      domainModelEnabled: normalizedSection.domainModelEnabled ?? false,
+      domainModelEnabled: normalizedSection.domainModelEnabled ?? true,
       clientFormat: normalizeParseFormat(normalizedSection.clientFormat),
       clientLastSyncedFormat: normalizeParseFormat(normalizedSection.clientLastSyncedFormat ?? normalizedSection.clientFormat),
       clientInput: normalizedSection.clientInput ?? '',

@@ -15,15 +15,11 @@ function renderTopbar(overrides: Partial<React.ComponentProps<typeof WorkbenchTo
     methodName: 'Create order',
     methodPath: '/orders',
     methodHttpMethod: 'POST',
-    mode: 'workbench',
-    layout: 'vertical',
     accent: 'warm',
     authUserLogin: 'User',
     isLogoutBusy: false,
     canUndo: true,
     canRedo: false,
-    onModeChange: vi.fn(),
-    onLayoutChange: vi.fn(),
     onAccentChange: vi.fn(),
     onOpenProjectImport: vi.fn(),
     onImportProjectJson: vi.fn(),
@@ -55,6 +51,17 @@ function renderTopbar(overrides: Partial<React.ComponentProps<typeof WorkbenchTo
     props
   };
 }
+
+describe('WorkbenchTopbar supported editor controls', () => {
+  it('does not expose legacy Workbench or layout switches', () => {
+    renderTopbar();
+
+    expect(screen.queryByRole('button', { name: 'Workbench' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Editor' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '☰' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '⊞' })).not.toBeInTheDocument();
+  });
+});
 
 describe('WorkbenchTopbar method actions menu', () => {
   it('opens method actions and runs rename/delete handlers', async () => {

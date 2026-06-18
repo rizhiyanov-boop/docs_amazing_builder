@@ -42,7 +42,9 @@ export function ContractSideAccordion({
       data-onboarding-anchor={onboardingAnchor}
     >
       <summary className="contract-side-summary">
-        <span className={`contract-side-badge contract-side-badge-${side}`}>{side.toUpperCase()}</span>
+        {side !== 'contract' && (
+          <span className={`contract-side-badge contract-side-badge-${side}`}>{side.toUpperCase()}</span>
+        )}
         <span className="contract-side-heading">
           <span className="contract-side-title">{title}</span>
           <span className="contract-side-meta">{summaryItems.join(' · ')}</span>

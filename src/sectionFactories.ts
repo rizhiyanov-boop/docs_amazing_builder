@@ -81,7 +81,7 @@ export function createParsedSection(sectionType: ParsedSectionType, id = `custom
     schemaInput: '',
     rows: [],
     error: '',
-    domainModelEnabled: sectionType !== 'generic' ? false : undefined,
+    domainModelEnabled: sectionType !== 'generic' ? true : undefined,
     clientFormat: sectionType !== 'generic' ? 'json' : undefined,
     clientLastSyncedFormat: sectionType !== 'generic' ? 'json' : undefined,
     clientInput: sectionType !== 'generic' ? '' : undefined,

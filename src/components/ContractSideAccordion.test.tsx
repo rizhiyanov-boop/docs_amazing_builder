@@ -49,7 +49,7 @@ describe('ContractSideAccordion', () => {
     expect(screen.getByText('Ошибка парсинга')).toHaveAttribute('title', 'Invalid JSON');
   });
 
-  it('supports a neutral single-contract context', () => {
+  it('supports a single-contract context without a side badge', () => {
     render(
       <ContractSideAccordion
         side="contract"
@@ -62,7 +62,7 @@ describe('ContractSideAccordion', () => {
       </ContractSideAccordion>
     );
 
-    expect(screen.getByText('CONTRACT')).toBeInTheDocument();
+    expect(screen.queryByText('CONTRACT')).not.toBeInTheDocument();
     expect(screen.getByText('Response')).toBeInTheDocument();
     expect(screen.getByText('2 параметра')).toBeInTheDocument();
   });

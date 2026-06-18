@@ -104,6 +104,7 @@ import { buildValidationRulesWithAi, fillDescriptionsWithAi, generateExamplesWit
 import { Card } from './components/cards/Card';
 import { AiLoadingCard } from './components/cards/AiLoadingCard';
 import { MethodHeaderCard } from './components/cards/MethodHeaderCard';
+import { ContractSideAccordion } from './components/ContractSideAccordion';
 import { DiagramSectionEditor } from './components/DiagramSectionEditor';
 import { EmptyState } from './components/EmptyState';
 import { ErrorsSectionEditor } from './components/ErrorsSectionEditor';
@@ -6101,6 +6102,7 @@ export default function App() {
 
   function renderParsedTable(section: ParsedSection) {
     const rows = getSectionRows(section);
+    const addServerParameterLabel = section.domainModelEnabled ? 'Добавить Server parameter' : 'Добавить параметр';
     const duplicateFieldSet = getDuplicateValueSet(section.rows.filter((row) => row.source !== 'header'));
     const duplicateClientFieldSet = isDualModelSection(section) ? getDuplicateValueSet(section.clientRows ?? []) : new Set<string>();
     const fillDescriptionsBusy = aiBusyKey === `fill-descriptions:${section.id}`;
@@ -6116,11 +6118,11 @@ export default function App() {
           <div className="table-wrap table-wrap-empty">
             <div className="muted">Таблица пока пустая</div>
             <div className="table-actions">
-              <button className="ghost small table-action-icon" type="button" onClick={() => addManualRow(section, 'server')} aria-label="Добавить параметр" title="Добавить параметр">
+              <button className="ghost small table-action-icon" type="button" onClick={() => addManualRow(section, 'server')} aria-label={addServerParameterLabel} title={addServerParameterLabel}>
                 <span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>
               </button>
               {section.domainModelEnabled && (
-                <button className="ghost small table-action-icon" type="button" onClick={() => addManualRow(section, 'client')} aria-label="Добавить client параметр" title="Добавить client параметр">
+                <button className="ghost small table-action-icon" type="button" onClick={() => addManualRow(section, 'client')} aria-label="Добавить Client parameter" title="Добавить Client parameter">
                   <span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>
                 </button>
               )}
@@ -6211,11 +6213,11 @@ export default function App() {
             </tbody>
           </table>
           <div className="table-actions">
-            <button className="ghost small table-action-icon" type="button" onClick={() => addManualRow(section, 'server')} aria-label="Добавить параметр" title="Добавить параметр">
+            <button className="ghost small table-action-icon" type="button" onClick={() => addManualRow(section, 'server')} aria-label={addServerParameterLabel} title={addServerParameterLabel}>
               <span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>
             </button>
             {section.domainModelEnabled && (
-              <button className="ghost small table-action-icon" type="button" onClick={() => addManualRow(section, 'client')} aria-label="Добавить client параметр" title="Добавить client параметр">
+              <button className="ghost small table-action-icon" type="button" onClick={() => addManualRow(section, 'client')} aria-label="Добавить Client parameter" title="Добавить Client parameter">
                 <span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>
               </button>
             )}
@@ -7217,17 +7219,79 @@ export default function App() {
   function renderRequestEditor(section: ParsedSection) {
     const serverLabel = getSectionSideLabel(section, 'server');
     const clientLabel = getSectionSideLabel(section, 'client');
+    const contractLabel = isResponseSection(section) ? 'Response' : 'Request';
     const exampleLabel = isResponseSection(section) ? 'Пример ответа' : 'Пример запроса';
+    const parametersLabel = isResponseSection(section) ? 'Параметры ответа' : 'Параметры запроса';
+    const serverParameterCount = section.rows.filter((row) => row.enabled !== false).length;
+    const clientParameterCount = (section.clientRows ?? []).filter((row) => row.enabled !== false).length;
+    const serverMetadata = isRequestSection(section)
+      ? [section.requestMethod ?? 'POST', section.requestProtocol ?? inferRequestProtocol(section.format, section.requestProtocol)]
+      : [];
+    const clientMetadata = isRequestSection(section)
+      ? [section.externalRequestMethod ?? 'POST', section.requestProtocol ?? inferRequestProtocol(section.clientFormat ?? 'json', section.requestProtocol)]
+      : [];
+    const renderSideSource = (target: ParseTarget, label: string) => (
+      <details
+        className="expander contract-source-expander"
+        open={isExpanderOpen(section.id, `source-${target}`)}
+        onToggle={(event) => setExpanderOpen(section.id, `source-${target}`, event.currentTarget.open)}
+      >
+        <summary className="expander-summary">{exampleLabel} и JSON Schema</summary>
+        <div className="expander-body">
+          {renderSourceEditor(section, target, `${exampleLabel} (${label})`)}
+        </div>
+      </details>
+    );
+
+    const renderServerContractContent = (label: string) => (
+      <>
+        {isRequestSection(section) && (
+          <>
+            <div className="contract-side-subsection">
+              <div className="contract-side-subsection-title">Endpoint</div>
+              {renderRequestMetaEditor(section, 'server')}
+            </div>
+            <div className="contract-side-subsection">
+              <div className="contract-side-subsection-title">Авторизация</div>
+              {renderRequestAuthEditor(section, 'server')}
+            </div>
+            <div className="contract-side-subsection">
+              <div className="contract-side-subsection-title">Headers</div>
+              {renderRequestHeadersTable(section, 'server')}
+            </div>
+          </>
+        )}
+        {renderSideSource('server', label)}
+        {section.error && <div className="alert error">{label}: {section.error}</div>}
+      </>
+    );
+
     return (
       <div className="stack">
-        <label className="switch">
-          <input
-            type="checkbox"
-            checked={Boolean(section.domainModelEnabled)}
-            onChange={(e) =>
-              updateSection(section.id, (current) => {
-                if (current.kind !== 'parsed' || !isDualModelSection(current)) return current;
-                if (e.target.checked) {
+        <div className="contract-mode-control" role="group" aria-label="Режим контракта">
+          <div className="contract-mode-label">Режим контракта</div>
+          <div className="contract-mode-segments">
+            <button
+              className={`contract-mode-segment ${!section.domainModelEnabled ? 'active' : ''}`}
+              type="button"
+              aria-pressed={!section.domainModelEnabled}
+              onClick={() =>
+                updateSection(section.id, (current) =>
+                  current.kind === 'parsed' && isDualModelSection(current)
+                    ? { ...current, domainModelEnabled: false }
+                    : current
+                )
+              }
+            >
+              Один контракт
+            </button>
+            <button
+              className={`contract-mode-segment ${section.domainModelEnabled ? 'active' : ''}`}
+              type="button"
+              aria-pressed={Boolean(section.domainModelEnabled)}
+              onClick={() =>
+                updateSection(section.id, (current) => {
+                  if (current.kind !== 'parsed' || !isDualModelSection(current)) return current;
                   return {
                     ...current,
                     domainModelEnabled: true,
@@ -7237,76 +7301,100 @@ export default function App() {
                     clientError: current.clientError ?? '',
                     clientMappings: current.clientMappings ?? {}
                   };
-                }
-
-                return {
-                  ...current,
-                  domainModelEnabled: false,
-                  clientFormat: 'json',
-                  clientInput: '',
-                  clientRows: [],
-                  clientError: '',
-                  clientMappings: {}
-                };
-              })
-            }
-          />
-          <span>Доменная модель</span>
-        </label>
-
-        {isRequestSection(section) && (
-          <>
-            {renderRequestMetaEditor(section, 'server')}
-            {renderRequestAuthEditor(section, 'server')}
-            <div className="stack">
-              <div className="label">Headers</div>
-              {renderRequestHeadersTable(section, 'server')}
-            </div>
-          </>
-        )}
-
-        <details
-          className="expander"
-          data-onboarding-anchor="prepare-source"
-          open={isExpanderOpen(section.id, 'source-server')}
-          onToggle={(e) => setExpanderOpen(section.id, 'source-server', e.currentTarget.open)}
-        >
-          <summary className="expander-summary">{serverLabel}</summary>
-          <div className="expander-body">
-            {renderSourceEditor(section, 'server', `${exampleLabel} (${serverLabel})`)}
+                })
+              }
+            >
+              Client ↔ Server
+            </button>
           </div>
-        </details>
+        </div>
+
+        {!section.domainModelEnabled && (
+          <ContractSideAccordion
+            side="contract"
+            title={contractLabel}
+            parameterCount={serverParameterCount}
+            metadata={serverMetadata}
+            error={section.error}
+            open={isExpanderOpen(section.id, 'contract-single')}
+            onToggle={(open) => setExpanderOpen(section.id, 'contract-single', open)}
+            onboardingAnchor="prepare-source"
+          >
+            {renderServerContractContent(contractLabel)}
+            <section className="contract-parameters-section">
+              <div className="contract-mapping-head">
+                <div>
+                  <div className="contract-mapping-eyebrow">CONTRACT</div>
+                  <h4 className="contract-mapping-title">{parametersLabel}</h4>
+                </div>
+                <div className="contract-mapping-count">{serverParameterCount} параметров</div>
+              </div>
+              {renderParsedTable(section)}
+            </section>
+          </ContractSideAccordion>
+        )}
 
         {section.domainModelEnabled && (
           <>
-            {isRequestSection(section) && (
-              <>
-                {renderRequestMetaEditor(section, 'client')}
-                {renderRequestAuthEditor(section, 'client')}
-                <div className="stack">
-                  <div className="label">Внешние headers</div>
-                  {renderRequestHeadersTable(section, 'client')}
-                </div>
-              </>
-            )}
-            <details
-              className="expander"
-              open={isExpanderOpen(section.id, 'source-client')}
-              onToggle={(e) => setExpanderOpen(section.id, 'source-client', e.currentTarget.open)}
+            <ContractSideAccordion
+              side="server"
+              title={serverLabel}
+              parameterCount={serverParameterCount}
+              metadata={serverMetadata}
+              error={section.error}
+              open={isExpanderOpen(section.id, 'contract-server')}
+              onToggle={(open) => setExpanderOpen(section.id, 'contract-server', open)}
+              onboardingAnchor="prepare-source"
             >
-              <summary className="expander-summary">{clientLabel}</summary>
-              <div className="expander-body">
-                {renderSourceEditor(section, 'client', `${exampleLabel} (${clientLabel})`)}
-              </div>
-            </details>
+              {renderServerContractContent(serverLabel)}
+            </ContractSideAccordion>
+            <ContractSideAccordion
+              side="client"
+              title={clientLabel}
+              parameterCount={clientParameterCount}
+              metadata={clientMetadata}
+              error={section.clientError}
+              open={isExpanderOpen(section.id, 'contract-client')}
+              onToggle={(open) => setExpanderOpen(section.id, 'contract-client', open)}
+            >
+              {isRequestSection(section) && (
+                <>
+                  <div className="contract-side-subsection">
+                    <div className="contract-side-subsection-title">Endpoint</div>
+                    {renderRequestMetaEditor(section, 'client')}
+                  </div>
+                  <div className="contract-side-subsection">
+                    <div className="contract-side-subsection-title">Авторизация</div>
+                    {renderRequestAuthEditor(section, 'client')}
+                  </div>
+                  <div className="contract-side-subsection">
+                    <div className="contract-side-subsection-title">Внешние headers</div>
+                    {renderRequestHeadersTable(section, 'client')}
+                  </div>
+                </>
+              )}
+              {renderSideSource('client', clientLabel)}
+              {section.clientError && <div className="alert error">{clientLabel}: {section.clientError}</div>}
+            </ContractSideAccordion>
           </>
         )}
 
-        {section.error && <div className="alert error">{serverLabel}: {section.error}</div>}
-        {section.clientError && <div className="alert error">{clientLabel}: {section.clientError}</div>}
         {aiErrorMessage && <div className="alert error">AI: {aiErrorMessage}</div>}
         {requestCellError && <div className="alert error">{requestCellError}</div>}
-        {renderParsedTable(section)}
+        {section.domainModelEnabled && (
+          <section className="contract-mapping-section">
+            <div className="contract-mapping-head">
+              <div>
+                <div className="contract-mapping-eyebrow">DOMAIN MODEL</div>
+                <h4 className="contract-mapping-title">Маппинг Client ↔ Server</h4>
+              </div>
+              <div className="contract-mapping-count">
+                {`${serverParameterCount} Server · ${clientParameterCount} Client`}
+              </div>
+            </div>
+            {renderParsedTable(section)}
+          </section>
+        )}
       </div>
     );
   }

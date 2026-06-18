@@ -210,6 +210,149 @@ describe('App integration', () => {
     expect(within(dialog).getByRole('button', { name: 'Удалить раздел' })).toBeInTheDocument();
   });
 
+  it('separates server and client request contexts into independent collapsed zones', async () => {
+    const user = userEvent.setup();
+    seedSingleMethodWorkspace({
+      id: 's_request',
+      title: 'Request',
+      enabled: true,
+      kind: 'parsed',
+      sectionType: 'request',
+      format: 'json',
+      input: '{"serverId":"1"}',
+      rows: [{
+        field: 'serverId',
+        sourceField: 'serverId',
+        origin: 'parsed',
+        enabled: true,
+        type: 'string',
+        required: '+',
+        description: '',
+        example: '1',
+        source: 'body'
+      }],
+      error: '',
+      domainModelEnabled: true,
+      clientFormat: 'json',
+      clientInput: '{"clientId":"1"}',
+      clientRows: [{
+        field: 'clientId',
+        sourceField: 'clientId',
+        origin: 'parsed',
+        enabled: true,
+        type: 'string',
+        required: '+',
+        description: '',
+        example: '1',
+        source: 'body'
+      }],
+      clientError: '',
+      clientMappings: { serverId: 'clientId' },
+      requestUrl: '/internal',
+      requestMethod: 'POST',
+      requestProtocol: 'REST',
+      externalRequestUrl: 'https://api.example.com',
+      externalRequestMethod: 'POST'
+    });
+
+    renderApp();
+    await user.click(screen.getAllByRole('button', { name: 'Editor' })[0]);
+
+    const serverTitle = screen.getByText('Server Request');
+    const clientTitle = screen.getByText('Client Request');
+    const serverZone = serverTitle.closest('details');
+    const clientZone = clientTitle.closest('details');
+    expect(serverZone).not.toHaveAttribute('open');
+    expect(clientZone).not.toHaveAttribute('open');
+    expect(screen.getByRole('heading', { name: 'Маппинг Client ↔ Server' })).toBeInTheDocument();
+
+    if (!serverZone || !clientZone) throw new Error('Contract zones not found');
+    await user.click(serverTitle);
+    expect(serverZone).toHaveAttribute('open');
+    expect(clientZone).not.toHaveAttribute('open');
+  });
+
+  it('renders one neutral contract and preserves client data while switching modes', async () => {
+    const user = userEvent.setup();
+    seedSingleMethodWorkspace({
+      id: 's_response',
+      title: 'Response',
+      enabled: true,
+      kind: 'parsed',
+      sectionType: 'response',
+      format: 'json',
+      input: '{"status":"OK"}',
+      rows: [{
+        field: 'status',
+        sourceField: 'status',
+        origin: 'parsed',
+        enabled: true,
+        type: 'string',
+        required: '+',
+        description: '',
+        example: 'OK',
+        source: 'body'
+      }],
+      error: '',
+      domainModelEnabled: true,
+      clientFormat: 'json',
+      clientInput: '{"result":"ok"}',
+      clientRows: [{
+        field: 'result',
+        sourceField: 'result',
+        origin: 'parsed',
+        enabled: true,
+        type: 'string',
+        required: '+',
+        description: '',
+        example: 'ok',
+        source: 'body'
+      }],
+      clientError: '',
+      clientMappings: { status: 'result' }
+    });
+
+    renderApp();
+    await user.click(screen.getAllByRole('button', { name: 'Editor' })[0]);
+
+    await user.click(screen.getByRole('button', { name: 'Один контракт' }));
+    const singleContract = document.querySelector('.contract-side-contract');
+    expect(singleContract).not.toBeNull();
+    if (!singleContract) throw new Error('Single contract not found');
+    expect(singleContract.querySelector('.contract-side-badge')).toHaveTextContent('CONTRACT');
+    const singleContractTitle = singleContract.querySelector('.contract-side-title');
+    expect(singleContractTitle).toHaveTextContent('Response');
+    if (!singleContractTitle) throw new Error('Single contract title not found');
+    expect(screen.queryByText('Server Response')).not.toBeInTheDocument();
+    expect(screen.queryByText('Client Response')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Маппинг Client ↔ Server' })).not.toBeInTheDocument();
+
+    expect(singleContract).not.toHaveAttribute('open');
+    await user.click(singleContractTitle);
+    expect(screen.getByRole('heading', { name: 'Параметры ответа' })).toBeInTheDocument();
+    expect(within(singleContract as HTMLElement).getByRole('columnheader', { name: 'Response' })).toBeInTheDocument();
+    expect(within(singleContract as HTMLElement).getByRole('button', { name: 'Добавить параметр' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Client ↔ Server' }));
+    expect(screen.getByText('Server Response')).toBeInTheDocument();
+    expect(screen.getByText('Client Response')).toBeInTheDocument();
+    const clientContract = document.querySelector('.contract-side-client');
+    expect(clientContract).not.toBeNull();
+    if (!clientContract) throw new Error('Client contract not found');
+    expect(within(clientContract as HTMLElement).getByText('1 параметр')).toBeInTheDocument();
+
+    await waitFor(() => {
+      const project = getStoredProject();
+      const methods = (project?.methods as Array<Record<string, unknown>> | undefined) ?? [];
+      const method = methods.find((item) => item.id === 'm_review');
+      const sections = (method?.sections as Array<Record<string, unknown>> | undefined) ?? [];
+      const response = sections.find((item) => item.id === 's_response');
+      expect(response?.clientInput).toBe('{"result":"ok"}');
+      expect(response?.clientMappings).toEqual({ status: 'result' });
+      expect((response?.clientRows as unknown[] | undefined)).toHaveLength(1);
+    });
+  });
+
   it('opens method delete confirmation from topbar actions', async () => {
     const user = userEvent.setup();
     seedTwoMethodWorkspace();

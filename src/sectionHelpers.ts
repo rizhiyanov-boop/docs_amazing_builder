@@ -24,7 +24,7 @@ export function isDualModelSection(section: ParsedSection): boolean {
 }
 
 export function getSectionSideLabel(section: ParsedSection, target: 'server' | 'client'): string {
-  const kind = isResponseSection(section) ? 'response' : 'request';
+  const kind = isResponseSection(section) ? 'Response' : 'Request';
   return `${target === 'client' ? 'Client' : 'Server'} ${kind}`;
 }
 

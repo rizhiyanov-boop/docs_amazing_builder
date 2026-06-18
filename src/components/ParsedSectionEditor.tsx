@@ -20,7 +20,7 @@ export function ParsedSectionEditor({
 }: ParsedSectionEditorProps): ReactNode {
   if (isDualModelSection(section)) {
     return (
-      <section className="ds-section-card">
+      <section className="ds-section-card dual-model-section-card">
         <header className="ds-section-card-head">
           <div className="ds-section-card-eyebrow">{section.sectionType === 'request' ? 'REQUEST' : 'RESPONSE'}</div>
           <h3 className="ds-section-card-title">{section.title}</h3>

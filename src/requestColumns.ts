@@ -26,6 +26,9 @@ export function getRequestColumnLabel(section: ParsedSection, column: RequestCol
   }
 
   if (column === 'field' && (section.sectionType === 'request' || section.sectionType === 'response')) {
+    if (!section.domainModelEnabled) {
+      return section.sectionType === 'response' ? 'Response' : 'Request';
+    }
     return section.sectionType === 'response' ? 'Server response' : 'Server request';
   }
 

@@ -9,6 +9,7 @@ import {
   requestHasRows,
   splitRequestRows
 } from './requestHeaders';
+import { getRequestColumnLabel } from './requestColumns';
 import { normalizeParsedRowsForSection } from './sectionHelpers';
 import { makeParsedRow, makeRequestSection, makeResponseSection } from './test/fixtures';
 
@@ -83,6 +84,14 @@ describe('requestHeaders', () => {
 
     expect(serverRows[0]?.source).toBe('query');
     expect(clientRows[0]?.source).toBe('body');
+  });
+
+  it('uses neutral contract column labels outside domain model', () => {
+    const request = makeRequestSection({ domainModelEnabled: false });
+    const response = makeResponseSection({ domainModelEnabled: false });
+
+    expect(getRequestColumnLabel(request, 'field')).toBe('Request');
+    expect(getRequestColumnLabel(response, 'field')).toBe('Response');
   });
 
   it('keeps get server to post client mapping rows visible', () => {

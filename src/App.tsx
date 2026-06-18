@@ -46,6 +46,7 @@ import {
   isDualModelSection,
   isRequestSection,
   isResponseSection,
+  mergeManualHeaders,
   normalizeParsedRowsForSection,
   normalizeRequestRowsForMethod,
   validateSection,
@@ -1555,7 +1556,7 @@ export default function App() {
             clientFormat: targetFormat,
             clientLastSyncedFormat: targetFormat,
             clientInput: jsonImportRouting.rawText,
-            clientRows: parsedRows,
+            clientRows: mergeManualHeaders(section.clientRows ?? [], parsedRows),
             clientError: parseError
           };
         }
@@ -1567,7 +1568,7 @@ export default function App() {
           format: targetFormat,
           lastSyncedFormat: targetFormat,
           input: jsonImportRouting.rawText,
-          rows: parsedRows,
+          rows: mergeManualHeaders(section.rows, parsedRows),
           error: parseError,
           requestProtocol: isRequestSection(section) ? inferRequestProtocol(targetFormat, section.requestProtocol) : section.requestProtocol
         };
@@ -3416,7 +3417,7 @@ export default function App() {
             ...current,
             clientFormat: format,
             clientInput: input,
-            clientRows: rows,
+            clientRows: mergeManualHeaders(current.clientRows ?? [], rows),
             clientError: '',
             clientLastSyncedFormat: format,
             externalRequestUrl: isRequestSection(current) ? curlMeta?.url ?? current.externalRequestUrl ?? '' : current.externalRequestUrl,
@@ -3428,7 +3429,7 @@ export default function App() {
           ...current,
           format,
           input,
-          rows,
+          rows: mergeManualHeaders(current.rows, rows),
           error: '',
           lastSyncedFormat: format,
           requestUrl: isRequestSection(current) ? curlMeta?.url ?? current.requestUrl ?? '' : current.requestUrl,
@@ -3449,7 +3450,7 @@ export default function App() {
             ...current,
             clientFormat: format,
             clientInput: input,
-            clientRows: [],
+            clientRows: mergeManualHeaders(current.clientRows ?? [], []),
             clientError: message
           };
         }
@@ -3457,7 +3458,7 @@ export default function App() {
           ...current,
           format,
           input,
-          rows: [],
+          rows: mergeManualHeaders(current.rows, []),
           error: message
         };
       });
@@ -3522,7 +3523,7 @@ export default function App() {
             ...current,
             clientFormat: 'json',
             clientInput: normalized,
-            clientRows: rows,
+            clientRows: mergeManualHeaders(current.clientRows ?? [], rows),
             clientError: '',
             clientLastSyncedFormat: 'json'
           };
@@ -3531,7 +3532,7 @@ export default function App() {
           ...current,
           format: 'json',
           input: normalized,
-          rows,
+          rows: mergeManualHeaders(current.rows, rows),
           error: '',
           lastSyncedFormat: 'json'
         };
@@ -3786,7 +3787,7 @@ export default function App() {
           ...current,
           format,
           input: rawText,
-          rows,
+          rows: mergeManualHeaders(current.rows, rows),
           error: '',
           lastSyncedFormat: format,
           requestUrl: isRequestSection(current) ? curlMeta?.url ?? current.requestUrl ?? '' : current.requestUrl,
@@ -7625,7 +7626,7 @@ export default function App() {
 
     return (
       <div style={{ display: 'grid', gap: 8 }}>
-        {section.rows.length === 0 && section.validationRules.length === 0 && <div style={{ color: 'var(--wb-text-muted)', fontSize: 13 }}>Ошибки и правила не добавлены.</div>}
+        {section.rows.length === 0 && <div style={{ color: 'var(--wb-text-muted)', fontSize: 13 }}>Ошибки не добавлены.</div>}
         {section.rows.map((row, index) => (
           <div key={`${row.internalCode}-${index}`} style={{ display: 'grid', gridTemplateColumns: '64px 1fr', gap: 8, padding: '7px 0', borderBottom: '1px solid var(--wb-border-soft)', fontSize: 13 }}>
             <code style={{ fontFamily: 'var(--wb-font-mono)', color: 'var(--wb-required)' }}>{row.clientHttpStatus || row.serverHttpStatus || row.responseCode || 'ERR'}</code>

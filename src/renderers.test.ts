@@ -158,7 +158,7 @@ describe('renderers', () => {
     expect(wiki).toContain('{expand:title=Пример JSON (Client response)}');
   });
 
-  it('renders SOAP protocol for XML request sections', () => {
+  it('keeps SOAP protocol in HTML but omits request metadata from wiki', () => {
     const sections: DocSection[] = [
       makeRequestSection({
         format: 'xml',
@@ -183,7 +183,9 @@ describe('renderers', () => {
     const wiki = renderWikiDocument(sections);
     const html = renderHtmlDocument(sections, 'light', { interactive: false });
 
-    expect(wiki).toContain('*Протокол:* SOAP');
+    expect(wiki).not.toContain('h3. Общее описание метода');
+    expect(wiki).not.toContain('h3. Внешний вызов');
+    expect(wiki).not.toContain('SOAP');
     expect(html).toContain('SOAP');
   });
 
@@ -215,7 +217,7 @@ describe('renderers', () => {
     expect(wiki).not.toContain('"requestId": "row-value"');
   });
 
-  it('exports request schema as Zod schema in wiki expand block', () => {
+  it('does not export Zod schemas in wiki', () => {
     const sections: DocSection[] = [
       makeRequestSection({
         schemaInput: JSON.stringify({
@@ -230,13 +232,9 @@ describe('renderers', () => {
     ];
 
     const wiki = renderWikiDocument(sections);
-    expect(wiki).toContain('{expand:title=Zod Schema (Server request)}');
-    expect(wiki).toContain('{code:typescript}');
-    expect(wiki).toContain("import { z } from 'zod';");
-    expect(wiki).toContain('export const serverRequestSchema = z.object({');
-    expect(wiki).toContain('"requestId": z.string().min(1)');
-    expect(wiki).toContain('"amount": z.number().min(0).optional()');
-    expect(wiki).not.toContain('{expand:title=JSON Schema (Server request)}');
+    expect(wiki).not.toContain('Zod Schema');
+    expect(wiki).not.toContain("import { z } from 'zod';");
+    expect(wiki).not.toContain('serverRequestSchema');
   });
 
   it('exports error response json as pretty multi-line code block in wiki table', () => {
@@ -268,7 +266,7 @@ describe('renderers', () => {
     expect(wiki).toContain('"message": "Bad request"');
   });
 
-  it('normalizes [0] to [] in wiki validation rules parameter column', () => {
+  it('does not render an errors section when it contains only validation rules', () => {
     const sections: DocSection[] = [
       {
         id: 'errors',
@@ -288,23 +286,36 @@ describe('renderers', () => {
     ];
 
     const wiki = renderWikiDocument(sections);
-    expect(wiki).toContain('items[].incomeType');
-    expect(wiki).toContain('|1|items[].incomeType|Pattern|^\\d+$|items[].incomeType must match pattern ^\\d+$|');
+    expect(wiki).not.toContain('items[].incomeType');
+    expect(wiki).not.toContain('Правила валидации');
+    expect(wiki).not.toContain('Pattern');
   });
 
-  it('normalizes regex classes in wiki validation condition for confluence compatibility', () => {
+  it('does not render validation rules alongside the errors table', () => {
     const sections: DocSection[] = [
       {
         id: 'errors',
         title: 'Ошибки',
         enabled: true,
         kind: 'errors',
-        rows: [],
+        rows: [
+          {
+            clientHttpStatus: '400',
+            clientResponse: 'Bad request',
+            clientResponseCode: '',
+            trigger: 'Validation failed',
+            errorType: 'BusinessException',
+            serverHttpStatus: '400',
+            internalCode: '100101',
+            message: 'Bad request',
+            responseCode: ''
+          }
+        ],
         validationRules: [
           {
             parameter: 'borrower.docDate',
             validationCase: 'Pattern',
-            condition: 'Значение должно содержать последовательно: одно из значений: 0[1-9], [12][0-9], 3[01], затем символ ".", затем одно из значений: 0[1-9], 1[0-2], затем символ ".", затем 4 цифры',
+            condition: 'date pattern',
             cause: 'borrower.docDate has invalid date/time format'
           }
         ]
@@ -312,10 +323,9 @@ describe('renderers', () => {
     ];
 
     const wiki = renderWikiDocument(sections);
-    expect(wiki).not.toContain('0[1-9]');
-    expect(wiki).not.toContain('[12][0-9]');
-    expect(wiki).toContain('0( 1-9 )');
-    expect(wiki).toContain('( 12 )( 0-9 )');
+    expect(wiki).toContain('Validation failed');
+    expect(wiki).not.toContain('borrower.docDate');
+    expect(wiki).not.toContain('Правила валидации');
   });
 
   it('fills method and path in wiki intro from meta', () => {

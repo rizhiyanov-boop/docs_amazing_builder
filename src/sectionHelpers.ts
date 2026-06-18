@@ -126,6 +126,26 @@ export function normalizeParsedRowsForSection(
   }));
 }
 
+function normalizeHeaderName(row: ParsedRow): string {
+  return String(row.field ?? '').trim().toLowerCase();
+}
+
+export function mergeManualHeaders(existingRows: ParsedRow[], parsedRows: ParsedRow[]): ParsedRow[] {
+  const parsedHeaderNames = new Set(
+    parsedRows
+      .filter((row) => row.source === 'header')
+      .map(normalizeHeaderName)
+      .filter(Boolean)
+  );
+  const manualHeaders = existingRows.filter((row) => (
+    row.source === 'header'
+    && row.origin === 'manual'
+    && !parsedHeaderNames.has(normalizeHeaderName(row))
+  ));
+
+  return [...parsedRows, ...manualHeaders];
+}
+
 export function getRowsRelevantToSourceFormat(rows: ParsedRow[], format: ParseFormat): ParsedRow[] {
   if (format !== 'json' && format !== 'xml') return rows;
   return rows.filter((row) => row.source !== 'header' && row.source !== 'url' && row.source !== 'query');

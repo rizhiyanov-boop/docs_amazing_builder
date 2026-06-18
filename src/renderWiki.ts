@@ -120,136 +120,6 @@ function getParsedExampleInput(format: ParseFormat, rawInput: string, schemaInpu
   return buildInputFromRows(format, rows);
 }
 
-type JsonSchemaNode = {
-  type?: string | string[];
-  properties?: Record<string, JsonSchemaNode>;
-  required?: string[];
-  items?: JsonSchemaNode;
-  enum?: unknown[];
-  format?: string;
-  pattern?: string;
-  minLength?: number;
-  maxLength?: number;
-  minimum?: number;
-  maximum?: number;
-  minItems?: number;
-  maxItems?: number;
-  oneOf?: JsonSchemaNode[];
-  anyOf?: JsonSchemaNode[];
-  allOf?: JsonSchemaNode[];
-};
-
-function resolveSchemaType(schema: JsonSchemaNode): string | undefined {
-  if (Array.isArray(schema.type)) {
-    return schema.type.find((item) => item !== 'null');
-  }
-  return schema.type;
-}
-
-function toZodRegex(pattern: string): string {
-  return `new RegExp(${JSON.stringify(pattern)})`;
-}
-
-function schemaNodeToZod(node: JsonSchemaNode): string {
-  const nullable = Array.isArray(node.type) && node.type.includes('null');
-  const nodeType = resolveSchemaType(node);
-
-  let expression = 'z.any()';
-
-  const oneOf = Array.isArray(node.oneOf) ? node.oneOf : [];
-  const anyOf = Array.isArray(node.anyOf) ? node.anyOf : [];
-  const allOf = Array.isArray(node.allOf) ? node.allOf : [];
-
-  if (Array.isArray(node.enum) && node.enum.length > 0) {
-    const enumValues = node.enum;
-    if (enumValues.every((item) => typeof item === 'string')) {
-      expression = `z.enum([${enumValues.map((item) => JSON.stringify(item)).join(', ')}])`;
-    } else {
-      expression = `z.union([${enumValues.map((item) => `z.literal(${JSON.stringify(item)})`).join(', ')}])`;
-    }
-  } else if (oneOf.length > 0 || anyOf.length > 0) {
-    const variants = (oneOf.length > 0 ? oneOf : anyOf).map((item) => schemaNodeToZod(item));
-    expression = variants.length > 1 ? `z.union([${variants.join(', ')}])` : (variants[0] ?? 'z.any()');
-  } else if (allOf.length > 0) {
-    const variants = allOf.map((item) => schemaNodeToZod(item));
-    expression = variants.reduce((acc, current) => (acc ? `z.intersection(${acc}, ${current})` : current), '');
-    if (!expression) expression = 'z.any()';
-  } else if (nodeType === 'object' || node.properties) {
-    const properties = node.properties ?? {};
-    const required = new Set(node.required ?? []);
-    const entries = Object.entries(properties).map(([key, value]) => {
-      let child = schemaNodeToZod(value);
-      if (!required.has(key)) child = `${child}.optional()`;
-      return `${JSON.stringify(key)}: ${child}`;
-    });
-    expression = `z.object({${entries.length > 0 ? `\n  ${entries.join(',\n  ')}\n` : ''}})`;
-  } else if (nodeType === 'array') {
-    const itemSchema = node.items ? schemaNodeToZod(node.items) : 'z.any()';
-    expression = `z.array(${itemSchema})`;
-    if (typeof node.minItems === 'number') expression += `.min(${node.minItems})`;
-    if (typeof node.maxItems === 'number') expression += `.max(${node.maxItems})`;
-  } else if (nodeType === 'string' || !nodeType) {
-    expression = 'z.string()';
-    if (typeof node.minLength === 'number') expression += `.min(${node.minLength})`;
-    if (typeof node.maxLength === 'number') expression += `.max(${node.maxLength})`;
-    if (node.format === 'email') expression += '.email()';
-    else if (node.format === 'uuid') expression += '.uuid()';
-    else if (node.format === 'uri' || node.format === 'url') expression += '.url()';
-    else if (typeof node.format === 'string') expression += `.describe(${JSON.stringify(`format:${node.format}`)})`;
-    if (typeof node.pattern === 'string' && node.pattern.trim()) expression += `.regex(${toZodRegex(node.pattern)})`;
-  } else if (nodeType === 'integer') {
-    expression = 'z.number().int()';
-    if (typeof node.minimum === 'number') expression += `.min(${node.minimum})`;
-    if (typeof node.maximum === 'number') expression += `.max(${node.maximum})`;
-  } else if (nodeType === 'number') {
-    expression = 'z.number()';
-    if (typeof node.minimum === 'number') expression += `.min(${node.minimum})`;
-    if (typeof node.maximum === 'number') expression += `.max(${node.maximum})`;
-  } else if (nodeType === 'boolean') {
-    expression = 'z.boolean()';
-  } else if (nodeType === 'null') {
-    expression = 'z.null()';
-  }
-
-  if (nullable && expression !== 'z.null()') {
-    expression += '.nullable()';
-  }
-
-  return expression;
-}
-
-function convertJsonSchemaToZodSource(schemaInput: string, schemaName: string): string {
-  const parsed = JSON.parse(schemaInput) as JsonSchemaNode;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('JSON Schema must be an object');
-  }
-
-  const rootExpression = schemaNodeToZod(parsed);
-  return [
-    "import { z } from 'zod';",
-    '',
-    `export const ${schemaName} = ${rootExpression};`
-  ].join('\n');
-}
-
-function toWikiZodSchemaCodeBlock(schemaInput: string, schemaName: string): string[] {
-  try {
-    const source = convertJsonSchemaToZodSource(schemaInput, schemaName);
-    return toWikiSourceCodeBlock(source, 'curl').map((line) => {
-      if (line === '{code:bash}') return '{code:typescript}';
-      return line;
-    });
-  } catch {
-    return [
-      '{code:typescript}',
-      `// Failed to convert JSON Schema to Zod.`,
-      "import { z } from 'zod';",
-      `export const ${schemaName} = z.any();`,
-      '{code}'
-    ];
-  }
-}
-
 function toWikiInlineCodeMacro(value: string, format: ParseFormat = 'json'): string {
   const normalized = value
     .replaceAll('\r\n', '\n')
@@ -407,20 +277,6 @@ function renderParsedSourceExamples(section: ParsedSection): string[] {
     lines.push('{expand}');
   }
 
-  if (serverSchema) {
-    lines.push('');
-    lines.push(`{expand:title=Zod Schema (Server ${sectionLabel})}`);
-    lines.push(...toWikiZodSchemaCodeBlock(serverSchema, `server${sectionLabel === 'response' ? 'Response' : 'Request'}Schema`));
-    lines.push('{expand}');
-  }
-
-  if (clientSchema) {
-    lines.push('');
-    lines.push(`{expand:title=Zod Schema (Client ${sectionLabel})}`);
-    lines.push(...toWikiZodSchemaCodeBlock(clientSchema, `client${sectionLabel === 'response' ? 'Response' : 'Request'}Schema`));
-    lines.push('{expand}');
-  }
-
   return lines;
 }
 
@@ -437,18 +293,6 @@ function toWikiTextBlock(value: string): string[] {
     .replaceAll('\r', '\n')
     .split('\n')
     .map((line) => escapeWikiTableText(line));
-}
-
-function normalizeValidationConditionForWiki(value: string): string {
-  return value.replace(/\[\s*([^\]]*?)\s*\]/g, (_match, inner: string) => {
-    const normalizedInner = inner.trim();
-    if (!normalizedInner) return '[]';
-    return `( ${normalizedInner} )`;
-  });
-}
-
-function normalizeValidationCauseForWiki(value: string): string {
-  return normalizeArrayFieldPath(value);
 }
 
 function wrapWikiTable(tableLines: string[]): string[] {
@@ -475,7 +319,7 @@ function shouldRenderDiagramSection(section: DiagramSection): boolean {
 
 function shouldRenderErrorsSection(section: ErrorsSection): boolean {
   if (!section.enabled) return true;
-  return section.rows.length > 0 || section.validationRules.length > 0;
+  return section.rows.length > 0;
 }
 
 function renderDefaultTable(rows: ParsedRow[]): string[] {
@@ -539,24 +383,10 @@ function renderRequestSection(section: ParsedSection): string[] {
     return lines;
   }
 
-  const { headers, otherRows, urlRow } = splitRequestRows(getRequestRows(section));
+  const { headers, otherRows } = splitRequestRows(getRequestRows(section));
   const requestError = section.error || section.clientError;
   const authInfo = getRequestAuthInfo(section);
-  const requestUrl = section.requestUrl?.trim() || (urlRow?.example ?? '');
-  const requestMethod = section.requestMethod?.trim() || section.format.toUpperCase();
-  const requestProtocol = section.requestProtocol?.trim() || 'REST';
-  const externalRequestUrl = section.externalRequestUrl?.trim() || '';
-  const externalRequestMethod = section.externalRequestMethod?.trim() || 'POST';
   const externalHeaders = (section.clientRows ?? []).filter((row) => row.source === 'header' && row.enabled !== false);
-
-  lines.push('');
-  lines.push('h3. Общее описание метода');
-  lines.push('');
-  if (requestUrl) {
-    lines.push(`*URL:* ${toWikiCell(requestUrl)}`);
-  }
-  lines.push(`*Метод:* ${toWikiCell(requestMethod)}`);
-  lines.push(`*Протокол:* ${toWikiCell(requestProtocol)}`);
 
   if (authInfo) {
     lines.push('');
@@ -571,16 +401,6 @@ function renderRequestSection(section: ParsedSection): string[] {
     lines.push('h3. Headers');
     lines.push('');
     lines.push(...renderStructuredTable(headers, section));
-  }
-  if (section.domainModelEnabled) {
-    lines.push('');
-    lines.push('h3. Внешний вызов');
-    lines.push('');
-    if (externalRequestUrl) {
-      lines.push(`*Внешний URL:* ${toWikiCell(externalRequestUrl)}`);
-    }
-    lines.push(`*Метод:* ${toWikiCell(externalRequestMethod)}`);
-    lines.push(`*Протокол:* ${toWikiCell(requestProtocol)}`);
   }
   if (externalHeaders.length > 0) {
     lines.push('');
@@ -688,19 +508,6 @@ function renderErrorsSection(section: ErrorsSection): string[] {
     section.rows.forEach((row, index) => {
       tableLines.push(
         `|${toWikiCell(String(index + 1))}|${toWikiCell(row.clientHttpStatus)}|${renderErrorResponseCell(row.clientResponse, row.clientResponseCode)}|${toWikiCell(row.trigger)}|${toWikiCell(row.errorType)}|${toWikiCell(row.serverHttpStatus)}|${toWikiCell(row.internalCode)}|${renderErrorResponseCell(row.message, row.responseCode)}|`
-      );
-    });
-    lines.push(...wrapWikiTable(tableLines));
-  }
-
-  if (section.validationRules.length > 0) {
-    lines.push('');
-    lines.push('h3. Правила валидации');
-    const tableLines = ['||№||Параметр (server request)||Кейс валидации||Условие возникновения||cause||'];
-
-    section.validationRules.forEach((row, index) => {
-      tableLines.push(
-        `|${toWikiCell(String(index + 1))}|${toWikiCell(normalizeArrayFieldPath(row.parameter))}|${toWikiCell(row.validationCase)}|${toWikiCell(normalizeValidationConditionForWiki(row.condition))}|${toWikiCell(normalizeValidationCauseForWiki(row.cause))}|`
       );
     });
     lines.push(...wrapWikiTable(tableLines));

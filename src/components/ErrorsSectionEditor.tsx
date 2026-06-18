@@ -362,7 +362,7 @@ export function ErrorsSectionEditor({
         </div>
       </div>
 
-      <div className="table-wrap">
+      <div className="table-wrap" hidden aria-hidden="true">
         <table>
           <thead>
             <tr>

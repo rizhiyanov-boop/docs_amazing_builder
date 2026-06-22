@@ -3,6 +3,7 @@ import type { RequestMethod } from '../../types';
 import { HttpChip, WBButton } from '../primitives/WorkbenchPrimitives';
 
 export type WorkbenchAccent = 'blue' | 'warm' | 'violet';
+export type TopbarAutosaveState = 'idle' | 'saving' | 'saved' | 'error';
 
 type WorkbenchTopbarProps = {
   topbarRef: RefObject<HTMLElement | null>;
@@ -15,6 +16,10 @@ type WorkbenchTopbarProps = {
   isLogoutBusy: boolean;
   canUndo: boolean;
   canRedo: boolean;
+  splitOpen: boolean;
+  splitAvailable: boolean;
+  autosaveState: TopbarAutosaveState;
+  autosaveAt?: string;
   onAccentChange: (accent: WorkbenchAccent) => void;
   onOpenProjectImport: () => void;
   onImportProjectJson: (files: File[]) => void;
@@ -24,6 +29,9 @@ type WorkbenchTopbarProps = {
   onExportFullProjectWiki: () => void;
   onExportJson: () => void;
   onToggleSidebar: () => void;
+  onToggleSplit: () => void;
+  onToggleTheme: () => void;
+  onOpenSearch: () => void;
   onRenameMethod: () => void;
   onDeleteMethod: () => void;
   canDeleteMethod: boolean;
@@ -41,133 +49,43 @@ const ACCENTS: Array<{ id: WorkbenchAccent; label: string }> = [
   { id: 'violet', label: 'Dusk' }
 ];
 
-function ExportSplitButton({
+function Icon({ name }: { name: 'json' | 'html' | 'wiki' | 'undo' | 'redo' | 'split' | 'search' | 'theme' | 'more' }): ReactNode {
+  if (name === 'json') return <svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3M16 3h3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-3M12 20V4" /></svg>;
+  if (name === 'html') return <svg viewBox="0 0 24 24"><path d="m16 18 6-6-6-6M8 6l-6 6 6 6" /></svg>;
+  if (name === 'wiki') return <svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" /></svg>;
+  if (name === 'undo') return <svg viewBox="0 0 24 24"><path d="M3 7v6h6M21 17a9 9 0 0 0-15-6.7L3 13" /></svg>;
+  if (name === 'redo') return <svg viewBox="0 0 24 24"><path d="M21 7v6h-6M3 17a9 9 0 0 1 15-6.7l3 2.7" /></svg>;
+  if (name === 'split') return <svg viewBox="0 0 16 16"><rect x="1" y="2" width="5.5" height="12" rx="1.2" /><rect x="9.5" y="2" width="5.5" height="12" rx="1.2" /></svg>;
+  if (name === 'search') return <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg>;
+  if (name === 'theme') return <svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z" /></svg>;
+  return <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" /></svg>;
+}
+
+function IconButton({
   label,
-  onExportMethod,
-  onExportProject
+  icon,
+  onClick,
+  disabled,
+  active
 }: {
   label: string;
-  onExportMethod: () => void;
-  onExportProject: () => void;
+  icon: Parameters<typeof Icon>[0]['name'];
+  onClick: () => void;
+  disabled?: boolean;
+  active?: boolean;
 }): ReactNode {
-  const [isOpen, setIsOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    function handleClickOutside(event: MouseEvent) {
-      if (ref.current && !ref.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    }
-    function handleEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        setIsOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    document.addEventListener('keydown', handleEscape);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-      document.removeEventListener('keydown', handleEscape);
-    };
-  }, [isOpen]);
-
   return (
-    <div ref={ref} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
-      <WBButton variant="ghost" size="sm" onClick={onExportMethod} title={`${label}: текущий метод`}>
-        {label}
-      </WBButton>
-      <button
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={isOpen}
-        aria-label={`Опции экспорта ${label}`}
-        title={`Опции экспорта ${label}`}
-        onClick={() => setIsOpen((current) => !current)}
-        style={{
-          background: 'transparent',
-          color: 'var(--wb-text-soft)',
-          border: '1px solid transparent',
-          padding: '4px 6px',
-          fontSize: 12,
-          fontWeight: 600,
-          borderRadius: 'var(--wb-button-radius)',
-          cursor: 'pointer',
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontFamily: 'var(--wb-font-sans)',
-          whiteSpace: 'nowrap'
-        }}
-      >
-        ▾
-      </button>
-      {isOpen && (
-        <div
-          role="menu"
-          aria-label={`Меню экспорта ${label}`}
-          style={{
-            position: 'absolute',
-            top: '100%',
-            right: 0,
-            marginTop: 4,
-            zIndex: 100,
-            minWidth: 180,
-            background: 'var(--wb-bg-surface)',
-            border: '1px solid var(--wb-border)',
-            borderRadius: 'var(--wb-radius-lg)',
-            boxShadow: 'var(--wb-shadow-pop)',
-            overflow: 'hidden'
-          }}
-        >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              setIsOpen(false);
-              onExportMethod();
-            }}
-            style={{
-              display: 'block',
-              width: '100%',
-              padding: '8px 12px',
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              fontSize: 13,
-              color: 'var(--wb-text)',
-              textAlign: 'left',
-              fontFamily: 'var(--wb-font-sans)'
-            }}
-          >
-            Текущий метод
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              setIsOpen(false);
-              onExportProject();
-            }}
-            style={{
-              display: 'block',
-              width: '100%',
-              padding: '8px 12px',
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              fontSize: 13,
-              color: 'var(--wb-text)',
-              textAlign: 'left',
-              fontFamily: 'var(--wb-font-sans)'
-            }}
-          >
-            Весь проект
-          </button>
-        </div>
-      )}
-    </div>
+    <button
+      type="button"
+      className={`wb-topbar-icon-button ${active ? 'active' : ''}`}
+      aria-label={label}
+      title={label}
+      aria-pressed={icon === 'split' ? active : undefined}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      <Icon name={icon} />
+    </button>
   );
 }
 
@@ -182,6 +100,10 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
   isLogoutBusy,
   canUndo,
   canRedo,
+  splitOpen,
+  splitAvailable,
+  autosaveState,
+  autosaveAt,
   onAccentChange,
   onOpenProjectImport,
   onImportProjectJson,
@@ -191,6 +113,9 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
   onExportFullProjectWiki,
   onExportJson,
   onToggleSidebar,
+  onToggleSplit,
+  onToggleTheme,
+  onOpenSearch,
   onRenameMethod,
   onDeleteMethod,
   canDeleteMethod,
@@ -201,264 +126,139 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
   onOpenLogin,
   onOpenRegister
 }: WorkbenchTopbarProps): ReactNode {
-  const [themeOpen, setThemeOpen] = useState(false);
-  const [isMethodMenuOpen, setIsMethodMenuOpen] = useState(false);
-  const themePanelRef = useRef<HTMLDivElement>(null);
-  const methodMenuRef = useRef<HTMLDivElement>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [overflowOpen, setOverflowOpen] = useState(false);
+  const profileRef = useRef<HTMLDivElement>(null);
+  const overflowRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!themeOpen) return;
-    function handleClickOutside(e: MouseEvent) {
-      if (themePanelRef.current && !themePanelRef.current.contains(e.target as Node)) {
-        setThemeOpen(false);
-      }
-    }
-    function handleEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        setThemeOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    document.addEventListener('keydown', handleEscape);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-      document.removeEventListener('keydown', handleEscape);
+    if (!profileOpen && !overflowOpen) return;
+    const closeOutside = (event: MouseEvent) => {
+      if (profileOpen && profileRef.current && !profileRef.current.contains(event.target as Node)) setProfileOpen(false);
+      if (overflowOpen && overflowRef.current && !overflowRef.current.contains(event.target as Node)) setOverflowOpen(false);
     };
-  }, [themeOpen]);
+    const closeEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setProfileOpen(false);
+        setOverflowOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', closeOutside);
+    document.addEventListener('keydown', closeEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeOutside);
+      document.removeEventListener('keydown', closeEscape);
+    };
+  }, [overflowOpen, profileOpen]);
 
-  useEffect(() => {
-    if (!isMethodMenuOpen) return;
-    function handleClickOutside(event: MouseEvent) {
-      if (methodMenuRef.current && !methodMenuRef.current.contains(event.target as Node)) {
-        setIsMethodMenuOpen(false);
-      }
-    }
-    function handleEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        setIsMethodMenuOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    document.addEventListener('keydown', handleEscape);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-      document.removeEventListener('keydown', handleEscape);
-    };
-  }, [isMethodMenuOpen]);
+  const autosaveLabel =
+    autosaveState === 'saving'
+      ? 'Сохранение…'
+      : autosaveState === 'error'
+        ? 'Ошибка сохранения'
+        : autosaveState === 'saved'
+          ? `Сохранено${autosaveAt ? ` · ${autosaveAt}` : ''}`
+          : 'Изменения сохранены';
+
+  const runOverflowAction = (action: () => void) => {
+    setOverflowOpen(false);
+    action();
+  };
 
   return (
-    <header
-      ref={topbarRef}
-      className="wb-topbar"
-      style={{
-        height: 48,
-        minHeight: 48,
-        borderBottom: '1px solid var(--wb-border)',
-        background: 'var(--wb-bg-surface)',
-        display: 'flex',
-        alignItems: 'center',
-        padding: '0 14px',
-        gap: 10,
-        color: 'var(--wb-text)',
-        fontFamily: 'var(--wb-font-sans)'
-      }}
-    >
-      <button
-        type="button"
-        className="wb-mobile-menu-button"
-        aria-label="Открыть навигацию"
-        title="Открыть навигацию"
-        onClick={onToggleSidebar}
-      >
-        ☰
-      </button>
-      <HttpChip method={methodHttpMethod} size="sm" />
-      <div ref={methodMenuRef} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
-        <code style={{ fontFamily: 'var(--wb-font-mono)', fontSize: 13, fontWeight: 600, color: 'var(--wb-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 240 }}>
-          {methodName || 'Untitled method'}
-        </code>
-        <button
-          type="button"
-          aria-haspopup="menu"
-          aria-expanded={isMethodMenuOpen}
-          aria-label="Действия с методом"
-          title="Действия с методом"
-          onClick={() => setIsMethodMenuOpen((current) => !current)}
-          style={{
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            color: 'var(--wb-text-muted)',
-            fontSize: 16,
-            lineHeight: 1,
-            padding: '2px 6px',
-            borderRadius: 'var(--wb-radius)',
-            opacity: 0.68
-          }}
-          onMouseEnter={(event) => {
-            event.currentTarget.style.opacity = '1';
-          }}
-          onMouseLeave={(event) => {
-            event.currentTarget.style.opacity = '0.68';
-          }}
-        >
-          ⋯
-        </button>
-        {isMethodMenuOpen && (
-          <div
-            role="menu"
-            style={{
-              position: 'absolute',
-              top: '100%',
-              left: 0,
-              marginTop: 4,
-              zIndex: 100,
-              minWidth: 180,
-              background: 'var(--wb-bg-surface)',
-              border: '1px solid var(--wb-border)',
-              borderRadius: 'var(--wb-radius-lg)',
-              boxShadow: 'var(--wb-shadow-pop)',
-              overflow: 'hidden'
-            }}
-          >
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                setIsMethodMenuOpen(false);
-                onRenameMethod();
-              }}
-              style={{
-                display: 'block',
-                width: '100%',
-                padding: '8px 12px',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                fontSize: 13,
-                color: 'var(--wb-text)',
-                textAlign: 'left',
-                fontFamily: 'var(--wb-font-sans)'
-              }}
-            >
-              Переименовать
-            </button>
-            <div style={{ borderTop: '1px solid var(--wb-border-soft)', margin: '4px 0' }} />
+    <header ref={topbarRef} className="wb-topbar">
+      <button type="button" className="wb-mobile-menu-button" aria-label="Открыть навигацию" onClick={onToggleSidebar}>☰</button>
+
+      <div className="wb-topbar-brand" aria-label="doc-builder">
+        <span className="wb-topbar-mark">db</span>
+        <span className="wb-topbar-name">doc-builder</span>
+      </div>
+      <span className="wb-topbar-divider" />
+
+      <div className="wb-topbar-crumb" title={methodName}>
+        <HttpChip method={methodHttpMethod} size="sm" />
+        <code>{methodPath || '/'}</code>
+        <span>/</span>
+      </div>
+      <span className="wb-topbar-divider" />
+
+      <div className="wb-topbar-tools" aria-label="Экспорт и история">
+        <IconButton label="JSON" icon="json" onClick={onExportJson} />
+        <IconButton label="HTML" icon="html" onClick={onExportHtml} />
+        <IconButton label="Wiki" icon="wiki" onClick={onExportWiki} />
+        <span className="wb-topbar-divider" />
+        <IconButton label="Отменить" icon="undo" onClick={onUndo} disabled={!canUndo} />
+        <IconButton label="Повторить" icon="redo" onClick={onRedo} disabled={!canRedo} />
+        <span className="wb-topbar-divider" />
+        <IconButton
+          label={splitAvailable ? 'Сплит-режим (Ctrl+\\)' : 'Сплит-режим недоступен на узком экране'}
+          icon="split"
+          onClick={onToggleSplit}
+          disabled={!splitAvailable}
+          active={splitOpen}
+        />
+      </div>
+
+      <div className={`wb-topbar-autosave ${autosaveState}`} role="status">
+        <span aria-hidden>{autosaveState === 'error' ? '!' : autosaveState === 'saving' ? '…' : '✓'}</span>
+        {autosaveLabel}
+      </div>
+
+      <button type="button" className="wb-topbar-save" onClick={onManualSave}>Сохранить</button>
+      <IconButton label="Поиск (Ctrl+K)" icon="search" onClick={onOpenSearch} />
+      <IconButton label="Переключить тему" icon="theme" onClick={onToggleTheme} />
+
+      <div className="wb-topbar-popover-anchor" ref={overflowRef}>
+        <IconButton label="Дополнительные действия" icon="more" onClick={() => setOverflowOpen((current) => !current)} />
+        {overflowOpen && (
+          <div className="wb-topbar-menu" role="menu" aria-label="Дополнительные действия">
+            <button type="button" role="menuitem" onClick={() => runOverflowAction(onOpenProjectImport)}>Импорт</button>
+            <button type="button" role="menuitem" onClick={() => runOverflowAction(onRenameMethod)}>Переименовать метод</button>
             <button
               type="button"
               role="menuitem"
               disabled={!canDeleteMethod}
-              title={canDeleteMethod ? '' : 'Нельзя удалить последний метод'}
-              onClick={() => {
-                setIsMethodMenuOpen(false);
-                onDeleteMethod();
-              }}
-              style={{
-                display: 'block',
-                width: '100%',
-                padding: '8px 12px',
-                background: 'none',
-                border: 'none',
-                cursor: canDeleteMethod ? 'pointer' : 'not-allowed',
-                fontSize: 13,
-                color: canDeleteMethod ? 'var(--wb-required)' : 'var(--wb-text-muted)',
-                textAlign: 'left',
-                fontFamily: 'var(--wb-font-sans)',
-                opacity: canDeleteMethod ? 1 : 0.5
-              }}
+              className="danger"
+              onClick={() => runOverflowAction(onDeleteMethod)}
             >
               Удалить метод
             </button>
+            <span className="wb-topbar-menu-divider" />
+            <button type="button" role="menuitem" onClick={() => runOverflowAction(onExportFullProjectHtml)}>Проект HTML</button>
+            <button type="button" role="menuitem" onClick={() => runOverflowAction(onExportFullProjectWiki)}>Проект Wiki</button>
           </div>
         )}
       </div>
-      <span style={{ width: 1, height: 20, background: 'var(--wb-border)' }} />
-      <span style={{ fontFamily: 'var(--wb-font-mono)', fontSize: 11, color: 'var(--wb-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 260 }}>{methodPath || '/'}</span>
 
-      <div style={{ flex: 1 }} />
+      <input
+        ref={importInputRef}
+        className="hidden-file-input"
+        type="file"
+        multiple
+        accept="application/json,application/xml,text/xml,text/plain,.json,.xml,.txt"
+        onChange={(event) => {
+          onImportProjectJson(Array.from(event.target.files ?? []));
+          event.currentTarget.value = '';
+        }}
+      />
 
-      <div className="wb-topbar-actions" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-        <WBButton variant="ghost" size="sm" onClick={onOpenProjectImport} aria-label="Импорт">Импорт</WBButton>
-        <input
-          ref={importInputRef}
-          className="hidden-file-input"
-          type="file"
-          multiple
-          accept="application/json,application/xml,text/xml,text/plain,.json,.xml,.txt"
-          onChange={(event) => {
-            const files = Array.from(event.target.files ?? []);
-            onImportProjectJson(files);
-            event.currentTarget.value = '';
-          }}
-        />
-        <ExportSplitButton label="HTML" onExportMethod={onExportHtml} onExportProject={onExportFullProjectHtml} />
-        <ExportSplitButton label="Wiki" onExportMethod={onExportWiki} onExportProject={onExportFullProjectWiki} />
-        <WBButton variant="secondary" size="sm" onClick={onExportJson}>JSON</WBButton>
-      </div>
-
-      <div className="wb-topbar-actions" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-        <WBButton variant="ghost" size="sm" onClick={onUndo} disabled={!canUndo} title="Отменить">↶</WBButton>
-        <WBButton variant="ghost" size="sm" onClick={onRedo} disabled={!canRedo} title="Повторить">↷</WBButton>
-        <WBButton variant="ghost" size="sm" onClick={onManualSave} title="Сохранить">Сохранить</WBButton>
-      </div>
-
-      <div style={{ position: 'relative' }} ref={themePanelRef}>
-        <button
-          type="button"
-          onClick={() => setThemeOpen((current) => !current)}
-          style={{
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            border: '1px solid var(--wb-border-soft)',
-            borderRadius: 999,
-            padding: '3px 7px',
-            background: 'var(--wb-bg-soft)',
-            color: 'var(--wb-text)',
-            fontSize: 12
-          }}
-        >
-          <span style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--wb-accent)', color: 'var(--wb-accent-fg)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>
-            {(authUserLogin ?? 'U').slice(0, 1).toUpperCase()}
-          </span>
-          <span style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{authUserLogin ?? 'Гость'}</span>
+      <div className="wb-topbar-popover-anchor" ref={profileRef}>
+        <button type="button" className="wb-topbar-profile" onClick={() => setProfileOpen((current) => !current)}>
+          <span>{(authUserLogin ?? 'U').slice(0, 1).toUpperCase()}</span>
+          <span>{authUserLogin ?? 'Гость'}</span>
         </button>
-        {themeOpen && (
-          <div
-            style={{
-              position: 'absolute',
-              top: 34,
-              right: 0,
-              zIndex: 20,
-              width: 220,
-              background: 'var(--wb-bg-surface)',
-              border: '1px solid var(--wb-border)',
-              borderRadius: 'var(--wb-radius)',
-              boxShadow: 'var(--wb-shadow-pop)',
-              padding: 10,
-              display: 'grid',
-              gap: 8
-            }}
-          >
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--wb-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Тема</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 4 }}>
+        {profileOpen && (
+          <div className="wb-topbar-profile-panel">
+            <div className="wb-topbar-panel-label">Акцент</div>
+            <div className="wb-topbar-accents">
               {ACCENTS.map((item) => (
                 <button
                   key={item.id}
                   type="button"
+                  className={accent === item.id ? 'active' : ''}
                   onClick={() => {
                     onAccentChange(item.id);
-                    setThemeOpen(false);
-                  }}
-                  style={{
-                    border: `1px solid ${accent === item.id ? 'var(--wb-accent)' : 'var(--wb-border-soft)'}`,
-                    background: accent === item.id ? 'var(--wb-accent-soft)' : 'var(--wb-bg-soft)',
-                    color: 'var(--wb-text)',
-                    borderRadius: 5,
-                    padding: '5px 4px',
-                    fontSize: 11,
-                    cursor: 'pointer'
+                    setProfileOpen(false);
                   }}
                 >
                   {item.label}
@@ -466,9 +266,11 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
               ))}
             </div>
             {authUserLogin ? (
-              <WBButton variant="danger" size="sm" onClick={onLogout} disabled={isLogoutBusy} fullWidth>{isLogoutBusy ? 'Выход...' : 'Logout'}</WBButton>
+              <WBButton variant="danger" size="sm" onClick={onLogout} disabled={isLogoutBusy} fullWidth>
+                {isLogoutBusy ? 'Выход…' : 'Выйти'}
+              </WBButton>
             ) : (
-              <div style={{ display: 'flex', gap: 6 }}>
+              <div className="wb-topbar-auth-actions">
                 <WBButton variant="secondary" size="sm" onClick={onOpenLogin} fullWidth>Войти</WBButton>
                 <WBButton variant="accent" size="sm" onClick={onOpenRegister} fullWidth>Регистрация</WBButton>
               </div>

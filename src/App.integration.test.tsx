@@ -117,11 +117,9 @@ function findTopbarButton(name: RegExp): HTMLButtonElement {
   return within(getTopbar()).getByRole('button', { name }) as HTMLButtonElement;
 }
 
-function findTopbarIconButton(name: RegExp, textToExclude: string): HTMLButtonElement {
-  const buttons = within(getTopbar()).getAllByRole('button', { name }) as HTMLButtonElement[];
-  const button = buttons.find((item) => item.textContent !== textToExclude);
-  expect(button).toBeDefined();
-  return button as HTMLButtonElement;
+async function openTopbarOverflow(user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> {
+  await user.click(findTopbarButton(/Дополнительные действия/));
+  return screen.getByRole('menu', { name: 'Дополнительные действия' });
 }
 
 function getNavigationTree(): HTMLElement {
@@ -167,6 +165,8 @@ describe('App integration', () => {
     expect(screen.queryByRole('button', { name: 'Workbench' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Editor' })).not.toBeInTheDocument();
     expect(screen.getByText('REQUEST')).toBeInTheDocument();
+    expect(screen.getAllByRole('textbox', { name: 'Содержимое текстовой секции' }).length).toBeGreaterThan(1);
+    expect(screen.queryByRole('toolbar', { name: 'Форматирование текста' })).not.toBeInTheDocument();
     expect(findTopbarButton(/^HTML$/)).toBeInTheDocument();
 
     await waitFor(() => {
@@ -361,15 +361,246 @@ describe('App integration', () => {
     });
   });
 
+  it('opens a read-only split with an independent linked method and closes it', async () => {
+    const user = userEvent.setup();
+    seedTwoMethodWorkspace();
+    renderApp();
+
+    expect(document.querySelector('.wb-meta-panel')).not.toBeNull();
+    await user.click(findTopbarButton(/Сплит-режим/));
+
+    const linkedPreview = screen.getByRole('complementary', { name: 'Связанный метод' });
+    expect(linkedPreview).toHaveTextContent('Second Method');
+    expect(linkedPreview).toHaveTextContent('Detailed second method body');
+    expect(within(linkedPreview).queryByRole('textbox')).not.toBeInTheDocument();
+    expect(within(linkedPreview).getByRole('tab', { name: 'Project Docs' })).toHaveAttribute('aria-disabled', 'true');
+    expect(document.querySelector('.wb-meta-panel')).toBeNull();
+    expect(findTopbarButton(/Сплит-режим/)).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(within(linkedPreview).getByRole('button', { name: 'Закрыть сплит' }));
+    expect(screen.queryByRole('complementary', { name: 'Связанный метод' })).not.toBeInTheDocument();
+    expect(document.querySelector('.wb-meta-panel')).not.toBeNull();
+  });
+
+  it('toggles split with Ctrl+\\ without changing the active method', async () => {
+    const user = userEvent.setup();
+    seedTwoMethodWorkspace();
+    renderApp();
+
+    fireEvent.keyDown(document, { key: '\\', ctrlKey: true });
+    const linkedPreview = await screen.findByRole('complementary', { name: 'Связанный метод' });
+    const picker = within(linkedPreview).getByRole('button', { name: /Second Method/ });
+    await user.click(picker);
+    await user.click(within(linkedPreview).getByRole('option', { name: /First Method/ }));
+
+    expect(within(linkedPreview).getByText('Detailed first method body')).toBeInTheDocument();
+    expect(within(getNavigationTree()).getByRole('treeitem', { name: /First Method/ })).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.keyDown(document, { key: '\\', ctrlKey: true });
+    expect(screen.queryByRole('complementary', { name: 'Связанный метод' })).not.toBeInTheDocument();
+  });
+
+  it('disables split in compact layout', () => {
+    vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({
+      matches: query.includes('64rem'),
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn()
+    })));
+    seedTwoMethodWorkspace();
+    renderApp();
+
+    expect(findTopbarButton(/Сплит-режим недоступен/)).toBeDisabled();
+    fireEvent.keyDown(document, { key: '\\', ctrlKey: true });
+    expect(screen.queryByRole('complementary', { name: 'Связанный метод' })).not.toBeInTheDocument();
+  });
+
+  it('falls back to an available linked method after the selected method is deleted', async () => {
+    const user = userEvent.setup();
+    seedTwoMethodWorkspace();
+    renderApp();
+
+    await user.click(findTopbarButton(/Сплит-режим/));
+    expect(screen.getByRole('complementary', { name: 'Связанный метод' })).toHaveTextContent('Second Method');
+    const secondMethodTreeItem = within(getNavigationTree()).getByRole('treeitem', { name: /Second Method/ });
+    await user.click(within(secondMethodTreeItem).getByRole('button'));
+    await waitFor(() => expect(document.querySelector('.wb-topbar-crumb')).toHaveAttribute('title', 'Second Method'));
+    const menu = await openTopbarOverflow(user);
+    await user.click(within(menu).getByRole('menuitem', { name: 'Удалить метод' }));
+    const dialog = screen.getByRole('dialog', { name: 'Подтверждение удаления метода' });
+    await user.click(within(dialog).getByRole('button', { name: 'Удалить метод' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('complementary', { name: 'Связанный метод' })).toHaveTextContent('First Method');
+    });
+  });
+
+  it('moves inline parameter editing vertically with Tab and Shift+Tab', async () => {
+    const user = userEvent.setup();
+    seedSingleMethodWorkspace({
+      id: 's_request',
+      title: 'Request',
+      enabled: true,
+      kind: 'parsed',
+      sectionType: 'request',
+      format: 'json',
+      input: '{"first":"1","disabled":"skip","second":"2"}',
+      rows: [
+        {
+          id: 'row-first',
+          field: 'first',
+          sourceField: 'first',
+          origin: 'parsed',
+          enabled: true,
+          type: 'object',
+          required: '+',
+          description: 'First description',
+          example: '{}',
+          source: 'body'
+        },
+        {
+          id: 'row-disabled',
+          field: 'disabled',
+          sourceField: 'disabled',
+          origin: 'parsed',
+          enabled: false,
+          type: 'object',
+          required: '+',
+          description: 'Disabled description',
+          example: 'skip',
+          source: 'body'
+        },
+        {
+          id: 'row-second',
+          field: 'second',
+          sourceField: 'second',
+          origin: 'parsed',
+          enabled: true,
+          type: 'object',
+          required: '+',
+          description: 'Second description',
+          example: '{}',
+          source: 'body'
+        }
+      ],
+      error: '',
+      domainModelEnabled: false
+    });
+
+    renderApp();
+    const contractTitle = document.querySelector('.contract-side-title');
+    if (!contractTitle) throw new Error('Contract title not found');
+    await user.click(contractTitle);
+
+    await user.dblClick(screen.getByText('First description'));
+    const firstEditor = screen.getByDisplayValue('First description');
+    fireEvent.keyDown(firstEditor, { key: 'Tab' });
+    await waitFor(() => expect(screen.getByDisplayValue('Second description')).toHaveFocus());
+
+    fireEvent.keyDown(screen.getByDisplayValue('Second description'), { key: 'Tab', shiftKey: true });
+    await waitFor(() => expect(screen.getByDisplayValue('First description')).toHaveFocus());
+
+    fireEvent.keyDown(screen.getByDisplayValue('First description'), { key: 'Escape' });
+    await user.dblClick(screen.getByText('first'));
+    fireEvent.keyDown(screen.getByDisplayValue('first'), { key: 'Tab' });
+    await waitFor(() => expect(screen.getByDisplayValue('second')).toHaveFocus());
+
+    fireEvent.keyDown(screen.getByDisplayValue('second'), { key: 'Escape' });
+    const firstRow = screen.getByText('First description').closest('tr');
+    const secondRow = screen.getByText('Second description').closest('tr');
+    if (!firstRow || !secondRow) throw new Error('Parameter rows not found');
+    await user.dblClick(within(firstRow).getByText('object'));
+    const firstTypeEditor = within(firstRow).getByRole('combobox');
+    fireEvent.keyDown(firstTypeEditor, { key: 'Tab' });
+    await waitFor(() => expect(within(secondRow).getByRole('combobox')).toHaveFocus());
+
+    fireEvent.keyDown(within(secondRow).getByRole('combobox'), { key: 'Escape' });
+    await user.dblClick(within(firstRow).getByText('{}'));
+    const firstExampleEditor = within(firstRow).getByDisplayValue('{}');
+    await waitFor(() => expect(firstExampleEditor).toHaveFocus());
+    fireEvent.change(firstExampleEditor, { target: { value: '{' } });
+    fireEvent.keyDown(firstExampleEditor, { key: 'Tab' });
+    expect(firstExampleEditor).toHaveFocus();
+    expect(within(secondRow).queryByDisplayValue('{}')).not.toBeInTheDocument();
+  });
+
+  it('moves header editing and masking focus vertically while skipping fixed headers', async () => {
+    const user = userEvent.setup();
+    seedSingleMethodWorkspace({
+      id: 's_request',
+      title: 'Request',
+      enabled: true,
+      kind: 'parsed',
+      sectionType: 'request',
+      format: 'json',
+      input: '{}',
+      rows: [
+        {
+          id: 'header-first',
+          field: 'X-FIRST',
+          sourceField: 'X-FIRST',
+          origin: 'manual',
+          enabled: true,
+          type: 'string',
+          required: '+',
+          description: 'First header description',
+          maskInLogs: false,
+          example: 'one',
+          source: 'header'
+        },
+        {
+          id: 'header-second',
+          field: 'X-SECOND',
+          sourceField: 'X-SECOND',
+          origin: 'manual',
+          enabled: true,
+          type: 'string',
+          required: '+',
+          description: 'Second header description',
+          maskInLogs: true,
+          example: 'two',
+          source: 'header'
+        }
+      ],
+      error: '',
+      domainModelEnabled: false
+    });
+
+    renderApp();
+    const contractTitle = document.querySelector('.contract-side-title');
+    if (!contractTitle) throw new Error('Contract title not found');
+    await user.click(contractTitle);
+
+    await user.dblClick(screen.getByText('First header description'));
+    fireEvent.keyDown(screen.getByDisplayValue('First header description'), { key: 'Tab' });
+    await waitFor(() => expect(screen.getByDisplayValue('Second header description')).toHaveFocus());
+
+    const headerTable = screen.getByDisplayValue('Second header description').closest('table');
+    if (!headerTable) throw new Error('Headers table not found');
+    const maskingCheckboxes = within(headerTable)
+      .getAllByRole('checkbox', { name: 'Маскирование в логах' })
+      .filter((checkbox) => !(checkbox as HTMLInputElement).disabled);
+    expect(maskingCheckboxes).toHaveLength(2);
+    maskingCheckboxes[0].focus();
+    fireEvent.keyDown(maskingCheckboxes[0], { key: 'Tab' });
+    expect(maskingCheckboxes[1]).toHaveFocus();
+    expect(maskingCheckboxes[0]).not.toBeChecked();
+    expect(maskingCheckboxes[1]).toBeChecked();
+  });
+
   it('opens method delete confirmation from topbar actions', async () => {
     const user = userEvent.setup();
     seedTwoMethodWorkspace();
     renderApp();
 
-    await user.click(findTopbarButton(/Действия с методом/));
-    const deleteItem = screen.getByRole('menuitem', { name: 'Удалить метод' });
+    const menu = await openTopbarOverflow(user);
+    const deleteItem = within(menu).getByRole('menuitem', { name: 'Удалить метод' });
 
-    expect(deleteItem).toHaveStyle({ color: 'var(--wb-required)' });
+    expect(deleteItem).toHaveClass('danger');
     await user.click(deleteItem);
 
     const dialog = screen.getByRole('dialog', { name: 'Подтверждение удаления метода' });
@@ -398,7 +629,7 @@ describe('App integration', () => {
     });
   });
 
-  it('edits section title by double click without visible edit icon', async () => {
+  it('edits section title directly and restores it on Escape', async () => {
     const user = userEvent.setup();
     seedSingleMethodWorkspace({ id: 's_goal', title: 'Editable Title', enabled: true, kind: 'text', value: 'A' });
     renderApp();
@@ -406,17 +637,18 @@ describe('App integration', () => {
     const main = screen.getByRole('main');
     expect(screen.queryByRole('button', { name: 'Редактировать название блока' })).not.toBeInTheDocument();
 
-    await user.dblClick(within(main).getByText('Editable Title'));
-    const titleInput = screen.getByDisplayValue('Editable Title');
-    await user.clear(titleInput);
-    await user.type(titleInput, 'Renamed Title{Enter}');
+    const titleInput = within(main).getByRole('textbox', { name: 'Название секции' });
+    await user.click(titleInput);
+    titleInput.textContent = 'Renamed Title';
+    fireEvent.input(titleInput);
+    await user.keyboard('{Enter}');
 
     expect(within(main).getByText('Renamed Title')).toBeInTheDocument();
 
-    await user.dblClick(within(main).getByText('Renamed Title'));
-    const cancelInput = screen.getByDisplayValue('Renamed Title');
-    await user.clear(cancelInput);
-    await user.type(cancelInput, 'Cancelled Title{Escape}');
+    await user.click(titleInput);
+    titleInput.textContent = 'Cancelled Title';
+    fireEvent.input(titleInput);
+    await user.keyboard('{Escape}');
 
     expect(within(main).getByText('Renamed Title')).toBeInTheDocument();
     expect(within(main).queryByText('Cancelled Title')).not.toBeInTheDocument();
@@ -447,8 +679,8 @@ describe('App integration', () => {
     seedProjectPreviewWorkspace();
     renderApp();
 
-    await user.click(findTopbarIconButton(/HTML/, 'HTML'));
-    await user.click(screen.getByRole('menuitem', { name: 'Весь проект' }));
+    const menu = await openTopbarOverflow(user);
+    await user.click(within(menu).getByRole('menuitem', { name: 'Проект HTML' }));
 
     expect(screen.getByText(/Published HTML/i)).toBeInTheDocument();
     expect(screen.getByText('Весь проект')).toBeInTheDocument();
@@ -480,8 +712,8 @@ describe('App integration', () => {
     seedProjectPreviewWorkspace();
     renderApp();
 
-    await user.click(findTopbarIconButton(/Wiki/, 'Wiki'));
-    await user.click(screen.getByRole('menuitem', { name: 'Весь проект' }));
+    const menu = await openTopbarOverflow(user);
+    await user.click(within(menu).getByRole('menuitem', { name: 'Проект Wiki' }));
 
     expect(screen.getByRole('heading', { name: /^Wiki$/i })).toBeInTheDocument();
     const wikiSource = screen.getAllByRole('textbox').find((element): element is HTMLTextAreaElement => element instanceof HTMLTextAreaElement);
@@ -515,8 +747,8 @@ describe('App integration', () => {
     seedProjectPreviewWorkspace();
     renderApp();
 
-    await user.click(findTopbarIconButton(/HTML/, 'HTML'));
-    await user.click(screen.getByRole('menuitem', { name: 'Весь проект' }));
+    let menu = await openTopbarOverflow(user);
+    await user.click(within(menu).getByRole('menuitem', { name: 'Проект HTML' }));
     await user.click(screen.getByRole('button', { name: 'Download' }));
 
     await waitFor(() => {
@@ -530,8 +762,8 @@ describe('App integration', () => {
       expect(downloads).toContain('preview-project.project.brief.documentation.html');
     });
 
-    await user.click(findTopbarIconButton(/Wiki/, 'Wiki'));
-    await user.click(screen.getByRole('menuitem', { name: 'Весь проект' }));
+    menu = await openTopbarOverflow(user);
+    await user.click(within(menu).getByRole('menuitem', { name: 'Проект Wiki' }));
     await user.click(screen.getByRole('button', { name: 'Полный' }));
     await user.click(screen.getByRole('button', { name: 'Download .txt' }));
 
@@ -542,7 +774,8 @@ describe('App integration', () => {
     const user = userEvent.setup();
     renderApp();
 
-    await user.click(findTopbarButton(/Импорт|Import/i));
+    const menu = await openTopbarOverflow(user);
+    await user.click(within(menu).getByRole('menuitem', { name: 'Импорт' }));
     const dialog = getImportDialog();
     expect(dialog).toBeInTheDocument();
 
@@ -649,7 +882,8 @@ describe('App integration', () => {
     const user = userEvent.setup();
     renderApp();
 
-    await user.click(findTopbarButton(/Импорт|Import/i));
+    const menu = await openTopbarOverflow(user);
+    await user.click(within(menu).getByRole('menuitem', { name: 'Импорт' }));
     const dialog = getImportDialog();
     const textarea = within(dialog).getByRole('textbox') as HTMLTextAreaElement;
     fireEvent.change(textarea, {
@@ -680,7 +914,8 @@ describe('App integration', () => {
     const user = userEvent.setup();
     renderApp();
 
-    await user.click(findTopbarButton(/Импорт|Import/i));
+    const menu = await openTopbarOverflow(user);
+    await user.click(within(menu).getByRole('menuitem', { name: 'Импорт' }));
     const dialog = getImportDialog();
     const textarea = within(dialog).getByRole('textbox') as HTMLTextAreaElement;
     fireEvent.change(textarea, {

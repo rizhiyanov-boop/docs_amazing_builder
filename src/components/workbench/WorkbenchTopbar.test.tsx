@@ -1,12 +1,10 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WorkbenchTopbar } from './WorkbenchTopbar';
 
-afterEach(() => {
-  cleanup();
-});
+afterEach(cleanup);
 
 function renderTopbar(overrides: Partial<React.ComponentProps<typeof WorkbenchTopbar>> = {}) {
   const props: React.ComponentProps<typeof WorkbenchTopbar> = {
@@ -20,6 +18,10 @@ function renderTopbar(overrides: Partial<React.ComponentProps<typeof WorkbenchTo
     isLogoutBusy: false,
     canUndo: true,
     canRedo: false,
+    splitOpen: false,
+    splitAvailable: true,
+    autosaveState: 'saved',
+    autosaveAt: '10:30',
     onAccentChange: vi.fn(),
     onOpenProjectImport: vi.fn(),
     onImportProjectJson: vi.fn(),
@@ -29,6 +31,9 @@ function renderTopbar(overrides: Partial<React.ComponentProps<typeof WorkbenchTo
     onExportFullProjectWiki: vi.fn(),
     onExportJson: vi.fn(),
     onToggleSidebar: vi.fn(),
+    onToggleSplit: vi.fn(),
+    onToggleTheme: vi.fn(),
+    onOpenSearch: vi.fn(),
     onRenameMethod: vi.fn(),
     onDeleteMethod: vi.fn(),
     canDeleteMethod: true,
@@ -40,162 +45,67 @@ function renderTopbar(overrides: Partial<React.ComponentProps<typeof WorkbenchTo
     onOpenRegister: vi.fn(),
     ...overrides
   };
-
-  return {
-    ...render(
-      <>
-        <WorkbenchTopbar {...props} />
-        <button type="button">Outside target</button>
-      </>
-    ),
-    props
-  };
+  return { props, ...render(<WorkbenchTopbar {...props} />) };
 }
 
-describe('WorkbenchTopbar supported editor controls', () => {
-  it('does not expose legacy Workbench or layout switches', () => {
+describe('WorkbenchTopbar', () => {
+  it('renders the mockup action order and autosave status', () => {
     renderTopbar();
-
-    expect(screen.queryByRole('button', { name: 'Workbench' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Editor' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '☰' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '⊞' })).not.toBeInTheDocument();
-  });
-});
-
-describe('WorkbenchTopbar method actions menu', () => {
-  it('opens method actions and runs rename/delete handlers', async () => {
-    const user = userEvent.setup();
-    const onRenameMethod = vi.fn();
-    const onDeleteMethod = vi.fn();
-    renderTopbar({ onRenameMethod, onDeleteMethod });
-
-    await user.click(screen.getByRole('button', { name: 'Действия с методом' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Переименовать' }));
-
-    expect(onRenameMethod).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole('menuitem', { name: 'Переименовать' })).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Действия с методом' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Удалить метод' }));
-
-    expect(onDeleteMethod).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole('menuitem', { name: 'Удалить метод' })).not.toBeInTheDocument();
+    const topbar = screen.getByRole('banner');
+    expect(within(topbar).getByLabelText('doc-builder')).toHaveTextContent('dbdoc-builder');
+    expect(within(topbar).getByText('/orders')).toBeInTheDocument();
+    expect(within(topbar).getByRole('button', { name: 'JSON' })).toBeInTheDocument();
+    expect(within(topbar).getByRole('button', { name: 'HTML' })).toBeInTheDocument();
+    expect(within(topbar).getByRole('button', { name: 'Wiki' })).toBeInTheDocument();
+    expect(within(topbar).getByRole('status')).toHaveTextContent('Сохранено · 10:30');
+    expect(within(topbar).getByRole('button', { name: 'Сохранить' })).toBeInTheDocument();
   });
 
-  it('disables delete action for the last method', async () => {
+  it('runs export, history, split, search and theme actions', async () => {
     const user = userEvent.setup();
-    const onDeleteMethod = vi.fn();
-    renderTopbar({ canDeleteMethod: false, onDeleteMethod });
-
-    await user.click(screen.getByRole('button', { name: 'Действия с методом' }));
-    const deleteItem = screen.getByRole('menuitem', { name: 'Удалить метод' });
-
-    expect(deleteItem).toBeDisabled();
-    expect(deleteItem).toHaveAttribute('title', 'Нельзя удалить последний метод');
-
-    await user.click(deleteItem);
-    expect(onDeleteMethod).not.toHaveBeenCalled();
-  });
-
-  it('closes method actions on outside click and Escape', async () => {
-    const user = userEvent.setup();
-    renderTopbar();
-
-    await user.click(screen.getByRole('button', { name: 'Действия с методом' }));
-    expect(screen.getByRole('menuitem', { name: 'Переименовать' })).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Outside target' }));
-    expect(screen.queryByRole('menuitem', { name: 'Переименовать' })).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Действия с методом' }));
-    expect(screen.getByRole('menuitem', { name: 'Переименовать' })).toBeInTheDocument();
-
-    await user.keyboard('{Escape}');
-    expect(screen.queryByRole('menuitem', { name: 'Переименовать' })).not.toBeInTheDocument();
-  });
-});
-
-describe('WorkbenchTopbar export split buttons', () => {
-  it('keeps primary html/wiki preview actions on the main buttons', async () => {
-    const user = userEvent.setup();
-    const onExportHtml = vi.fn();
-    const onExportWiki = vi.fn();
-    renderTopbar({ onExportHtml, onExportWiki });
-
+    const result = renderTopbar();
+    await user.click(screen.getByRole('button', { name: 'JSON' }));
     await user.click(screen.getByRole('button', { name: 'HTML' }));
     await user.click(screen.getByRole('button', { name: 'Wiki' }));
-
-    expect(onExportHtml).toHaveBeenCalledTimes(1);
-    expect(onExportWiki).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: 'Отменить' }));
+    await user.click(screen.getByRole('button', { name: 'Сплит-режим (Ctrl+\\)' }));
+    await user.click(screen.getByRole('button', { name: 'Поиск (Ctrl+K)' }));
+    await user.click(screen.getByRole('button', { name: 'Переключить тему' }));
+    expect(result.props.onExportJson).toHaveBeenCalledOnce();
+    expect(result.props.onExportHtml).toHaveBeenCalledOnce();
+    expect(result.props.onExportWiki).toHaveBeenCalledOnce();
+    expect(result.props.onUndo).toHaveBeenCalledOnce();
+    expect(result.props.onToggleSplit).toHaveBeenCalledOnce();
+    expect(result.props.onOpenSearch).toHaveBeenCalledOnce();
+    expect(result.props.onToggleTheme).toHaveBeenCalledOnce();
   });
 
-  it('opens full project preview actions from split button menus', async () => {
+  it('marks split active and disables it for compact layout', () => {
+    const { rerender, props } = renderTopbar({ splitOpen: true });
+    expect(screen.getByRole('button', { name: 'Сплит-режим (Ctrl+\\)' })).toHaveAttribute('aria-pressed', 'true');
+    rerender(<WorkbenchTopbar {...props} splitOpen={false} splitAvailable={false} />);
+    expect(screen.getByRole('button', { name: 'Сплит-режим недоступен на узком экране' })).toBeDisabled();
+  });
+
+  it('moves import, method actions and project exports into overflow', async () => {
     const user = userEvent.setup();
-    const onExportFullProjectHtml = vi.fn();
-    const onExportFullProjectWiki = vi.fn();
-    renderTopbar({ onExportFullProjectHtml, onExportFullProjectWiki });
-
-    await user.click(screen.getByRole('button', { name: 'Опции экспорта HTML' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Весь проект' }));
-    expect(onExportFullProjectHtml).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole('menu', { name: 'Меню экспорта HTML' })).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Опции экспорта Wiki' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Весь проект' }));
-    expect(onExportFullProjectWiki).toHaveBeenCalledTimes(1);
+    const result = renderTopbar();
+    expect(screen.queryByRole('button', { name: 'Импорт' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Дополнительные действия' }));
+    const menu = screen.getByRole('menu', { name: 'Дополнительные действия' });
+    await user.click(within(menu).getByRole('menuitem', { name: 'Импорт' }));
+    expect(result.props.onOpenProjectImport).toHaveBeenCalledOnce();
+    await user.click(screen.getByRole('button', { name: 'Дополнительные действия' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Проект HTML' }));
+    expect(result.props.onExportFullProjectHtml).toHaveBeenCalledOnce();
   });
 
-  it('closes export split menu on outside click and Escape', async () => {
-    const user = userEvent.setup();
-    renderTopbar();
-
-    await user.click(screen.getByRole('button', { name: 'Опции экспорта HTML' }));
-    expect(screen.getByRole('menu', { name: 'Меню экспорта HTML' })).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Outside target' }));
-    expect(screen.queryByRole('menu', { name: 'Меню экспорта HTML' })).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Опции экспорта Wiki' }));
-    expect(screen.getByRole('menu', { name: 'Меню экспорта Wiki' })).toBeInTheDocument();
-
-    await user.keyboard('{Escape}');
-    expect(screen.queryByRole('menu', { name: 'Меню экспорта Wiki' })).not.toBeInTheDocument();
-  });
-});
-
-describe('WorkbenchTopbar theme panel', () => {
-  it('closes theme panel on outside click', async () => {
-    const user = userEvent.setup();
-    renderTopbar();
-
-    await user.click(screen.getByRole('button', { name: /User/i }));
-    expect(screen.getByText('Daylight')).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Outside target' }));
-    expect(screen.queryByText('Daylight')).not.toBeInTheDocument();
-  });
-
-  it('changes accent and closes theme panel when a theme is selected', async () => {
+  it('keeps profile and accent controls', async () => {
     const user = userEvent.setup();
     const onAccentChange = vi.fn();
     renderTopbar({ onAccentChange });
-
-    await user.click(screen.getByRole('button', { name: /User/i }));
+    await user.click(screen.getByRole('button', { name: /User/ }));
     await user.click(screen.getByRole('button', { name: 'Dusk' }));
-
     expect(onAccentChange).toHaveBeenCalledWith('violet');
-    expect(screen.queryByText('Daylight')).not.toBeInTheDocument();
-  });
-
-  it('closes theme panel on Escape', async () => {
-    const user = userEvent.setup();
-    renderTopbar();
-
-    await user.click(screen.getByRole('button', { name: /User/i }));
-    expect(screen.getByText('Daylight')).toBeInTheDocument();
-
-    await user.keyboard('{Escape}');
-    expect(screen.queryByText('Daylight')).not.toBeInTheDocument();
   });
 });

@@ -1,9 +1,5 @@
 ﻿import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
-import { EditorContent, useEditor } from '@tiptap/react';
-import StarterKit from '@tiptap/starter-kit';
-import Highlight from '@tiptap/extension-highlight';
-import { liftListItem, sinkListItem } from '@tiptap/pm/schema-list';
 import './tokens.css';
 import './tokens-workbench.css';
 import './App.css';
@@ -32,7 +28,7 @@ import {
 import { renderHtmlDocument } from './renderHtml';
 import { getFlowExportFileName, renderProjectHtmlDocument, renderProjectWikiDocument } from './projectExport';
 import type { ProjectExportDetailMode } from './projectExport';
-import { editorElementToWikiText, editorHtmlToWikiText, escapeRichTextHtml, richTextToHtml } from './richText';
+import { editorElementToWikiText, escapeRichTextHtml, richTextToHtml } from './richText';
 import { renderWikiDocument } from './renderWiki';
 import type { WikiRenderMeta } from './renderWiki';
 import { buildValidationRulesFromSchemaInput } from './schemaValidationRules';
@@ -54,6 +50,13 @@ import {
 } from './sectionHelpers';
 import { resolveSectionTitle, sanitizeSections } from './sectionTitles';
 import { buildInputFromRows } from './sourceSync';
+import {
+  findVerticalCellTarget,
+  getVerticalCellKey,
+  type VerticalCellAddress,
+  type VerticalCellColumn,
+  type VerticalTableKind
+} from './tableVerticalNavigation';
 import {
   getDuplicateValueSet,
   getDynamicTextareaRows,
@@ -106,6 +109,8 @@ import { AiLoadingCard } from './components/cards/AiLoadingCard';
 import { MethodHeaderCard } from './components/cards/MethodHeaderCard';
 import { ContractSideAccordion } from './components/ContractSideAccordion';
 import { DiagramSectionEditor } from './components/DiagramSectionEditor';
+import { InlineSectionTitle } from './components/InlineSectionTitle';
+import { InlineTextSectionEditor } from './components/InlineTextSectionEditor';
 import { EmptyState } from './components/EmptyState';
 import { ErrorsSectionEditor } from './components/ErrorsSectionEditor';
 import type { AddableBlockType } from './components/MethodSectionSidebar';
@@ -120,6 +125,7 @@ import { WorkbenchSidebar } from './components/workbench/WorkbenchSidebar';
 import { MethodMetaPanel } from './components/workbench/MethodMetaPanel';
 import { WorkbenchDiagramPreview } from './components/workbench/WorkbenchDiagramPreview';
 import { WorkbenchTopbar, type WorkbenchAccent } from './components/workbench/WorkbenchTopbar';
+import { LinkedMethodPreview } from './components/workbench/LinkedMethodPreview';
 import { WorkspaceHome } from './components/workbench/WorkspaceHome';
 import { TableClassic, TableGallery, TableMiniCards } from './components/tables/WorkbenchTables';
 import { HtmlExportScreen } from './screens/HtmlExportScreen';
@@ -351,6 +357,7 @@ type EditableRequestCellState = {
   column: 'type' | 'required' | 'description' | 'example';
   draft: string;
   target: ParseTarget;
+  rowType: string;
 };
 type EditableHeaderCellState = {
   sectionId: string;
@@ -373,10 +380,6 @@ type EditableSchemaState = {
   target: ParseTarget;
   draft: string;
 };
-type EditableTitleState = {
-  sectionId: string;
-  draft: string;
-};
 type DriftAlertState = Record<string, boolean>;
 type ExpanderState = Record<string, boolean>;
 type InternalCodePopoverState = {
@@ -390,6 +393,7 @@ type EditableFieldOptions = {
   allowEdit?: boolean;
   onDelete?: () => void;
   editTarget?: ParseTarget;
+  table?: VerticalTableKind;
 };
 type DeletedRowUndoState = {
   sectionId: string;
@@ -652,17 +656,17 @@ function formatTime(date: Date): string {
 }
 
 export default function App() {
-  const activeTextSectionIdRef = useRef<string | null>(null);
   const sectionAnchorRefs = useRef<Map<string, HTMLElement>>(new Map());
   const inlineFieldInputRef = useRef<HTMLInputElement | null>(null);
   const inlineRequestCellInputRef = useRef<HTMLElement | null>(null);
+  const verticalCheckboxRefs = useRef(new Map<string, HTMLInputElement>());
+  const suppressedInlineBlurKeyRef = useRef<string | null>(null);
   const suppressObserverSelectionUntilRef = useRef<number>(0);
   const sectionJumpHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const richEditorSelectionRef = useRef<{ editor: HTMLElement; range: Range } | null>(null);
   const topbarRef = useRef<HTMLElement | null>(null);
   const aiStatusResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const authStatusResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const textEditorWikiSnapshotRef = useRef<string>('');
   const diagramTextRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const methodNameInputRef = useRef<HTMLInputElement | null>(null);
   const projectNameInputRef = useRef<HTMLInputElement | null>(null);
@@ -692,6 +696,8 @@ export default function App() {
   const [exportPreviewScope, setExportPreviewScope] = useState<'method' | 'project'>('method');
   const [projectExportDetailMode, setProjectExportDetailMode] = useState<ProjectExportDetailMode>('full');
   const [workspaceScope, setWorkspaceScope] = useState<WorkspaceScope>('methods');
+  const [splitOpen, setSplitOpen] = useState(false);
+  const [splitMethodId, setSplitMethodId] = useState('');
   const [workbenchTableView, setWorkbenchTableView] = useState<TablePreviewView>('classic');
   const [wbAccent, setWbAccent] = useState<WorkbenchAccent>(() => loadPersistedWbAccent());
   const [isSearchPaletteOpen, setIsSearchPaletteOpen] = useState(false);
@@ -727,7 +733,6 @@ export default function App() {
   const [inlineImportError, setInlineImportError] = useState('');
   const [authRequestStatus, setAuthRequestStatus] = useState<AuthRequestStatus | null>(null);
   const [authBusyKey, setAuthBusyKey] = useState<string | null>(null);
-  const [editingTitle, setEditingTitle] = useState<EditableTitleState | null>(null);
   const [expandedDriftAlerts, setExpandedDriftAlerts] = useState<DriftAlertState>({});
   const [expanderState, setExpanderState] = useState<ExpanderState>({});
   const [openInternalCodeKey, setOpenInternalCodeKey] = useState<string | null>(null);
@@ -1019,6 +1024,7 @@ export default function App() {
     return validateProjectFlow(current, methods);
   }, [flows, activeFlowId, methods]);
   const canRenderWorkspace = workspaceScope !== 'methods' || sections.length > 0;
+  const splitAvailable = !isCompactLayout && tab === 'editor' && workspaceScope === 'methods';
 
   useEffect(() => {
     if (!serverProjectId) return;
@@ -2085,93 +2091,6 @@ export default function App() {
   }, [sections]);
 
   const selectedSection = sections.find((section) => section.id === selectedId) ?? sections[0];
-  const activeTextSection = selectedSection?.kind === 'text' ? selectedSection : null;
-
-  function isSelectionInsideListItem(): boolean {
-    if (!textEditor) return false;
-    const from = textEditor.state.selection.$from;
-    for (let depth = from.depth; depth > 0; depth -= 1) {
-      const nodeName = from.node(depth).type.name;
-      if (nodeName === 'listItem' || nodeName === 'list_item') return true;
-    }
-    return false;
-  }
-
-  const textEditor = useEditor({
-    extensions: [
-      StarterKit.configure({
-        heading: { levels: [3] },
-        codeBlock: false
-      }),
-      Highlight.configure({ multicolor: true })
-    ],
-    content: activeTextSection ? richTextToHtml(activeTextSection.value, { editable: true }) : '<p></p>',
-    editorProps: {
-      attributes: {
-        class: 'rich-text-editor'
-      },
-      handleDOMEvents: {
-        keydown: (view, event) => {
-          if (event.key !== 'Tab') return false;
-
-          const from = view.state.selection.$from;
-          let insideListItem = false;
-          for (let depth = from.depth; depth > 0; depth -= 1) {
-            const nodeName = from.node(depth).type.name;
-            if (nodeName === 'listItem' || nodeName === 'list_item') {
-              insideListItem = true;
-              break;
-            }
-          }
-          if (!insideListItem) return false;
-
-          const listItemType = (view.state.schema.nodes as Record<string, unknown>).listItem || (view.state.schema.nodes as Record<string, unknown>).list_item;
-          if (!listItemType) {
-            event.preventDefault();
-            return true;
-          }
-
-          const command = event.shiftKey ? liftListItem(listItemType as never) : sinkListItem(listItemType as never);
-          const handled = command(view.state, view.dispatch);
-
-          // Always keep Tab inside editor when cursor is in a list item.
-          event.preventDefault();
-          if (!handled) view.focus();
-          return true;
-        }
-      }
-    },
-    onUpdate: ({ editor }) => {
-      const sectionId = activeTextSectionIdRef.current;
-      if (!sectionId) return;
-
-      const nextValue = editorHtmlToWikiText(editor.getHTML());
-      textEditorWikiSnapshotRef.current = nextValue;
-      updateSection(sectionId, (current) => (current.kind === 'text' && current.value !== nextValue ? { ...current, value: nextValue } : current));
-    }
-  });
-
-  useEffect(() => {
-    activeTextSectionIdRef.current = activeTextSection?.id ?? null;
-  }, [activeTextSection?.id]);
-
-  useEffect(() => {
-    if (!textEditor) return;
-
-    if (!activeTextSection) {
-      textEditor.commands.setContent('<p></p>', { emitUpdate: false });
-      textEditorWikiSnapshotRef.current = '';
-      return;
-    }
-
-    if (textEditor.isFocused && textEditorWikiSnapshotRef.current === activeTextSection.value) {
-      return;
-    }
-
-    const nextHtml = richTextToHtml(activeTextSection.value, { editable: true });
-    textEditor.commands.setContent(nextHtml, { emitUpdate: false });
-    textEditorWikiSnapshotRef.current = activeTextSection.value;
-  }, [textEditor, activeTextSection]);
 
   const selectedServerSourceRows =
     selectedSection?.kind === 'parsed' ? getRowsRelevantToSourceFormat(selectedSection.rows, selectedSection.format) : [];
@@ -2910,6 +2829,36 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!splitAvailable && splitOpen) setSplitOpen(false);
+  }, [splitAvailable, splitOpen]);
+
+  useEffect(() => {
+    if (!splitOpen) return;
+    const selectedStillExists = methods.some((method) => method.id === splitMethodId);
+    if (selectedStillExists) return;
+    const fallback = methods.find((method) => method.id !== activeMethodId) ?? methods[0];
+    setSplitMethodId(fallback?.id ?? '');
+  }, [activeMethodId, methods, splitMethodId, splitOpen]);
+
+  useEffect(() => {
+    const handleSplitShortcut = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key !== '\\') return;
+      event.preventDefault();
+      if (!splitAvailable) return;
+      setSplitOpen((current) => {
+        const next = !current;
+        if (next) {
+          const fallback = methods.find((method) => method.id !== activeMethodId) ?? methods[0];
+          setSplitMethodId((selected) => methods.some((method) => method.id === selected) ? selected : fallback?.id ?? '');
+        }
+        return next;
+      });
+    };
+    document.addEventListener('keydown', handleSplitShortcut);
+    return () => document.removeEventListener('keydown', handleSplitShortcut);
+  }, [activeMethodId, methods, splitAvailable]);
+
+  useEffect(() => {
     try {
       if (isSidebarHidden) {
         localStorage.setItem(SIDEBAR_HIDDEN_KEY, '1');
@@ -2999,23 +2948,6 @@ export default function App() {
 
   function updateSectionTitle(id: string, title: string): void {
     updateSection(id, (section) => ({ ...section, title }));
-  }
-
-  function startTitleEditing(section: DocSection): void {
-    setEditingTitle({
-      sectionId: section.id,
-      draft: section.title
-    });
-  }
-
-  function cancelTitleEditing(): void {
-    setEditingTitle(null);
-  }
-
-  function saveTitleEditing(): void {
-    if (!editingTitle) return;
-    updateSectionTitle(editingTitle.sectionId, resolveSectionTitle(editingTitle.draft));
-    setEditingTitle(null);
   }
 
   function deleteSection(id: string): void {
@@ -4566,13 +4498,6 @@ export default function App() {
     return normalizeWorkspaceForMode(workspace);
   }
 
-  function syncTextSectionFromEditor(sectionId: string): void {
-    if (!textEditor) return;
-    const nextValue = editorHtmlToWikiText(textEditor.getHTML());
-    textEditorWikiSnapshotRef.current = nextValue;
-    updateSection(sectionId, (current) => (current.kind === 'text' && current.value !== nextValue ? { ...current, value: nextValue } : current));
-  }
-
   function getDiagramEditorKey(sectionId: string, diagramId: string): string {
     return `${sectionId}:${diagramId}`;
   }
@@ -4857,26 +4782,6 @@ export default function App() {
     applyRichTextCommand(editor, action, options);
 
     syncDiagramDescriptionFromEditor(sectionId, diagramId);
-  }
-
-  function rememberTextSelection(): void {
-    // Tiptap keeps selection state internally.
-  }
-
-  function applyTextEditorCommand(sectionId: string, action: RichTextAction, options?: RichTextCommandOptions): void {
-    if (!textEditor) return;
-
-    const chain = textEditor.chain().focus();
-    if (action === 'bold') chain.toggleBold().run();
-    else if (action === 'italic') chain.toggleItalic().run();
-    else if (action === 'code') chain.toggleCode().run();
-    else if (action === 'h3') chain.toggleHeading({ level: 3 }).run();
-    else if (action === 'ul') chain.toggleBulletList().run();
-    else if (action === 'ol') chain.toggleOrderedList().run();
-    else if (action === 'quote') chain.toggleBlockquote().run();
-    else if (action === 'highlight') chain.toggleHighlight({ color: options?.color ?? DEFAULT_RICH_TEXT_HIGHLIGHT }).run();
-
-    syncTextSectionFromEditor(sectionId);
   }
 
   function queueDeletedRowUndo(payload: DeletedRowUndoState): void {
@@ -5323,6 +5228,107 @@ export default function App() {
     return null;
   }
 
+  function getVerticalCellAddresses(
+    section: ParsedSection,
+    table: VerticalTableKind,
+    column: VerticalCellColumn,
+    target: ParseTarget
+  ): VerticalCellAddress[] {
+    const rows =
+      table === 'headers'
+        ? target === 'client'
+          ? getExternalRequestHeaderRowsForEditor(section)
+          : getRequestHeaderRowsForEditor(section)
+        : getSectionRows(section);
+
+    return rows.flatMap((row): VerticalCellAddress[] => {
+      const rowKey = getParsedRowKey(row);
+      if (row.enabled === false) return [];
+
+      if (table === 'headers') {
+        const unavailable = target === 'server' && (isDefaultRequestHeader(row) || isAuthHeader(section, row));
+        if (unavailable || !['field', 'description', 'maskInLogs', 'example'].includes(column)) return [];
+        return [{ table, sectionId: section.id, target, rowKey, column }];
+      }
+
+      if (column === 'field') {
+        return target === 'server' && row.field.trim()
+          ? [{ table, sectionId: section.id, target, rowKey, column }]
+          : [];
+      }
+      if (column === 'clientField') {
+        return target === 'client' && section.domainModelEnabled && !row.field.trim() && Boolean(row.clientField?.trim())
+          ? [{ table, sectionId: section.id, target, rowKey, column }]
+          : [];
+      }
+
+      const editTarget = getRequestCellEditTarget(section, row);
+      return editTarget === target ? [{ table, sectionId: section.id, target, rowKey, column }] : [];
+    });
+  }
+
+  function getVerticalRow(section: ParsedSection, address: VerticalCellAddress): ParsedRow | null {
+    const rows =
+      address.table === 'headers'
+        ? address.target === 'client'
+          ? getExternalRequestHeaderRowsForEditor(section)
+          : getRequestHeaderRowsForEditor(section)
+        : getSectionRows(section);
+    return rows.find((row) => getParsedRowKey(row) === address.rowKey) ?? null;
+  }
+
+  function findNextVerticalAddress(
+    section: ParsedSection,
+    current: VerticalCellAddress,
+    direction: 1 | -1
+  ): VerticalCellAddress | null {
+    return findVerticalCellTarget(
+      getVerticalCellAddresses(section, current.table, current.column, current.target),
+      current,
+      direction
+    );
+  }
+
+  function openVerticalCell(address: VerticalCellAddress): void {
+    const section = sections.find((item): item is ParsedSection => item.kind === 'parsed' && item.id === address.sectionId);
+    if (!section) return;
+    const row = getVerticalRow(section, address);
+    if (!row) return;
+
+    if (address.column === 'field') {
+      startFieldEditing(section, row, address.target);
+      return;
+    }
+    if (address.column === 'clientField') {
+      startClientFieldEditing(section, row);
+      return;
+    }
+    if (address.column === 'maskInLogs') {
+      window.requestAnimationFrame(() => verticalCheckboxRefs.current.get(getVerticalCellKey(address))?.focus());
+      return;
+    }
+    if (address.table === 'headers' && (address.column === 'description' || address.column === 'example')) {
+      startHeaderCellEditing(section, row, address.target, address.column, row[address.column] ?? '');
+      return;
+    }
+    if (address.column === 'type' || address.column === 'required' || address.column === 'description' || address.column === 'example') {
+      startRequestCellEditing(section, row, address.column);
+    }
+  }
+
+  function consumeSuppressedInlineBlur(address: VerticalCellAddress, save: () => void): void {
+    const key = getVerticalCellKey(address);
+    if (suppressedInlineBlurKeyRef.current === key) {
+      suppressedInlineBlurKeyRef.current = null;
+      return;
+    }
+    save();
+  }
+
+  function suppressInlineBlurForTransition(address: VerticalCellAddress): void {
+    suppressedInlineBlurKeyRef.current = getVerticalCellKey(address);
+  }
+
   function startRequestCellEditing(section: ParsedSection, row: ParsedRow, column: 'type' | 'required' | 'description' | 'example'): void {
     const target = getRequestCellEditTarget(section, row);
     if (!target) return;
@@ -5332,7 +5338,8 @@ export default function App() {
       rowKey: getParsedRowKey(row),
       column,
       draft: row[column] || '',
-      target
+      target,
+      rowType: row.type
     });
   }
 
@@ -5361,10 +5368,13 @@ export default function App() {
     setEditingHeaderCell(null);
   }
 
-  function saveHeaderCellEditing(): void {
-    if (!editingHeaderCell) return;
-
-    const { sectionId, rowKey, column, target, draft } = editingHeaderCell;
+  function applyHeaderCellValue(
+    sectionId: string,
+    rowKey: string,
+    column: 'description' | 'example',
+    target: ParseTarget,
+    draft: string
+  ): void {
     if (target === 'client') {
       updateSection(sectionId, (current) => {
         if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
@@ -5378,7 +5388,12 @@ export default function App() {
     } else {
       updateServerRow(sectionId, rowKey, (current) => ({ ...current, [column]: draft }));
     }
+  }
 
+  function saveHeaderCellEditing(draft = editingHeaderCell?.draft ?? ''): void {
+    if (!editingHeaderCell) return;
+    const { sectionId, rowKey, column, target } = editingHeaderCell;
+    applyHeaderCellValue(sectionId, rowKey, column, target, draft);
     setEditingHeaderCell(null);
   }
 
@@ -5387,7 +5402,8 @@ export default function App() {
     rowKey: string,
     column: 'type' | 'required' | 'description' | 'example',
     draft: string,
-    target: ParseTarget
+    target: ParseTarget,
+    rowType?: string
   ): boolean {
     if (column === 'example') {
       const section = sections.find((item) => item.id === sectionId);
@@ -5397,7 +5413,7 @@ export default function App() {
             ? (section.clientRows ?? []).find((item) => getParsedRowKey(item) === rowKey)
             : section.rows.find((item) => getParsedRowKey(item) === rowKey)
           : undefined;
-      const message = validateExampleValue(draft, row?.type ?? 'string');
+      const message = validateExampleValue(draft, rowType ?? row?.type ?? 'string');
       if (message) {
         setRequestCellError(message);
         return false;
@@ -5425,22 +5441,22 @@ export default function App() {
     return true;
   }
 
-  function saveRequestCellEditing(): void {
+  function saveRequestCellEditing(draft = editingRequestCell?.draft ?? ''): void {
     if (!editingRequestCell) return;
 
-    const { sectionId, rowKey, column, draft, target } = editingRequestCell;
-    const saved = applyRequestCellValue(sectionId, rowKey, column, draft, target);
+    const { sectionId, rowKey, column, target, rowType } = editingRequestCell;
+    const saved = applyRequestCellValue(sectionId, rowKey, column, draft, target, rowType);
     if (!saved) return;
     setEditingRequestCell(null);
   }
 
-  function saveFieldEditing(): void {
-    if (!editingField) return;
+  function saveFieldEditing(draft = editingField?.draft ?? ''): boolean {
+    if (!editingField) return false;
 
-    const nextField = editingField.draft.trim();
+    const nextField = draft.trim();
     if (!nextField) {
       setEditingField(null);
-      return;
+      return true;
     }
 
     if (editingField.target === 'client') {
@@ -5478,6 +5494,105 @@ export default function App() {
     }
 
     setEditingField(null);
+    return true;
+  }
+
+  function handleFieldVerticalTab(
+    event: ReactKeyboardEvent<HTMLElement>,
+    section: ParsedSection,
+    row: ParsedRow,
+    table: VerticalTableKind,
+    target: ParseTarget,
+    column: 'field' | 'clientField'
+  ): void {
+    if (event.key !== 'Tab') return;
+    const current: VerticalCellAddress = {
+      table,
+      sectionId: section.id,
+      target,
+      rowKey: getParsedRowKey(row),
+      column
+    };
+    const next = findNextVerticalAddress(section, current, event.shiftKey ? -1 : 1);
+    if (!next) return;
+
+    event.preventDefault();
+    suppressInlineBlurForTransition(current);
+    if (saveFieldEditing((event.currentTarget as HTMLInputElement).value)) openVerticalCell(next);
+  }
+
+  function handleRequestCellVerticalTab(
+    event: ReactKeyboardEvent<HTMLElement>,
+    section: ParsedSection,
+    row: ParsedRow,
+    column: 'type' | 'required' | 'description' | 'example'
+  ): void {
+    if (event.key !== 'Tab' || !editingRequestCell) return;
+    const current: VerticalCellAddress = {
+      table: 'parameters',
+      sectionId: section.id,
+      target: editingRequestCell.target,
+      rowKey: getParsedRowKey(row),
+      column
+    };
+    const next = findNextVerticalAddress(section, current, event.shiftKey ? -1 : 1);
+    if (!next) return;
+
+    event.preventDefault();
+    const saved = applyRequestCellValue(
+      editingRequestCell.sectionId,
+      editingRequestCell.rowKey,
+      editingRequestCell.column,
+      (event.currentTarget as HTMLSelectElement | HTMLTextAreaElement).value,
+      editingRequestCell.target,
+      editingRequestCell.rowType
+    );
+    if (!saved) return;
+
+    suppressInlineBlurForTransition(current);
+    openVerticalCell(next);
+  }
+
+  function handleHeaderCellVerticalTab(
+    event: ReactKeyboardEvent<HTMLElement>,
+    section: ParsedSection,
+    row: ParsedRow,
+    column: 'description' | 'example',
+    target: ParseTarget
+  ): void {
+    if (event.key !== 'Tab' || !editingHeaderCell) return;
+    const current: VerticalCellAddress = {
+      table: 'headers',
+      sectionId: section.id,
+      target,
+      rowKey: getParsedRowKey(row),
+      column
+    };
+    const next = findNextVerticalAddress(section, current, event.shiftKey ? -1 : 1);
+    if (!next) return;
+
+    event.preventDefault();
+    applyHeaderCellValue(
+      editingHeaderCell.sectionId,
+      editingHeaderCell.rowKey,
+      editingHeaderCell.column,
+      editingHeaderCell.target,
+      (event.currentTarget as HTMLInputElement).value
+    );
+    suppressInlineBlurForTransition(current);
+    openVerticalCell(next);
+  }
+
+  function handleCheckboxVerticalTab(
+    event: ReactKeyboardEvent<HTMLInputElement>,
+    section: ParsedSection,
+    address: VerticalCellAddress
+  ): void {
+    if (event.key !== 'Tab') return;
+    const next = findNextVerticalAddress(section, address, event.shiftKey ? -1 : 1);
+    if (!next) return;
+    event.preventDefault();
+    verticalCheckboxRefs.current.get(getVerticalCellKey(next))?.focus();
   }
 
   function renderFieldName(value: string | null | undefined): ReactNode {
@@ -5570,6 +5685,7 @@ export default function App() {
   function renderEditableFieldCell(section: ParsedSection, row: ParsedRow, options: EditableFieldOptions = {}): ReactNode {
     const allowEdit = options.allowEdit ?? true;
     const editTarget = options.editTarget ?? 'server';
+    const table = options.table ?? 'parameters';
     if (!row.field.trim()) return '—';
 
     const isEditing =
@@ -5588,9 +5704,21 @@ export default function App() {
             onChange={(e) => setEditingField((current) => (current ? { ...current, draft: e.target.value } : current))}
             onMouseDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
-            onBlur={saveFieldEditing}
+            onBlur={(event) =>
+              consumeSuppressedInlineBlur(
+                {
+                  table,
+                  sectionId: section.id,
+                  target: editTarget,
+                  rowKey: getParsedRowKey(row),
+                  column: 'field'
+                },
+                () => saveFieldEditing(event.currentTarget.value)
+              )
+            }
             onKeyDown={(e) => {
-              if (e.key === 'Enter') saveFieldEditing();
+              handleFieldVerticalTab(e, section, row, table, editTarget, 'field');
+              if (e.key === 'Enter') saveFieldEditing(e.currentTarget.value);
               if (e.key === 'Escape') cancelFieldEditing();
             }}
           />
@@ -5671,9 +5799,21 @@ export default function App() {
             onChange={(e) => setEditingField((current) => (current ? { ...current, draft: e.target.value } : current))}
             onMouseDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
-            onBlur={saveFieldEditing}
+            onBlur={(event) =>
+              consumeSuppressedInlineBlur(
+                {
+                  table: 'parameters',
+                  sectionId: section.id,
+                  target: 'client',
+                  rowKey: getParsedRowKey(row),
+                  column: 'clientField'
+                },
+                () => saveFieldEditing(event.currentTarget.value)
+              )
+            }
             onKeyDown={(e) => {
-              if (e.key === 'Enter') saveFieldEditing();
+              handleFieldVerticalTab(e, section, row, 'parameters', 'client', 'clientField');
+              if (e.key === 'Enter') saveFieldEditing(e.currentTarget.value);
               if (e.key === 'Escape') cancelFieldEditing();
             }}
           />
@@ -5750,13 +5890,23 @@ export default function App() {
               onChange={(e) => {
                 const nextValue = e.target.value;
                 setEditingRequestCell((current) => (current ? { ...current, draft: nextValue } : current));
-                if (applyRequestCellValue(section.id, getParsedRowKey(row), 'type', nextValue, editingRequestCell.target)) {
-                  setEditingRequestCell(null);
-                }
+                applyRequestCellValue(section.id, getParsedRowKey(row), 'type', nextValue, editingRequestCell.target);
               }}
               onMouseDown={(event) => event.stopPropagation()}
               onClick={(event) => event.stopPropagation()}
-              onBlur={cancelRequestCellEditing}
+              onBlur={() =>
+                consumeSuppressedInlineBlur(
+                  {
+                    table: 'parameters',
+                    sectionId: section.id,
+                    target: editingRequestCell.target,
+                    rowKey: getParsedRowKey(row),
+                    column: 'type'
+                  },
+                  cancelRequestCellEditing
+                )
+              }
+              onKeyDown={(event) => handleRequestCellVerticalTab(event, section, row, 'type')}
             >
               <optgroup label="Частые">
                 {TYPE_OPTIONS_COMMON.map((option) => (
@@ -5786,13 +5936,23 @@ export default function App() {
               onChange={(e) => {
                 const nextValue = e.target.value;
                 setEditingRequestCell((current) => (current ? { ...current, draft: nextValue } : current));
-                if (applyRequestCellValue(section.id, getParsedRowKey(row), 'required', nextValue, editingRequestCell.target)) {
-                  setEditingRequestCell(null);
-                }
+                applyRequestCellValue(section.id, getParsedRowKey(row), 'required', nextValue, editingRequestCell.target);
               }}
               onMouseDown={(event) => event.stopPropagation()}
               onClick={(event) => event.stopPropagation()}
-              onBlur={cancelRequestCellEditing}
+              onBlur={() =>
+                consumeSuppressedInlineBlur(
+                  {
+                    table: 'parameters',
+                    sectionId: section.id,
+                    target: editingRequestCell.target,
+                    rowKey: getParsedRowKey(row),
+                    column: 'required'
+                  },
+                  cancelRequestCellEditing
+                )
+              }
+              onKeyDown={(event) => handleRequestCellVerticalTab(event, section, row, 'required')}
             >
               {REQUIRED_OPTIONS.map((option) => (
                 <option key={option} value={option}>
@@ -5812,10 +5972,22 @@ export default function App() {
             onChange={(e) => setEditingRequestCell((current) => (current ? { ...current, draft: e.target.value } : current))}
             onMouseDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
-            onBlur={saveRequestCellEditing}
+            onBlur={(event) =>
+              consumeSuppressedInlineBlur(
+                {
+                  table: 'parameters',
+                  sectionId: section.id,
+                  target: editingRequestCell.target,
+                  rowKey: getParsedRowKey(row),
+                  column
+                },
+                () => saveRequestCellEditing(event.currentTarget.value)
+              )
+            }
             rows={getDynamicTextareaRows(editingRequestCell.draft, column === 'example' ? 3 : 1, column === 'example' ? 10 : 6)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) saveRequestCellEditing();
+              handleRequestCellVerticalTab(e, section, row, column);
+              if (e.key === 'Enter' && !e.shiftKey) saveRequestCellEditing(e.currentTarget.value);
               if (e.key === 'Escape') cancelRequestCellEditing();
             }}
           />
@@ -5860,35 +6032,12 @@ export default function App() {
   }
 
   function renderEditableSectionTitle(section: DocSection): ReactNode {
-    const isEditing = editingTitle?.sectionId === section.id;
-
-    if (isEditing) {
-      return (
-        <div className="field-edit title-edit">
-          <input
-            type="text"
-            autoFocus
-            value={editingTitle.draft}
-            onChange={(e) => setEditingTitle((current) => (current ? { ...current, draft: e.target.value } : current))}
-            onBlur={saveTitleEditing}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') saveTitleEditing();
-              if (e.key === 'Escape') cancelTitleEditing();
-            }}
-          />
-        </div>
-      );
-    }
-
     return (
       <div className="field-display title-display">
-        <span
-          onDoubleClick={() => startTitleEditing(section)}
-          title="Двойной клик — переименовать"
-          style={{ cursor: 'text' }}
-        >
-          {resolveSectionTitle(section.title)}
-        </span>
+        <InlineSectionTitle
+          value={resolveSectionTitle(section.title)}
+          onCommit={(value) => updateSectionTitle(section.id, resolveSectionTitle(value))}
+        />
       </div>
     );
   }
@@ -5929,9 +6078,9 @@ export default function App() {
               onChange={(e) => setEditingField((current) => (current ? { ...current, draft: e.target.value } : current))}
               onMouseDown={(event) => event.stopPropagation()}
               onClick={(event) => event.stopPropagation()}
-              onBlur={saveFieldEditing}
+              onBlur={(event) => saveFieldEditing(event.currentTarget.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') saveFieldEditing();
+                if (e.key === 'Enter') saveFieldEditing(e.currentTarget.value);
                 if (e.key === 'Escape') cancelFieldEditing();
               }}
             />
@@ -6085,11 +6234,31 @@ export default function App() {
     }
 
     if (column === 'maskInLogs') {
+      const target = getRequestCellEditTarget(section, row) ?? 'server';
+      const address: VerticalCellAddress = {
+        table: 'parameters',
+        sectionId: section.id,
+        target,
+        rowKey: getParsedRowKey(row),
+        column
+      };
       return (
         <input
+          ref={(node) => {
+            const key = getVerticalCellKey(address);
+            if (node) verticalCheckboxRefs.current.set(key, node);
+            else verticalCheckboxRefs.current.delete(key);
+          }}
           type="checkbox"
           checked={Boolean(row.maskInLogs)}
-          onChange={(e) => updateServerRow(section.id, getParsedRowKey(row), (current) => ({ ...current, maskInLogs: e.target.checked }))}
+          onChange={(e) =>
+            (target === 'client' ? updateClientRow : updateServerRow)(
+              section.id,
+              getParsedRowKey(row),
+              (current) => ({ ...current, maskInLogs: e.target.checked })
+            )
+          }
+          onKeyDown={(event) => handleCheckboxVerticalTab(event, section, address)}
           aria-label="Маскирование в логах"
         />
       );
@@ -6293,12 +6462,29 @@ export default function App() {
                 <td>{row.required}</td>
                 <td>{row.description || '—'}</td>
                 <td>
-                  <input
-                    type="checkbox"
-                    checked={Boolean(row.maskInLogs)}
-                    onChange={(e) => updateServerRow(section.id, getParsedRowKey(row), (current) => ({ ...current, maskInLogs: e.target.checked }))}
-                    aria-label="Маскирование в логах"
-                  />
+                  {(() => {
+                    const address: VerticalCellAddress = {
+                      table: 'parameters',
+                      sectionId: section.id,
+                      target: 'server',
+                      rowKey: getParsedRowKey(row),
+                      column: 'maskInLogs'
+                    };
+                    return (
+                      <input
+                        ref={(node) => {
+                          const key = getVerticalCellKey(address);
+                          if (node) verticalCheckboxRefs.current.set(key, node);
+                          else verticalCheckboxRefs.current.delete(key);
+                        }}
+                        type="checkbox"
+                        checked={Boolean(row.maskInLogs)}
+                        onChange={(e) => updateServerRow(section.id, getParsedRowKey(row), (current) => ({ ...current, maskInLogs: e.target.checked }))}
+                        onKeyDown={(event) => handleCheckboxVerticalTab(event, section, address)}
+                        aria-label="Маскирование в логах"
+                      />
+                    );
+                  })()}
                 </td>
                 <td className="mono">{row.example || '—'}</td>
               </tr>
@@ -6408,9 +6594,10 @@ export default function App() {
                       section,
                       row,
                       isAuto || isDefault
-                        ? { allowEdit: false, editTarget: isExternal ? 'client' : 'server' }
+                        ? { allowEdit: false, editTarget: isExternal ? 'client' : 'server', table: 'headers' }
                         : {
                             editTarget: isExternal ? 'client' : 'server',
+                            table: 'headers',
                             onDelete: () => (isExternal ? deleteExternalRequestHeader(section.id, rowKey) : deleteRequestHeader(section.id, rowKey))
                           }
                     )}
@@ -6437,9 +6624,21 @@ export default function App() {
                                 autoFocus
                                 value={editingHeaderCell.draft}
                                 onChange={(e) => setEditingHeaderCell((current) => (current ? { ...current, draft: e.target.value } : current))}
-                                onBlur={saveHeaderCellEditing}
+                                onBlur={(event) =>
+                                  consumeSuppressedInlineBlur(
+                                    {
+                                      table: 'headers',
+                                      sectionId: section.id,
+                                      target,
+                                      rowKey,
+                                      column: 'description'
+                                    },
+                                    () => saveHeaderCellEditing(event.currentTarget.value)
+                                  )
+                                }
                                 onKeyDown={(e) => {
-                                  if (e.key === 'Enter') saveHeaderCellEditing();
+                                  handleHeaderCellVerticalTab(e, section, row, 'description', target);
+                                  if (e.key === 'Enter') saveHeaderCellEditing(e.currentTarget.value);
                                   if (e.key === 'Escape') cancelHeaderCellEditing();
                                 }}
                               />
@@ -6469,28 +6668,46 @@ export default function App() {
                     {isAuto || isDefault ? (
                       <input type="checkbox" checked={Boolean(row.maskInLogs)} disabled aria-label="Маскирование в логах" />
                     ) : (
-                      <input
-                        type="checkbox"
-                        checked={Boolean(
-                          isPersisted
-                            ? persistedRows.find((item) => getParsedRowKey(item) === rowKey)?.maskInLogs
-                            : row.maskInLogs
-                        )}
-                        onChange={(e) =>
-                          isExternal
-                            ? updateSection(section.id, (current) => {
-                                if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
-                                return {
-                                  ...current,
-                                  clientRows: (current.clientRows ?? []).map((item) =>
-                                    getParsedRowKey(item) === rowKey ? { ...item, maskInLogs: e.target.checked } : item
-                                  )
-                                };
-                              })
-                            : updateServerRow(section.id, rowKey, (current) => ({ ...current, maskInLogs: e.target.checked }))
-                        }
-                        aria-label="Маскирование в логах"
-                      />
+                      (() => {
+                        const target = isExternal ? 'client' as const : 'server' as const;
+                        const address: VerticalCellAddress = {
+                          table: 'headers',
+                          sectionId: section.id,
+                          target,
+                          rowKey,
+                          column: 'maskInLogs'
+                        };
+                        return (
+                          <input
+                            ref={(node) => {
+                              const key = getVerticalCellKey(address);
+                              if (node) verticalCheckboxRefs.current.set(key, node);
+                              else verticalCheckboxRefs.current.delete(key);
+                            }}
+                            type="checkbox"
+                            checked={Boolean(
+                              isPersisted
+                                ? persistedRows.find((item) => getParsedRowKey(item) === rowKey)?.maskInLogs
+                                : row.maskInLogs
+                            )}
+                            onChange={(e) =>
+                              isExternal
+                                ? updateSection(section.id, (current) => {
+                                    if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
+                                    return {
+                                      ...current,
+                                      clientRows: (current.clientRows ?? []).map((item) =>
+                                        getParsedRowKey(item) === rowKey ? { ...item, maskInLogs: e.target.checked } : item
+                                      )
+                                    };
+                                  })
+                                : updateServerRow(section.id, rowKey, (current) => ({ ...current, maskInLogs: e.target.checked }))
+                            }
+                            onKeyDown={(event) => handleCheckboxVerticalTab(event, section, address)}
+                            aria-label="Маскирование в логах"
+                          />
+                        );
+                      })()
                     )}
                   </td>
                   <td className="mono">
@@ -6514,9 +6731,21 @@ export default function App() {
                                 autoFocus
                                 value={editingHeaderCell.draft}
                                 onChange={(e) => setEditingHeaderCell((current) => (current ? { ...current, draft: e.target.value } : current))}
-                                onBlur={saveHeaderCellEditing}
+                                onBlur={(event) =>
+                                  consumeSuppressedInlineBlur(
+                                    {
+                                      table: 'headers',
+                                      sectionId: section.id,
+                                      target,
+                                      rowKey,
+                                      column: 'example'
+                                    },
+                                    () => saveHeaderCellEditing(event.currentTarget.value)
+                                  )
+                                }
                                 onKeyDown={(e) => {
-                                  if (e.key === 'Enter') saveHeaderCellEditing();
+                                  handleHeaderCellVerticalTab(e, section, row, 'example', target);
+                                  if (e.key === 'Enter') saveHeaderCellEditing(e.currentTarget.value);
                                   if (e.key === 'Escape') cancelHeaderCellEditing();
                                 }}
                               />
@@ -7531,6 +7760,18 @@ export default function App() {
   const handleToggleSidebar = useCallback(() => {
     setIsSidebarHidden((current) => !current);
   }, []);
+
+  const handleToggleSplit = useCallback(() => {
+    if (!splitAvailable) return;
+    setSplitOpen((current) => {
+      const next = !current;
+      if (next) {
+        const fallback = methods.find((method) => method.id !== activeMethodId) ?? methods[0];
+        setSplitMethodId((selected) => methods.some((method) => method.id === selected) ? selected : fallback?.id ?? '');
+      }
+      return next;
+    });
+  }, [activeMethodId, methods, splitAvailable]);
 
   const handleManualSaveClick = useCallback(() => {
     void handleManualSave();
@@ -8554,6 +8795,10 @@ export default function App() {
           isLogoutBusy={authBusyKey === 'auth:logout'}
           canUndo={canUndo}
           canRedo={canRedo}
+          splitOpen={splitOpen}
+          splitAvailable={splitAvailable}
+          autosaveState={autosave.state}
+          autosaveAt={autosave.at}
           onAccentChange={handleWbAccentChange}
           onRenameMethod={() => {
             if (activeMethod) {
@@ -8570,6 +8815,9 @@ export default function App() {
           onExportFullProjectWiki={handleOpenProjectWikiPreview}
           onExportJson={exportProjectJson}
           onToggleSidebar={handleToggleSidebar}
+          onToggleSplit={handleToggleSplit}
+          onToggleTheme={toggleTheme}
+          onOpenSearch={handleOpenSearchPalette}
           onUndo={undoWorkspace}
           onRedo={redoWorkspace}
           onManualSave={handleManualSaveClick}
@@ -8579,7 +8827,7 @@ export default function App() {
         />
 
         <div className="wb-content">
-          <div className="wb-content-body">
+          <div className={`wb-content-body ${splitOpen ? 'split-active' : ''}`}>
 
       {importError && <div className="alert error">Ошибка импорта: {importError}</div>}
       {serverSyncError && <div className="alert error">Ошибка синхронизации: {serverSyncError}</div>}
@@ -8638,7 +8886,7 @@ export default function App() {
       </div>
 
       <div
-        className={`layout ${isSidebarHidden ? 'sidebar-hidden' : ''}`}
+        className={`layout ${isSidebarHidden ? 'sidebar-hidden' : ''} ${splitOpen ? 'split-open' : ''}`}
         style={{ '--sidebar-width': `${sidebarWidth}px` } as CSSProperties}
       >
         <main className={`workspace ${workspaceScope === 'flows' && tab === 'editor' ? 'workspace-flow-focus' : ''}`} role="main">
@@ -8748,148 +8996,19 @@ export default function App() {
 
                         {section.kind === 'text' && (
                           <div className="stack">
-                            {isSelectedSection ? (
-                              <>
-                                <div className="editor-toolbar-shell" data-onboarding-anchor="refine-structure">
-                                  <div className="editor-toolbar-head">
-                                    <div className="editor-toolbar-title">Редактор текста</div>
-                                    <div className="editor-toolbar-note">Выделите текст и примените форматирование</div>
-                                  </div>
-                                  <div className="text-toolbar" role="toolbar" aria-label="Форматирование текста">
-                                    <div className="toolbar-group" aria-label="Базовое форматирование">
-                                      <button
-                                        className="ghost small toolbar-button"
-                                        type="button"
-                                        title="Жирный"
-                                        aria-label="Жирный"
-                                        onMouseDown={(event) => {
-                                          event.preventDefault();
-                                          rememberTextSelection();
-                                        }}
-                                        onClick={() => applyTextEditorCommand(section.id, 'bold')}
-                                      >
-                                        <span className="toolbar-icon toolbar-icon-bold">B</span>
-                                      </button>
-                                      <button
-                                        className="ghost small toolbar-button"
-                                        type="button"
-                                        title="Код"
-                                        aria-label="Код"
-                                        onMouseDown={(event) => {
-                                          event.preventDefault();
-                                          rememberTextSelection();
-                                        }}
-                                        onClick={() => applyTextEditorCommand(section.id, 'code')}
-                                      >
-                                        <span className="toolbar-icon">&lt;/&gt;</span>
-                                      </button>
-                                      <button
-                                        className="ghost small toolbar-button"
-                                        type="button"
-                                        title="Выделение цветом"
-                                        aria-label="Выделение цветом"
-                                        onMouseDown={(event) => {
-                                          event.preventDefault();
-                                          rememberTextSelection();
-                                        }}
-                                        onClick={() => applyTextEditorCommand(section.id, 'highlight', { color: DEFAULT_RICH_TEXT_HIGHLIGHT })}
-                                      >
-                                        <span className="toolbar-icon">🖍</span>
-                                      </button>
-                                    </div>
-                                    <div className="toolbar-group" aria-label="Структура текста">
-                                      <button
-                                        className="ghost small toolbar-button"
-                                        type="button"
-                                        title="Подзаголовок"
-                                        aria-label="Подзаголовок"
-                                        onMouseDown={(event) => {
-                                          event.preventDefault();
-                                          rememberTextSelection();
-                                        }}
-                                        onClick={() => applyTextEditorCommand(section.id, 'h3')}
-                                      >
-                                        <span className="toolbar-heading-glyph" aria-hidden="true">
-                                          <span className="toolbar-heading-main">T</span>
-                                          <span className="toolbar-heading-level">3</span>
-                                        </span>
-                                      </button>
-                                      <button
-                                        className="ghost small toolbar-button"
-                                        type="button"
-                                        title="Цитата"
-                                        aria-label="Цитата"
-                                        onMouseDown={(event) => {
-                                          event.preventDefault();
-                                          rememberTextSelection();
-                                        }}
-                                        onClick={() => applyTextEditorCommand(section.id, 'quote')}
-                                      >
-                                        <span className="toolbar-icon">❝</span>
-                                      </button>
-                                    </div>
-                                    <div className="toolbar-group" aria-label="Списки">
-                                      <button
-                                        className="ghost small toolbar-button"
-                                        type="button"
-                                        title="Маркированный список"
-                                        aria-label="Маркированный список"
-                                        onMouseDown={(event) => {
-                                          event.preventDefault();
-                                          rememberTextSelection();
-                                        }}
-                                        onClick={() => applyTextEditorCommand(section.id, 'ul')}
-                                      >
-                                        <span className="toolbar-icon">•</span>
-                                      </button>
-                                      <button
-                                        className="ghost small toolbar-button"
-                                        type="button"
-                                        title="Нумерованный список"
-                                        aria-label="Нумерованный список"
-                                        onMouseDown={(event) => {
-                                          event.preventDefault();
-                                          rememberTextSelection();
-                                        }}
-                                        onClick={() => applyTextEditorCommand(section.id, 'ol')}
-                                      >
-                                        <span className="toolbar-icon">1.</span>
-                                      </button>
-                                    </div>
-                                  </div>
-                                </div>
-                                <div className="panel-sub">Поддерживаются подзаголовки, цитаты, код и вложенные списки с Tab.</div>
-                                <label className="field">
-                                  <div className="label">Содержимое</div>
-                                  <EditorContent
-                                    editor={textEditor}
-                                    onKeyDown={(event) => {
-                                      const handled = handleRichTextHotkeys(event, (action) => applyTextEditorCommand(section.id, action));
-                                      if (handled) return;
-
-                                      if (event.key !== 'Tab' || !textEditor) return;
-                                      if (!isSelectionInsideListItem()) return;
-
-                                      event.preventDefault();
-                                      if (event.shiftKey) {
-                                        textEditor.chain().focus().liftListItem('listItem').run();
-                                      } else {
-                                        const sunk = textEditor.chain().focus().sinkListItem('listItem').run();
-                                        if (!sunk) {
-                                          textEditor.chain().focus().splitListItem('listItem').sinkListItem('listItem').run();
-                                        }
-                                      }
-                                      syncTextSectionFromEditor(section.id);
-                                    }}
-                                  />
-                                </label>
-                              </>
-                            ) : (
-                              <label className="field">
-                                <div className="label">Содержимое</div>
-                                <div className="rich-text-preview" dangerouslySetInnerHTML={{ __html: richTextToHtml(section.value, { editable: false }) }} />
-                              </label>
-                            )}
+                            <div className="label">Содержимое</div>
+                            <InlineTextSectionEditor
+                              sectionId={section.id}
+                              value={section.value}
+                              onFocus={() => {
+                                if (selectedId !== section.id) setSelectedId(section.id);
+                              }}
+                              onChange={(value) =>
+                                updateSection(section.id, (current) =>
+                                  current.kind === 'text' && current.value !== value ? { ...current, value } : current
+                                )
+                              }
+                            />
                           </div>
                         )}
 
@@ -9115,7 +9234,20 @@ export default function App() {
             </section>
           )}
         </main>
-        {activeMethod && tab === 'editor' && workspaceScope === 'methods' && (
+        {splitOpen && (
+          <>
+            <div className="linked-preview-divider" aria-hidden />
+            <LinkedMethodPreview
+              methods={methods}
+              selectedMethodId={splitMethodId}
+              onSelectMethod={setSplitMethodId}
+              onClose={() => setSplitOpen(false)}
+              getMethodHttpMethod={getMethodHttpMethod}
+              getMethodPath={getMethodPath}
+            />
+          </>
+        )}
+        {activeMethod && tab === 'editor' && workspaceScope === 'methods' && !splitOpen && (
           <MethodMetaPanel
             method={activeMethod}
             methodHttpMethod={getMethodHttpMethod(activeMethod)}

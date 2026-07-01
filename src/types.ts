@@ -1,5 +1,5 @@
 export type ParseFormat = 'json' | 'curl' | 'xml';
-export type RequestColumnKey = 'field' | 'type' | 'required' | 'clientField' | 'description' | 'maskInLogs' | 'example';
+export type RequestColumnKey = 'field' | 'type' | 'required' | 'validations' | 'clientField' | 'description' | 'maskInLogs' | 'example';
 export type RequestAuthType = 'none' | 'bearer' | 'basic' | 'api-key';
 export type RequestMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 export type RequestProtocol = 'REST' | 'SOAP';
@@ -29,6 +29,7 @@ export interface ParsedRow {
   clientOrigin?: 'parsed' | 'manual' | 'generated';
   type: string;
   required: string;
+  validations?: string;
   description: string;
   maskInLogs?: boolean;
   example: string;

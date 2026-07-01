@@ -354,7 +354,7 @@ type EditableFieldState = {
 type EditableRequestCellState = {
   sectionId: string;
   rowKey: string;
-  column: 'type' | 'required' | 'description' | 'example';
+  column: 'type' | 'required' | 'validations' | 'description' | 'example';
   draft: string;
   target: ParseTarget;
   rowType: string;
@@ -4838,6 +4838,7 @@ export default function App() {
       origin: 'manual',
       type: fieldType || 'string',
       required: '+',
+      validations: '',
       description: '',
       example: '',
       source: isDualModelSection(section) ? (requestMethod === 'GET' ? 'query' : 'body') : 'parsed'
@@ -4861,6 +4862,7 @@ export default function App() {
       enabled: true,
       type: 'string',
       required: '+',
+      validations: '',
       description: '',
       example: '',
       source: 'header'
@@ -4881,6 +4883,7 @@ export default function App() {
       enabled: true,
       type: 'string',
       required: '+',
+      validations: '',
       description: '',
       example: '',
       source: 'header'
@@ -5311,7 +5314,7 @@ export default function App() {
       startHeaderCellEditing(section, row, address.target, address.column, row[address.column] ?? '');
       return;
     }
-    if (address.column === 'type' || address.column === 'required' || address.column === 'description' || address.column === 'example') {
+    if (address.column === 'type' || address.column === 'required' || address.column === 'validations' || address.column === 'description' || address.column === 'example') {
       startRequestCellEditing(section, row, address.column);
     }
   }
@@ -5329,7 +5332,7 @@ export default function App() {
     suppressedInlineBlurKeyRef.current = getVerticalCellKey(address);
   }
 
-  function startRequestCellEditing(section: ParsedSection, row: ParsedRow, column: 'type' | 'required' | 'description' | 'example'): void {
+  function startRequestCellEditing(section: ParsedSection, row: ParsedRow, column: 'type' | 'required' | 'validations' | 'description' | 'example'): void {
     const target = getRequestCellEditTarget(section, row);
     if (!target) return;
     setRequestCellError('');
@@ -5400,7 +5403,7 @@ export default function App() {
   function applyRequestCellValue(
     sectionId: string,
     rowKey: string,
-    column: 'type' | 'required' | 'description' | 'example',
+    column: 'type' | 'required' | 'validations' | 'description' | 'example',
     draft: string,
     target: ParseTarget,
     rowType?: string
@@ -5525,7 +5528,7 @@ export default function App() {
     event: ReactKeyboardEvent<HTMLElement>,
     section: ParsedSection,
     row: ParsedRow,
-    column: 'type' | 'required' | 'description' | 'example'
+    column: 'type' | 'required' | 'validations' | 'description' | 'example'
   ): void {
     if (event.key !== 'Tab' || !editingRequestCell) return;
     const current: VerticalCellAddress = {
@@ -5873,7 +5876,7 @@ export default function App() {
   function renderEditableRequestCell(
     section: ParsedSection,
     row: ParsedRow,
-    column: 'type' | 'required' | 'description' | 'example'
+    column: 'type' | 'required' | 'validations' | 'description' | 'example'
   ): ReactNode {
     const isEditing =
       editingRequestCell?.sectionId === section.id &&
@@ -6048,6 +6051,7 @@ export default function App() {
       clientField: row.clientField || '—',
       type: row.type || '—',
       required: row.required || '—',
+      validations: row.validations || '—',
       description: row.description || '—',
       maskInLogs: row.maskInLogs ? '***' : ' ',
       example: row.example || '—'
@@ -6229,7 +6233,7 @@ export default function App() {
       return renderEditableFieldCell(section, row, canDelete ? { onDelete: () => deleteParsedRow(section.id, getParsedRowKey(row), 'server') } : {});
     }
 
-    if (column === 'type' || column === 'required' || column === 'description' || column === 'example') {
+    if (column === 'type' || column === 'required' || column === 'validations' || column === 'description' || column === 'example') {
       return renderEditableRequestCell(section, row, column);
     }
 

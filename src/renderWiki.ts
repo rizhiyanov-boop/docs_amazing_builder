@@ -1,8 +1,12 @@
 ﻿import { getRequestColumnLabel, getRequestColumnOrder } from './requestColumns';
-import { getRequestAuthInfo, getRequestRows, requestHasRows, splitRequestRows } from './requestHeaders';
+import { getRequestRows, requestHasRows, splitRequestRows } from './requestHeaders';
 import { buildInputFromRows } from './sourceSync';
 import { resolveSectionTitle } from './sectionTitles';
 import { getDiagramImageUrl, resolveDiagramEngine } from './diagramUtils';
+import {
+  formatDocumentationUrl,
+  replaceDocumentationUrls
+} from './documentationBaseUrl';
 import { normalizeArrayFieldPath } from './fieldPath';
 import type { DiagramSection, DocSection, ErrorsSection, ParseFormat, ParsedRow, ParsedSection, TextSection } from './types';
 
@@ -111,7 +115,7 @@ function getJsonSchemaExampleInput(schemaInput: string): string {
 
 function getParsedExampleInput(format: ParseFormat, rawInput: string, schemaInput: string, rows: ParsedRow[]): string {
   const trimmedInput = rawInput.trim();
-  if (trimmedInput) return trimmedInput;
+  if (trimmedInput) return format === 'curl' ? replaceDocumentationUrls(trimmedInput) : trimmedInput;
   if (format === 'json') {
     const schemaExample = getJsonSchemaExampleInput(schemaInput);
     if (schemaExample) return schemaExample;
@@ -198,10 +202,13 @@ function buildExternalAuthHeaderRows(section: ParsedSection): ParsedRow[] {
 function renderErrorResponseCell(text: string, responseCode: string): string {
   const messageText = text.trim();
   const codeMacro = toWikiInlineCodeMacro(responseCode, 'json');
+  const expandableCodeMacro = codeMacro
+    ? `{expand:title=Пример JSON}\n${codeMacro}\n{expand}`
+    : '';
 
-  if (messageText && codeMacro) return `${toWikiCell(messageText)}<br/><br/>${codeMacro}`;
+  if (messageText && expandableCodeMacro) return `${toWikiCell(messageText)}<br/><br/>${expandableCodeMacro}`;
   if (messageText) return toWikiCell(messageText);
-  if (codeMacro) return codeMacro;
+  if (expandableCodeMacro) return expandableCodeMacro;
   return EMPTY_WIKI_CELL;
 }
 
@@ -215,16 +222,20 @@ function renderParsedSourceExamples(section: ParsedSection): string[] {
   const sectionLabel = section.sectionType === 'response' ? 'response' : 'request';
   const serverFormat = section.format;
   const clientFormat = section.clientFormat ?? 'json';
-  const serverExampleInput = isRequest ? serverInput : getParsedExampleInput(serverFormat, serverInput, serverSchema, section.rows);
+  const serverExampleInput = isRequest
+    ? serverFormat === 'curl' ? replaceDocumentationUrls(serverInput) : serverInput
+    : getParsedExampleInput(serverFormat, serverInput, serverSchema, section.rows);
   const clientExampleInput = section.domainModelEnabled
-    ? isRequest ? clientInput : getParsedExampleInput(clientFormat, clientInput, clientSchema, section.clientRows ?? [])
+    ? isRequest
+      ? clientFormat === 'curl' ? replaceDocumentationUrls(clientInput) : clientInput
+      : getParsedExampleInput(clientFormat, clientInput, clientSchema, section.clientRows ?? [])
     : '';
   const serverCurl = isRequest
     ? buildInputFromRows(
       'curl',
       [...splitRequestRows(getRequestRows(section)).headers.filter((row) => row.enabled !== false), ...(section.rows.filter((row) => row.source !== 'header'))],
       {
-        requestUrl: section.requestUrl?.trim() || '',
+        requestUrl: formatDocumentationUrl(section.requestUrl?.trim() || ''),
         requestMethod: section.requestMethod,
         bodyText: section.format === 'json' || section.format === 'xml' ? section.input : undefined
       }
@@ -239,7 +250,7 @@ function renderParsedSourceExamples(section: ParsedSection): string[] {
         ...((section.clientRows ?? []).filter((row) => row.source !== 'header'))
       ],
       {
-        requestUrl: section.externalRequestUrl?.trim() || '',
+        requestUrl: formatDocumentationUrl(section.externalRequestUrl?.trim() || ''),
         requestMethod: section.externalRequestMethod,
         bodyText: section.clientFormat === 'json' || section.clientFormat === 'xml' ? (section.clientInput ?? '') : undefined
       }
@@ -299,7 +310,16 @@ function wrapWikiTable(tableLines: string[]): string[] {
   return tableLines;
 }
 
+function isGoalSection(section: TextSection): boolean {
+  return resolveSectionTitle(section.title).trim().toLowerCase() === 'цель';
+}
+
+function isProcessDiagramSection(section: DocSection): section is DiagramSection {
+  return section.kind === 'diagram' && resolveSectionTitle(section.title).trim().toLowerCase() === 'диаграмма процесса';
+}
+
 function shouldRenderTextSection(section: TextSection): boolean {
+  if (isGoalSection(section)) return false;
   if (!section.enabled) return true;
   return Boolean(section.value.trim());
 }
@@ -349,6 +369,7 @@ function renderStructuredTable(rows: ParsedRow[], section: ParsedSection): strin
       clientField: normalizeArrayFieldPath(row.clientField ?? ''),
       type: row.type,
       required: row.required,
+      validations: row.validations ?? '',
       description: row.description,
       maskInLogs: row.maskInLogs ? '***' : '   ',
       example: row.example
@@ -364,6 +385,40 @@ function renderStructuredTable(rows: ParsedRow[], section: ParsedSection): strin
     lines.push(`|${cells.join('|')}|`);
   }
 
+  return wrapWikiTable(lines);
+}
+
+function renderRequestBodyTable(rows: ParsedRow[]): string[] {
+  const lines = ['||Server request||Тип||Обяз.||Валидации||Описание||Пример||Client request||Маск.||'];
+  for (const row of rows) {
+    const cells = [
+      toWikiCell(normalizeArrayFieldPath(row.field)),
+      toWikiCell(row.type),
+      toWikiCell(row.required),
+      toWikiCell(row.validations ?? ''),
+      toWikiCell(row.description),
+      toWikiExampleCell(row.example),
+      toWikiCell(normalizeArrayFieldPath(row.clientField ?? '')),
+      row.maskInLogs ? '***' : '   '
+    ];
+    lines.push(`|${cells.join('|')}|`);
+  }
+  return wrapWikiTable(lines);
+}
+
+function renderResponseTable(rows: ParsedRow[]): string[] {
+  const lines = ['||Server Response||Тип||Описание||Пример||Client Response||Маск.||'];
+  for (const row of rows) {
+    const cells = [
+      toWikiCell(normalizeArrayFieldPath(row.field)),
+      toWikiCell(row.type),
+      toWikiCell(row.description),
+      toWikiExampleCell(row.example),
+      toWikiCell(normalizeArrayFieldPath(row.clientField ?? '')),
+      row.maskInLogs ? '***' : '   '
+    ];
+    lines.push(`|${cells.join('|')}|`);
+  }
   return wrapWikiTable(lines);
 }
 
@@ -385,17 +440,8 @@ function renderRequestSection(section: ParsedSection): string[] {
 
   const { headers, otherRows } = splitRequestRows(getRequestRows(section));
   const requestError = section.error || section.clientError;
-  const authInfo = getRequestAuthInfo(section);
   const externalHeaders = (section.clientRows ?? []).filter((row) => row.source === 'header' && row.enabled !== false);
 
-  if (authInfo) {
-    lines.push('');
-    lines.push('h3. Authorization');
-    lines.push('');
-    for (const detail of authInfo.details) {
-      lines.push(`*${escapeWiki(detail.label)}:* ${toWikiCell(detail.value)}`);
-    }
-  }
   if (headers.length > 0) {
     lines.push('');
     lines.push('h3. Headers');
@@ -413,9 +459,9 @@ function renderRequestSection(section: ParsedSection): string[] {
     lines.push(`*Секция заблокирована:* ${toWikiCell(requestError)}`);
   } else if (otherRows.length > 0) {
     lines.push('');
-    lines.push('h3. Параметры');
+    lines.push('h3. Body');
     lines.push('');
-    lines.push(...renderStructuredTable(otherRows, section));
+    lines.push(...renderRequestBodyTable(otherRows));
   }
 
   lines.push(...renderParsedSourceExamples(section));
@@ -436,7 +482,7 @@ function renderResponseSection(section: ParsedSection): string[] {
     return lines;
   }
 
-  lines.push(...renderStructuredTable(getRequestRows(section), section));
+  lines.push(...renderResponseTable(getRequestRows(section)));
   lines.push(...renderParsedSourceExamples(section));
   return lines;
 }
@@ -493,6 +539,32 @@ function renderDiagramSection(section: DiagramSection): string[] {
   return lines;
 }
 
+function renderProcessDiagramSection(section: DiagramSection): string[] {
+  const lines: string[] = ['h2. Диаграмма процесса'];
+
+  if (!section.enabled) {
+    lines.push('');
+    lines.push('_Не используется_');
+    return lines;
+  }
+
+  section.diagrams
+    .filter((diagram) => diagram.code.trim())
+    .forEach((diagram) => {
+      const imageUrl = getDiagramImageUrl(resolveDiagramEngine(diagram.code, diagram.engine), diagram.code, 'jpeg');
+
+      lines.push('');
+      lines.push(`!${escapeWiki(imageUrl)}!`);
+      lines.push('{expand:title=Код диаграммы}');
+      lines.push('{code}');
+      lines.push(escapeWiki(diagram.code));
+      lines.push('{code}');
+      lines.push('{expand}');
+    });
+
+  return lines;
+}
+
 function renderErrorsSection(section: ErrorsSection): string[] {
   const lines: string[] = [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`];
 
@@ -534,13 +606,17 @@ function renderWikiTemplateIntro(meta: WikiRenderMeta): string[] {
   const taskTable = wrapWikiTable([
     `|Epic|${toWikiCell(meta.epic ?? '')}|`,
     `|Цель|${EMPTY_WIKI_CELL}|`,
-    `|Инициаторы|${toWikiCell(meta.initiators ?? '')}|`,
-    `|Ответственный разработчик / модуль|${toWikiCell(meta.responsible ?? '')}|`
+    `|Инициаторы|${toWikiCell(meta.initiators ?? '')}|`
   ]);
 
   const commonInfoTable = wrapWikiTable([
     `|Метод|${methodCell}|`,
-    `|Внешний URL|${toWikiCell(meta.externalUrl ?? '')}|`
+    `|Внутренний URL|${toWikiCell(formatDocumentationUrl(meta.externalUrl ?? meta.path ?? ''))}|`
+  ]);
+
+  const linksTable = wrapWikiTable([
+    '||Ссылка||Описание||',
+    `|${EMPTY_WIKI_CELL}|${EMPTY_WIKI_CELL}|`
   ]);
 
   return [
@@ -554,7 +630,9 @@ function renderWikiTemplateIntro(meta: WikiRenderMeta): string[] {
     '',
     'h2. Общая информация',
     '',
-    ...commonInfoTable
+    ...commonInfoTable,
+    '',
+    ...linksTable
   ];
 }
 
@@ -578,7 +656,16 @@ export function renderWikiDocument(sections: DocSection[], meta: WikiRenderMeta 
     lines.push(...renderWikiTemplateIntro(meta));
   }
 
+  const processDiagramSection = includeTemplateIntro
+    ? sections.find(isProcessDiagramSection)
+    : undefined;
+  if (processDiagramSection && shouldRenderDiagramSection(processDiagramSection)) {
+    lines.push('');
+    lines.push(...renderProcessDiagramSection(processDiagramSection).map((line) => shiftWikiHeadingLine(line, headingOffset)));
+  }
+
   for (const section of sections) {
+    if (section === processDiagramSection) continue;
     const rendered =
       section.kind === 'text'
         ? shouldRenderTextSection(section)
@@ -590,7 +677,9 @@ export function renderWikiDocument(sections: DocSection[], meta: WikiRenderMeta 
             : []
           : section.kind === 'diagram'
             ? shouldRenderDiagramSection(section)
-              ? renderDiagramSection(section)
+              ? isProcessDiagramSection(section)
+                ? renderProcessDiagramSection(section)
+                : renderDiagramSection(section)
               : []
             : shouldRenderErrorsSection(section)
               ? renderErrorsSection(section)

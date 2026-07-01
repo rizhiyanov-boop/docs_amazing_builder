@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { renderHtmlDocument } from './renderHtml';
 import { renderProjectHtmlDocument, renderProjectWikiDocument } from './projectExport';
 import { renderWikiDocument } from './renderWiki';
+import { DOCUMENTATION_BASE_URL_TEST_VALUE } from './documentationBaseUrl';
 import { makeRequestSection, makeResponseSection, makeSectionsForRender } from './test/fixtures';
 import type { DocSection, MethodDocument, MethodGroup, ProjectSection } from './types';
 
@@ -19,8 +20,7 @@ describe('renderers', () => {
 
     expect(wiki).toContain('{toc}');
     expect(wiki).toContain('h2. История изменений');
-    expect(wiki).toContain('h2. Цель');
-    expect(wiki).toContain('Тестовая цель');
+    expect(wiki).not.toContain('h2. Цель');
   });
 
   it('renders parse error marker for blocked request section in wiki', () => {
@@ -107,7 +107,32 @@ describe('renderers', () => {
 
     const wiki = renderWikiDocument(sections);
     expect(wiki).toContain('{expand:title=Server cURL}');
-    expect(wiki).toContain('curl -X POST "https://api.example.com/payments"');
+    expect(wiki).toContain(`curl -X POST "${DOCUMENTATION_BASE_URL_TEST_VALUE}/payments"`);
+  });
+
+  it('renders full internal url in wiki method description', () => {
+    const wiki = renderWikiDocument([], {
+      httpMethod: 'POST',
+      path: '/payments',
+      externalUrl: 'https://api.example.com/payments'
+    });
+
+    expect(wiki).toContain(`|Внутренний URL|${DOCUMENTATION_BASE_URL_TEST_VALUE}/payments|`);
+    expect(wiki).not.toContain('BASE_URL_TEST');
+  });
+
+  it('does not render authorization summary block in wiki request section', () => {
+    const wiki = renderWikiDocument([
+      makeRequestSection({
+        authType: 'basic',
+        authUsername: '',
+        authPassword: '',
+        rows: []
+      })
+    ]);
+
+    expect(wiki).not.toContain('h3. Authorization');
+    expect(wiki).not.toContain('Схема: Basic auth');
   });
 
   it('renders server response example in wiki from json schema examples when source input is empty', () => {
@@ -355,8 +380,7 @@ describe('renderers', () => {
 
     expect(wiki).not.toContain('{toc}');
     expect(wiki).not.toContain('h2. История изменений');
-    expect(wiki).toContain('h4. Цель');
-    expect(wiki).toContain('Тестовая цель');
+    expect(wiki).not.toContain('h4. Цель');
   });
 
   it('renders project diagrams in html and wiki exports and includes methods in project wiki', () => {
@@ -409,7 +433,7 @@ describe('renderers', () => {
     expect(wiki).toContain('h3. Save Claim');
     expect(wiki).toContain('*Jira:* GRKI-77');
     expect(wiki).toContain('*Статус:* На ревью');
-    expect(wiki).toContain('h4. Цель');
+    expect(wiki).not.toContain('h4. Цель');
     expect(wiki).toContain('!https://mermaid.ink');
   });
 

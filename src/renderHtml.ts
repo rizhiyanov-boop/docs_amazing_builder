@@ -3,6 +3,10 @@ import { getRequestHeaderRows, getRequestRows, requestHasRows, splitRequestRows 
 import { richTextToHtml } from './richText';
 import { resolveSectionTitle } from './sectionTitles';
 import { buildInputFromRows } from './sourceSync';
+import {
+  formatDocumentationUrl,
+  replaceDocumentationUrls
+} from './documentationBaseUrl';
 import { wrapNonDomainResponseJson } from './parsers';
 import { getThemeTokens } from './theme';
 import { getDiagramExportFileName, getDiagramImageUrl, resolveDiagramEngine } from './diagramUtils';
@@ -226,6 +230,7 @@ function renderStructuredTable(rows: ParsedRow[], section: ParsedSection): strin
         clientField: normalizeArrayFieldPath(row.clientField || '') || '—',
         type: row.type || '—',
         required: row.required || '—',
+        validations: row.validations || '—',
         description: row.description || '—',
         maskInLogs: row.maskInLogs ? '***' : ' ',
         example: row.example || '—'
@@ -276,9 +281,11 @@ function renderRequestSection(section: ParsedSection, interactive = true): strin
   const { headers, otherRows, urlRow } = splitRequestRows(requestRows);
   const requestError = section.error || section.clientError;
   const requestUrl = section.requestUrl?.trim() || (urlRow?.example ?? '');
+  const documentationRequestUrl = formatDocumentationUrl(requestUrl);
   const requestMethod = section.requestMethod?.trim() || section.format.toUpperCase();
   const requestProtocol = section.requestProtocol?.trim() || 'REST';
   const externalRequestUrl = section.externalRequestUrl?.trim() || '';
+  const documentationExternalRequestUrl = formatDocumentationUrl(externalRequestUrl);
   const externalAuthHeader =
     section.externalAuthType === 'bearer'
       ? [{ field: 'Authorization', type: 'string', required: '+', description: 'Авторизация: Bearer token', example: `Bearer ${section.externalAuthTokenExample?.trim() || 'token'}` }]
@@ -301,7 +308,7 @@ function renderRequestSection(section: ParsedSection, interactive = true): strin
     'curl',
     [...getRequestHeaderRows(section).filter((row) => row.enabled !== false), ...section.rows.filter((row) => row.source !== 'header')],
     {
-      requestUrl,
+      requestUrl: documentationRequestUrl,
       requestMethod: section.requestMethod,
       bodyText: section.format === 'json' || section.format === 'xml' ? section.input : undefined
     }
@@ -309,7 +316,7 @@ function renderRequestSection(section: ParsedSection, interactive = true): strin
   const clientCurl =
     section.domainModelEnabled && (section.clientRows?.length ?? 0) > 0
       ? buildInputFromRows('curl', externalHeaders.concat((section.clientRows ?? []).filter((row) => row.source !== 'header')), {
-        requestUrl: externalRequestUrl,
+        requestUrl: documentationExternalRequestUrl,
         requestMethod: section.externalRequestMethod,
         bodyText: section.clientFormat === 'json' || section.clientFormat === 'xml' ? (section.clientInput ?? '') : undefined
       })
@@ -323,11 +330,17 @@ function renderRequestSection(section: ParsedSection, interactive = true): strin
     otherRows.length > 0
       ? `<details open><summary>Request schema <span class="sumhint">${section.format.toUpperCase()}</span></summary>${renderStructuredTable(otherRows, section)}</details>`
       : '',
-    renderCodeBlock(`${section.id}-server-example`, 'Server request example', section.input, interactive, section.format),
+    renderCodeBlock(`${section.id}-server-example`, 'Server request example', section.format === 'curl' ? replaceDocumentationUrls(section.input) : section.input, interactive, section.format),
     renderCodeBlock(`${section.id}-server-schema`, 'Server request JSON Schema', section.schemaInput ?? '', interactive, 'json'),
     renderCodeBlock(`${section.id}-server-curl`, 'Server cURL', serverCurl, interactive),
     section.domainModelEnabled
-      ? renderCodeBlock(`${section.id}-client-example`, 'Client request example', section.clientInput ?? '', interactive, section.clientFormat ?? 'json')
+      ? renderCodeBlock(
+        `${section.id}-client-example`,
+        'Client request example',
+        (section.clientFormat ?? 'json') === 'curl' ? replaceDocumentationUrls(section.clientInput ?? '') : (section.clientInput ?? ''),
+        interactive,
+        section.clientFormat ?? 'json'
+      )
       : '',
     section.domainModelEnabled
       ? renderCodeBlock(`${section.id}-client-schema`, 'Client request JSON Schema', section.clientSchemaInput ?? '', interactive, 'json')
@@ -338,7 +351,7 @@ function renderRequestSection(section: ParsedSection, interactive = true): strin
     .filter(Boolean)
     .join('');
 
-  return wrapCard(section.id, title, meta, body, requestUrl, requestMethod, interactive);
+  return wrapCard(section.id, title, meta, body, documentationRequestUrl, requestMethod, interactive);
 }
 
 function renderResponseSection(section: ParsedSection, interactive = true): string {
@@ -534,9 +547,9 @@ export function renderHtmlDocument(sections: DocSection[], theme: ThemeName = 'd
   if (methodPath || methodHttpMethod) {
     const summaryBody = [
       renderMeta?.responsible ? renderInfoNote('Ответственный', renderMeta.responsible) : '',
-      renderMeta?.externalUrl ? renderInfoNote('Внешний URL', renderMeta.externalUrl) : ''
+      renderMeta?.externalUrl || renderMeta?.path ? renderInfoNote('Внутренний URL', formatDocumentationUrl(renderMeta.externalUrl ?? renderMeta.path ?? '')) : ''
     ].filter(Boolean).join('');
-    blocks.unshift(wrapCard('method-summary', 'Метод', '', summaryBody || '<span class="muted">Без дополнительных данных</span>', methodPath, methodHttpMethod, interactive));
+    blocks.unshift(wrapCard('method-summary', 'Метод', '', summaryBody || '<span class="muted">Без дополнительных данных</span>', formatDocumentationUrl(methodPath), methodHttpMethod, interactive));
   }
   const darkTokens = getThemeTokens('dark');
   const lightTokens = getThemeTokens('light');

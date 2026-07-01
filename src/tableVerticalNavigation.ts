@@ -4,6 +4,7 @@ export type VerticalCellColumn =
   | 'clientField'
   | 'type'
   | 'required'
+  | 'validations'
   | 'description'
   | 'maskInLogs'
   | 'example';

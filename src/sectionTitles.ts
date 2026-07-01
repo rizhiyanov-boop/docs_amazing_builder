@@ -13,6 +13,7 @@ export const DEFAULT_SECTION_TITLE = 'Новая секция';
 
 function normalizeRow(row: ParsedRow): ParsedRow {
   const normalizedField = row.field ?? '';
+  const legacyValidation = (row as ParsedRow & { validation?: unknown }).validation;
 
   return {
     ...row,
@@ -24,6 +25,7 @@ function normalizeRow(row: ParsedRow): ParsedRow {
     enabled: row.enabled ?? true,
     type: row.type ?? '',
     required: row.required ?? '',
+    validations: row.validations ?? (typeof legacyValidation === 'string' ? legacyValidation : ''),
     description: row.description ?? '',
     example: row.example ?? '',
     maskInLogs: row.maskInLogs ?? false

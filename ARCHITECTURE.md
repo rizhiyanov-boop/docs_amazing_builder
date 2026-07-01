@@ -83,6 +83,7 @@ New UI should prefer `var(--wb-*)` tokens. Legacy variables should only be used 
 - HTML/Wiki preview screens provide explicit copy/download actions.
 - JSON remains a direct project/workspace download.
 - Lazy preview rendering is used so HTML/Wiki renderers do not run on every editor keystroke.
+- Wiki export generation rules are documented in `docs/wiki-export.md`.
 
 ## Mobile Behavior
 

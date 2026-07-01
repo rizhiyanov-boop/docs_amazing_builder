@@ -47,8 +47,9 @@ function toWikiCell(value: string): string {
     .replaceAll('\r', '\n')
     .replaceAll('\t', ' ')
     .split('\n')
-    .map((part) => part.trimEnd())
-    .join('<br/>');
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(' ');
 
   return normalized.trim() ? normalized : EMPTY_WIKI_CELL;
 }
@@ -67,6 +68,11 @@ function toWikiExampleCell(value: string): string {
     }
   }
   return toWikiCell(trimmed);
+}
+
+function toWikiMappingCell(value: string | null | undefined): string {
+  const normalized = normalizeArrayFieldPath(value ?? '').trim();
+  return normalized ? toWikiCell(normalized) : '-';
 }
 
 function toWikiSourceCodeBlock(value: string, format: ParseFormat): string[] {
@@ -203,10 +209,10 @@ function renderErrorResponseCell(text: string, responseCode: string): string {
   const messageText = text.trim();
   const codeMacro = toWikiInlineCodeMacro(responseCode, 'json');
   const expandableCodeMacro = codeMacro
-    ? `{expand:title=Пример JSON}\n${codeMacro}\n{expand}`
+    ? `{expand:title=Пример}\n${codeMacro}\n{expand}`
     : '';
 
-  if (messageText && expandableCodeMacro) return `${toWikiCell(messageText)}<br/><br/>${expandableCodeMacro}`;
+  if (messageText && expandableCodeMacro) return `${toWikiCell(messageText)}\n${expandableCodeMacro}`;
   if (messageText) return toWikiCell(messageText);
   if (expandableCodeMacro) return expandableCodeMacro;
   return EMPTY_WIKI_CELL;
@@ -392,13 +398,13 @@ function renderRequestBodyTable(rows: ParsedRow[]): string[] {
   const lines = ['||Server request||Тип||Обяз.||Валидации||Описание||Пример||Client request||Маск.||'];
   for (const row of rows) {
     const cells = [
-      toWikiCell(normalizeArrayFieldPath(row.field)),
+      toWikiMappingCell(row.field),
       toWikiCell(row.type),
       toWikiCell(row.required),
       toWikiCell(row.validations ?? ''),
       toWikiCell(row.description),
       toWikiExampleCell(row.example),
-      toWikiCell(normalizeArrayFieldPath(row.clientField ?? '')),
+      toWikiMappingCell(row.clientField),
       row.maskInLogs ? '***' : '   '
     ];
     lines.push(`|${cells.join('|')}|`);
@@ -410,11 +416,11 @@ function renderResponseTable(rows: ParsedRow[]): string[] {
   const lines = ['||Server Response||Тип||Описание||Пример||Client Response||Маск.||'];
   for (const row of rows) {
     const cells = [
-      toWikiCell(normalizeArrayFieldPath(row.field)),
+      toWikiMappingCell(row.field),
       toWikiCell(row.type),
       toWikiCell(row.description),
       toWikiExampleCell(row.example),
-      toWikiCell(normalizeArrayFieldPath(row.clientField ?? '')),
+      toWikiMappingCell(row.clientField),
       row.maskInLogs ? '***' : '   '
     ];
     lines.push(`|${cells.join('|')}|`);
@@ -555,6 +561,9 @@ function renderProcessDiagramSection(section: DiagramSection): string[] {
 
       lines.push('');
       lines.push(`!${escapeWiki(imageUrl)}!`);
+      if (diagram.description?.trim()) {
+        lines.push(...toWikiTextBlock(diagram.description));
+      }
       lines.push('{expand:title=Код диаграммы}');
       lines.push('{code}');
       lines.push(escapeWiki(diagram.code));

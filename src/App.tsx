@@ -342,6 +342,8 @@ type JsonImportSampleType = 'request' | 'response';
 type JsonImportTargetSide = 'server' | 'client';
 type AuthDialogMode = 'login' | 'register';
 
+const WIKI_EXPORT_CACHE_VERSION = 'wiki-export-no-authorization-summary-v2';
+
 type AutosaveInfo = { state: AutosaveState; at?: string };
 type TableValidation = Map<string, string>;
 type EditableFieldState = {
@@ -2175,7 +2177,7 @@ export default function App() {
   }, [onboardingState.status, onboardingState.entryPath, onboardingState.currentStep, hasOnboardingExport]);
 
   const htmlPreviewCacheRef = useRef<{ sectionsRef: DocSection[]; theme: ThemeName; output: string } | null>(null);
-  const wikiPreviewCacheRef = useRef<{ sectionsRef: DocSection[]; output: string } | null>(null);
+  const wikiPreviewCacheRef = useRef<{ sectionsRef: DocSection[]; formatVersion: string; output: string } | null>(null);
   const projectHtmlPreviewCacheRef = useRef<{
     projectSectionsRef: ProjectSection[];
     flowsRef: ProjectFlow[];
@@ -2191,6 +2193,7 @@ export default function App() {
     methodsRef: MethodDocument[];
     groupsRef: MethodGroup[];
     detailMode: ProjectExportDetailMode;
+    formatVersion: string;
     output: string;
   } | null>(null);
 
@@ -2221,7 +2224,7 @@ export default function App() {
 
   function getWikiPreview(): string {
     const cached = wikiPreviewCacheRef.current;
-    if (cached && cached.sectionsRef === sections) return cached.output;
+    if (cached && cached.sectionsRef === sections && cached.formatVersion === WIKI_EXPORT_CACHE_VERSION) return cached.output;
     const meta: WikiRenderMeta = {
       httpMethod: activeMethod ? getMethodHttpMethod(activeMethod) : undefined,
       path: activeMethod ? getMethodPath(activeMethod) : undefined,
@@ -2233,7 +2236,7 @@ export default function App() {
       updatedAt: activeMethod?.updatedAt
     };
     const output = renderWikiDocument(sections, meta);
-    wikiPreviewCacheRef.current = { sectionsRef: sections, output };
+    wikiPreviewCacheRef.current = { sectionsRef: sections, formatVersion: WIKI_EXPORT_CACHE_VERSION, output };
     return output;
   }
 
@@ -2280,6 +2283,7 @@ export default function App() {
       cached.flowsRef === flows &&
       cached.methodsRef === methods &&
       cached.groupsRef === methodGroups &&
+      cached.formatVersion === WIKI_EXPORT_CACHE_VERSION &&
       cached.detailMode === projectExportDetailMode
     ) {
       return cached.output;
@@ -2298,6 +2302,7 @@ export default function App() {
       methodsRef: methods,
       groupsRef: methodGroups,
       detailMode: projectExportDetailMode,
+      formatVersion: WIKI_EXPORT_CACHE_VERSION,
       output
     };
     return output;

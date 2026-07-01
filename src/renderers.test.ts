@@ -3,7 +3,7 @@ import { renderHtmlDocument } from './renderHtml';
 import { renderProjectHtmlDocument, renderProjectWikiDocument } from './projectExport';
 import { renderWikiDocument } from './renderWiki';
 import { DOCUMENTATION_BASE_URL_TEST_VALUE } from './documentationBaseUrl';
-import { makeRequestSection, makeResponseSection, makeSectionsForRender } from './test/fixtures';
+import { makeParsedRow, makeRequestSection, makeResponseSection, makeSectionsForRender } from './test/fixtures';
 import type { DocSection, MethodDocument, MethodGroup, ProjectSection } from './types';
 
 describe('renderers', () => {
@@ -133,6 +133,60 @@ describe('renderers', () => {
 
     expect(wiki).not.toContain('h3. Authorization');
     expect(wiki).not.toContain('Схема: Basic auth');
+  });
+
+  it('renders dash for missing request/response wiki mapping cells', () => {
+    const wiki = renderWikiDocument([
+      makeRequestSection({
+        rows: [
+          makeParsedRow({
+            field: 'requestId',
+            clientField: '',
+            type: 'string',
+            required: '+',
+            description: 'Request id',
+            example: 'req-1',
+            source: 'body'
+          })
+        ]
+      }),
+      makeResponseSection({
+        rows: [
+          makeParsedRow({
+            field: '',
+            clientField: 'payload.status',
+            type: 'string',
+            required: '+',
+            description: 'Status',
+            example: 'OK',
+            source: 'body'
+          })
+        ]
+      })
+    ]);
+
+    expect(wiki).toContain('|requestId|string|+| |Request id|req-1|-|   |');
+    expect(wiki).toContain('|-|string|Status|OK|payload.status|   |');
+  });
+
+  it('does not render html break tags in wiki table cells', () => {
+    const wiki = renderWikiDocument([
+      makeRequestSection({
+        rows: [
+          makeParsedRow({
+            field: 'requestId',
+            type: 'string',
+            required: '+',
+            description: 'Line one\nLine two',
+            example: 'req-1',
+            source: 'body'
+          })
+        ]
+      })
+    ]);
+
+    expect(wiki).not.toContain('<br');
+    expect(wiki).toContain('Line one Line two');
   });
 
   it('renders server response example in wiki from json schema examples when source input is empty', () => {
@@ -287,6 +341,8 @@ describe('renderers', () => {
     ];
 
     const wiki = renderWikiDocument(sections);
+    expect(wiki).toContain('{expand:title=Пример}');
+    expect(wiki).not.toContain('{expand:title=Пример JSON}');
     expect(wiki).toContain('{code:json}\n{\n  "error": {');
     expect(wiki).toContain('"message": "Bad request"');
   });
@@ -381,6 +437,30 @@ describe('renderers', () => {
     expect(wiki).not.toContain('{toc}');
     expect(wiki).not.toContain('h2. История изменений');
     expect(wiki).not.toContain('h4. Цель');
+  });
+
+  it('exports process diagram description without diagram title heading in wiki', () => {
+    const wiki = renderWikiDocument([
+      {
+        id: 'process-diagram',
+        title: 'Диаграмма процесса',
+        enabled: true,
+        kind: 'diagram',
+        diagrams: [
+          {
+            id: 'diagram-1',
+            title: 'Internal diagram title',
+            engine: 'plantuml',
+            code: '@startuml\nA -> B\n@enduml',
+            description: 'Process diagram description'
+          }
+        ]
+      }
+    ]);
+
+    expect(wiki).toContain('h2. Диаграмма процесса');
+    expect(wiki).toContain('Process diagram description');
+    expect(wiki).not.toContain('h3. Internal diagram title');
   });
 
   it('renders project diagrams in html and wiki exports and includes methods in project wiki', () => {

@@ -361,12 +361,12 @@ describe('App integration', () => {
     });
   });
 
-  it('opens a read-only split with an independent linked method and closes it', async () => {
+  it.skip('removed split mode: opens a read-only split with an independent linked method and closes it', async () => {
     const user = userEvent.setup();
     seedTwoMethodWorkspace();
     renderApp();
 
-    expect(document.querySelector('.wb-meta-panel')).not.toBeNull();
+    expect(document.querySelector('.wb-meta-panel')).toBeNull();
     await user.click(findTopbarButton(/Сплит-режим/));
 
     const linkedPreview = screen.getByRole('complementary', { name: 'Связанный метод' });
@@ -379,10 +379,10 @@ describe('App integration', () => {
 
     await user.click(within(linkedPreview).getByRole('button', { name: 'Закрыть сплит' }));
     expect(screen.queryByRole('complementary', { name: 'Связанный метод' })).not.toBeInTheDocument();
-    expect(document.querySelector('.wb-meta-panel')).not.toBeNull();
+    expect(document.querySelector('.wb-meta-panel')).toBeNull();
   });
 
-  it('toggles split with Ctrl+\\ without changing the active method', async () => {
+  it.skip('removed split mode: toggles split with Ctrl+\\ without changing the active method', async () => {
     const user = userEvent.setup();
     seedTwoMethodWorkspace();
     renderApp();
@@ -400,7 +400,7 @@ describe('App integration', () => {
     expect(screen.queryByRole('complementary', { name: 'Связанный метод' })).not.toBeInTheDocument();
   });
 
-  it('disables split in compact layout', () => {
+  it.skip('removed split mode: disables split in compact layout', () => {
     vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({
       matches: query.includes('64rem'),
       media: query,
@@ -419,7 +419,7 @@ describe('App integration', () => {
     expect(screen.queryByRole('complementary', { name: 'Связанный метод' })).not.toBeInTheDocument();
   });
 
-  it('falls back to an available linked method after the selected method is deleted', async () => {
+  it.skip('removed split mode: falls back to an available linked method after the selected method is deleted', async () => {
     const user = userEvent.setup();
     seedTwoMethodWorkspace();
     renderApp();

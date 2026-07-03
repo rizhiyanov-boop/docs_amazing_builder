@@ -6,6 +6,7 @@ import { TableClassic } from './WorkbenchTables';
 import { makeParsedRow } from '../../test/fixtures';
 
 afterEach(() => {
+  vi.restoreAllMocks();
   cleanup();
 });
 
@@ -77,30 +78,36 @@ describe('WorkbenchTables isRequired', () => {
     expect(onAddRow).not.toHaveBeenCalled();
   });
 
-  it('moves focus with Tab in row order and with Shift+Tab backwards', () => {
-    render(React.createElement(TableClassic, {
-      rows: [makeParsedRow({ field: 'id', type: 'string', required: '+', description: '' })],
+  it('moves focus vertically within the edited column with Tab and Shift+Tab', () => {
+    const scrollIntoView = vi.fn();
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    const { container } = render(React.createElement(TableClassic, {
+      rows: [
+        makeParsedRow({ id: 'row-1', field: 'id', type: 'string', required: '+', description: 'First' }),
+        makeParsedRow({ id: 'row-2', field: 'amount', type: 'number', required: '-', description: 'Second' })
+      ],
       editable: true,
       onUpdateRow: vi.fn(),
       onAddRow: vi.fn()
     }));
 
-    const fieldInput = screen.getByRole('textbox', { name: 'Имя поля' });
-    const typeSelect = screen.getByRole('combobox', { name: 'Тип поля' });
-    const descriptionInput = screen.getByRole('textbox', { name: 'Описание поля' });
-    const newFieldInput = screen.getByRole('textbox', { name: 'Новое поле' });
+    const fields = Array.from(container.querySelectorAll<HTMLElement>('[data-table-column="field"]'));
+    const types = Array.from(container.querySelectorAll<HTMLElement>('[data-table-column="type"]'));
+    const descriptions = Array.from(container.querySelectorAll<HTMLElement>('[data-table-column="description"]'));
 
-    fieldInput.focus();
-    fireEvent.keyDown(fieldInput, { key: 'Tab' });
-    expect(typeSelect).toHaveFocus();
+    fields[0].focus();
+    fireEvent.keyDown(fields[0], { key: 'Tab' });
+    expect(fields[1]).toHaveFocus();
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest' });
 
-    fireEvent.keyDown(typeSelect, { key: 'Tab' });
-    expect(descriptionInput).toHaveFocus();
+    types[0].focus();
+    fireEvent.keyDown(types[0], { key: 'Tab' });
+    expect(types[1]).toHaveFocus();
 
-    fireEvent.keyDown(descriptionInput, { key: 'Tab' });
-    expect(newFieldInput).toHaveFocus();
+    descriptions[1].focus();
+    fireEvent.keyDown(descriptions[1], { key: 'Tab', shiftKey: true });
+    expect(descriptions[0]).toHaveFocus();
 
-    fireEvent.keyDown(newFieldInput, { key: 'Tab', shiftKey: true });
-    expect(descriptionInput).toHaveFocus();
+    expect(fireEvent.keyDown(fields[1], { key: 'Tab' })).toBe(true);
   });
 });

@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { ParsedRow } from '../../types';
 import { ReqDot, TypeChip } from '../primitives/WorkbenchPrimitives';
 import { isRequired } from './WorkbenchTables.utils';
@@ -24,14 +24,42 @@ type TableProps = {
   editable?: boolean;
 };
 
-function moveFocus(current: HTMLElement, direction: 'next' | 'prev'): void {
+function moveFocus(current: HTMLElement, direction: 'next' | 'prev'): boolean {
   const scope = current.closest('.wb-table-focus-scope');
-  if (!scope) return;
+  if (!scope) return false;
   const focusables = Array.from(scope.querySelectorAll<HTMLElement>('[data-table-focusable="true"]'));
   const currentIndex = focusables.indexOf(current);
-  if (currentIndex < 0) return;
+  if (currentIndex < 0) return false;
   const next = direction === 'next' ? focusables[currentIndex + 1] : focusables[currentIndex - 1];
-  next?.focus();
+  if (!next) return false;
+  next.focus();
+  return true;
+}
+
+function moveVerticalFocus(current: HTMLElement, direction: 'next' | 'prev'): boolean {
+  const scope = current.closest('.wb-table-focus-scope');
+  const column = current.dataset.tableColumn;
+  if (!scope || !column) return false;
+  const focusables = Array.from(scope.querySelectorAll<HTMLElement>(`[data-table-focusable="true"][data-table-column="${column}"]`));
+  const currentIndex = focusables.indexOf(current);
+  if (currentIndex < 0) return false;
+  const next = direction === 'next' ? focusables[currentIndex + 1] : focusables[currentIndex - 1];
+  if (!next) return false;
+  next.focus();
+  next.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  return true;
+}
+
+function handleVerticalTab(event: KeyboardEvent<HTMLElement>): void {
+  if (event.key !== 'Tab') return;
+  if (!moveVerticalFocus(event.currentTarget, event.shiftKey ? 'prev' : 'next')) return;
+  event.preventDefault();
+}
+
+function handleRowFormTab(event: KeyboardEvent<HTMLElement>): void {
+  if (event.key !== 'Tab') return;
+  if (!moveFocus(event.currentTarget, event.shiftKey ? 'prev' : 'next')) return;
+  event.preventDefault();
 }
 
 function groupRowsByPrefix(rows: ParsedRow[]): Array<{ prefix: string | null; rows: ParsedRow[] }> {
@@ -89,19 +117,11 @@ function FieldInput({ row, onUpdateRow }: { row: ParsedRow; onUpdateRow?: (row: 
     <input
       value={row.field || row.sourceField || ''}
       onChange={(event) => onUpdateRow?.(row, { field: event.target.value, sourceField: event.target.value })}
-      onKeyDown={(event) => {
-        if (event.key === 'Tab' && !event.shiftKey) {
-          event.preventDefault();
-          moveFocus(event.currentTarget, 'next');
-          return;
-        }
-        if (event.key === 'Tab' && event.shiftKey) {
-          event.preventDefault();
-          moveFocus(event.currentTarget, 'prev');
-        }
-      }}
+      onKeyDown={handleVerticalTab}
       aria-label="Имя поля"
       data-table-focusable="true"
+      data-table-column="field"
+      data-table-row-key={row.id ?? row.sourceField ?? row.field}
       style={{
         width: '100%',
         border: '1px solid var(--wb-border-soft)',
@@ -135,19 +155,13 @@ function DescriptionInput({
           event.currentTarget.blur();
           return;
         }
-        if (event.key === 'Tab' && !event.shiftKey) {
-          event.preventDefault();
-          moveFocus(event.currentTarget, 'next');
-          return;
-        }
-        if (event.key === 'Tab' && event.shiftKey) {
-          event.preventDefault();
-          moveFocus(event.currentTarget, 'prev');
-        }
+        handleVerticalTab(event);
       }}
       rows={rows}
       aria-label="Описание поля"
       data-table-focusable="true"
+      data-table-column="description"
+      data-table-row-key={row.id ?? row.sourceField ?? row.field}
       style={{
         width: '100%',
         resize: 'vertical',
@@ -171,19 +185,11 @@ function TypeSelect({ row, onUpdateRow }: { row: ParsedRow; onUpdateRow?: (row: 
     <select
       value={row.type || 'string'}
       onChange={(event) => onUpdateRow(row, { type: event.target.value })}
-      onKeyDown={(event) => {
-        if (event.key === 'Tab' && !event.shiftKey) {
-          event.preventDefault();
-          moveFocus(event.currentTarget, 'next');
-          return;
-        }
-        if (event.key === 'Tab' && event.shiftKey) {
-          event.preventDefault();
-          moveFocus(event.currentTarget, 'prev');
-        }
-      }}
+      onKeyDown={handleVerticalTab}
       aria-label="Тип поля"
       data-table-focusable="true"
+      data-table-column="type"
+      data-table-row-key={row.id ?? row.sourceField ?? row.field}
       style={{
         fontFamily: 'var(--wb-font-mono)',
         fontSize: 11,
@@ -242,15 +248,7 @@ function AddRowInline({ onAdd }: { onAdd?: (fieldName?: string, fieldType?: stri
             setType('string');
             return;
           }
-          if (event.key === 'Tab' && !event.shiftKey) {
-            event.preventDefault();
-            moveFocus(event.currentTarget, 'next');
-            return;
-          }
-          if (event.key === 'Tab' && event.shiftKey) {
-            event.preventDefault();
-            moveFocus(event.currentTarget, 'prev');
-          }
+          handleRowFormTab(event);
         }}
         aria-label="Новое поле"
         data-table-focusable="true"
@@ -269,15 +267,7 @@ function AddRowInline({ onAdd }: { onAdd?: (fieldName?: string, fieldType?: stri
         value={type}
         onChange={(event) => setType(event.target.value)}
         onKeyDown={(event) => {
-          if (event.key === 'Tab' && !event.shiftKey) {
-            event.preventDefault();
-            moveFocus(event.currentTarget, 'next');
-            return;
-          }
-          if (event.key === 'Tab' && event.shiftKey) {
-            event.preventDefault();
-            moveFocus(event.currentTarget, 'prev');
-          }
+          handleRowFormTab(event);
         }}
         aria-label="Тип нового поля"
         data-table-focusable="true"

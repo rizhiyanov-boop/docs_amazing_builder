@@ -11,16 +11,12 @@ type WorkbenchTopbarProps = {
   methodName: string;
   methodPath: string;
   methodHttpMethod: RequestMethod;
-  accent: WorkbenchAccent;
   authUserLogin: string | null;
   isLogoutBusy: boolean;
   canUndo: boolean;
   canRedo: boolean;
-  splitOpen: boolean;
-  splitAvailable: boolean;
   autosaveState: TopbarAutosaveState;
   autosaveAt?: string;
-  onAccentChange: (accent: WorkbenchAccent) => void;
   onOpenProjectImport: () => void;
   onImportProjectJson: (files: File[]) => void;
   onExportHtml: () => void;
@@ -29,35 +25,22 @@ type WorkbenchTopbarProps = {
   onExportFullProjectWiki: () => void;
   onExportJson: () => void;
   onToggleSidebar: () => void;
-  onToggleSplit: () => void;
-  onToggleTheme: () => void;
-  onOpenSearch: () => void;
   onRenameMethod: () => void;
   onDeleteMethod: () => void;
   canDeleteMethod: boolean;
   onUndo: () => void;
   onRedo: () => void;
-  onManualSave: () => void;
   onLogout: () => void;
   onOpenLogin: () => void;
   onOpenRegister: () => void;
 };
 
-const ACCENTS: Array<{ id: WorkbenchAccent; label: string }> = [
-  { id: 'blue', label: 'Daylight' },
-  { id: 'warm', label: 'Kraft' },
-  { id: 'violet', label: 'Dusk' }
-];
-
-function Icon({ name }: { name: 'json' | 'html' | 'wiki' | 'undo' | 'redo' | 'split' | 'search' | 'theme' | 'more' }): ReactNode {
+function Icon({ name }: { name: 'json' | 'html' | 'wiki' | 'undo' | 'redo' | 'more' }): ReactNode {
   if (name === 'json') return <svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3M16 3h3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-3M12 20V4" /></svg>;
   if (name === 'html') return <svg viewBox="0 0 24 24"><path d="m16 18 6-6-6-6M8 6l-6 6 6 6" /></svg>;
   if (name === 'wiki') return <svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" /></svg>;
   if (name === 'undo') return <svg viewBox="0 0 24 24"><path d="M3 7v6h6M21 17a9 9 0 0 0-15-6.7L3 13" /></svg>;
   if (name === 'redo') return <svg viewBox="0 0 24 24"><path d="M21 7v6h-6M3 17a9 9 0 0 1 15-6.7l3 2.7" /></svg>;
-  if (name === 'split') return <svg viewBox="0 0 16 16"><rect x="1" y="2" width="5.5" height="12" rx="1.2" /><rect x="9.5" y="2" width="5.5" height="12" rx="1.2" /></svg>;
-  if (name === 'search') return <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg>;
-  if (name === 'theme') return <svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z" /></svg>;
   return <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" /></svg>;
 }
 
@@ -80,7 +63,7 @@ function IconButton({
       className={`wb-topbar-icon-button ${active ? 'active' : ''}`}
       aria-label={label}
       title={label}
-      aria-pressed={icon === 'split' ? active : undefined}
+      aria-pressed={active}
       disabled={disabled}
       onClick={onClick}
     >
@@ -95,16 +78,12 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
   methodName,
   methodPath,
   methodHttpMethod,
-  accent,
   authUserLogin,
   isLogoutBusy,
   canUndo,
   canRedo,
-  splitOpen,
-  splitAvailable,
   autosaveState,
   autosaveAt,
-  onAccentChange,
   onOpenProjectImport,
   onImportProjectJson,
   onExportHtml,
@@ -113,15 +92,11 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
   onExportFullProjectWiki,
   onExportJson,
   onToggleSidebar,
-  onToggleSplit,
-  onToggleTheme,
-  onOpenSearch,
   onRenameMethod,
   onDeleteMethod,
   canDeleteMethod,
   onUndo,
   onRedo,
-  onManualSave,
   onLogout,
   onOpenLogin,
   onOpenRegister
@@ -153,7 +128,7 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
 
   const autosaveLabel =
     autosaveState === 'saving'
-      ? 'Сохранение…'
+      ? 'Сохранение...'
       : autosaveState === 'error'
         ? 'Ошибка сохранения'
         : autosaveState === 'saved'
@@ -189,24 +164,12 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
         <span className="wb-topbar-divider" />
         <IconButton label="Отменить" icon="undo" onClick={onUndo} disabled={!canUndo} />
         <IconButton label="Повторить" icon="redo" onClick={onRedo} disabled={!canRedo} />
-        <span className="wb-topbar-divider" />
-        <IconButton
-          label={splitAvailable ? 'Сплит-режим (Ctrl+\\)' : 'Сплит-режим недоступен на узком экране'}
-          icon="split"
-          onClick={onToggleSplit}
-          disabled={!splitAvailable}
-          active={splitOpen}
-        />
       </div>
 
       <div className={`wb-topbar-autosave ${autosaveState}`} role="status">
-        <span aria-hidden>{autosaveState === 'error' ? '!' : autosaveState === 'saving' ? '…' : '✓'}</span>
+        <span aria-hidden>{autosaveState === 'error' ? '!' : autosaveState === 'saving' ? '...' : '✓'}</span>
         {autosaveLabel}
       </div>
-
-      <button type="button" className="wb-topbar-save" onClick={onManualSave}>Сохранить</button>
-      <IconButton label="Поиск (Ctrl+K)" icon="search" onClick={onOpenSearch} />
-      <IconButton label="Переключить тему" icon="theme" onClick={onToggleTheme} />
 
       <div className="wb-topbar-popover-anchor" ref={overflowRef}>
         <IconButton label="Дополнительные действия" icon="more" onClick={() => setOverflowOpen((current) => !current)} />
@@ -249,25 +212,9 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
         </button>
         {profileOpen && (
           <div className="wb-topbar-profile-panel">
-            <div className="wb-topbar-panel-label">Акцент</div>
-            <div className="wb-topbar-accents">
-              {ACCENTS.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={accent === item.id ? 'active' : ''}
-                  onClick={() => {
-                    onAccentChange(item.id);
-                    setProfileOpen(false);
-                  }}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
             {authUserLogin ? (
               <WBButton variant="danger" size="sm" onClick={onLogout} disabled={isLogoutBusy} fullWidth>
-                {isLogoutBusy ? 'Выход…' : 'Выйти'}
+                {isLogoutBusy ? 'Выход...' : 'Выйти'}
               </WBButton>
             ) : (
               <div className="wb-topbar-auth-actions">

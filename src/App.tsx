@@ -122,10 +122,8 @@ import { SearchPalette } from './components/dialogs/SearchPalette';
 import { Toast } from './components/Toast';
 import { AiTableButton } from './components/primitives/WorkbenchPrimitives';
 import { WorkbenchSidebar } from './components/workbench/WorkbenchSidebar';
-import { MethodMetaPanel } from './components/workbench/MethodMetaPanel';
 import { WorkbenchDiagramPreview } from './components/workbench/WorkbenchDiagramPreview';
 import { WorkbenchTopbar, type WorkbenchAccent } from './components/workbench/WorkbenchTopbar';
-import { LinkedMethodPreview } from './components/workbench/LinkedMethodPreview';
 import { WorkspaceHome } from './components/workbench/WorkspaceHome';
 import { TableClassic, TableGallery, TableMiniCards } from './components/tables/WorkbenchTables';
 import { HtmlExportScreen } from './screens/HtmlExportScreen';
@@ -133,7 +131,6 @@ import { WikiScreen } from './screens/WikiScreen';
 import { useRemoteProjectAutosave } from './hooks/useRemoteProjectAutosave';
 import { useServerSync } from './hooks/useServerSync';
 import { useWorkspaceHistory } from './hooks/useWorkspaceHistory';
-import { hashWorkspace } from './workspaceHash';
 import {
   loginWithPassword,
   listServerProjects,
@@ -698,8 +695,6 @@ export default function App() {
   const [exportPreviewScope, setExportPreviewScope] = useState<'method' | 'project'>('method');
   const [projectExportDetailMode, setProjectExportDetailMode] = useState<ProjectExportDetailMode>('full');
   const [workspaceScope, setWorkspaceScope] = useState<WorkspaceScope>('methods');
-  const [splitOpen, setSplitOpen] = useState(false);
-  const [splitMethodId, setSplitMethodId] = useState('');
   const [workbenchTableView, setWorkbenchTableView] = useState<TablePreviewView>('classic');
   const [wbAccent, setWbAccent] = useState<WorkbenchAccent>(() => loadPersistedWbAccent());
   const [isSearchPaletteOpen, setIsSearchPaletteOpen] = useState(false);
@@ -954,8 +949,6 @@ export default function App() {
     setServerSyncError,
     upsertProjectCache,
     removeProjectCache,
-    upsertServerProjectListEntry,
-    saveServerProjectWithFallback,
     saveRemoteWorkspace,
     loadServerProjectIntoWorkspace,
     handleServerProjectSelect,
@@ -986,10 +979,7 @@ export default function App() {
     projectSections,
     flows
   ), [normalizedProjectName, methods, activeMethodId, methodGroups, projectSections, flows]);
-  const {
-    cancelPendingRemoteSave,
-    resetRemoteTracking
-  } = useRemoteProjectAutosave({
+  const { resetRemoteTracking } = useRemoteProjectAutosave({
     authUser,
     remoteHydratedRef,
     remoteSaveInFlightRef,
@@ -1026,7 +1016,6 @@ export default function App() {
     return validateProjectFlow(current, methods);
   }, [flows, activeFlowId, methods]);
   const canRenderWorkspace = workspaceScope !== 'methods' || sections.length > 0;
-  const splitAvailable = !isCompactLayout && tab === 'editor' && workspaceScope === 'methods';
 
   useEffect(() => {
     if (!serverProjectId) return;
@@ -2833,35 +2822,6 @@ export default function App() {
     return () => mediaQuery.removeListener(updateCompactLayout);
   }, []);
 
-  useEffect(() => {
-    if (!splitAvailable && splitOpen) setSplitOpen(false);
-  }, [splitAvailable, splitOpen]);
-
-  useEffect(() => {
-    if (!splitOpen) return;
-    const selectedStillExists = methods.some((method) => method.id === splitMethodId);
-    if (selectedStillExists) return;
-    const fallback = methods.find((method) => method.id !== activeMethodId) ?? methods[0];
-    setSplitMethodId(fallback?.id ?? '');
-  }, [activeMethodId, methods, splitMethodId, splitOpen]);
-
-  useEffect(() => {
-    const handleSplitShortcut = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || event.key !== '\\') return;
-      event.preventDefault();
-      if (!splitAvailable) return;
-      setSplitOpen((current) => {
-        const next = !current;
-        if (next) {
-          const fallback = methods.find((method) => method.id !== activeMethodId) ?? methods[0];
-          setSplitMethodId((selected) => methods.some((method) => method.id === selected) ? selected : fallback?.id ?? '');
-        }
-        return next;
-      });
-    };
-    document.addEventListener('keydown', handleSplitShortcut);
-    return () => document.removeEventListener('keydown', handleSplitShortcut);
-  }, [activeMethodId, methods, splitAvailable]);
 
   useEffect(() => {
     try {
@@ -7656,60 +7616,6 @@ export default function App() {
     setTheme((current) => (current === 'dark' ? 'light' : 'dark'));
   }, []);
 
-  const handleManualSave = async () => {
-    setAutosave({ state: 'saving' });
-
-    const workspace = asWorkspaceProjectData(
-      normalizedProjectName,
-      methods,
-      activeMethodId,
-      methodGroups,
-      projectSections,
-      flows
-    );
-    if (!persistLocalWorkspace(workspace)) {
-      setAutosave({ state: 'error' });
-      return;
-    }
-
-    if (authUser && remoteHydratedRef.current) {
-      cancelPendingRemoteSave();
-
-      if (!remoteSaveInFlightRef.current) {
-        remoteSaveInFlightRef.current = true;
-        const nextProjectName = normalizedProjectName;
-        const workspaceHash = hashWorkspace(workspace);
-
-        try {
-          const saved = await saveServerProjectWithFallback({
-            projectId: serverProjectId ?? undefined,
-            name: nextProjectName,
-            workspace
-          });
-          setServerProjectId(saved.id);
-          upsertProjectCache(saved.id, {
-            workspace: deepClone(workspace),
-            history: null,
-            loadedAt: Date.now()
-          });
-          upsertServerProjectListEntry({ id: saved.id, name: nextProjectName, updatedAt: saved.updatedAt });
-          setServerSyncError('');
-          remoteLastSavedHashRef.current = workspaceHash;
-          remoteLastObservedHashRef.current = workspaceHash;
-          remotePendingChangesRef.current = 0;
-        } catch (error) {
-          setServerSyncError(error instanceof Error ? error.message : 'Ошибка сохранения на сервер');
-          setAutosave({ state: 'error' });
-          return;
-        } finally {
-          remoteSaveInFlightRef.current = false;
-        }
-      }
-    }
-
-    setAutosave({ state: 'saved', at: formatTime(new Date()) });
-  };
-
   const isOnboardingHeaderAvailable =
     ONBOARDING_FEATURES.onboardingV1
     && ONBOARDING_FEATURES.onboardingGuidedMode
@@ -7769,22 +7675,6 @@ export default function App() {
   const handleToggleSidebar = useCallback(() => {
     setIsSidebarHidden((current) => !current);
   }, []);
-
-  const handleToggleSplit = useCallback(() => {
-    if (!splitAvailable) return;
-    setSplitOpen((current) => {
-      const next = !current;
-      if (next) {
-        const fallback = methods.find((method) => method.id !== activeMethodId) ?? methods[0];
-        setSplitMethodId((selected) => methods.some((method) => method.id === selected) ? selected : fallback?.id ?? '');
-      }
-      return next;
-    });
-  }, [activeMethodId, methods, splitAvailable]);
-
-  const handleManualSaveClick = useCallback(() => {
-    void handleManualSave();
-  }, [handleManualSave]);
 
   const handleSelectProject = useCallback((projectId: string | null) => {
     if (!projectId) return;
@@ -7856,19 +7746,6 @@ export default function App() {
   const handleSwitchMethod = useCallback((method: MethodDocument) => {
     switchMethod(method);
   }, [switchMethod]);
-
-  const handleMethodMetaUpdate = useCallback((patch: Partial<MethodDocument>) => {
-    if (!activeMethodId) return;
-    markWorkspaceChanged();
-    clearPreviewCaches();
-    setMethodsState((prev) => (
-      prev.map((method) => (
-        method.id === activeMethodId
-          ? { ...method, ...patch, updatedAt: new Date().toISOString() }
-          : method
-      ))
-    ));
-  }, [activeMethodId]);
 
   const handleDragStartSection = useCallback((id: string) => {
     setDraggingId(id);
@@ -8799,16 +8676,12 @@ export default function App() {
           methodName={activeMethod?.name ?? DEFAULT_METHOD_NAME}
           methodPath={getMethodPath(activeMethod)}
           methodHttpMethod={getMethodHttpMethod(activeMethod)}
-          accent={wbAccent}
           authUserLogin={authUser?.login ?? null}
           isLogoutBusy={authBusyKey === 'auth:logout'}
           canUndo={canUndo}
           canRedo={canRedo}
-          splitOpen={splitOpen}
-          splitAvailable={splitAvailable}
           autosaveState={autosave.state}
           autosaveAt={autosave.at}
-          onAccentChange={handleWbAccentChange}
           onRenameMethod={() => {
             if (activeMethod) {
               startMethodRename(activeMethod);
@@ -8824,19 +8697,15 @@ export default function App() {
           onExportFullProjectWiki={handleOpenProjectWikiPreview}
           onExportJson={exportProjectJson}
           onToggleSidebar={handleToggleSidebar}
-          onToggleSplit={handleToggleSplit}
-          onToggleTheme={toggleTheme}
-          onOpenSearch={handleOpenSearchPalette}
           onUndo={undoWorkspace}
           onRedo={redoWorkspace}
-          onManualSave={handleManualSaveClick}
           onLogout={handleLogoutClick}
           onOpenLogin={handleOpenLoginDialog}
           onOpenRegister={handleOpenRegisterDialog}
         />
 
         <div className="wb-content">
-          <div className={`wb-content-body ${splitOpen ? 'split-active' : ''}`}>
+          <div className="wb-content-body">
 
       {importError && <div className="alert error">Ошибка импорта: {importError}</div>}
       {serverSyncError && <div className="alert error">Ошибка синхронизации: {serverSyncError}</div>}
@@ -8895,7 +8764,7 @@ export default function App() {
       </div>
 
       <div
-        className={`layout ${isSidebarHidden ? 'sidebar-hidden' : ''} ${splitOpen ? 'split-open' : ''}`}
+        className={`layout ${isSidebarHidden ? 'sidebar-hidden' : ''}`}
         style={{ '--sidebar-width': `${sidebarWidth}px` } as CSSProperties}
       >
         <main className={`workspace ${workspaceScope === 'flows' && tab === 'editor' ? 'workspace-flow-focus' : ''}`} role="main">
@@ -9243,27 +9112,6 @@ export default function App() {
             </section>
           )}
         </main>
-        {splitOpen && (
-          <>
-            <div className="linked-preview-divider" aria-hidden />
-            <LinkedMethodPreview
-              methods={methods}
-              selectedMethodId={splitMethodId}
-              onSelectMethod={setSplitMethodId}
-              onClose={() => setSplitOpen(false)}
-              getMethodHttpMethod={getMethodHttpMethod}
-              getMethodPath={getMethodPath}
-            />
-          </>
-        )}
-        {activeMethod && tab === 'editor' && workspaceScope === 'methods' && !splitOpen && (
-          <MethodMetaPanel
-            method={activeMethod}
-            methodHttpMethod={getMethodHttpMethod(activeMethod)}
-            methodPath={getMethodPath(activeMethod)}
-            onUpdate={handleMethodMetaUpdate}
-          />
-        )}
       </div>
         </div>
       </div>

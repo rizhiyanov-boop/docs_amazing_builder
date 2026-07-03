@@ -13,16 +13,12 @@ function renderTopbar(overrides: Partial<React.ComponentProps<typeof WorkbenchTo
     methodName: 'Create order',
     methodPath: '/orders',
     methodHttpMethod: 'POST',
-    accent: 'warm',
     authUserLogin: 'User',
     isLogoutBusy: false,
     canUndo: true,
     canRedo: false,
-    splitOpen: false,
-    splitAvailable: true,
     autosaveState: 'saved',
     autosaveAt: '10:30',
-    onAccentChange: vi.fn(),
     onOpenProjectImport: vi.fn(),
     onImportProjectJson: vi.fn(),
     onExportHtml: vi.fn(),
@@ -31,15 +27,11 @@ function renderTopbar(overrides: Partial<React.ComponentProps<typeof WorkbenchTo
     onExportFullProjectWiki: vi.fn(),
     onExportJson: vi.fn(),
     onToggleSidebar: vi.fn(),
-    onToggleSplit: vi.fn(),
-    onToggleTheme: vi.fn(),
-    onOpenSearch: vi.fn(),
     onRenameMethod: vi.fn(),
     onDeleteMethod: vi.fn(),
     canDeleteMethod: true,
     onUndo: vi.fn(),
     onRedo: vi.fn(),
-    onManualSave: vi.fn(),
     onLogout: vi.fn(),
     onOpenLogin: vi.fn(),
     onOpenRegister: vi.fn(),
@@ -49,7 +41,7 @@ function renderTopbar(overrides: Partial<React.ComponentProps<typeof WorkbenchTo
 }
 
 describe('WorkbenchTopbar', () => {
-  it('renders the mockup action order and autosave status', () => {
+  it('renders the action order and autosave status without split, theme, save or search controls', () => {
     renderTopbar();
     const topbar = screen.getByRole('banner');
     expect(within(topbar).getByLabelText('doc-builder')).toHaveTextContent('dbdoc-builder');
@@ -57,34 +49,24 @@ describe('WorkbenchTopbar', () => {
     expect(within(topbar).getByRole('button', { name: 'JSON' })).toBeInTheDocument();
     expect(within(topbar).getByRole('button', { name: 'HTML' })).toBeInTheDocument();
     expect(within(topbar).getByRole('button', { name: 'Wiki' })).toBeInTheDocument();
+    expect(within(topbar).queryByRole('button', { name: /Сплит-режим/ })).not.toBeInTheDocument();
+    expect(within(topbar).queryByRole('button', { name: 'Переключить тему' })).not.toBeInTheDocument();
+    expect(within(topbar).queryByRole('button', { name: 'Сохранить' })).not.toBeInTheDocument();
+    expect(within(topbar).queryByRole('button', { name: 'Поиск (Ctrl+K)' })).not.toBeInTheDocument();
     expect(within(topbar).getByRole('status')).toHaveTextContent('Сохранено · 10:30');
-    expect(within(topbar).getByRole('button', { name: 'Сохранить' })).toBeInTheDocument();
   });
 
-  it('runs export, history, split, search and theme actions', async () => {
+  it('runs export and history actions', async () => {
     const user = userEvent.setup();
     const result = renderTopbar();
     await user.click(screen.getByRole('button', { name: 'JSON' }));
     await user.click(screen.getByRole('button', { name: 'HTML' }));
     await user.click(screen.getByRole('button', { name: 'Wiki' }));
     await user.click(screen.getByRole('button', { name: 'Отменить' }));
-    await user.click(screen.getByRole('button', { name: 'Сплит-режим (Ctrl+\\)' }));
-    await user.click(screen.getByRole('button', { name: 'Поиск (Ctrl+K)' }));
-    await user.click(screen.getByRole('button', { name: 'Переключить тему' }));
     expect(result.props.onExportJson).toHaveBeenCalledOnce();
     expect(result.props.onExportHtml).toHaveBeenCalledOnce();
     expect(result.props.onExportWiki).toHaveBeenCalledOnce();
     expect(result.props.onUndo).toHaveBeenCalledOnce();
-    expect(result.props.onToggleSplit).toHaveBeenCalledOnce();
-    expect(result.props.onOpenSearch).toHaveBeenCalledOnce();
-    expect(result.props.onToggleTheme).toHaveBeenCalledOnce();
-  });
-
-  it('marks split active and disables it for compact layout', () => {
-    const { rerender, props } = renderTopbar({ splitOpen: true });
-    expect(screen.getByRole('button', { name: 'Сплит-режим (Ctrl+\\)' })).toHaveAttribute('aria-pressed', 'true');
-    rerender(<WorkbenchTopbar {...props} splitOpen={false} splitAvailable={false} />);
-    expect(screen.getByRole('button', { name: 'Сплит-режим недоступен на узком экране' })).toBeDisabled();
   });
 
   it('moves import, method actions and project exports into overflow', async () => {
@@ -100,12 +82,12 @@ describe('WorkbenchTopbar', () => {
     expect(result.props.onExportFullProjectHtml).toHaveBeenCalledOnce();
   });
 
-  it('keeps profile and accent controls', async () => {
+  it('keeps profile auth controls without accent controls', async () => {
     const user = userEvent.setup();
-    const onAccentChange = vi.fn();
-    renderTopbar({ onAccentChange });
+    renderTopbar();
     await user.click(screen.getByRole('button', { name: /User/ }));
-    await user.click(screen.getByRole('button', { name: 'Dusk' }));
-    expect(onAccentChange).toHaveBeenCalledWith('violet');
+    expect(screen.queryByText('Акцент')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Dusk' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Выйти' })).toBeInTheDocument();
   });
 });

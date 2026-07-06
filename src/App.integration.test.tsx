@@ -674,6 +674,51 @@ describe('App integration', () => {
     expect(clickSpy).not.toHaveBeenCalled();
   });
 
+  it('returns from Wiki to the previous workspace context', async () => {
+    const user = userEvent.setup();
+    seedSingleMethodWorkspace({ id: 's_goal', title: 'Goal', enabled: true, kind: 'text', value: 'A' });
+    renderApp();
+
+    await user.click(screen.getByRole('tab', { name: 'Project Docs' }));
+    expect(screen.getByRole('tab', { name: 'Project Docs' })).toHaveAttribute('aria-selected', 'true');
+
+    await user.click(findTopbarButton(/^Wiki$/));
+    expect(screen.getByRole('heading', { name: /^Wiki$/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Вернуться в предыдущий раздел' }));
+    expect(screen.getByRole('tab', { name: 'Project Docs' })).toHaveAttribute('aria-selected', 'true');
+
+    await user.click(findTopbarButton(/^Wiki$/));
+    expect(screen.getByRole('heading', { name: /^Wiki$/i })).toBeInTheDocument();
+
+    await user.click(findTopbarButton(/^Wiki$/));
+    expect(screen.getByRole('tab', { name: 'Project Docs' })).toHaveAttribute('aria-selected', 'true');
+
+    await user.click(screen.getByRole('tab', { name: 'Flows' }));
+    expect(screen.getByRole('tab', { name: 'Flows' })).toHaveAttribute('aria-selected', 'true');
+
+    await user.click(findTopbarButton(/^Wiki$/));
+    expect(screen.getByRole('heading', { name: /^Wiki$/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Вернуться в предыдущий раздел' }));
+    expect(screen.getByRole('tab', { name: 'Flows' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('returns from Wiki to HTML preview and toggles back on repeated topbar Wiki click', async () => {
+    const user = userEvent.setup();
+    seedSingleMethodWorkspace({ id: 's_goal', title: 'Goal', enabled: true, kind: 'text', value: 'A' });
+    renderApp();
+
+    await user.click(findTopbarButton(/^HTML$/));
+    expect(screen.getByText(/Published HTML/i)).toBeInTheDocument();
+
+    await user.click(findTopbarButton(/^Wiki$/));
+    expect(screen.getByRole('heading', { name: /^Wiki$/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Вернуться в предыдущий раздел' }));
+    expect(screen.getByText(/Published HTML/i)).toBeInTheDocument();
+  });
+
   it('opens full project HTML preview from export split menu', async () => {
     const user = userEvent.setup();
     seedProjectPreviewWorkspace();

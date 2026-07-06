@@ -6,6 +6,7 @@ type WikiScreenProps = {
   wiki: string;
   projectDetailMode?: ProjectExportDetailMode;
   onProjectDetailModeChange?: (mode: ProjectExportDetailMode) => void;
+  onBack: () => void;
   onCopy: () => void;
   onDownload: () => void;
 };
@@ -73,7 +74,7 @@ function renderWiki(wiki: string): string {
   return output.join('\n').replace('__TOC__', toc);
 }
 
-export function WikiScreen({ wiki, projectDetailMode, onProjectDetailModeChange, onCopy, onDownload }: WikiScreenProps): ReactNode {
+export function WikiScreen({ wiki, projectDetailMode, onProjectDetailModeChange, onBack, onCopy, onDownload }: WikiScreenProps): ReactNode {
   const [mode, setMode] = useState<'source' | 'preview'>('source');
   const html = useMemo(() => renderWiki(wiki), [wiki]);
 
@@ -81,6 +82,7 @@ export function WikiScreen({ wiki, projectDetailMode, onProjectDetailModeChange,
     <section style={{ minHeight: '100%', padding: 24, background: 'var(--wb-bg-canvas)', color: 'var(--wb-text)', fontFamily: 'var(--wb-font-sans)' }}>
       <div style={{ maxWidth: 980, margin: '0 auto', display: 'grid', gap: 12 }}>
         <div className="wb-wiki-toolbar">
+          <WBButton size="sm" variant="secondary" onClick={onBack} aria-label="Вернуться в предыдущий раздел">Назад</WBButton>
           <h2 style={{ margin: 0, fontSize: 20 }}>Wiki</h2>
           <TabsPill>
             <TabPill value="source" active={mode === 'source'} onSelect={setMode}>source</TabPill>

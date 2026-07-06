@@ -332,6 +332,11 @@ function getSectionWorkbenchMeta(section: DocSection): {
 
 type TabKey = 'editor' | 'html' | 'wiki';
 type WorkspaceScope = 'methods' | 'project-docs' | 'flows';
+type WikiReturnTarget = {
+  tab: TabKey;
+  workspaceScope: WorkspaceScope;
+  isSidebarHidden: boolean;
+};
 type TablePreviewView = 'classic' | 'gallery' | 'mini';
 type AutosaveState = 'idle' | 'saving' | 'saved' | 'error';
 type ParseTarget = 'server' | 'client';
@@ -709,6 +714,7 @@ export default function App() {
   const [isSidebarHidden, setIsSidebarHidden] = useState<boolean>(() => loadPersistedSidebarHidden());
   const [isCompactLayout, setIsCompactLayout] = useState<boolean>(() => isCompactLayoutViewport());
   const [editingField, setEditingField] = useState<EditableFieldState | null>(null);
+  const wikiReturnTargetRef = useRef<WikiReturnTarget | null>(null);
   const [editingRequestCell, setEditingRequestCell] = useState<EditableRequestCellState | null>(null);
   const [editingHeaderCell, setEditingHeaderCell] = useState<EditableHeaderCellState | null>(null);
   const [editingMappingCell, setEditingMappingCell] = useState<EditableMappingCellState | null>(null);
@@ -7639,12 +7645,30 @@ export default function App() {
     if (isCompactLayout) setIsSidebarHidden(true);
   }, [isCompactLayout]);
 
+  const rememberWikiReturnTarget = useCallback(() => {
+    if (tab === 'wiki') return;
+    wikiReturnTargetRef.current = { tab, workspaceScope, isSidebarHidden };
+  }, [isSidebarHidden, tab, workspaceScope]);
+
+  const handleReturnFromWiki = useCallback(() => {
+    const target = wikiReturnTargetRef.current ?? { tab: 'editor' as const, workspaceScope: 'methods' as const, isSidebarHidden: false };
+    wikiReturnTargetRef.current = null;
+    setTab(target.tab);
+    setWorkspaceScope(target.workspaceScope);
+    setIsSidebarHidden(target.isSidebarHidden);
+  }, []);
+
   const handleOpenMethodWikiPreview = useCallback(() => {
+    if (tab === 'wiki') {
+      handleReturnFromWiki();
+      return;
+    }
+    rememberWikiReturnTarget();
     setExportPreviewScope('method');
     setWorkspaceScope('methods');
     setTab('wiki');
     if (isCompactLayout) setIsSidebarHidden(true);
-  }, [isCompactLayout]);
+  }, [handleReturnFromWiki, isCompactLayout, rememberWikiReturnTarget, tab]);
 
   const handleOpenProjectHtmlPreview = useCallback(() => {
     setExportPreviewScope('project');
@@ -7654,11 +7678,12 @@ export default function App() {
   }, [isCompactLayout]);
 
   const handleOpenProjectWikiPreview = useCallback(() => {
+    rememberWikiReturnTarget();
     setExportPreviewScope('project');
     setWorkspaceScope('methods');
     setTab('wiki');
     if (isCompactLayout) setIsSidebarHidden(true);
-  }, [isCompactLayout]);
+  }, [isCompactLayout, rememberWikiReturnTarget]);
 
   const handleLogoutClick = useCallback(() => {
     void handleLogout();
@@ -9095,6 +9120,7 @@ export default function App() {
                     wiki={wikiPreview}
                     projectDetailMode={isProjectPreview ? projectExportDetailMode : undefined}
                     onProjectDetailModeChange={isProjectPreview ? setProjectExportDetailMode : undefined}
+                    onBack={handleReturnFromWiki}
                     onCopy={() => {
                       void copyToClipboard(wikiPreview);
                       setToastMessage('Скопировано');

@@ -21,12 +21,16 @@ function deepClone<T>(value: T): T {
 
 export const TYPE_OPTIONS_COMMON = ['string', 'int', 'long', 'boolean', 'number', 'object', 'array', 'array_object', 'null'];
 export const TYPE_OPTIONS_EXTENDED = [
+  'byte',
   'short',
   'float',
   'double',
+  'char',
   'decimal',
   'date',
   'datetime',
+  'LocalDate',
+  'LocalDateTime',
   'timestamp',
   'uuid',
   'enum',

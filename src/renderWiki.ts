@@ -266,32 +266,46 @@ function renderParsedSourceExamples(section: ParsedSection): string[] {
   const serverFormatLabel = serverFormat === 'curl' ? 'cURL' : serverFormat === 'xml' ? 'XML' : 'JSON';
   const clientFormatLabel = clientFormat === 'curl' ? 'cURL' : clientFormat === 'xml' ? 'XML' : 'JSON';
 
-  if (serverExampleInput) {
+  const pushServerExample = (): void => {
+    if (!serverExampleInput) return;
     lines.push('');
     lines.push(`{expand:title=Пример ${serverFormatLabel} (Server ${sectionLabel})}`);
     lines.push(...toWikiSourceCodeBlock(serverExampleInput, serverFormat));
     lines.push('{expand}');
-  }
+  };
 
-  if (serverCurl) {
+  const pushServerCurl = (): void => {
+    if (!serverCurl) return;
     lines.push('');
     lines.push('{expand:title=Server cURL}');
     lines.push(...toWikiSourceCodeBlock(serverCurl, 'curl'));
     lines.push('{expand}');
-  }
+  };
 
-  if (clientExampleInput) {
+  const pushClientExample = (): void => {
+    if (!clientExampleInput) return;
     lines.push('');
     lines.push(`{expand:title=Пример ${clientFormatLabel} (Client ${sectionLabel})}`);
     lines.push(...toWikiSourceCodeBlock(clientExampleInput, clientFormat));
     lines.push('{expand}');
-  }
+  };
 
-  if (clientCurl) {
+  const pushClientCurl = (): void => {
+    if (!clientCurl) return;
     lines.push('');
     lines.push('{expand:title=Client cURL}');
     lines.push(...toWikiSourceCodeBlock(clientCurl, 'curl'));
     lines.push('{expand}');
+  };
+
+  if (section.sectionType === 'response') {
+    pushClientExample();
+    pushServerExample();
+  } else {
+    pushServerExample();
+    pushServerCurl();
+    pushClientExample();
+    pushClientCurl();
   }
 
   return lines;
@@ -620,7 +634,7 @@ function renderWikiTemplateIntro(meta: WikiRenderMeta): string[] {
 
   const commonInfoTable = wrapWikiTable([
     `|Метод|${methodCell}|`,
-    `|Внутренний URL|${toWikiCell(formatDocumentationUrl(meta.externalUrl ?? meta.path ?? ''))}|`
+    `|Внешний URL|${toWikiCell(formatDocumentationUrl(meta.externalUrl ?? meta.path ?? ''))}|`
   ]);
 
   const linksTable = wrapWikiTable([

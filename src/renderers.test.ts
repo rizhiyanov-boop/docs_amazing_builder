@@ -117,7 +117,7 @@ describe('renderers', () => {
       externalUrl: 'https://api.example.com/payments'
     });
 
-    expect(wiki).toContain(`|Внутренний URL|${DOCUMENTATION_BASE_URL_TEST_VALUE}/payments|`);
+    expect(wiki).toContain(`|Внешний URL|${DOCUMENTATION_BASE_URL_TEST_VALUE}/payments|`);
     expect(wiki).not.toContain('BASE_URL_TEST');
   });
 
@@ -231,10 +231,13 @@ describe('renderers', () => {
     ];
 
     const wiki = renderWikiDocument(sections);
+    const clientResponseExampleTitle = '{expand:title=Пример JSON (Client response)}';
+    const serverResponseExampleTitle = '{expand:title=Пример JSON (Server response)}';
 
-    expect(wiki).toContain('{expand:title=Пример JSON (Server response)}');
+    expect(wiki.indexOf(clientResponseExampleTitle)).toBeLessThan(wiki.indexOf(serverResponseExampleTitle));
+    expect(wiki).toContain(serverResponseExampleTitle);
     expect(wiki).toContain('"id": 1001');
-    expect(wiki).toContain('{expand:title=Пример JSON (Client response)}');
+    expect(wiki).toContain(clientResponseExampleTitle);
   });
 
   it('keeps SOAP protocol in HTML but omits request metadata from wiki', () => {

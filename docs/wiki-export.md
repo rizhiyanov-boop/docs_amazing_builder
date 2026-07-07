@@ -196,6 +196,10 @@ h2. <section title>
 ||Server response||Тип||Client response||Описание||Маскирование в логах||Пример||
 |...|
 
+{expand:title=Пример JSON/XML/cURL (Client response)}
+...
+{expand}
+
 {expand:title=Пример JSON/XML/cURL (Server response)}
 ...
 {expand}

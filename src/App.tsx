@@ -117,6 +117,7 @@ import type { AddableBlockType } from './components/MethodSectionSidebar';
 import { ParsedSectionEditor } from './components/ParsedSectionEditor';
 import { ProjectDocsEditor } from './components/ProjectDocsEditor';
 import { ProjectFlowsEditor } from './components/ProjectFlowsEditor';
+import { AiDescriptionContextDialog, AI_DESCRIPTION_CONTEXT_MAX_LENGTH } from './components/dialogs/AiDescriptionContextDialog';
 import { AiDescriptionsPreview, type AiDescriptionSuggestion } from './components/dialogs/AiDescriptionsPreview';
 import { SearchPalette } from './components/dialogs/SearchPalette';
 import { Toast } from './components/Toast';
@@ -480,6 +481,10 @@ type SourceTextImportState = {
   target: ParseTarget;
   draft: string;
 };
+type AiDescriptionContextState = {
+  sectionId: string;
+  draft: string;
+};
 type AiDescriptionsPreviewState = {
   sectionId: string;
   suggestions: AiDescriptionSuggestion[];
@@ -729,6 +734,7 @@ export default function App() {
   const [aiErrorMessage, setAiErrorMessage] = useState('');
   const [aiRequestStatus, setAiRequestStatus] = useState<AiRequestStatus | null>(null);
   const [aiBusyKey, setAiBusyKey] = useState<string | null>(null);
+  const [aiDescriptionContext, setAiDescriptionContext] = useState<AiDescriptionContextState | null>(null);
   const [aiDescriptionsPreview, setAiDescriptionsPreview] = useState<AiDescriptionsPreviewState | null>(null);
   const [aiExamplesPreview, setAiExamplesPreview] = useState<AiExamplesPreviewState | null>(null);
   const [inlineImportSectionId, setInlineImportSectionId] = useState<string | null>(null);
@@ -3451,7 +3457,19 @@ export default function App() {
     }
   }
 
-  async function fillFieldDescriptionsWithAi(section: ParsedSection): Promise<void> {
+  function openAiDescriptionContextDialog(section: ParsedSection): void {
+    const targetRows = section.rows.filter((row) => row.field.trim() && row.source !== 'header' && row.source !== 'url');
+    if (targetRows.length === 0) {
+      setAiRequestStatus(null);
+      setAiErrorMessage('Нет полей для автозаполнения описаний');
+      return;
+    }
+
+    setAiErrorMessage('');
+    setAiDescriptionContext({ sectionId: section.id, draft: '' });
+  }
+
+  async function fillFieldDescriptionsWithAi(section: ParsedSection, manualContext = ''): Promise<void> {
     const busyKey = `fill-descriptions:${section.id}`;
     if (aiBusyKey) return;
 
@@ -3459,6 +3477,13 @@ export default function App() {
     if (targetRows.length === 0) {
       setAiRequestStatus(null);
       setAiErrorMessage('Нет полей для автозаполнения описаний');
+      return;
+    }
+
+    const normalizedManualContext = manualContext.trim();
+    if (normalizedManualContext.length > AI_DESCRIPTION_CONTEXT_MAX_LENGTH) {
+      setAiRequestStatus(null);
+      setAiErrorMessage(`Контекст превышает ${AI_DESCRIPTION_CONTEXT_MAX_LENGTH} символов`);
       return;
     }
 
@@ -3475,7 +3500,8 @@ export default function App() {
           required: row.required,
           example: row.example,
           source: row.source
-        }))
+        })),
+        manualContext: normalizedManualContext || undefined
       });
 
       const descriptionByField = new Map(
@@ -3514,6 +3540,27 @@ export default function App() {
     } finally {
       setAiBusyKey(null);
     }
+  }
+
+  function cancelAiDescriptionContextDialog(): void {
+    setAiDescriptionContext(null);
+  }
+
+  function submitAiDescriptionContextDialog(): void {
+    if (!aiDescriptionContext) return;
+    if (aiDescriptionContext.draft.length > AI_DESCRIPTION_CONTEXT_MAX_LENGTH) return;
+
+    const section = sections.find((item): item is ParsedSection => item.id === aiDescriptionContext.sectionId && item.kind === 'parsed');
+    if (!section) {
+      setAiDescriptionContext(null);
+      setAiRequestStatus(null);
+      setAiErrorMessage('Секция для AI-заполнения описаний не найдена');
+      return;
+    }
+
+    const manualContext = aiDescriptionContext.draft;
+    setAiDescriptionContext(null);
+    void fillFieldDescriptionsWithAi(section, manualContext);
   }
 
   function toggleAiDescriptionPreviewItem(field: string, accepted: boolean): void {
@@ -6272,7 +6319,7 @@ export default function App() {
               <button
                 className="ghost small table-action-icon"
                 type="button"
-                onClick={() => void fillFieldDescriptionsWithAi(section)}
+                onClick={() => openAiDescriptionContextDialog(section)}
                 disabled={Boolean(aiBusyKey)}
                 aria-label="AI: заполнить описания"
                 aria-busy={fillDescriptionsBusy}
@@ -6367,7 +6414,7 @@ export default function App() {
             <button
               className="ghost small table-action-icon"
               type="button"
-              onClick={() => void fillFieldDescriptionsWithAi(section)}
+              onClick={() => openAiDescriptionContextDialog(section)}
               disabled={Boolean(aiBusyKey)}
               aria-label="AI: заполнить описания"
               aria-busy={fillDescriptionsBusy}
@@ -6470,7 +6517,7 @@ export default function App() {
           <button
             className="ghost small table-action-icon"
             type="button"
-            onClick={() => void fillFieldDescriptionsWithAi(section)}
+            onClick={() => openAiDescriptionContextDialog(section)}
             disabled={Boolean(aiBusyKey)}
             aria-label="AI: заполнить описания"
             aria-busy={fillDescriptionsBusy}
@@ -7950,7 +7997,7 @@ export default function App() {
                       <button type="button" className="wb-table-view-btn" onClick={() => setWorkbenchTableView('classic')}>classic</button>
                       <button type="button" className="wb-table-view-btn" onClick={() => setWorkbenchTableView('gallery')}>gallery</button>
                       <button type="button" className="wb-table-view-btn" onClick={() => setWorkbenchTableView('mini')}>mini</button>
-                      <AiTableButton kind="fill" onClick={() => void fillFieldDescriptionsWithAi(section)} />
+                      <AiTableButton kind="fill" onClick={() => openAiDescriptionContextDialog(section)} />
                       <AiTableButton kind="examples" onClick={() => void generateExamplesWithAiForSection(section)} />
                       {(section.sectionType === 'request' || section.sectionType === 'response') && (
                         <button type="button" className="wb-table-view-btn" onClick={() => openInlineImport(section)}>
@@ -8170,6 +8217,15 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {aiDescriptionContext && (
+        <AiDescriptionContextDialog
+          value={aiDescriptionContext.draft}
+          onChange={(draft) => setAiDescriptionContext((current) => (current ? { ...current, draft } : current))}
+          onConfirm={submitAiDescriptionContextDialog}
+          onCancel={cancelAiDescriptionContextDialog}
+        />
       )}
 
       {aiDescriptionsPreview && (

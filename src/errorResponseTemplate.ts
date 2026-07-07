@@ -25,7 +25,7 @@ export function buildServerErrorResponseTemplate({ code, message }: BuildErrorRe
       error: {
         code,
         message,
-        cause: [],
+        cause: '',
         externalCode: 'unknown',
         fields: []
       },

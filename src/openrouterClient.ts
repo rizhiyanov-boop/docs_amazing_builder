@@ -160,6 +160,7 @@ export async function fillDescriptionsWithAi(payload: {
     example: string;
     source?: string;
   }>;
+  manualContext?: string;
 }): Promise<DescriptionSuggestion[]> {
   const result = await callAiApi<FillDescriptionsResponse>('fill-descriptions', payload);
   return result.descriptions;

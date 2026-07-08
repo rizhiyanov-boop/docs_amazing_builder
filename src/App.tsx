@@ -3569,7 +3569,7 @@ export default function App() {
       return {
         ...current,
         suggestions: current.suggestions.map((item) => (
-          item.field === field && !item.locked
+          item.field === field
             ? { ...item, accepted }
             : item
         ))
@@ -3581,7 +3581,7 @@ export default function App() {
     if (!aiDescriptionsPreview) return;
     const selectedByField = new Map(
       aiDescriptionsPreview.suggestions
-        .filter((item) => item.accepted && !item.locked)
+        .filter((item) => item.accepted)
         .map((item) => [item.field.trim().toLowerCase(), item.description] as const)
     );
     const selectedCount = selectedByField.size;
@@ -3595,7 +3595,6 @@ export default function App() {
     updateSection(aiDescriptionsPreview.sectionId, (current) => {
       if (current.kind !== 'parsed') return current;
       const rows = current.rows.map((row) => {
-        if (row.description.trim()) return row;
         const suggested = selectedByField.get(row.field.trim().toLowerCase());
         return suggested ? { ...row, description: suggested } : row;
       });
@@ -8237,7 +8236,7 @@ export default function App() {
               if (!current) return current;
               return {
                 ...current,
-                suggestions: current.suggestions.map((item) => (item.locked ? item : { ...item, accepted: true }))
+                suggestions: current.suggestions.map((item) => ({ ...item, accepted: true }))
               };
             });
           }}
@@ -8246,7 +8245,7 @@ export default function App() {
               if (!current) return current;
               return {
                 ...current,
-                suggestions: current.suggestions.map((item) => (item.locked ? item : { ...item, accepted: false }))
+                suggestions: current.suggestions.map((item) => ({ ...item, accepted: false }))
               };
             });
           }}

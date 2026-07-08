@@ -8,7 +8,7 @@ afterEach(() => {
 });
 
 describe('AiDescriptionsPreview', () => {
-  it('renders suggestions and keeps locked item disabled', async () => {
+  it('renders suggestions and allows selecting already filled items', async () => {
     const user = userEvent.setup();
     const onToggle = vi.fn();
 
@@ -28,10 +28,12 @@ describe('AiDescriptionsPreview', () => {
 
     const checkboxes = screen.getAllByRole('checkbox');
     expect(checkboxes).toHaveLength(2);
-    expect(checkboxes[1]).toBeDisabled();
+    expect(checkboxes[1]).not.toBeDisabled();
 
     await user.click(checkboxes[0]);
     expect(onToggle).toHaveBeenCalledWith('orderId', false);
+    await user.click(checkboxes[1]);
+    expect(onToggle).toHaveBeenCalledWith('status', true);
   });
 
   it('calls action callbacks', async () => {

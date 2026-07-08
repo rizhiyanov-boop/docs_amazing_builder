@@ -28,9 +28,9 @@ export function AiDescriptionsPreview({
   onCancel,
   title = 'AI предлагает значения',
   applyLabel = 'Применить',
-  lockedHint = 'Уже заполнено — не изменяется'
+  lockedHint = 'Уже заполнено — будет заменено при выборе'
 }: AiDescriptionsPreviewProps): ReactNode {
-  const selectedCount = suggestions.filter((item) => item.accepted && !item.locked).length;
+  const selectedCount = suggestions.filter((item) => item.accepted).length;
 
   return (
     <div className="import-routing-backdrop" role="dialog" aria-modal="true" aria-label={title}>
@@ -49,13 +49,12 @@ export function AiDescriptionsPreview({
                 border: '1px solid var(--wb-border-soft)',
                 borderRadius: 6,
                 background: item.locked ? 'var(--wb-bg-soft)' : 'var(--wb-bg-surface)',
-                opacity: item.locked ? 0.75 : 1
+                opacity: 1
               }}
             >
               <input
                 type="checkbox"
                 checked={item.accepted}
-                disabled={Boolean(item.locked)}
                 onChange={(event) => onToggle(item.field, event.target.checked)}
               />
               <code style={{ fontFamily: 'var(--wb-font-mono)', fontSize: 12 }}>{item.field}</code>

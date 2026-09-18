@@ -181,6 +181,9 @@
 
 ## Основные файлы
 
+- Навигация для разработки: [docs/CODE_MAP.md](docs/CODE_MAP.md)
+- Правила работы агента: [AGENTS.md](AGENTS.md)
+- Шаблон постановки задачи: [docs/TASK_TEMPLATE.md](docs/TASK_TEMPLATE.md)
 - Интерфейс: [src/App.tsx](src/App.tsx)
 - Парсеры: [src/parsers.ts](src/parsers.ts)
 - Логика request/response (headers, auth, маппинг): [src/requestHeaders.ts](src/requestHeaders.ts)

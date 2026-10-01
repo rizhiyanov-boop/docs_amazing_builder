@@ -1,0 +1,331 @@
+{
+  "importProfile": "codex-v1",
+  "version": 3,
+  "projectName": "Учебный импорт",
+  "updatedAt": "2026-10-02T00:00:00.000Z",
+  "activeMethodId": "method-create",
+  "methods": [
+    {
+      "id": "method-create",
+      "name": "Учебный POST",
+      "updatedAt": "2026-10-02T00:00:00.000Z",
+      "jiraTicket": "",
+      "epic": "",
+      "initiators": "",
+      "responsible": "",
+      "externalUrl": "",
+      "status": "draft",
+      "sections": [
+        {
+          "id": "goal",
+          "title": "Цель",
+          "enabled": true,
+          "kind": "text",
+          "value": "Учебный пример структуры импорта; API и правила вымышлены."
+        },
+        {
+          "id": "functional",
+          "title": "Функциональные требования",
+          "enabled": true,
+          "kind": "text",
+          "value": ""
+        },
+        {
+          "id": "process-diagram",
+          "title": "Диаграмма процесса",
+          "enabled": true,
+          "kind": "diagram",
+          "diagrams": []
+        },
+        {
+          "id": "request",
+          "title": "Request",
+          "enabled": true,
+          "kind": "parsed",
+          "sectionType": "request",
+          "format": "json",
+          "lastSyncedFormat": "json",
+          "input": "{\"customerId\":\"demo-001\",\"items\":[{\"id\":1}]}",
+          "schemaInput": "",
+          "rows": [
+            {
+              "id": "method-create-customer",
+              "field": "customerId",
+              "sourceField": "customerId",
+              "type": "string",
+              "required": "+",
+              "validations": "",
+              "description": "Учебное поле customerId",
+              "example": "demo-001",
+              "origin": "generated",
+              "source": "body",
+              "enabled": true,
+              "maskInLogs": false,
+              "clientField": ""
+            },
+            {
+              "id": "method-create-items",
+              "field": "items",
+              "sourceField": "items",
+              "type": "array_object",
+              "required": "+",
+              "validations": "",
+              "description": "Учебное поле items",
+              "example": "[]",
+              "origin": "generated",
+              "source": "body",
+              "enabled": true,
+              "maskInLogs": false,
+              "clientField": ""
+            },
+            {
+              "id": "method-create-item-id",
+              "field": "items[0].id",
+              "sourceField": "items[0].id",
+              "type": "int",
+              "required": "+",
+              "validations": "",
+              "description": "Учебное поле items[0].id",
+              "example": "1",
+              "origin": "generated",
+              "source": "body",
+              "enabled": true,
+              "maskInLogs": false,
+              "clientField": ""
+            }
+          ],
+          "error": "",
+          "domainModelEnabled": false,
+          "clientFormat": "json",
+          "clientLastSyncedFormat": "json",
+          "clientInput": "",
+          "clientSchemaInput": "",
+          "clientRows": [],
+          "clientError": "",
+          "clientMappings": {},
+          "requestColumnOrder": [
+            "field",
+            "type",
+            "required",
+            "validations",
+            "clientField",
+            "description",
+            "maskInLogs",
+            "example"
+          ],
+          "authType": "none",
+          "authHeaderName": "",
+          "authTokenExample": "",
+          "authUsername": "",
+          "authPassword": "",
+          "authApiKeyExample": "",
+          "requestUrl": "https://api.example.test/customers",
+          "requestMethod": "POST",
+          "requestProtocol": "REST",
+          "externalRequestUrl": "",
+          "externalRequestMethod": "POST",
+          "externalAuthType": "none",
+          "externalAuthHeaderName": "",
+          "externalAuthTokenExample": "",
+          "externalAuthUsername": "",
+          "externalAuthPassword": "",
+          "externalAuthApiKeyExample": ""
+        },
+        {
+          "id": "response",
+          "title": "Response",
+          "enabled": true,
+          "kind": "parsed",
+          "sectionType": "response",
+          "format": "json",
+          "lastSyncedFormat": "json",
+          "input": "{\"data\":{\"customerId\":\"demo-001\"},\"techData\":{},\"warnings\":{}}",
+          "schemaInput": "",
+          "rows": [
+            {
+              "id": "method-create-data",
+              "field": "data",
+              "sourceField": "data",
+              "type": "object",
+              "required": "+",
+              "validations": "",
+              "description": "Учебное поле data",
+              "example": "{}",
+              "origin": "generated",
+              "source": "body",
+              "enabled": true,
+              "maskInLogs": false,
+              "clientField": ""
+            },
+            {
+              "id": "method-create-result-id",
+              "field": "data.customerId",
+              "sourceField": "data.customerId",
+              "type": "string",
+              "required": "+",
+              "validations": "",
+              "description": "Учебное поле data.customerId",
+              "example": "demo-001",
+              "origin": "generated",
+              "source": "body",
+              "enabled": true,
+              "maskInLogs": false,
+              "clientField": ""
+            },
+            {
+              "id": "method-create-tech",
+              "field": "techData",
+              "sourceField": "techData",
+              "type": "object",
+              "required": "+",
+              "validations": "",
+              "description": "Учебное поле techData",
+              "example": "{}",
+              "origin": "generated",
+              "source": "body",
+              "enabled": true,
+              "maskInLogs": false,
+              "clientField": ""
+            },
+            {
+              "id": "method-create-warnings",
+              "field": "warnings",
+              "sourceField": "warnings",
+              "type": "object",
+              "required": "+",
+              "validations": "",
+              "description": "Учебное поле warnings",
+              "example": "{}",
+              "origin": "generated",
+              "source": "body",
+              "enabled": true,
+              "maskInLogs": false,
+              "clientField": ""
+            }
+          ],
+          "error": "",
+          "domainModelEnabled": false,
+          "clientFormat": "json",
+          "clientLastSyncedFormat": "json",
+          "clientInput": "",
+          "clientSchemaInput": "",
+          "clientRows": [],
+          "clientError": "",
+          "clientMappings": {},
+          "requestColumnOrder": [
+            "field",
+            "type",
+            "required",
+            "validations",
+            "clientField",
+            "description",
+            "maskInLogs",
+            "example"
+          ]
+        },
+        {
+          "id": "errors",
+          "title": "Ошибки",
+          "enabled": true,
+          "kind": "errors",
+          "rows": [],
+          "validationRules": []
+        },
+        {
+          "id": "non-functional",
+          "title": "Нефункциональные требования",
+          "enabled": true,
+          "kind": "text",
+          "value": ""
+        }
+      ]
+    }
+  ],
+  "groups": [],
+  "projectSections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "enabled": true,
+      "type": "text",
+      "content": "Это учебный пример, а не согласованный API-контракт.",
+      "order": 0
+    }
+  ],
+  "flows": [
+    {
+      "id": "flow-main",
+      "name": "Учебный сценарий",
+      "description": "",
+      "createdAt": "2026-10-02T00:00:00.000Z",
+      "updatedAt": "2026-10-02T00:00:00.000Z",
+      "nodes": [
+        {
+          "id": "start",
+          "type": "start",
+          "position": {
+            "x": 0,
+            "y": 100
+          },
+          "label": "start",
+          "description": "",
+          "actor": "",
+          "noteContent": "",
+          "preconditions": [],
+          "postconditions": []
+        },
+        {
+          "id": "call",
+          "type": "method",
+          "position": {
+            "x": 200,
+            "y": 100
+          },
+          "label": "call",
+          "description": "",
+          "actor": "",
+          "noteContent": "",
+          "preconditions": [],
+          "postconditions": [],
+          "methodRef": {
+            "methodId": "method-create"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end",
+          "position": {
+            "x": 400,
+            "y": 100
+          },
+          "label": "end",
+          "description": "",
+          "actor": "",
+          "noteContent": "",
+          "preconditions": [],
+          "postconditions": []
+        }
+      ],
+      "edges": [
+        {
+          "id": "edge-start",
+          "type": "sequence",
+          "fromNodeId": "start",
+          "toNodeId": "call",
+          "label": "",
+          "condition": "",
+          "mappings": []
+        },
+        {
+          "id": "edge-end",
+          "type": "sequence",
+          "fromNodeId": "call",
+          "toNodeId": "end",
+          "label": "",
+          "condition": "",
+          "mappings": []
+        }
+      ]
+    }
+  ]
+}

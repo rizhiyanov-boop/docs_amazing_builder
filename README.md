@@ -210,7 +210,7 @@
 
 ## Важные примечания
 
-- Текущая версия формата проекта: `version: 2` (см. `asProjectData` в [src/App.tsx](src/App.tsx)).
+- Текущая версия workspace: `version: 3` (см. [src/types.ts](src/types.ts)). Генерация JSON через Codex использует [профиль codex-v1](docs/ai-import-json/README.md), проверяемый командой `npm run validate:import -- file.json` и тем же импортёром UI.
 - Runtime поддерживает оба сценария:
    - frontend-only (`npm run dev`): только локальное сохранение;
    - full-stack (`vercel dev`/Vercel deploy): auth, сохранение проектов и AI через `api/`.

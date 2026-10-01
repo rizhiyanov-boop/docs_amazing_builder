@@ -2,6 +2,9 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
+import { makeRequestSection } from './test/fixtures';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 const STORAGE_KEY = 'doc-builder-project-v2';
 const ONBOARDING_ENTRY_SUPPRESS_KEY = 'doc-builder-onboarding-entry-suppressed-v1';
@@ -981,6 +984,78 @@ describe('App integration', () => {
     await waitFor(() => {
       expect(within(getNavigationTree()).getByText(/Partial Rows Method/i)).toBeInTheDocument();
     });
+  });
+
+  it.each(['merge', 'replace'])('preserves method metadata when importing a workspace with %s', async mode => {
+    const user = userEvent.setup();
+    renderApp();
+    const metadata = { jiraTicket: 'TEST-1', epic: 'Epic', initiators: 'Team', responsible: 'Owner', externalUrl: 'https://example.test', status: 'review' };
+    const payload = { version: 3, methods: [{ id: 'metadata-method', name: 'Metadata Method', updatedAt: '2026-10-01T00:00:00Z', ...metadata, sections: [{ id: 'goal', title: 'Goal', kind: 'text', enabled: true, value: 'Imported' }] }], groups: [] };
+    fireEvent.change(getImportFileInput(), { target: { files: [new File([JSON.stringify(payload)], 'metadata.json', { type: 'application/json' })] } });
+    const dialog = await screen.findByRole('dialog', { name: /Импорт методов из JSON/i });
+    await user.click(getDialogButton(dialog, mode === 'replace' ? /Заменить проект/i : /Импортировать метод$/i));
+    await waitFor(() => {
+      const stored = getStoredProject();
+      const methods = stored?.methods as Array<Record<string, unknown>>;
+      expect(methods.find(method => method.name === 'Metadata Method')).toMatchObject(metadata);
+    });
+  });
+
+  it.each([
+    [{ version: 3, methods: [] }, 'methods'],
+    [{ version: 3, methods: [{ sections: [{ id: 'request', kind: 'parsed', rows: [null] }] }] }, 'methods[0].sections[0].rows[0]']
+  ])('rejects invalid import at %s without changing the current workspace', async (payload, path) => {
+    seedSingleMethodWorkspace({ ...makeRequestSection() });
+    renderApp();
+    await waitFor(() => expect(getStoredProject()?.methods).toBeDefined());
+    const originalMethods = getStoredProject()?.methods;
+    fireEvent.change(getImportFileInput(), { target: { files: [new File([JSON.stringify(payload)], 'invalid.json', { type: 'application/json' })] } });
+    await waitFor(() => {
+      const alert = document.querySelector('.alert.error');
+      expect(alert).not.toBeNull();
+      expect(alert?.textContent).toContain(path);
+    });
+    expect(screen.queryByRole('dialog', { name: /Импорт методов из JSON/i })).not.toBeInTheDocument();
+    expect(getStoredProject()?.methods).toEqual(originalMethods);
+  });
+
+  it('shows import warnings for a mapping to an absent field before applying the file', async () => {
+    renderApp();
+    const payload = { version: 3, methods: [{ id: 'm1', name: 'Draft', sections: [makeRequestSection({ clientMappings: { id: 'absent' } })] }], groups: [] };
+    fireEvent.change(getImportFileInput(), { target: { files: [new File([JSON.stringify(payload)], 'draft.json', { type: 'application/json' })] } });
+    const dialog = await screen.findByRole('dialog', { name: /Импорт методов из JSON/i });
+    expect(within(dialog).getByLabelText('Предупреждения импорта').textContent).toContain('clientMappings');
+    expect((getStoredProject()?.methods as Array<Record<string, unknown>>).some(method => method.name === 'Draft')).toBe(false);
+  });
+
+  it('imports a validated Codex example as a complete workspace without persisting its profile marker', async () => {
+    const user = userEvent.setup();
+    const text = readFileSync(resolve('docs/ai-import-json/examples/simple-post.json'), 'utf8');
+    const payload = JSON.parse(text);
+    renderApp();
+    fireEvent.change(getImportFileInput(), { target: { files: [new File([text], 'codex.json', { type: 'application/json' })] } });
+    const dialog = await screen.findByRole('dialog', { name: /Импорт методов из JSON/i });
+    await user.click(getDialogButton(dialog, /Заменить проект/i));
+    await waitFor(() => {
+      const stored = getStoredProject();
+      expect(stored?.activeMethodId).toBe(payload.activeMethodId);
+      expect(stored?.importProfile).toBeUndefined();
+      const methods = stored?.methods as Array<{ sections: Array<{ rows?: unknown[] }> }>;
+      expect(methods[0].sections[3].rows).toEqual(payload.methods[0].sections[3].rows);
+    });
+  });
+
+  it('rejects a generated import with an unknown field before preview and keeps the current method', async () => {
+    const payload = JSON.parse(readFileSync(resolve('docs/ai-import-json/examples/simple-post.json'), 'utf8'));
+    payload.methods[0].sections[3].rows[0].examples = 'wrong field';
+    seedSingleMethodWorkspace({ ...makeRequestSection() });
+    renderApp();
+    await waitFor(() => expect(getStoredProject()?.methods).toBeDefined());
+    const original = getStoredProject()?.methods;
+    fireEvent.change(getImportFileInput(), { target: { files: [new File([JSON.stringify(payload)], 'invalid-codex.json', { type: 'application/json' })] } });
+    await waitFor(() => expect(document.querySelector('.alert.error')?.textContent).toContain('methods[0].sections[3].rows[0].examples'));
+    expect(screen.queryByRole('dialog', { name: /Импорт методов из JSON/i })).not.toBeInTheDocument();
+    expect(getStoredProject()?.methods).toEqual(original);
   });
 
   it('keeps copied section available when switching methods and pastes with new id', async () => {

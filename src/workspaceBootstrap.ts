@@ -180,6 +180,26 @@ export function createMethodId(): string {
   return `method-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** Shared by file import and localStorage loading; keeps all method metadata. */
+export function normalizeMethodDocument(
+  method: MethodDocument | Record<string, unknown>,
+  index = 0,
+  fallbackName = `Метод ${index + 1}`
+): MethodDocument {
+  return {
+    id: typeof method.id === 'string' && method.id.trim() ? method.id.trim() : createMethodId(),
+    name: typeof method.name === 'string' && method.name.trim() ? method.name.trim() : fallbackName,
+    updatedAt: typeof method.updatedAt === 'string' && method.updatedAt ? method.updatedAt : new Date().toISOString(),
+    jiraTicket: typeof method.jiraTicket === 'string' ? method.jiraTicket : undefined,
+    epic: typeof method.epic === 'string' ? method.epic : undefined,
+    initiators: typeof method.initiators === 'string' ? method.initiators : undefined,
+    responsible: typeof method.responsible === 'string' ? method.responsible : undefined,
+    externalUrl: typeof method.externalUrl === 'string' ? method.externalUrl : undefined,
+    status: method.status === 'draft' || method.status === 'review' || method.status === 'done' ? method.status : undefined,
+    sections: sanitizeSections(method.sections as DocSection[]).map(withSectionRowIds)
+  };
+}
+
 export function createMethodDocument(
   name = DEFAULT_METHOD_NAME,
   sections: DocSection[] = createInitialSections(),
@@ -409,18 +429,7 @@ export function loadWorkspaceProject(storageKey: string, enableMultiMethods: boo
     if ('methods' in parsed && Array.isArray(parsed.methods)) {
       const sanitizedMethods = parsed.methods
         .filter((method) => method && Array.isArray(method.sections))
-        .map((method, index) => ({
-          id: method.id || createMethodId(),
-          name: method.name?.trim() || `Метод ${index + 1}`,
-          updatedAt: method.updatedAt || new Date().toISOString(),
-          jiraTicket: typeof method.jiraTicket === 'string' ? method.jiraTicket : undefined,
-          epic: typeof method.epic === 'string' ? method.epic : undefined,
-          initiators: typeof method.initiators === 'string' ? method.initiators : undefined,
-          responsible: typeof method.responsible === 'string' ? method.responsible : undefined,
-          externalUrl: typeof method.externalUrl === 'string' ? method.externalUrl : undefined,
-          status: method.status === 'draft' || method.status === 'review' || method.status === 'done' ? method.status : undefined,
-          sections: sanitizeSections(method.sections).map(withSectionRowIds)
-        }));
+        .map((method, index) => normalizeMethodDocument(method, index));
 
       if (sanitizedMethods.length === 0) return createWorkspaceSeed();
 

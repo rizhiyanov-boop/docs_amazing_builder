@@ -1,6 +1,6 @@
 # ARCHITECTURE
 
-Updated: 2026-05-08
+Updated: 2026-10-02
 
 ## Purpose
 
@@ -30,7 +30,7 @@ The workspace is stored as `WorkspaceProjectData`:
 
 - `projectName`: workspace/service label.
 - `methods`: array of `MethodDocument`.
-- `methodGroups`: service/group tree for methods.
+- `groups`: service/group tree for methods.
 - `projectSections`: project-level documentation sections.
 - `flows`: project flow definitions.
 - `activeMethodId`: current method selection.
@@ -71,7 +71,12 @@ New UI should prefer `var(--wb-*)` tokens. Legacy variables should only be used 
 
 ## Editing and Source Flow
 
-- Source import supports JSON and cURL.
+- Source import supports JSON, XML and cURL.
+- `src/projectImport.ts` classifies import text, prepares normalized projects/methods and batches, and remaps method/group IDs for merging. It does not read files or change UI state.
+- `src/projectImportValidation.ts` checks the raw structure before normalization and checks IDs/references afterward. Invalid structures and duplicate IDs block import; stale draft references produce preview warnings.
+- Documents with `importProfile: "codex-v1"` additionally pass `src/codexImportValidation.ts`: the shared JSON Schema and semantic checks reject unknown keys, incomplete generated documents and ambiguous references/source data. Unmarked documents retain compatibility normalization. `npm run validate:import -- file.json` uses the same loader as UI.
+- `src/workspaceBootstrap.ts` shares method normalization between file import and localStorage, including method metadata.
+- `App.tsx` reads files, shows routing/preview/errors, and applies the prepared import result to state. Ready workspace imports keep `rows`/`clientRows` as canonical table data without reparsing `input`/`schemaInput`.
 - `src/parsers.ts` turns source text into `ParsedRow[]`.
 - `src/sourceSync.ts` rebuilds JSON/cURL source from table rows.
 - Drift alerts compare rows against last synced source.

@@ -32,10 +32,6 @@ function normalizeRow(row: ParsedRow): ParsedRow {
   };
 }
 
-function isDualModelSectionId(id: string): boolean {
-  return id === 'request' || id === 'response';
-}
-
 function normalizeParseFormat(format: unknown): 'json' | 'curl' | 'xml' {
   if (format === 'curl' || format === 'xml') return format;
   return 'json';
@@ -74,7 +70,8 @@ function looksLikeJson(value: string): boolean {
 export function sanitizeSections(sections: DocSection[]): DocSection[] {
   return sections
     .filter((section) => section.id !== 'external-url')
-    .map((section) => {
+    .map((rawSection) => {
+    const section = { ...rawSection, enabled: rawSection.enabled ?? true };
     if (section.kind === 'errors') {
       return {
         ...section,
@@ -154,11 +151,14 @@ export function sanitizeSections(sections: DocSection[]): DocSection[] {
     if (normalizedSection.kind !== 'parsed') {
       return {
         ...normalizedSection,
-        title: resolveSectionTitle(normalizedSection.title)
+        title: resolveSectionTitle(normalizedSection.title),
+        enabled: normalizedSection.enabled ?? true,
+        ...(normalizedSection.kind === 'text' ? { value: normalizedSection.value ?? '' } : {})
       };
     }
 
-    if (!isDualModelSectionId(normalizedSection.id)) {
+    const sectionType = resolveParsedSectionType(normalizedSection);
+    if (normalizedSection.id !== 'request' && normalizedSection.id !== 'response') {
       const normalizedFormat = normalizeParseFormat(normalizedSection.format);
       const normalizedRows = Array.isArray(normalizedSection.rows) ? normalizedSection.rows.map(normalizeRow) : [];
 
@@ -171,11 +171,14 @@ export function sanitizeSections(sections: DocSection[]): DocSection[] {
         sectionType: resolveParsedSectionType(normalizedSection),
         title: resolveSectionTitle(normalizedSection.title),
         lastSyncedFormat: normalizedSection.lastSyncedFormat ?? normalizedFormat,
-        rows: normalizedRows
+        rows: normalizedRows,
+        clientRows: normalizedSection.clientRows?.map(normalizeRow),
+        clientInput: normalizedSection.clientInput ?? '',
+        clientSchemaInput: normalizedSection.clientSchemaInput ?? '',
+        clientError: normalizedSection.clientError ?? ''
       };
     }
 
-    const sectionType = resolveParsedSectionType(normalizedSection);
     const normalizedFormat = normalizeParseFormat(normalizedSection.format);
     const normalizedRows = Array.isArray(normalizedSection.rows) ? normalizedSection.rows.map(normalizeRow) : [];
 
@@ -193,6 +196,7 @@ export function sanitizeSections(sections: DocSection[]): DocSection[] {
       clientFormat: normalizeParseFormat(normalizedSection.clientFormat),
       clientLastSyncedFormat: normalizeParseFormat(normalizedSection.clientLastSyncedFormat ?? normalizedSection.clientFormat),
       clientInput: normalizedSection.clientInput ?? '',
+      clientSchemaInput: normalizedSection.clientSchemaInput ?? '',
       clientRows: (normalizedSection.clientRows ?? []).map(normalizeRow),
       clientError: normalizedSection.clientError ?? '',
       clientMappings: normalizedSection.clientMappings ?? {},

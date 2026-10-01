@@ -10,7 +10,9 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:wiki": "vitest run src/renderers.test.ts src/documentationBaseUrl.test.ts src/richText.test.ts",
-    "test:import": "vitest run src/parsers.test.ts src/sourceSync.test.ts src/requestHeaders.test.ts src/sectionHelpers.test.ts src/sectionDefaults.test.ts src/schemaValidationRules.test.ts src/mockServiceExport.test.ts",
+    "test:import": "vitest run src/codexImportValidation.test.ts src/projectImport.test.ts src/projectImportValidation.test.ts src/parsers.test.ts src/sourceSync.test.ts src/requestHeaders.test.ts src/sectionHelpers.test.ts src/sectionDefaults.test.ts src/schemaValidationRules.test.ts src/mockServiceExport.test.ts",
+    "validate:import": "node scripts/validate-import.mjs",
+    "examples:import": "node scripts/generate-import-examples.mjs",
     "test:ai": "vitest run src/aiEndpoint.test.ts src/openrouterClient.test.ts src/components/dialogs/AiDescriptionContextDialog.test.tsx src/components/dialogs/AiDescriptionsPreview.test.tsx",
     "test:sync": "vitest run src/authEndpoints.test.ts src/projectsEndpoint.test.ts src/dbPersistence.test.ts src/useRemoteProjectAutosave.test.tsx src/useWorkspaceHistory.test.tsx",
     "test:ui": "vitest run src/components src/App.integration.test.tsx src/mermaidLivePreview.test.tsx src/tableVerticalNavigation.test.ts --testTimeout=10000",
@@ -24,6 +26,7 @@
     "db:migrate-projects": "node scripts/migrate-projects-to-new-db.mjs"
   },
   "dependencies": {
+    "@floating-ui/dom": "^1.7.6",
     "@neondatabase/serverless": "^0.10.3",
     "@tiptap/extension-color": "^3.20.5",
     "@tiptap/extension-highlight": "^3.20.5",
@@ -32,6 +35,8 @@
     "@tiptap/pm": "^3.20.5",
     "@tiptap/react": "^3.20.5",
     "@tiptap/starter-kit": "^3.20.5",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "bcryptjs": "^3.0.3",
     "highlight.js": "^11.11.1",
     "mermaid": "^11.13.0",

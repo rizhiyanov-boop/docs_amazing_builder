@@ -9,7 +9,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'json-summary'],
-      include: ['src/parsers.ts', 'src/sourceSync.ts', 'src/requestHeaders.ts', 'src/renderHtml.ts', 'src/renderWiki.ts'],
+      include: ['src/codexImportValidation.ts', 'src/projectImport.ts', 'src/projectImportValidation.ts', 'src/parsers.ts', 'src/sourceSync.ts', 'src/requestHeaders.ts', 'src/renderHtml.ts', 'src/renderWiki.ts'],
       exclude: ['src/test/**'],
       thresholds: {
         lines: 70,

@@ -45,10 +45,9 @@ import {
   mergeManualHeaders,
   normalizeParsedRowsForSection,
   normalizeRequestRowsForMethod,
-  validateSection,
-  withSectionRowIds
+  validateSection
 } from './sectionHelpers';
-import { resolveSectionTitle, sanitizeSections } from './sectionTitles';
+import { resolveSectionTitle } from './sectionTitles';
 import { buildInputFromRows } from './sourceSync';
 import {
   findVerticalCellTarget,
@@ -95,10 +94,11 @@ import {
   createWorkspaceSeed,
   loadWorkspaceProject as loadWorkspaceProjectCore,
   normalizeProjectName,
-  normalizeWorkspaceForMode as normalizeWorkspaceForModeCore,
   sanitizeProjectFlows,
   sanitizeProjectSections
 } from './workspaceBootstrap';
+import { parseProjectImportText, prepareProjectImportBatch, prepareMethodsMerge } from './projectImport';
+import type { ImportIssue } from './projectImportValidation';
 import { ONBOARDING_FEATURES } from './onboarding/featureFlags';
 import { ONBOARDING_STEPS, evaluateOnboardingProgress, resolveOnboardingStep, type OnboardingStepId } from './onboarding/steps';
 import { loadOnboardingState, markOnboardingCompleted, markOnboardingStarted, saveOnboardingState } from './onboarding/storage';
@@ -155,7 +155,6 @@ import type {
   ParsedSection,
   ParseFormat,
   ProjectFlow,
-  ProjectData,
   ProjectSection,
   RequestAuthType,
   RequestColumnKey,
@@ -439,6 +438,7 @@ function inferRequestProtocol(format: ParseFormat, current?: RequestProtocol): R
 type WorkspaceMethodImportPreviewItem = {
   sourceName: string;
   workspace: WorkspaceProjectData;
+  warnings?: ImportIssue[];
 };
 
 type WorkspaceMethodImportPreviewIssue = {
@@ -451,24 +451,6 @@ type WorkspaceMethodsImportRoutingState = {
   items: WorkspaceMethodImportPreviewItem[];
   invalidFiles: WorkspaceMethodImportPreviewIssue[];
   allowReplace: boolean;
-};
-
-type WorkspaceProjectImportPayload = Record<string, unknown> & {
-  methods: Record<string, unknown>[];
-  groups?: Record<string, unknown>[];
-};
-
-type MethodDocumentImportPayload = Record<string, unknown> & {
-  id?: unknown;
-  name?: unknown;
-  updatedAt?: unknown;
-  jiraTicket?: unknown;
-  epic?: unknown;
-  initiators?: unknown;
-  responsible?: unknown;
-  externalUrl?: unknown;
-  status?: unknown;
-  sections: unknown[];
 };
 
 type ProjectTextImportState = {
@@ -538,73 +520,8 @@ type OnboardingStepTarget = {
   hintMessage?: string;
 };
 
-function guessJsonSampleType(value: unknown): JsonImportSampleType {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return 'response';
-
-  const payload = value as Record<string, unknown>;
-  const keys = Object.keys(payload).map((key) => key.toLowerCase());
-
-  const requestMarkers = ['request', 'headers', 'params', 'query', 'body', 'payload', 'method', 'path', 'url'];
-  const responseMarkers = ['response', 'result', 'status', 'code', 'message', 'error'];
-
-  const requestHits = requestMarkers.filter((marker) => keys.some((key) => key.includes(marker))).length;
-  const responseHits = responseMarkers.filter((marker) => keys.some((key) => key.includes(marker))).length;
-
-  if (responseHits >= requestHits) return 'response';
-  return 'request';
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function isWorkspaceProjectImportPayload(value: Record<string, unknown>): value is WorkspaceProjectImportPayload {
-  return Array.isArray(value.methods) && value.methods.every(isRecord);
-}
-
-function isMethodDocumentImportPayload(value: Record<string, unknown>): value is MethodDocumentImportPayload {
-  return Array.isArray(value.sections)
-    && !Array.isArray(value.methods)
-    && (typeof value.name === 'string' || typeof value.id === 'string');
-}
-
-function buildWorkspaceImportFromMethodPayload(
-  payload: MethodDocumentImportPayload,
-  fallbackName: string
-): WorkspaceProjectData {
-  const resolvedName = typeof payload.name === 'string' && payload.name.trim()
-    ? payload.name.trim()
-    : fallbackName.replace(/\.json$/i, '').trim() || DEFAULT_METHOD_NAME;
-  const resolvedUpdatedAt = typeof payload.updatedAt === 'string' && payload.updatedAt ? payload.updatedAt : new Date().toISOString();
-  const resolvedId = typeof payload.id === 'string' && payload.id.trim() ? payload.id.trim() : createMethodId();
-
-  return asWorkspaceProjectData(
-    resolvedName,
-    [
-      {
-        id: resolvedId,
-        name: resolvedName,
-        updatedAt: resolvedUpdatedAt,
-        jiraTicket: typeof payload.jiraTicket === 'string' ? payload.jiraTicket : undefined,
-        epic: typeof payload.epic === 'string' ? payload.epic : undefined,
-        initiators: typeof payload.initiators === 'string' ? payload.initiators : undefined,
-        responsible: typeof payload.responsible === 'string' ? payload.responsible : undefined,
-        externalUrl: typeof payload.externalUrl === 'string' ? payload.externalUrl : undefined,
-        status: payload.status === 'draft' || payload.status === 'review' || payload.status === 'done' ? payload.status : undefined,
-        sections: payload.sections as DocSection[]
-      }
-    ],
-    resolvedId,
-    []
-  );
-}
-
 function countImportedMethods(items: WorkspaceMethodImportPreviewItem[]): number {
   return items.reduce((total, item) => total + item.workspace.methods.length, 0);
-}
-
-function normalizeWorkspaceForMode(workspace: WorkspaceProjectData): WorkspaceProjectData {
-  return normalizeWorkspaceForModeCore(workspace, ENABLE_MULTI_METHODS);
 }
 
 function asWorkspaceProjectData(
@@ -2834,7 +2751,6 @@ export default function App() {
     return () => mediaQuery.removeListener(updateCompactLayout);
   }, []);
 
-
   useEffect(() => {
     try {
       if (isSidebarHidden) {
@@ -4089,92 +4005,33 @@ export default function App() {
 
   function processImportedText(rawText: string, fileName: string): void {
     try {
-      const text = rawText.trim();
-      if (!text) {
-        setImportError('Вставьте JSON, XML или cURL.');
-        return;
-      }
-
-      let parsed: WorkspaceProjectData | ProjectData | Record<string, unknown> | null = null;
-      try {
-        parsed = JSON.parse(text) as WorkspaceProjectData | ProjectData | Record<string, unknown>;
-      } catch {
-        parsed = null;
-      }
-
-      if (parsed === null) {
-        const sourceFormat = detectSourceFormat(text, true);
-        if (sourceFormat !== 'curl' && sourceFormat !== 'xml') {
-          throw new Error('Неподдерживаемый формат: нужен JSON, XML или cURL');
-        }
-        parseToRows(sourceFormat, text);
-        const sampleType: JsonImportSampleType = 'request';
-        const linkedSectionId = getParsedSectionIdByType(sampleType);
+      const result = parseProjectImportText(rawText, fileName, ENABLE_MULTI_METHODS);
+      if (result.kind === 'workspace') {
+        setWorkspaceMethodsImportRouting({
+          sourceLabel: fileName,
+          items: [{ sourceName: fileName, workspace: result.workspace, warnings: result.warnings }],
+          invalidFiles: [],
+          allowReplace: true
+        });
+      } else if (result.kind === 'sections') {
+        setSections(result.sections);
+        setSelectedId(result.sections[0]?.id ?? selectedId);
+        if (result.warnings.length > 0) setToastMessage(result.warnings.map(issue => `${issue.path}: ${issue.message}`).join('\n'));
+      } else {
+        const linkedSectionId = getParsedSectionIdByType(result.sampleType);
         const linkedSection = sections.find(
           (section): section is ParsedSection => section.kind === 'parsed' && section.id === linkedSectionId
         );
         const domainModelEnabled = Boolean(linkedSection?.domainModelEnabled);
         setJsonImportRouting({
           fileName,
-          rawText: text,
-          sourceFormat,
-          sampleType,
+          rawText: result.rawText,
+          sourceFormat: result.sourceFormat,
+          sampleType: result.sampleType,
           domainModelEnabled,
           targetSide: domainModelEnabled ? 'client' : 'server'
         });
-        setImportError('');
-        setProjectTextImport(null);
-        return;
       }
-
-      if (isRecord(parsed) && isWorkspaceProjectImportPayload(parsed)) {
-        setWorkspaceMethodsImportRouting({
-          sourceLabel: fileName,
-          items: [{ sourceName: fileName, workspace: loadWorkspaceProjectFromPayload(parsed) }],
-          invalidFiles: [],
-          allowReplace: true
-        });
-        setImportError('');
-        setProjectTextImport(null);
-        return;
-      }
-
-      if (isRecord(parsed) && isMethodDocumentImportPayload(parsed)) {
-        setWorkspaceMethodsImportRouting({
-          sourceLabel: fileName,
-          items: [{ sourceName: fileName, workspace: buildWorkspaceImportFromMethodPayload(parsed, fileName) }],
-          invalidFiles: [],
-          allowReplace: true
-        });
-        setImportError('');
-        setProjectTextImport(null);
-        return;
-      }
-
-      if ('sections' in parsed && Array.isArray(parsed.sections)) {
-        const sanitizedSections = sanitizeSections((parsed as ProjectData).sections);
-        setSections(sanitizedSections);
-        setSelectedId(sanitizedSections[0]?.id ?? selectedId);
-        setImportError('');
-        setProjectTextImport(null);
-        return;
-      }
-
-      const guessedType = guessJsonSampleType(parsed);
-      const linkedSectionId = getParsedSectionIdByType(guessedType);
-      const linkedSection = sections.find(
-        (section): section is ParsedSection => section.kind === 'parsed' && section.id === linkedSectionId
-      );
-
-      const domainModelEnabled = Boolean(linkedSection?.domainModelEnabled);
-      setJsonImportRouting({
-        fileName,
-        rawText: text,
-        sourceFormat: 'json',
-        sampleType: guessedType,
-        domainModelEnabled,
-        targetSide: domainModelEnabled ? 'client' : 'server'
-      });
       setImportError('');
       setProjectTextImport(null);
     } catch (error) {
@@ -4201,74 +4058,11 @@ export default function App() {
   }
 
   function mergeWorkspaceImportsAsMethods(workspaces: WorkspaceProjectData[]): number {
-    const loadedWorkspaces = workspaces.map((workspace) => loadWorkspaceProjectFromPayload(workspace));
-    const hasMethods = loadedWorkspaces.some((workspace) => workspace.methods.length > 0);
-    if (!hasMethods) {
-      setImportError('JSON не содержит методов для импорта');
-      return 0;
-    }
-
-    const takenNames = new Set(methods.map((method) => method.name.trim().toLowerCase()));
-    const importedMethods: MethodDocument[] = [];
-    const importedGroups: MethodGroup[] = [];
-
-    for (const loaded of loadedWorkspaces) {
-      const methodIdMap = new Map<string, string>();
-      for (const method of loaded.methods) {
-        const nextId = createMethodId();
-        methodIdMap.set(method.id, nextId);
-
-        const nextName = getUniqueMethodImportName(method.name, takenNames);
-        takenNames.add(nextName.toLowerCase());
-
-        importedMethods.push({
-          ...method,
-          id: nextId,
-          name: nextName,
-          updatedAt: method.updatedAt || new Date().toISOString()
-        });
-      }
-
-      if (!ENABLE_MULTI_METHODS) continue;
-      const remappedGroups = loaded.groups
-        .map((group) => {
-          const remappedMethodIds = group.methodIds
-            .map((methodId) => methodIdMap.get(methodId) ?? null)
-            .filter((methodId): methodId is string => Boolean(methodId));
-
-          if (remappedMethodIds.length === 0) {
-            return null;
-          }
-
-          const remappedLinks = group.links
-            .map((link) => {
-              const fromMethodId = methodIdMap.get(link.fromMethodId);
-              const toMethodId = methodIdMap.get(link.toMethodId);
-              if (!fromMethodId || !toMethodId) return null;
-              return {
-                ...link,
-                fromMethodId,
-                toMethodId
-              };
-            })
-            .filter((link): link is MethodGroup['links'][number] => Boolean(link));
-
-          return {
-            ...group,
-            id: `group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-            methodIds: remappedMethodIds,
-            links: remappedLinks
-          };
-        })
-        .filter((group): group is MethodGroup => Boolean(group));
-      importedGroups.push(...remappedGroups);
-    }
-
+    const { methods: importedMethods, groups: importedGroups } = prepareMethodsMerge(workspaces, methods, ENABLE_MULTI_METHODS);
     if (importedMethods.length === 0) {
       setImportError('JSON не содержит методов для импорта');
       return 0;
     }
-
     markWorkspaceChanged();
     setMethodsState((current) => [...current, ...importedMethods]);
     if (importedGroups.length > 0) {
@@ -4293,64 +4087,12 @@ export default function App() {
 
     void Promise.all(files.map((file) => readFileAsText(file).then((text) => ({ file, text }))))
       .then((loadedFiles) => {
-        const invalidFiles: WorkspaceMethodImportPreviewIssue[] = [];
-        const previewItems: WorkspaceMethodImportPreviewItem[] = [];
-
-        for (const loadedFile of loadedFiles) {
-          try {
-            const parsed = JSON.parse(loadedFile.text.trim()) as Record<string, unknown>;
-            if (isRecord(parsed) && isWorkspaceProjectImportPayload(parsed)) {
-              previewItems.push({ sourceName: loadedFile.file.name, workspace: loadWorkspaceProjectFromPayload(parsed) });
-              continue;
-            }
-
-            if (isRecord(parsed) && isMethodDocumentImportPayload(parsed)) {
-              previewItems.push({ sourceName: loadedFile.file.name, workspace: buildWorkspaceImportFromMethodPayload(parsed, loadedFile.file.name) });
-              continue;
-            }
-
-            const methodName = typeof parsed?.name === 'string' && parsed.name.trim()
-              ? parsed.name.trim()
-              : loadedFile.file.name.replace(/\.json$/i, '').trim();
-            if (parsed && typeof parsed === 'object' && 'sections' in parsed && Array.isArray(parsed.sections)) {
-              previewItems.push({
-                sourceName: loadedFile.file.name,
-                workspace: {
-                version: 3,
-                updatedAt: new Date().toISOString(),
-                methods: [
-                  {
-                    id: typeof parsed.id === 'string' && parsed.id.trim() ? parsed.id.trim() : createMethodId(),
-                    name: methodName || DEFAULT_METHOD_NAME,
-                    updatedAt: typeof parsed.updatedAt === 'string' && parsed.updatedAt ? parsed.updatedAt : new Date().toISOString(),
-                    jiraTicket: typeof parsed.jiraTicket === 'string' ? parsed.jiraTicket : undefined,
-                    epic: typeof parsed.epic === 'string' ? parsed.epic : undefined,
-                    initiators: typeof parsed.initiators === 'string' ? parsed.initiators : undefined,
-                    responsible: typeof parsed.responsible === 'string' ? parsed.responsible : undefined,
-                    externalUrl: typeof parsed.externalUrl === 'string' ? parsed.externalUrl : undefined,
-                    status: parsed.status === 'draft' || parsed.status === 'review' || parsed.status === 'done' ? parsed.status : undefined,
-                    sections: sanitizeSections(parsed.sections as DocSection[])
-                  }
-                ],
-                groups: []
-              }
-              });
-            } else {
-              invalidFiles.push({
-                fileName: loadedFile.file.name,
-                reason: 'Неподдерживаемый формат: нужен JSON с methods[] или sections[]'
-              });
-            }
-          } catch {
-            invalidFiles.push({
-              fileName: loadedFile.file.name,
-              reason: 'Некорректный JSON'
-            });
-          }
-        }
+        const { items: previewItems, invalidFiles } = prepareProjectImportBatch(
+          loadedFiles.map(({ file, text }) => ({ name: file.name, text })), ENABLE_MULTI_METHODS
+        );
 
         if (previewItems.length === 0) {
-          setImportError(`Для множественного импорта подходят JSON с methods[] или sections[]. Проблемные файлы: ${invalidFiles.map((item) => item.fileName).join(', ')}`);
+          setImportError(`Для множественного импорта подходят JSON с methods[] или sections[]. Проблемные файлы: ${invalidFiles.map((item) => `${item.fileName}: ${item.reason}`).join('; ')}`);
           return;
         }
 
@@ -4368,27 +4110,13 @@ export default function App() {
       });
   }
 
-  function getUniqueMethodImportName(name: string, takenNames: Set<string>): string {
-    const baseName = name.trim() || DEFAULT_METHOD_NAME;
-    if (!takenNames.has(baseName.toLowerCase())) {
-      return baseName;
-    }
-
-    let suffix = 2;
-    while (takenNames.has(`${baseName} ${suffix}`.toLowerCase())) {
-      suffix += 1;
-    }
-
-    return `${baseName} ${suffix}`;
-  }
-
   function cancelWorkspaceMethodsImportRouting(): void {
     setWorkspaceMethodsImportRouting(null);
   }
 
   function applyWorkspaceImportAsReplace(): void {
     if (!workspaceMethodsImportRouting || workspaceMethodsImportRouting.items.length === 0) return;
-    const loaded = loadWorkspaceProjectFromPayload(workspaceMethodsImportRouting.items[0].workspace);
+    const loaded = workspaceMethodsImportRouting.items[0].workspace;
     markWorkspaceChanged();
     applyWorkspaceState({ ...loaded, groups: ENABLE_MULTI_METHODS ? loaded.groups : [] });
     setWorkspaceMethodsImportRouting(null);
@@ -4399,7 +4127,13 @@ export default function App() {
   function applyWorkspaceImportAsMethodsMerge(): void {
     if (!workspaceMethodsImportRouting) return;
 
-    const importedCount = mergeWorkspaceImportsAsMethods(workspaceMethodsImportRouting.items.map((item) => item.workspace));
+    let importedCount: number;
+    try {
+      importedCount = mergeWorkspaceImportsAsMethods(workspaceMethodsImportRouting.items.map((item) => item.workspace));
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : 'Ошибка импорта');
+      return;
+    }
     if (importedCount > 0) {
       const skippedCount = workspaceMethodsImportRouting.invalidFiles.length;
       setWorkspaceMethodsImportRouting(null);
@@ -4468,51 +4202,6 @@ export default function App() {
     setSourceEditorError('');
     setSourceTextImport(null);
     setToastMessage(`Текст импортирован в ${sourceTextImport.target === 'client' ? 'Client source' : 'Server source'}.`);
-  }
-
-  function loadWorkspaceProjectFromPayload(payload: WorkspaceProjectData | WorkspaceProjectImportPayload): WorkspaceProjectData {
-    const methods = payload.methods
-      .filter((method): method is Record<string, unknown> => isRecord(method) && Array.isArray(method.sections))
-      .map((method, index) => ({
-        id: typeof method.id === 'string' && method.id.trim() ? method.id.trim() : createMethodId(),
-        name: typeof method.name === 'string' && method.name.trim() ? method.name.trim() : `Метод ${index + 1}`,
-        updatedAt: typeof method.updatedAt === 'string' && method.updatedAt ? method.updatedAt : new Date().toISOString(),
-        sections: sanitizeSections(method.sections as DocSection[]).map(withSectionRowIds)
-      }));
-
-    if (methods.length === 0) return createWorkspaceSeed();
-
-    const groups = Array.isArray(payload.groups)
-      ? payload.groups.filter(isRecord).map((group) => ({
-          id: typeof group.id === 'string' && group.id.trim() ? group.id.trim() : `group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          name: typeof group.name === 'string' && group.name.trim() ? group.name.trim() : 'Новая цепочка',
-          methodIds: Array.isArray(group.methodIds) ? group.methodIds.filter((methodId): methodId is string => typeof methodId === 'string' && Boolean(methodId.trim())) : [],
-          links: Array.isArray(group.links)
-            ? group.links.filter((link): link is MethodGroup['links'][number] => (
-                isRecord(link)
-                && typeof link.fromMethodId === 'string'
-                && typeof link.toMethodId === 'string'
-              ))
-            : []
-        }))
-      : [];
-
-    const activeMethodId = typeof payload.activeMethodId === 'string' && methods.some((method) => method.id === payload.activeMethodId)
-      ? payload.activeMethodId
-      : methods[0].id;
-
-    const workspace: WorkspaceProjectData = {
-      version: 3,
-      projectName: normalizeProjectName(typeof payload.projectName === 'string' ? payload.projectName : undefined),
-      updatedAt: typeof payload.updatedAt === 'string' && payload.updatedAt ? payload.updatedAt : new Date().toISOString(),
-      methods,
-      groups,
-      activeMethodId,
-      projectSections: sanitizeProjectSections(Array.isArray(payload.projectSections) ? payload.projectSections as ProjectSection[] : undefined),
-      flows: sanitizeProjectFlows(Array.isArray(payload.flows) ? payload.flows as ProjectFlow[] : undefined, methods)
-    };
-
-    return normalizeWorkspaceForMode(workspace);
   }
 
   function getDiagramEditorKey(sectionId: string, diagramId: string): string {
@@ -8471,6 +8160,26 @@ export default function App() {
             <p className="import-routing-file">
               Найдено методов: {countImportedMethods(workspaceMethodsImportRouting.items)}. Проверьте, что будет добавлено, и затем подтвердите импорт.
             </p>
+            <p className="import-routing-file">
+              При добавлении методов разделы и сценарии проекта не переносятся.
+              {workspaceMethodsImportRouting.allowReplace && ' Для полного переноса используйте «Заменить проект».'}
+            </p>
+
+            {workspaceMethodsImportRouting.items.some(item => item.warnings?.length) && (
+              <div className="import-preview-block" aria-label="Предупреждения импорта">
+                <div className="label">Предупреждения</div>
+                <ul className="import-preview-list">
+                  {workspaceMethodsImportRouting.items.flatMap((item, itemIndex) =>
+                    (item.warnings ?? []).map((issue, issueIndex) => (
+                      <li key={`${itemIndex}:${issueIndex}`} className="import-preview-item">
+                        <strong>{item.sourceName}</strong>
+                        <span className="import-routing-file">{issue.path}: {issue.message}</span>
+                      </li>
+                    ))
+                  )}
+                </ul>
+              </div>
+            )}
 
             <div className="import-preview-block">
               <div className="label">Будут импортированы методы</div>

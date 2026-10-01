@@ -1,0 +1,633 @@
+{
+  "importProfile": "codex-v1",
+  "version": 3,
+  "projectName": "Учебный импорт",
+  "updatedAt": "2026-10-02T00:00:00.000Z",
+  "activeMethodId": "method-adapter",
+  "methods": [
+    {
+      "id": "method-adapter",
+      "name": "Учебный адаптер",
+      "updatedAt": "2026-10-02T00:00:00.000Z",
+      "jiraTicket": "",
+      "epic": "",
+      "initiators": "",
+      "responsible": "",
+      "externalUrl": "",
+      "status": "draft",
+      "sections": [
+        {
+          "id": "goal",
+          "title": "Цель",
+          "enabled": true,
+          "kind": "text",
+          "value": "Учебный пример структуры импорта; API и правила вымышлены."
+        },
+        {
+          "id": "functional",
+          "title": "Функциональные требования",
+          "enabled": true,
+          "kind": "text",
+          "value": ""
+        },
+        {
+          "id": "process-diagram",
+          "title": "Диаграмма процесса",
+          "enabled": true,
+          "kind": "diagram",
+          "diagrams": []
+        },
+        {
+          "id": "request",
+          "title": "Request",
+          "enabled": true,
+          "kind": "parsed",
+          "sectionType": "request",
+          "format": "json",
+          "lastSyncedFormat": "json",
+          "input": "{\"externalId\":\"demo-001\"}",
+          "schemaInput": "",
+          "rows": [
+            {
+              "id": "adapter-server-id",
+              "field": "externalId",
+              "sourceField": "externalId",
+              "type": "string",
+              "required": "+",
+              "validations": "",
+              "description": "Учебное поле externalId",
+              "example": "demo-001",
+              "origin": "generated",
+              "source": "body",
+              "enabled": true,
+              "maskInLogs": false,
+              "clientField": ""
+            }
+          ],
+          "error": "",
+          "domainModelEnabled": true,
+          "clientFormat": "json",
+          "clientLastSyncedFormat": "json",
+          "clientInput": "{\"customerId\":\"demo-001\"}",
+          "clientSchemaInput": "",
+          "clientRows": [
+            {
+              "id": "adapter-client-id",
+              "field": "customerId",
+              "sourceField": "customerId",
+              "type": "string",
+              "required": "+",
+              "validations": "",
+              "description": "Учебное поле customerId",
+              "example": "demo-001",
+              "origin": "generated",
+              "source": "body",
+              "enabled": true,
+              "maskInLogs": false,
+              "clientField": ""
+            }
+          ],
+          "clientError": "",
+          "clientMappings": {
+            "externalId": "customerId"
+          },
+          "requestColumnOrder": [
+            "field",
+            "type",
+            "required",
+            "validations",
+            "clientField",
+            "description",
+            "maskInLogs",
+            "example"
+          ],
+          "authType": "none",
+          "authHeaderName": "",
+          "authTokenExample": "",
+          "authUsername": "",
+          "authPassword": "",
+          "authApiKeyExample": "",
+          "requestUrl": "https://api.example.test/customers",
+          "requestMethod": "POST",
+          "requestProtocol": "REST",
+          "externalRequestUrl": "https://public.example.test/customers",
+          "externalRequestMethod": "POST",
+          "externalAuthType": "none",
+          "externalAuthHeaderName": "",
+          "externalAuthTokenExample": "",
+          "externalAuthUsername": "",
+          "externalAuthPassword": "",
+          "externalAuthApiKeyExample": ""
+        },
+        {
+          "id": "response",
+          "title": "Response",
+          "enabled": true,
+          "kind": "parsed",
+          "sectionType": "response",
+          "format": "json",
+          "lastSyncedFormat": "json",
+          "input": "{\"externalId\":\"demo-001\"}",
+          "schemaInput": "",
+          "rows": [
+            {
+              "id": "adapter-server-result",
+              "field": "externalId",
+              "sourceField": "externalId",
+              "type": "string",
+              "required": "+",
+              "validations": "",
+              "description": "Учебное поле externalId",
+              "example": "demo-001",
+              "origin": "generated",
+              "source": "body",
+              "enabled": true,
+              "maskInLogs": false,
+              "clientField": ""
+            }
+          ],
+          "error": "",
+          "domainModelEnabled": true,
+          "clientFormat": "json",
+          "clientLastSyncedFormat": "json",
+          "clientInput": "{\"data\":{\"customerId\":\"demo-001\"},\"techData\":{},\"warnings\":{}}",
+          "clientSchemaInput": "",
+          "clientRows": [
+            {
+              "id": "adapter-client-data",
+              "field": "data",
+              "sourceField": "data",
+              "type": "object",
+              "required": "+",
+              "validations": "",
+              "description": "Учебное поле data",
+              "example": "{}",
+              "origin": "generated",
+              "source": "body",
+              "enabled": true,
+              "maskInLogs": false,
+              "clientField": ""
+            },
+            {
+              "id": "adapter-client-result",
+              "field": "data.customerId",
+              "sourceField": "data.customerId",
+              "type": "string",
+              "required": "+",
+              "validations": "",
+              "description": "Учебное поле data.customerId",
+              "example": "demo-001",
+              "origin": "generated",
+              "source": "body",
+              "enabled": true,
+              "maskInLogs": false,
+              "clientField": ""
+            },
+            {
+              "id": "adapter-client-tech",
+              "field": "techData",
+              "sourceField": "techData",
+              "type": "object",
+              "required": "+",
+              "validations": "",
+              "description": "Учебное поле techData",
+              "example": "{}",
+              "origin": "generated",
+              "source": "body",
+              "enabled": true,
+              "maskInLogs": false,
+              "clientField": ""
+            },
+            {
+              "id": "adapter-client-warnings",
+              "field": "warnings",
+              "sourceField": "warnings",
+              "type": "object",
+              "required": "+",
+              "validations": "",
+              "description": "Учебное поле warnings",
+              "example": "{}",
+              "origin": "generated",
+              "source": "body",
+              "enabled": true,
+              "maskInLogs": false,
+              "clientField": ""
+            }
+          ],
+          "clientError": "",
+          "clientMappings": {
+            "externalId": "data.customerId"
+          },
+          "requestColumnOrder": [
+            "field",
+            "type",
+            "required",
+            "validations",
+            "clientField",
+            "description",
+            "maskInLogs",
+            "example"
+          ]
+        },
+        {
+          "id": "errors",
+          "title": "Ошибки",
+          "enabled": true,
+          "kind": "errors",
+          "rows": [],
+          "validationRules": []
+        },
+        {
+          "id": "non-functional",
+          "title": "Нефункциональные требования",
+          "enabled": true,
+          "kind": "text",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "id": "method-next",
+      "name": "Следующий вызов",
+      "updatedAt": "2026-10-02T00:00:00.000Z",
+      "jiraTicket": "",
+      "epic": "",
+      "initiators": "",
+      "responsible": "",
+      "externalUrl": "",
+      "status": "draft",
+      "sections": [
+        {
+          "id": "goal",
+          "title": "Цель",
+          "enabled": true,
+          "kind": "text",
+          "value": "Учебный пример структуры импорта; API и правила вымышлены."
+        },
+        {
+          "id": "functional",
+          "title": "Функциональные требования",
+          "enabled": true,
+          "kind": "text",
+          "value": ""
+        },
+        {
+          "id": "process-diagram",
+          "title": "Диаграмма процесса",
+          "enabled": true,
+          "kind": "diagram",
+          "diagrams": []
+        },
+        {
+          "id": "request",
+          "title": "Request",
+          "enabled": true,
+          "kind": "parsed",
+          "sectionType": "request",
+          "format": "json",
+          "lastSyncedFormat": "json",
+          "input": "{\"customerId\":\"demo-001\",\"items\":[{\"id\":1}]}",
+          "schemaInput": "",
+          "rows": [
+            {
+              "id": "method-next-customer",
+              "field": "customerId",
+              "sourceField": "customerId",
+              "type": "string",
+              "required": "+",
+              "validations": "",
+              "description": "Учебное поле customerId",
+              "example": "demo-001",
+              "origin": "generated",
+              "source": "body",
+              "enabled": true,
+              "maskInLogs": false,
+              "clientField": ""
+            },
+            {
+              "id": "method-next-items",
+              "field": "items",
+              "sourceField": "items",
+              "type": "array_object",
+              "required": "+",
+              "validations": "",
+              "description": "Учебное поле items",
+              "example": "[]",
+              "origin": "generated",
+              "source": "body",
+              "enabled": true,
+              "maskInLogs": false,
+              "clientField": ""
+            },
+            {
+              "id": "method-next-item-id",
+              "field": "items[0].id",
+              "sourceField": "items[0].id",
+              "type": "int",
+              "required": "+",
+              "validations": "",
+              "description": "Учебное поле items[0].id",
+              "example": "1",
+              "origin": "generated",
+              "source": "body",
+              "enabled": true,
+              "maskInLogs": false,
+              "clientField": ""
+            }
+          ],
+          "error": "",
+          "domainModelEnabled": false,
+          "clientFormat": "json",
+          "clientLastSyncedFormat": "json",
+          "clientInput": "",
+          "clientSchemaInput": "",
+          "clientRows": [],
+          "clientError": "",
+          "clientMappings": {},
+          "requestColumnOrder": [
+            "field",
+            "type",
+            "required",
+            "validations",
+            "clientField",
+            "description",
+            "maskInLogs",
+            "example"
+          ],
+          "authType": "none",
+          "authHeaderName": "",
+          "authTokenExample": "",
+          "authUsername": "",
+          "authPassword": "",
+          "authApiKeyExample": "",
+          "requestUrl": "https://api.example.test/customers",
+          "requestMethod": "POST",
+          "requestProtocol": "REST",
+          "externalRequestUrl": "",
+          "externalRequestMethod": "POST",
+          "externalAuthType": "none",
+          "externalAuthHeaderName": "",
+          "externalAuthTokenExample": "",
+          "externalAuthUsername": "",
+          "externalAuthPassword": "",
+          "externalAuthApiKeyExample": ""
+        },
+        {
+          "id": "response",
+          "title": "Response",
+          "enabled": true,
+          "kind": "parsed",
+          "sectionType": "response",
+          "format": "json",
+          "lastSyncedFormat": "json",
+          "input": "{\"data\":{\"customerId\":\"demo-001\"},\"techData\":{},\"warnings\":{}}",
+          "schemaInput": "",
+          "rows": [
+            {
+              "id": "method-next-data",
+              "field": "data",
+              "sourceField": "data",
+              "type": "object",
+              "required": "+",
+              "validations": "",
+              "description": "Учебное поле data",
+              "example": "{}",
+              "origin": "generated",
+              "source": "body",
+              "enabled": true,
+              "maskInLogs": false,
+              "clientField": ""
+            },
+            {
+              "id": "method-next-result-id",
+              "field": "data.customerId",
+              "sourceField": "data.customerId",
+              "type": "string",
+              "required": "+",
+              "validations": "",
+              "description": "Учебное поле data.customerId",
+              "example": "demo-001",
+              "origin": "generated",
+              "source": "body",
+              "enabled": true,
+              "maskInLogs": false,
+              "clientField": ""
+            },
+            {
+              "id": "method-next-tech",
+              "field": "techData",
+              "sourceField": "techData",
+              "type": "object",
+              "required": "+",
+              "validations": "",
+              "description": "Учебное поле techData",
+              "example": "{}",
+              "origin": "generated",
+              "source": "body",
+              "enabled": true,
+              "maskInLogs": false,
+              "clientField": ""
+            },
+            {
+              "id": "method-next-warnings",
+              "field": "warnings",
+              "sourceField": "warnings",
+              "type": "object",
+              "required": "+",
+              "validations": "",
+              "description": "Учебное поле warnings",
+              "example": "{}",
+              "origin": "generated",
+              "source": "body",
+              "enabled": true,
+              "maskInLogs": false,
+              "clientField": ""
+            }
+          ],
+          "error": "",
+          "domainModelEnabled": false,
+          "clientFormat": "json",
+          "clientLastSyncedFormat": "json",
+          "clientInput": "",
+          "clientSchemaInput": "",
+          "clientRows": [],
+          "clientError": "",
+          "clientMappings": {},
+          "requestColumnOrder": [
+            "field",
+            "type",
+            "required",
+            "validations",
+            "clientField",
+            "description",
+            "maskInLogs",
+            "example"
+          ]
+        },
+        {
+          "id": "errors",
+          "title": "Ошибки",
+          "enabled": true,
+          "kind": "errors",
+          "rows": [],
+          "validationRules": []
+        },
+        {
+          "id": "non-functional",
+          "title": "Нефункциональные требования",
+          "enabled": true,
+          "kind": "text",
+          "value": ""
+        }
+      ]
+    }
+  ],
+  "groups": [
+    {
+      "id": "group-chain",
+      "name": "Учебная цепочка",
+      "methodIds": [
+        "method-adapter",
+        "method-next"
+      ],
+      "links": [
+        {
+          "fromMethodId": "method-adapter",
+          "toMethodId": "method-next",
+          "relationType": "sync",
+          "note": ""
+        }
+      ]
+    }
+  ],
+  "projectSections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "enabled": true,
+      "type": "text",
+      "content": "Это учебный пример, а не согласованный API-контракт.",
+      "order": 0
+    }
+  ],
+  "flows": [
+    {
+      "id": "flow-main",
+      "name": "Учебный сценарий",
+      "description": "",
+      "createdAt": "2026-10-02T00:00:00.000Z",
+      "updatedAt": "2026-10-02T00:00:00.000Z",
+      "nodes": [
+        {
+          "id": "start",
+          "type": "start",
+          "position": {
+            "x": 0,
+            "y": 100
+          },
+          "label": "start",
+          "description": "",
+          "actor": "",
+          "noteContent": "",
+          "preconditions": [],
+          "postconditions": []
+        },
+        {
+          "id": "adapter",
+          "type": "method",
+          "position": {
+            "x": 200,
+            "y": 100
+          },
+          "label": "adapter",
+          "description": "",
+          "actor": "",
+          "noteContent": "",
+          "preconditions": [],
+          "postconditions": [],
+          "methodRef": {
+            "methodId": "method-adapter"
+          }
+        },
+        {
+          "id": "next",
+          "type": "method",
+          "position": {
+            "x": 400,
+            "y": 100
+          },
+          "label": "next",
+          "description": "",
+          "actor": "",
+          "noteContent": "",
+          "preconditions": [],
+          "postconditions": [],
+          "methodRef": {
+            "methodId": "method-next"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end",
+          "position": {
+            "x": 600,
+            "y": 100
+          },
+          "label": "end",
+          "description": "",
+          "actor": "",
+          "noteContent": "",
+          "preconditions": [],
+          "postconditions": []
+        }
+      ],
+      "edges": [
+        {
+          "id": "edge-start",
+          "type": "sequence",
+          "fromNodeId": "start",
+          "toNodeId": "adapter",
+          "label": "",
+          "condition": "",
+          "mappings": []
+        },
+        {
+          "id": "edge-call",
+          "type": "sequence",
+          "fromNodeId": "adapter",
+          "toNodeId": "next",
+          "label": "",
+          "condition": "",
+          "mappings": [
+            {
+              "id": "mapping-customer",
+              "source": {
+                "nodeId": "adapter",
+                "side": "response",
+                "rowId": "adapter-client-result",
+                "fieldPath": "data.customerId"
+              },
+              "target": {
+                "nodeId": "next",
+                "side": "request",
+                "rowId": "method-next-customer",
+                "fieldPath": "customerId"
+              },
+              "transform": "",
+              "note": "Передача идентификатора в следующий вызов"
+            }
+          ]
+        },
+        {
+          "id": "edge-end",
+          "type": "sequence",
+          "fromNodeId": "next",
+          "toNodeId": "end",
+          "label": "",
+          "condition": "",
+          "mappings": []
+        }
+      ]
+    }
+  ]
+}

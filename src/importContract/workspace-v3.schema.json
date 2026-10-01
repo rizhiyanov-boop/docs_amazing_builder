@@ -1,0 +1,197 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:doc-builder:import:codex-v1",
+  "title": "DocBuilder workspace v3 — Codex generation profile v1",
+  "description": "Strict generation profile. Cross-references and source semantics are checked by validateCodexProjectImport in addition to this schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["importProfile", "version", "projectName", "updatedAt", "activeMethodId", "methods", "groups", "projectSections", "flows"],
+  "properties": {
+    "importProfile": { "const": "codex-v1" },
+    "version": { "const": 3 },
+    "projectName": { "$ref": "#/definitions/nonBlank" },
+    "updatedAt": { "$ref": "#/definitions/timestamp" },
+    "activeMethodId": { "$ref": "#/definitions/id" },
+    "methods": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/method" } },
+    "groups": { "type": "array", "items": { "$ref": "#/definitions/group" } },
+    "projectSections": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/projectSection" } },
+    "flows": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/flow" } }
+  },
+  "definitions": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+    "nonBlank": { "type": "string", "minLength": 1, "pattern": "^\\S(?:[\\s\\S]*\\S)?$" },
+    "timestamp": { "type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?Z$" },
+    "method": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "name", "updatedAt", "jiraTicket", "epic", "initiators", "responsible", "externalUrl", "status", "sections"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" }, "name": { "$ref": "#/definitions/nonBlank" }, "updatedAt": { "$ref": "#/definitions/timestamp" },
+        "jiraTicket": { "type": "string" }, "epic": { "type": "string" }, "initiators": { "type": "string" }, "responsible": { "type": "string" },
+        "externalUrl": { "type": "string" }, "status": { "enum": ["draft", "review", "done"] },
+        "sections": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/section" } }
+      }
+    },
+    "section": {
+      "type": "object", "required": ["kind"], "properties": { "kind": { "enum": ["text", "parsed", "diagram", "errors"] } },
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "text" } }, "required": ["kind"] }, "then": { "$ref": "#/definitions/textSection" } },
+        { "if": { "properties": { "kind": { "const": "parsed" } }, "required": ["kind"] }, "then": { "$ref": "#/definitions/parsedSection" } },
+        { "if": { "properties": { "kind": { "const": "diagram" } }, "required": ["kind"] }, "then": { "$ref": "#/definitions/diagramSection" } },
+        { "if": { "properties": { "kind": { "const": "errors" } }, "required": ["kind"] }, "then": { "$ref": "#/definitions/errorsSection" } }
+      ]
+    },
+    "textSection": {
+      "type": "object", "additionalProperties": false, "required": ["id", "title", "enabled", "kind", "value"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" }, "title": { "$ref": "#/definitions/nonBlank" }, "enabled": { "type": "boolean" },
+        "kind": { "const": "text" }, "value": { "type": "string" }, "required": { "type": "boolean" }
+      }
+    },
+    "diagramSection": {
+      "type": "object", "additionalProperties": false, "required": ["id", "title", "enabled", "kind", "diagrams"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" }, "title": { "$ref": "#/definitions/nonBlank" }, "enabled": { "type": "boolean" },
+        "kind": { "const": "diagram" }, "diagrams": { "type": "array", "items": { "$ref": "#/definitions/diagram" } }
+      }
+    },
+    "diagram": {
+      "type": "object", "additionalProperties": false, "required": ["id", "title", "engine", "code", "description"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" }, "title": { "type": "string" }, "engine": { "enum": ["mermaid", "plantuml"] },
+        "code": { "type": "string" }, "description": { "type": "string" }
+      }
+    },
+    "parsedSection": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "title", "enabled", "kind", "sectionType", "format", "lastSyncedFormat", "input", "schemaInput", "rows", "error", "domainModelEnabled", "clientFormat", "clientLastSyncedFormat", "clientInput", "clientSchemaInput", "clientRows", "clientError", "clientMappings", "requestColumnOrder"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" }, "title": { "$ref": "#/definitions/nonBlank" }, "enabled": { "type": "boolean" }, "kind": { "const": "parsed" },
+        "sectionType": { "enum": ["request", "response", "generic"] }, "format": { "enum": ["json", "curl", "xml"] }, "lastSyncedFormat": { "enum": ["json", "curl", "xml"] },
+        "input": { "type": "string" }, "schemaInput": { "const": "" }, "rows": { "type": "array", "items": { "$ref": "#/definitions/row" } }, "error": { "const": "" },
+        "domainModelEnabled": { "type": "boolean" }, "clientFormat": { "enum": ["json", "curl", "xml"] }, "clientLastSyncedFormat": { "enum": ["json", "curl", "xml"] },
+        "clientInput": { "type": "string" }, "clientSchemaInput": { "const": "" }, "clientRows": { "type": "array", "items": { "$ref": "#/definitions/row" } }, "clientError": { "const": "" },
+        "clientMappings": { "type": "object", "additionalProperties": { "$ref": "#/definitions/nonBlank" } },
+        "requestColumnOrder": { "const": ["field", "type", "required", "validations", "clientField", "description", "maskInLogs", "example"] },
+        "authType": { "enum": ["none", "bearer", "basic", "api-key"] }, "authHeaderName": { "type": "string" }, "authTokenExample": { "type": "string" },
+        "authUsername": { "type": "string" }, "authPassword": { "type": "string" }, "authApiKeyExample": { "type": "string" },
+        "requestUrl": { "type": "string" }, "requestMethod": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] }, "requestProtocol": { "enum": ["REST", "SOAP"] },
+        "externalRequestUrl": { "type": "string" }, "externalRequestMethod": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+        "externalAuthType": { "enum": ["none", "bearer", "basic", "api-key"] }, "externalAuthHeaderName": { "type": "string" }, "externalAuthTokenExample": { "type": "string" },
+        "externalAuthUsername": { "type": "string" }, "externalAuthPassword": { "type": "string" }, "externalAuthApiKeyExample": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "sectionType": { "const": "request" } }, "required": ["sectionType"] },
+          "then": {
+            "properties": { "id": { "const": "request" } },
+            "required": ["authType", "authHeaderName", "authTokenExample", "authUsername", "authPassword", "authApiKeyExample", "requestUrl", "requestMethod", "requestProtocol", "externalRequestUrl", "externalRequestMethod", "externalAuthType", "externalAuthHeaderName", "externalAuthTokenExample", "externalAuthUsername", "externalAuthPassword", "externalAuthApiKeyExample"]
+          }
+        },
+        {
+          "if": { "properties": { "sectionType": { "const": "response" } }, "required": ["sectionType"] },
+          "then": { "properties": { "id": { "const": "response" }, "format": { "enum": ["json", "xml"] }, "clientFormat": { "enum": ["json", "xml"] } } }
+        },
+        {
+          "if": { "properties": { "sectionType": { "const": "generic" } }, "required": ["sectionType"] },
+          "then": { "properties": { "format": { "enum": ["json", "xml"] }, "domainModelEnabled": { "const": false }, "clientInput": { "const": "" }, "clientRows": { "maxItems": 0 }, "clientMappings": { "maxProperties": 0 } } }
+        },
+        {
+          "if": { "properties": { "domainModelEnabled": { "const": false } }, "required": ["domainModelEnabled"] },
+          "then": { "properties": { "clientFormat": { "const": "json" }, "clientLastSyncedFormat": { "const": "json" }, "clientInput": { "const": "" }, "clientRows": { "maxItems": 0 }, "clientMappings": { "maxProperties": 0 } } }
+        }
+      ]
+    },
+    "row": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "field", "sourceField", "type", "required", "validations", "description", "example", "origin", "source", "enabled", "maskInLogs", "clientField"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" }, "field": { "$ref": "#/definitions/nonBlank" }, "sourceField": { "$ref": "#/definitions/nonBlank" },
+        "type": { "enum": ["string", "int", "long", "number", "boolean", "object", "map", "array", "array_object", "null", "element", "attribute"] },
+        "required": { "enum": ["+", "-"] }, "validations": { "type": "string" }, "description": { "type": "string" }, "example": { "type": "string" },
+        "origin": { "const": "generated" }, "source": { "enum": ["header", "body", "query", "url"] }, "enabled": { "type": "boolean" }, "maskInLogs": { "type": "boolean" }, "clientField": { "const": "" }
+      },
+      "allOf": [{ "if": { "properties": { "source": { "const": "header" } }, "required": ["source"] }, "else": { "properties": { "enabled": { "const": true } } } }]
+    },
+    "errorsSection": {
+      "type": "object", "additionalProperties": false, "required": ["id", "title", "enabled", "kind", "rows", "validationRules"],
+      "properties": {
+        "id": { "const": "errors" }, "title": { "$ref": "#/definitions/nonBlank" }, "enabled": { "type": "boolean" }, "kind": { "const": "errors" },
+        "rows": { "type": "array", "items": { "$ref": "#/definitions/errorRow" } }, "validationRules": { "type": "array", "items": { "$ref": "#/definitions/validationRule" } }
+      }
+    },
+    "errorRow": {
+      "type": "object", "additionalProperties": false,
+      "required": ["clientHttpStatus", "clientResponse", "clientResponseCode", "trigger", "errorType", "serverHttpStatus", "internalCode", "message", "responseCode"],
+      "properties": {
+        "clientHttpStatus": { "type": "string" }, "clientResponse": { "type": "string" }, "clientResponseCode": { "type": "string" }, "trigger": { "type": "string" },
+        "errorType": { "enum": ["CommonException", "BusinessException", "AlertException", "-"] }, "serverHttpStatus": { "type": "string" },
+        "internalCode": { "type": "string" }, "message": { "type": "string" }, "responseCode": { "type": "string" }
+      }
+    },
+    "validationRule": {
+      "type": "object", "additionalProperties": false, "required": ["parameter", "validationCase", "condition", "cause"],
+      "properties": { "parameter": { "type": "string" }, "validationCase": { "type": "string" }, "condition": { "type": "string" }, "cause": { "type": "string" } }
+    },
+    "group": {
+      "type": "object", "additionalProperties": false, "required": ["id", "name", "methodIds", "links"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" }, "name": { "$ref": "#/definitions/nonBlank" }, "methodIds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/definitions/id" } },
+        "links": { "type": "array", "items": { "$ref": "#/definitions/groupLink" } }
+      }
+    },
+    "groupLink": {
+      "type": "object", "additionalProperties": false, "required": ["fromMethodId", "toMethodId", "relationType", "note"],
+      "properties": {
+        "fromMethodId": { "$ref": "#/definitions/id" }, "toMethodId": { "$ref": "#/definitions/id" },
+        "relationType": { "enum": ["request-response", "event", "sync", "async", "custom"] }, "note": { "type": "string" }
+      }
+    },
+    "projectSection": {
+      "type": "object", "additionalProperties": false, "required": ["id", "title", "enabled", "type", "content", "order"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" }, "title": { "$ref": "#/definitions/nonBlank" }, "enabled": { "type": "boolean" },
+        "type": { "enum": ["text", "markdown", "note", "checklist", "diagram"] }, "content": { "type": "string" }, "order": { "type": "integer", "minimum": 0 },
+        "diagramEngine": { "enum": ["mermaid", "plantuml"] }, "diagramCode": { "type": "string" }
+      },
+      "allOf": [{ "if": { "properties": { "type": { "const": "diagram" } }, "required": ["type"] }, "then": { "required": ["diagramEngine", "diagramCode"] } }]
+    },
+    "flow": {
+      "type": "object", "additionalProperties": false, "required": ["id", "name", "description", "createdAt", "updatedAt", "nodes", "edges"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" }, "name": { "$ref": "#/definitions/nonBlank" }, "description": { "type": "string" },
+        "createdAt": { "$ref": "#/definitions/timestamp" }, "updatedAt": { "$ref": "#/definitions/timestamp" },
+        "nodes": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/node" } }, "edges": { "type": "array", "items": { "$ref": "#/definitions/edge" } }
+      }
+    },
+    "node": {
+      "type": "object", "additionalProperties": false, "required": ["id", "type", "position", "label", "description", "actor", "noteContent", "preconditions", "postconditions"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" }, "type": { "enum": ["start", "method", "end", "note"] },
+        "position": { "type": "object", "additionalProperties": false, "required": ["x", "y"], "properties": { "x": { "type": "number" }, "y": { "type": "number" } } },
+        "label": { "type": "string" }, "description": { "type": "string" }, "actor": { "type": "string" }, "noteContent": { "type": "string" },
+        "preconditions": { "type": "array", "items": { "type": "string" } }, "postconditions": { "type": "array", "items": { "type": "string" } },
+        "methodRef": { "type": "object", "additionalProperties": false, "required": ["methodId"], "properties": { "methodId": { "$ref": "#/definitions/id" } } }
+      },
+      "allOf": [{ "if": { "properties": { "type": { "const": "method" } }, "required": ["type"] }, "then": { "required": ["methodRef"] }, "else": { "not": { "required": ["methodRef"] } } }]
+    },
+    "edge": {
+      "type": "object", "additionalProperties": false, "required": ["id", "type", "fromNodeId", "toNodeId", "label", "condition", "mappings"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" }, "type": { "const": "sequence" }, "fromNodeId": { "$ref": "#/definitions/id" }, "toNodeId": { "$ref": "#/definitions/id" },
+        "label": { "type": "string" }, "condition": { "type": "string" }, "mappings": { "type": "array", "items": { "$ref": "#/definitions/mapping" } }
+      }
+    },
+    "fieldRef": {
+      "type": "object", "additionalProperties": false, "required": ["nodeId", "side", "rowId", "fieldPath"],
+      "properties": { "nodeId": { "$ref": "#/definitions/id" }, "side": { "enum": ["request", "response", "context"] }, "rowId": { "type": "string" }, "fieldPath": { "$ref": "#/definitions/nonBlank" } }
+    },
+    "mapping": {
+      "type": "object", "additionalProperties": false, "required": ["id", "source", "target", "transform", "note"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" }, "source": { "$ref": "#/definitions/fieldRef" },
+        "target": { "allOf": [{ "$ref": "#/definitions/fieldRef" }, { "properties": { "side": { "enum": ["request", "context"] } } }] },
+        "transform": { "type": "string" }, "note": { "type": "string" }
+      }
+    }
+  }
+}

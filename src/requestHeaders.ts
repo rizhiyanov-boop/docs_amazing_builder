@@ -207,7 +207,7 @@ function isMappableRow(row: ParsedRow): boolean {
   return row.source !== 'header' && row.source !== 'url';
 }
 
-function getValidClientMappings(section: ParsedSection): Record<string, string> {
+export function getValidClientMappings(section: ParsedSection): Record<string, string> {
   if (!isDualModelSection(section)) return {};
 
   const clientKeys = new Set((section.clientRows ?? []).map((row) => getRowKey(row)));

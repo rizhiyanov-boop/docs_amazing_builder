@@ -17,6 +17,9 @@
 
 | Задача | Владелец | Связанные файлы | Целевая проверка |
 | --- | --- | --- | --- |
+| Импорт проекта/метода, классификация source, batch и merge | src/projectImport.ts | projectImportValidation, workspaceBootstrap, App | npm run test:import |
+| Проверка структуры JSON и ссылок импорта | src/projectImportValidation.ts | types, requestHeaders, projectImport | npm run test:import |
+| Строгий профиль генерации Codex | src/codexImportValidation.ts | importContract/workspace-v3.schema.json, scripts/validate-import.mjs, docs/ai-import-json | npm run test:import |
 | JSON/XML/cURL → rows | src/parsers.ts | editorValueUtils | npm run test:import |
 | rows → JSON/XML/cURL | src/sourceSync.ts | requestHeaders | npm run test:import |
 | JSON Schema → rows | src/parsers.ts | schemaValidationRules | npm run test:import |

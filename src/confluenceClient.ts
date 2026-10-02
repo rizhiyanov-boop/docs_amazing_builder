@@ -72,7 +72,7 @@ async function request<T>(path: string, body?: unknown, isWrite = false, baseUrl
 
 export const confluenceClient: ConfluenceClient = {
   getStatus: () => request('status'),
-  getSpaces: (start, baseUrl) => request(`spaces?${new URLSearchParams({ start: String(start), limit: '25' })}`, undefined, false, baseUrl),
+  getSpaces: (start, baseUrl) => request(`spaces?${new URLSearchParams({ start: String(start), limit: '100' })}`, undefined, false, baseUrl),
   getTree: (spaceKey, parentId, start, baseUrl) => request(`tree?${new URLSearchParams({ spaceKey, start: String(start), limit: '25', ...(parentId ? { parentId } : {}) })}`, undefined, false, baseUrl),
   getPage: (id, baseUrl) => request(`page?${new URLSearchParams({ id })}`, undefined, false, baseUrl),
   prepare: async (wiki, diagrams, baseUrl) => request('prepare', { wiki, diagrams, baseUrl: confluenceOrigin(baseUrl) }, false, baseUrl),

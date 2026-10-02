@@ -26,13 +26,18 @@ async function fixture(t, options = {}) {
   const state = { writes: 0, reads: 0, treeReads: 0, requests: [], mode: 'normal', release: null };
   const upstream = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1');
-    state.requests.push({ path: url.pathname, method: req.method, origin: req.headers['x-test-target-origin'], authorizationPresent: req.headers.authorization === `Bearer ${TEST_TOKEN}` });
+    state.requests.push({ path: url.pathname, method: req.method, expand: url.searchParams.get('expand'), origin: req.headers['x-test-target-origin'], authorizationPresent: req.headers.authorization === `Bearer ${TEST_TOKEN}` });
     if (req.headers.authorization !== `Bearer ${TEST_TOKEN}`) { json(res, 401, { message: 'Rejected' }); return; }
     if (state.mode === 'redirect') { json(res, 302, { message: TEST_TOKEN }, { Location: 'https://outside.example/steal' }); return; }
     if (state.mode === 'unauthorized') { json(res, 401, { message: TEST_TOKEN }); return; }
     if (state.mode === 'forbidden') { json(res, 403, { message: TEST_TOKEN }); return; }
     if (url.pathname === '/rest/api/user/current') { json(res, 200, { type: 'known', displayName: 'Never exposed' }); return; }
-    if (url.pathname === '/rest/api/space') { json(res, 200, { results: [{ key: 'DI', name: 'Integration' }], _links: { next: '/rest/api/space?start=50&limit=50' } }); return; }
+    if (url.pathname === '/rest/api/space') {
+      const results = state.mode === 'space-metadata'
+        ? [{ key: 'DI', name: 'Integration', type: 'global', metadata: { labels: { results: [{ name: 'integration' }, { name: 'integration' }, { name: 123 }] } } }, { key: '~user', name: 'User', type: 'personal', metadata: { labels: ['personal'] } }]
+        : [{ key: 'DI', name: 'Integration' }];
+      json(res, 200, { results, _links: { next: '/rest/api/space?start=50&limit=50' } }); return;
+    }
     if (url.pathname === '/rest/api/space/DI') { json(res, 200, { key: 'DI' }); return; }
     if (url.pathname === '/rest/api/space/DI/content/page') {
       state.treeReads += 1;
@@ -46,6 +51,7 @@ async function fixture(t, options = {}) {
       if (!existing) { json(res, 404, {}); return; }
       if (state.mode === 'readback-fail' && state.writes) { json(res, 503, { message: TEST_TOKEN }); return; }
       const value = structuredClone(existing);
+      if (state.mode === 'readback-nbsp') value.body.storage.value = value.body.storage.value.replace(/&nbsp;/g, '\u00a0');
       if (state.mode === 'readback-changed' && state.writes) value.body.storage.value = '<p>Different</p>';
       if (state.mode === 'different-space') value.space.key = 'OTHER';
       json(res, 200, value); return;
@@ -109,6 +115,14 @@ async function fixture(t, options = {}) {
 }
 const createRequest = (operationId = OPERATION) => ({ operationId, mode: 'create', title: 'Published', spaceKey: 'DI', parentId: '10', storage: '<p>Published content</p>' });
 const updateRequest = (expectedVersion = 1) => ({ ...createRequest(), mode: 'update', parentId: undefined, pageId: '20', expectedVersion });
+
+test('space listing expands categories and preserves global/personal type without returning other metadata', async t => {
+  const f = await fixture(t); await f.connect(); f.state.mode = 'space-metadata';
+  const result = await f.api('/api/spaces');
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body.items, [{ key: 'DI', name: 'Integration', type: 'global', categories: ['integration'] }, { key: '~user', name: 'User', type: 'personal', categories: ['personal'] }]);
+  assert.ok(f.state.requests.some(request => request.expand === 'metadata.labels'));
+});
 
 test('operation journal has no remote tree/content and requires current session and page access', async t => {
   const f = await fixture(t);
@@ -207,7 +221,8 @@ test('native diagram macros preserve CDATA terminators and reject missing/duplic
 
 test('create validates fresh parent, reads back content and cannot duplicate a completed operation', async t => {
   const f = await fixture(t); await f.connect();
-  const request = createRequest();
+  f.state.mode = 'readback-nbsp';
+  const request = { ...createRequest(), storage: '<p>Test&nbsp;document</p>' };
   const first = await f.api('/api/publish', request);
   assert.equal(first.status, 200);
   assert.equal(first.body.id, '101'); assert.equal(first.body.version, 1);
@@ -323,11 +338,14 @@ test('strict origins and upstream seam reject arbitrary egress destinations', ()
   assert.throws(() => createBridge({ upstream: 'http://127.0.0.1:12345' }));
 });
 
-test('body confirmation ignores only generated macro ids, preserves diagram text', () => {
+test('body confirmation normalizes generated macro ids and nbsp, preserves diagram text', () => {
   assert.ok(sameStorage('<p>x</p>\r\n', '<p>x</p>\n'));
   assert.ok(sameStorage(diagramMacro('mermaid', 'A --> B', 'one'), diagramMacro('mermaid', 'A --> B', 'two')));
   assert.equal(sameStorage(diagramMacro('mermaid', 'literal ac:macro-id="one"', 'one'), diagramMacro('mermaid', 'literal ac:macro-id="two"', 'two')), false);
   assert.equal(sameStorage('<p>one</p>', '<p>two</p>'), false);
+  assert.ok(sameStorage('<p>&nbsp;</p>', '<p>\u00a0</p>'));
+  assert.equal(sameStorage('<p>&nbsp;</p>', '<p> </p>'), false);
+  assert.equal(sameStorage(diagramMacro('mermaid', 'A &nbsp; B', 'one'), diagramMacro('mermaid', 'A \u00a0 B', 'two')), false);
 });
 
 test('GET operation reconciles a known page after readback recovers without another write', async t => {

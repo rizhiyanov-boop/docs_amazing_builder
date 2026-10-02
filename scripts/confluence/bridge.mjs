@@ -94,7 +94,7 @@ export function sameStorage(expected, actual) {
   return storageDigest(expected) === storageDigest(actual);
 }
 function storageDigest(value) {
-  const normalized = value.replace(/\r\n?/g, '\n').replace(/<!\[CDATA\[[\s\S]*?\]\]>|<ac:structured-macro\b[^>]*>/g, tag => tag.startsWith('<![CDATA[') ? tag : tag.replace(/\s+ac:macro-id="[^"]*"/g, '')).trim();
+  const normalized = value.replace(/\r\n?/g, '\n').replace(/<!\[CDATA\[[\s\S]*?\]\]>|<ac:structured-macro\b[^>]*>|&nbsp;/g, tag => tag.startsWith('<![CDATA[') ? tag : tag.replace(/\s+ac:macro-id="[^"]*"/g, '').replace(/&nbsp;/g, '\u00a0')).trim();
   return createHash('sha256').update(normalized).digest('hex');
 }
 function summary(value, parentId = undefined) {
@@ -404,8 +404,14 @@ export function createBridge(options = {}) {
       }
       if (url.pathname === '/api/spaces' && req.method === 'GET') {
         const start = integer(url.searchParams.get('start'), 0, 0, Number.MAX_SAFE_INTEGER); const limit = integer(url.searchParams.get('limit'), 50, 1, 100);
-        const path = `/rest/api/space?start=${start}&limit=${limit}`;
-        send(200, collection(await upstream(path, { connection }), path, start, value => { if (!isRecord(value) || typeof value.key !== 'string' || typeof value.name !== 'string') throw new BridgeError(502, 'UPSTREAM_INVALID', 'Confluence вернул некорректное пространство.'); return { key: value.key, name: value.name.slice(0, 500) }; }, connection)); return;
+        const path = `/rest/api/space?start=${start}&limit=${limit}&expand=metadata.labels`;
+        send(200, collection(await upstream(path, { connection }), path, start, value => {
+          if (!isRecord(value) || typeof value.key !== 'string' || typeof value.name !== 'string') throw new BridgeError(502, 'UPSTREAM_INVALID', 'Confluence вернул некорректное пространство.');
+          const labels = value.metadata?.labels;
+          const entries = Array.isArray(labels) ? labels : Array.isArray(labels?.results) ? labels.results : [];
+          const categories = [...new Set(entries.map(label => typeof label === 'string' ? label : label?.name).filter(name => typeof name === 'string' && name.length > 0 && name.length <= 255))].slice(0, 100);
+          return { key: value.key, name: value.name.slice(0, 500), ...(value.type === 'global' || value.type === 'personal' ? { type: value.type } : {}), ...(labels !== undefined ? { categories } : {}) };
+        }, connection)); return;
       }
       if (url.pathname === '/api/tree' && req.method === 'GET') {
         const key = spaceKey(url.searchParams.get('spaceKey')); const parent = url.searchParams.get('parentId');

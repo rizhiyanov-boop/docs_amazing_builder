@@ -87,7 +87,7 @@ describe('WorkbenchTopbar', () => {
     renderTopbar({ onOpenConfluence, confluenceBound: true });
     await userEvent.setup().click(screen.getByRole('button', { name: /Confluence/ }));
     expect(onOpenConfluence).toHaveBeenCalledOnce();
-    expect(screen.getByLabelText('Страница привязана')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Confluence.*страница привязана/ })).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('Сохранено');
   });
 

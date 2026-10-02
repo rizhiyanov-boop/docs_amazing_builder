@@ -33,10 +33,9 @@ describe('Confluence workspace integration', () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: '+ Метод', exact: true }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Отменить', exact: true })).toBeEnabled());
-    await user.click(screen.getByRole('button', { name: 'Confluence', exact: true }));
+    await user.click(screen.getByRole('button', { name: /Confluence/ }));
     await user.click(await screen.findByRole('button', { name: parent.title, exact: true }));
-    await user.click(screen.getByRole('button', { name: 'Проверить публикацию', exact: true }));
-    await user.click(await screen.findByRole('button', { name: 'Создать страницу', exact: true }));
+    await user.click(screen.getByRole('button', { name: 'Опубликовать', exact: true }));
     await waitFor(() => expect(bridge.publish).toHaveBeenCalledOnce());
     fireEvent.keyDown(window, { code: 'KeyZ', ctrlKey: true });
     fireEvent.keyDown(window, { code: 'KeyY', ctrlKey: true });

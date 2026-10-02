@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { WBButton, WBInput } from '../components/primitives/WorkbenchPrimitives';
+import { ConfluenceSpacePicker } from '../components/ConfluenceSpacePicker';
+import { isPersonalSpace, loadConfluenceSpaces, rememberSpace } from '../confluenceSpaces';
 import {
   CONFLUENCE_BRIDGE_URL, ConfluenceClientError, confluenceClient,
   confluenceContentText, confluenceOrigin, confluencePageIdFromLink, confluencePageUrl, type ConfluenceClient
@@ -39,12 +41,22 @@ function pagePath(page: ConfluencePage): string {
   return [page.spaceKey, ...page.ancestors.map(a => a.title), page.title].join(' / ');
 }
 
+type NavigationState = { spaces: Map<string, string>; branches: Map<string, Set<string>> };
+const navigationStates = new WeakMap<ConfluenceClient, NavigationState>();
+function navigationState(client: ConfluenceClient): NavigationState {
+  let state = navigationStates.get(client);
+  if (!state) { state = { spaces: new Map(), branches: new Map() }; navigationStates.set(client, state); }
+  return state;
+}
+
 function PageTree({ spaceKey, baseUrl, client, selectedId, onSelect }: {
   spaceKey: string; baseUrl: string; client: ConfluenceClient; selectedId?: string;
   onSelect: (page: ConfluencePageSummary) => void;
 }): ReactNode {
   const [levels, setLevels] = useState<Record<string, TreeLevel>>({ root: { items: [], nextStart: null, loading: true } });
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const treeKey = `${baseUrl}/${spaceKey}`;
+  const rememberedBranches = navigationState(client).branches;
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(rememberedBranches.get(treeKey)));
   const lifetime = useRef({ active: true });
   useEffect(() => {
     const generation = { active: true };
@@ -74,9 +86,16 @@ function PageTree({ spaceKey, baseUrl, client, selectedId, onSelect }: {
   }
   function toggle(page: ConfluencePageSummary) {
     const open = !expanded.has(page.id);
-    setExpanded(old => { const next = new Set(old); if (open) next.add(page.id); else next.delete(page.id); return next; });
+    setExpanded(old => { const next = new Set(old); if (open) next.add(page.id); else next.delete(page.id); rememberedBranches.set(treeKey, next); return next; });
     if (open && !levels[page.id]) void load(page.id);
   }
+  useEffect(() => {
+    for (const level of Object.values(levels)) {
+      for (const page of level.items) if (expanded.has(page.id) && !levels[page.id]) void load(page.id);
+    }
+    // Fetch remembered branches only as their parents become available.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [levels, expanded]);
   function renderLevel(parentId?: string, path: string[] = []): ReactNode {
     const level = levels[parentId ?? 'root'];
     if (!level) return null;
@@ -99,6 +118,7 @@ function PageTree({ spaceKey, baseUrl, client, selectedId, onSelect }: {
 
 export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, client = confluenceClient }: ConfluenceScreenProps): ReactNode {
   const binding = method.confluence;
+  const rememberedSpaces = navigationState(client).spaces;
   const bindingBaseUrl = binding?.baseUrl;
   const bindingSpaceKey = binding?.spaceKey;
   const document = useMemo(() => renderConfluenceDocument(method), [method]);
@@ -113,7 +133,6 @@ export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, cl
   const [mode, setMode] = useState<'create' | 'update'>(binding ? 'update' : 'create');
   const [title, setTitle] = useState(method.name);
   const [parent, setParent] = useState<ConfluencePage>();
-  const [rootChosen, setRootChosen] = useState(false);
   const [boundPage, setBoundPage] = useState<ConfluencePage>();
   const [browsePage, setBrowsePage] = useState<ConfluencePage>();
   const [pageBusy, setPageBusy] = useState(false);
@@ -160,7 +179,7 @@ export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, cl
       currentOrigin.current = nextOrigin;
       if (changed) {
         pageSequence.current++; preparationSequence.current++;
-        setParent(undefined); setRootChosen(false); setBoundPage(undefined); setBrowsePage(undefined);
+        setParent(undefined); setBoundPage(undefined); setBrowsePage(undefined);
         setPrepared(undefined); setResult(undefined); setConflict(false); setShowPreview(false);
         setPageBusy(false); setPreparing(false); setSpacesBusy(false); setLink(''); setRecoveryLink('');
         setSpaceKey(bindingBaseUrl === nextOrigin ? bindingSpaceKey ?? '' : '');
@@ -170,19 +189,46 @@ export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, cl
       if (nextOrigin) previousOrigin.current = nextOrigin;
       setStatus({ ...next, baseUrl: nextOrigin }); setError('');
       if (nextOrigin) {
-        const list = await client.getSpaces(0, nextOrigin);
+        setSpacesBusy(true);
+        const items = await loadConfluenceSpaces(client, nextOrigin, () => alive.current && sequence === connectionSequence.current);
         if (!alive.current || sequence !== connectionSequence.current) return;
-        setSpaces(list); setSpaceKey(old => old || list.items[0]?.key || '');
-        setBrowseSpaceKey(old => old || list.items[0]?.key || '');
+        const firstGlobalKey = items.find(space => !isPersonalSpace(space))?.key ?? '';
+        const restore = (context: Tab, previous: string) => {
+          const remembered = rememberedSpaces.get(`${nextOrigin}/${context}`);
+          return items.some(space => space.key === previous) ? previous : items.some(space => space.key === remembered) ? remembered! : firstGlobalKey;
+        };
+        setSpaces({ items, nextStart: null }); setSpaceKey(old => restore('publish', changed ? '' : old));
+        setBrowseSpaceKey(old => restore('browse', changed ? '' : old));
         setTreeRevision(old => old + 1);
       } else setSpaces({ items: [], nextStart: null });
     } catch (failure) {
       if (alive.current && sequence === connectionSequence.current) { currentOrigin.current = ''; setStatus(null); setSpaces({ items: [], nextStart: null }); reportError(failure); }
-    } finally { if (alive.current && sequence === connectionSequence.current) setConnectionBusy(false); }
-  }, [client, reportError, bindingBaseUrl, bindingSpaceKey]);
+    } finally { if (alive.current && sequence === connectionSequence.current) { setConnectionBusy(false); setSpacesBusy(false); } }
+  }, [client, reportError, bindingBaseUrl, bindingSpaceKey, rememberedSpaces]);
   useEffect(() => {
     void Promise.resolve().then(() => { if (alive.current) void refreshConnection(); });
   }, [refreshConnection]);
+  useEffect(() => {
+    if (connected && activeSpaceKey && spaces.items.some(space => space.key === activeSpaceKey)) rememberedSpaces.set(`${baseUrl}/${tab}`, activeSpaceKey);
+  }, [connected, baseUrl, activeSpaceKey, spaces, tab, rememberedSpaces]);
+  useEffect(() => {
+    let active = true;
+    let pending = false;
+    const interval = window.setInterval(async () => {
+      if (pending || busy || unknown) return;
+      pending = true;
+      try {
+        const next = await client.getStatus();
+        if (!active) return;
+        const origin = next.connected ? confluenceOrigin(next.baseUrl) : '';
+        if (origin !== baseUrl || next.connected !== connected) await refreshConnection();
+        else setStatus({ ...next, baseUrl: origin });
+      } catch {
+        if (active) { currentOrigin.current = ''; setStatus(null); }
+      } finally { pending = false; }
+    }, 5000);
+    return () => { active = false; window.clearInterval(interval); };
+  }, [client, baseUrl, connected, busy, unknown, refreshConnection]);
   useEffect(() => {
     if (!connected || !bindingMatches || !boundPageId || mode !== 'update') return;
     let active = true;
@@ -190,17 +236,6 @@ export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, cl
     return () => { active = false; };
   }, [client, connected, bindingMatches, boundPageId, baseUrl, mode, reportError]);
 
-  async function loadMoreSpaces() {
-    if (!connected || spaces.nextStart === null) return;
-    const origin = baseUrl;
-    setSpacesBusy(true);
-    try {
-      const list = await client.getSpaces(spaces.nextStart, origin);
-      if (!alive.current || currentOrigin.current !== origin) return;
-      setSpaces(old => ({ ...list, items: [...new Map([...old.items, ...list.items].map(space => [space.key, space])).values()] }));
-    } catch (failure) { if (alive.current && currentOrigin.current === origin) reportError(failure); }
-    finally { if (alive.current && currentOrigin.current === origin) setSpacesBusy(false); }
-  }
   async function selectPage(id: string, context = tab) {
     if (!connected) return;
     const origin = baseUrl;
@@ -209,19 +244,20 @@ export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, cl
     try {
       const page = await client.getPage(id, origin);
       if (!alive.current || sequence !== pageSequence.current || currentOrigin.current !== origin) return;
+      rememberSpace(origin, page.spaceKey);
       if (context === 'browse') { setBrowsePage(page); setBrowseSpaceKey(page.spaceKey); }
-      else { setParent(page); setRootChosen(false); setPrepared(undefined); setSpaceKey(page.spaceKey); }
+      else { setParent(page); setPrepared(undefined); setSpaceKey(page.spaceKey); }
     } catch (failure) { if (alive.current && sequence === pageSequence.current && currentOrigin.current === origin) reportError(failure); }
     finally { if (alive.current && sequence === pageSequence.current && currentOrigin.current === origin) setPageBusy(false); }
   }
   function changeSpace(value: string) {
     pageSequence.current++; setPageBusy(false);
     if (tab === 'browse') { setBrowsePage(undefined); setBrowseSpaceKey(value); }
-    else { setSpaceKey(value); setParent(undefined); setRootChosen(false); setPrepared(undefined); }
+    else { setSpaceKey(value); setParent(undefined); setPrepared(undefined); }
   }
   function createNew() {
     setMode('create'); setPrepared(undefined); setResult(undefined); setConflict(false);
-    setParent(undefined); setRootChosen(false); setError(''); setTab('publish');
+    setParent(undefined); setError(''); setTab('publish');
   }
   async function preparePublication() {
     if (!connected || busy || unknown || !spaceKey) return;
@@ -244,14 +280,15 @@ export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, cl
         if (!active()) return;
         draft.target = page; draft.spaceKey = page.spaceKey; draft.title = page.title;
         setBoundPage(page);
-        if (page.version !== binding.lastPublishedVersion) setConflict(true);
+        if (page.version !== binding.lastPublishedVersion) { setConflict(true); setPrepared(draft); return; }
       } else if (parent) {
         draft.parent = await client.getPage(parent.id, origin);
         if (!active()) return;
         if (draft.parent.spaceKey !== spaceKey) throw new ConfluenceClientError('INVALID_TARGET', 'Родительская страница перемещена. Выберите место публикации заново.');
         setParent(draft.parent);
-      } else if (!rootChosen) throw new ConfluenceClientError('INVALID_TARGET', 'Выберите родительскую страницу или создание в корне пространства.');
-      setPrepared(draft); setShowPreview(false);
+      } else throw new ConfluenceClientError('INVALID_TARGET', 'Выберите родительскую страницу в дереве.');
+      setShowPreview(false);
+      await publish(draft);
     } catch (failure) { if (active()) reportError(failure); }
     finally { if (alive.current && sequence === preparationSequence.current) setPreparing(false); }
   }
@@ -269,8 +306,10 @@ export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, cl
       publishedAt: new Date().toISOString()
     });
   }
-  async function publish() {
-    if (!prepared || conflict || !connected || prepared.baseUrl !== baseUrl || unknown || writeLock.current) return;
+  async function publish(draft: Prepared | undefined = prepared) {
+    const publication = draft;
+    if (!publication || conflict || !connected || publication.baseUrl !== baseUrl || unknown || writeLock.current) return;
+    const prepared = publication;
     writeLock.current = true; setPublishing(true); setError('');
     const attempt: Attempt = { operationId: crypto.randomUUID(), prepared };
     try {
@@ -298,7 +337,7 @@ export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, cl
     } catch (failure) {
       if (!alive.current) return;
       if (failure instanceof ConfluenceClientError && ['OUTCOME_UNKNOWN', 'OPERATION_PENDING'].includes(failure.code)) setUnknown({ ...attempt, operationId: failure.operationId ?? attempt.operationId });
-      else if (failure instanceof ConfluenceClientError && failure.code === 'VERSION_CONFLICT') setConflict(true);
+      else if (failure instanceof ConfluenceClientError && failure.code === 'VERSION_CONFLICT') { setPrepared(prepared); setConflict(true); }
       reportError(failure);
     } finally { writeLock.current = false; if (alive.current) setPublishing(false); }
   }
@@ -321,7 +360,32 @@ export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, cl
       const pageId = confluencePageIdFromLink(recoveryLink, unknown.prepared.baseUrl);
       const page = await client.confirmOperation(unknown.operationId, pageId, unknown.prepared.baseUrl);
       finish(page, unknown);
-    } catch (failure) { if (alive.current) reportError(failure); }
+    } catch (failure) {
+      if (!alive.current) return;
+      if (failure instanceof ConfluenceClientError && failure.code === 'VERIFICATION_MISMATCH') {
+        try {
+          const actual = await client.getPage(confluencePageIdFromLink(recoveryLink, unknown.prepared.baseUrl), unknown.prepared.baseUrl);
+          if (!alive.current || currentOrigin.current !== unknown.prepared.baseUrl) return;
+          const expected = unknown.prepared;
+          const differences: string[] = [];
+          if (actual.title !== expected.title) differences.push(`Название: ожидалось «${expected.title}», получено «${actual.title}».`);
+          if (actual.spaceKey !== expected.spaceKey) differences.push(`Пространство: ожидалось ${expected.spaceKey}, получено ${actual.spaceKey}.`);
+          const version = expected.target ? expected.target.version + 1 : 1;
+          if (actual.version !== version) differences.push(`Версия: ожидалась ${version}, получена ${actual.version}.`);
+          if (expected.target && actual.id !== expected.target.id) differences.push('Идентификатор страницы отличается.');
+          if (!expected.target && (actual.parentId ?? null) !== (expected.parent?.id ?? null)) differences.push(`Родитель: ожидался ${expected.parent?.id ?? 'корень'}, получен ${actual.parentId ?? 'корень'}.`);
+          const normalize = (value: string) => value.replace(/\r\n?/g, '\n').replace(/<!\[CDATA\[[\s\S]*?\]\]>|<ac:structured-macro\b[^>]*>|&nbsp;/g, tag => tag.startsWith('<![CDATA[') ? tag : tag.replace(/\s+ac:macro-id="[^"]*"/g, '').replace(/&nbsp;/g, '\u00a0')).trim();
+          const sent = normalize(expected.storage);
+          const received = normalize(actual.storage ?? '');
+          if (sent !== received) {
+            let offset = 0;
+            while (offset < Math.min(sent.length, received.length) && sent[offset] === received[offset]) offset++;
+            differences.push(`Содержимое отличается с позиции ${offset}. Отправлено: ${sent.slice(Math.max(0, offset - 60), offset + 180)}. Сохранено: ${received.slice(Math.max(0, offset - 60), offset + 180)}.`);
+          }
+          setError(differences.length ? differences.join(' ') : 'Метаданные и содержимое совпадают. Требуется проверка журнала локального сервиса.');
+        } catch (diagnosticFailure) { reportError(diagnosticFailure); }
+      } else reportError(failure);
+    }
     finally { if (alive.current) setCheckingOperation(false); }
   }
   const shownPage = mode === 'update' ? prepared?.target ?? boundPage : prepared?.parent ?? parent;
@@ -329,15 +393,8 @@ export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, cl
 
   function treeControls() {
     return <section>
-      <label className="cf-field">Пространство
-        <select aria-label="Пространство" value={activeSpaceKey} disabled={busy || Boolean(unknown)} onChange={event => changeSpace(event.target.value)}>
-          <option value="">Выберите пространство</option>
-          {activeSpaceKey && !spaces.items.some(space => space.key === activeSpaceKey) && <option value={activeSpaceKey}>{activeSpaceKey}</option>}
-          {spaces.items.map(space => <option key={space.key} value={space.key}>{space.name} · {space.key}</option>)}
-        </select>
-      </label>
+      <ConfluenceSpacePicker key={baseUrl} spaces={spaces.items} value={activeSpaceKey} origin={baseUrl} loading={spacesBusy} disabled={busy || Boolean(unknown) || spacesBusy} onChange={changeSpace} />
       <div className="cf-actions">
-        {spaces.nextStart !== null && <WBButton size="sm" disabled={spacesBusy} onClick={() => void loadMoreSpaces()}>Другие пространства</WBButton>}
         <WBButton size="sm" disabled={!activeSpaceKey || busy} onClick={() => setTreeRevision(old => old + 1)}>Обновить дерево</WBButton>
       </div>
       <p className="cf-muted">Раскройте раздел и выберите страницу. Загружаются только открытые ветви.</p>
@@ -353,10 +410,10 @@ export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, cl
 
   return <section className="cf-screen" aria-label="Confluence">
     <header className="cf-header">
-      <div><WBButton size="sm" onClick={onBack} disabled={publishing || Boolean(unknown)}>Назад в редактор</WBButton><h2>Confluence</h2><p className="cf-muted">{method.name}</p></div>
-      <div className="cf-connection"><span role="status">{connectionBusy ? 'Проверка подключения…' : connected ? 'Локальное подключение активно' : 'Нет подключения'}</span>{status?.user && <span className="cf-muted">{status.user}</span>}
+      <div><button type="button" className="cf-back" aria-label="Назад в редактор" title="Назад в редактор" onClick={onBack} disabled={publishing || Boolean(unknown)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5m7-7-7 7 7 7" /></svg></button><h2>Confluence</h2><p className="cf-muted">{method.name}</p></div>
+      <div className="cf-connection"><span className={`cf-status ${connected ? 'cf-status-active' : ''}`} role="status" aria-label={connectionBusy ? 'Проверка подключения' : connected ? 'Локальное подключение активно' : 'Нет подключения'} title={connectionBusy ? 'Проверка подключения…' : connected ? 'Локальное подключение активно' : 'Нет подключения'}>●</span>{status?.user && <span className="cf-muted">{status.user}</span>}
         {connected && <span className="cf-muted">{baseUrl}</span>}
-        <a href={`${CONFLUENCE_BRIDGE_URL}/`} target="_blank" rel="noopener noreferrer">Открыть локальное подключение</a>
+        {!connected && !connectionBusy && <a href={`${CONFLUENCE_BRIDGE_URL}/`} target="_blank" rel="noopener noreferrer">Открыть локальное подключение</a>}
         <WBButton size="sm" disabled={connectionBusy} onClick={() => { setConnectionBusy(true); void refreshConnection(); }}>Проверить подключение</WBButton>
       </div>
     </header>
@@ -379,10 +436,9 @@ export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, cl
       {!result && !prepared && !unknown && <>
         {binding && <div className="cf-actions"><WBButton aria-pressed={mode === 'update'} disabled={busy || !connected || !bindingMatches} onClick={() => setMode('update')}>Обновить привязанную страницу</WBButton><WBButton aria-pressed={mode === 'create'} disabled={busy} onClick={createNew}>Опубликовать как новую страницу</WBButton></div>}
         {mode === 'create' ? <div className="cf-grid">{connected ? treeControls() : <p className="cf-muted">После подключения здесь появится дерево пространств.</p>}<section><h3>Новая страница</h3><WBInput label="Заголовок страницы" value={title} disabled={busy} onChange={event => setTitle(event.target.value)} />
-          <p className="cf-destination">{baseUrl || 'Адрес Confluence не настроен'}<br />{parent ? pagePath(parent) : rootChosen ? `${spaceKey} / Корень пространства` : 'Родительская страница не выбрана'}<br /><strong>{title || 'Новая страница'}</strong></p>
-          <WBButton size="sm" disabled={!connected || !spaceKey || busy} onClick={() => { setParent(undefined); setRootChosen(true); }}>Создать в корне пространства</WBButton><p className="cf-muted">Будет создана новая страница. Выбранный родитель сохраняет своё содержимое.</p>
+          <p className="cf-muted">Выберите родительскую страницу в дереве. Её содержимое останется без изменений.</p>
         </section></div> : <section><h3>Обновление привязанной страницы</h3><p className="cf-destination">{binding?.baseUrl}<br />{!connected || !bindingMatches ? 'Подключите Confluence привязанной страницы или создайте отдельную страницу в текущем подключении.' : boundPage ? pagePath(boundPage) : 'Читаем актуальное название и путь…'}</p><p className="cf-notice">Документ DocBuilder заменит всё содержимое этой страницы. Версия проверяется перед записью.</p></section>}
-        <footer className="cf-footer"><WBButton variant="accent" disabled={!connected || busy || (mode === 'update' && !bindingMatches) || (mode === 'create' && (!title.trim() || !spaceKey || (!parent && !rootChosen)))} onClick={() => void preparePublication()}>{preparing ? 'Проверяем публикацию…' : 'Проверить публикацию'}</WBButton></footer>
+        <footer className="cf-footer"><WBButton variant="accent" disabled={!connected || busy || (mode === 'update' && !bindingMatches) || (mode === 'create' && (!title.trim() || !spaceKey || !parent))} onClick={() => void preparePublication()}>{preparing || publishing ? 'Публикация…' : 'Опубликовать'}</WBButton></footer>
       </>}
       {prepared && !result && <section><h3>{prepared.mode === 'update' ? 'Проверка обновления' : 'Проверка новой страницы'}</h3><p className="cf-destination">{prepared.baseUrl}<br />{shownPage ? pagePath(shownPage) : `${prepared.spaceKey} / Корень пространства`}<br />{prepared.mode === 'create' && <strong>{prepared.title}</strong>}</p>
         {conflict ? <><div className="cf-notice cf-error" role="alert"><h3>Страницу изменили в Confluence</h3><p>Запись остановлена. Последняя публикация: версия {binding?.lastPublishedVersion ?? 'неизвестна'}; сейчас: {prepared.target?.version ?? 'новая версия'}.</p></div><div className="cf-grid"><section><h3>Сейчас в Confluence</h3><pre className="cf-content">{confluenceContentText(prepared.target?.storage ?? '')}</pre></section><section><h3>Подготовлено в DocBuilder</h3><pre className="cf-content">{confluenceContentText(prepared.storage)}</pre></section></div><div className="cf-actions">{binding && <a href={confluencePageUrl(binding.pageId, prepared.baseUrl)} target="_blank" rel="noopener noreferrer">Открыть страницу</a>}<WBButton onClick={createNew}>Создать отдельную страницу</WBButton></div></> : <>

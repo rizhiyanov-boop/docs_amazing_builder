@@ -7,7 +7,7 @@ export interface ConfluenceBinding {
   publishedAt: string;
 }
 
-export interface ConfluenceSpace { key: string; name: string }
+export interface ConfluenceSpace { key: string; name: string; type?: 'global' | 'personal'; categories?: string[] }
 export interface ConfluencePageSummary { id: string; title: string; parentId?: string | null }
 export interface ConfluenceCollection<T> { items: T[]; nextStart: number | null }
 export interface ConfluencePage extends ConfluencePageSummary {

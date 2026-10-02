@@ -47,6 +47,7 @@
 | Mock service JSON | src/mockServiceExport.ts | App | npm run test:import |
 | Диаграммы | src/diagramUtils.ts | flowDiagram, projectExport | npm run test:wiki |
 | Публикация Confluence и дерево страниц | src/screens/ConfluenceScreen.tsx | confluenceClient, confluenceTypes, scripts/confluence/bridge.mjs | npm run test:confluence |
+| Выбор и недавние пространства Confluence | src/components/ConfluenceSpacePicker.tsx | confluenceSpaces, scripts/confluence/bridge.mjs | npm run test:confluence |
 | Wiki с нативными диаграммами для Confluence | src/confluenceDocument.ts | renderWiki, scripts/confluence/bridge.mjs | npm run test:confluence |
 | Привязка метода к странице Confluence | src/confluenceBinding.ts | workspaceBootstrap, projectImport, useWorkspaceHistory | npm run test:confluence |
 

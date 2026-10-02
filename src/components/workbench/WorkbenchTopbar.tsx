@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import type { RequestMethod } from '../../types';
 import { HttpChip, WBButton } from '../primitives/WorkbenchPrimitives';
+import { confluenceClient } from '../../confluenceClient';
 
 export type WorkbenchAccent = 'blue' | 'warm' | 'violet';
 export type TopbarAutosaveState = 'idle' | 'saving' | 'saved' | 'error';
@@ -38,7 +39,8 @@ type WorkbenchTopbarProps = {
   onOpenRegister: () => void;
 };
 
-function Icon({ name }: { name: 'json' | 'html' | 'wiki' | 'undo' | 'redo' | 'more' }): ReactNode {
+function Icon({ name }: { name: 'json' | 'html' | 'wiki' | 'confluence' | 'undo' | 'redo' | 'more' }): ReactNode {
+  if (name === 'confluence') return <svg viewBox="0 0 24 24" aria-hidden="true" style={{ fill: 'currentColor', stroke: 'none' }}><path d="M3 17c2-4 4-6 7-6 3 0 5 3 11 6l-3 5c-5-3-7-6-9-6-1 0-2 1-3 3zM21 7c-2 4-4 6-7 6-3 0-5-3-11-6l3-5c5 3 7 6 9 6 1 0 2-1 3-3z" /></svg>;
   if (name === 'json') return <svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3M16 3h3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-3M12 20V4" /></svg>;
   if (name === 'html') return <svg viewBox="0 0 24 24"><path d="m16 18 6-6-6-6M8 6l-6 6 6 6" /></svg>;
   if (name === 'wiki') return <svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" /></svg>;
@@ -108,6 +110,22 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
   onOpenRegister
 }: WorkbenchTopbarProps): ReactNode {
   const [profileOpen, setProfileOpen] = useState(false);
+  const [confluenceConnected, setConfluenceConnected] = useState(false);
+  useEffect(() => {
+    if (!onOpenConfluence) return;
+    let active = true;
+    let pending = false;
+    const check = async () => {
+      if (pending) return;
+      pending = true;
+      try { const status = await confluenceClient.getStatus(); if (active) setConfluenceConnected(status.connected); }
+      catch { if (active) setConfluenceConnected(false); }
+      finally { pending = false; }
+    };
+    void check();
+    const timer = window.setInterval(() => void check(), 5000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [onOpenConfluence]);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
   const overflowRef = useRef<HTMLDivElement>(null);
@@ -168,14 +186,7 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
         <IconButton label="HTML" icon="html" onClick={onExportHtml} />
         <IconButton label="Wiki" icon="wiki" onClick={onExportWiki} />
         {onOpenConfluence && (
-          <button
-            type="button"
-            className="wb-topbar-confluence"
-            onClick={onOpenConfluence}
-            title={confluenceBound ? 'Метод связан со страницей Confluence' : 'Опубликовать метод в Confluence'}
-          >
-            Confluence{confluenceBound && <span aria-label="Страница привязана"> · ↗</span>}
-          </button>
+          <IconButton label={`Confluence${confluenceConnected ? ' · подключено' : ''}${confluenceBound ? ' · страница привязана' : ''}`} icon="confluence" onClick={onOpenConfluence} active={confluenceConnected} />
         )}
         <span className="wb-topbar-divider" />
         <IconButton label="Отменить" icon="undo" onClick={onUndo} disabled={!canUndo} />

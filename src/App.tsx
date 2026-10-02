@@ -115,6 +115,7 @@ import { EmptyState } from './components/EmptyState';
 import { ErrorsSectionEditor } from './components/ErrorsSectionEditor';
 import type { AddableBlockType } from './components/MethodSectionSidebar';
 import { ParsedSectionEditor } from './components/ParsedSectionEditor';
+import { ParsedTableFrame } from './components/tables/ParsedTableFrame';
 import { ProjectDocsEditor } from './components/ProjectDocsEditor';
 import { ProjectFlowsEditor } from './components/ProjectFlowsEditor';
 import { AiDescriptionContextDialog, AI_DESCRIPTION_CONTEXT_MAX_LENGTH } from './components/dialogs/AiDescriptionContextDialog';
@@ -5380,17 +5381,6 @@ export default function App() {
     );
   }
 
-  function renderParsedTableColGroup(columns: RequestColumnKey[]): ReactNode {
-    return (
-      <colgroup>
-        {columns.map((column) => {
-          const style: CSSProperties | undefined = column === 'field' ? { width: `${parsedFieldColumnWidth}px` } : undefined;
-          return <col key={column} className={`table-col table-col-${column}`} style={style} />;
-        })}
-      </colgroup>
-    );
-  }
-
   function renderEditableFieldCell(section: ParsedSection, row: ParsedRow, options: EditableFieldOptions = {}): ReactNode {
     const allowEdit = options.allowEdit ?? true;
     const editTarget = options.editTarget ?? 'server';
@@ -6046,8 +6036,7 @@ export default function App() {
 
       return (
         <div className="table-wrap">
-          <table className="parsed-table">
-            {renderParsedTableColGroup(columns)}
+          <ParsedTableFrame columns={columns} fieldColumnWidth={parsedFieldColumnWidth} label={`Параметры: ${section.title}`}>
             <thead>
               <tr>
                 {columns.map((column) => (
@@ -6088,7 +6077,7 @@ export default function App() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </ParsedTableFrame>
           <div className="table-actions">
             <button className="ghost small table-action-icon" type="button" onClick={() => addManualRow(section, 'server')} aria-label={addServerParameterLabel} title={addServerParameterLabel}>
               <span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>
@@ -6143,8 +6132,11 @@ export default function App() {
 
     return (
       <div className="table-wrap">
-        <table className="parsed-table">
-          {renderParsedTableColGroup(['field', 'type', 'required', 'description', 'maskInLogs', 'example'])}
+        <ParsedTableFrame
+          columns={['field', 'type', 'required', 'description', 'maskInLogs', 'example']}
+          fieldColumnWidth={parsedFieldColumnWidth}
+          label={`Параметры: ${section.title}`}
+        >
           <thead>
             <tr>
               <th>{renderParsedFieldColumnHeader('Поле')}</th>
@@ -6200,7 +6192,7 @@ export default function App() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </ParsedTableFrame>
         <div className="table-actions">
           <button
             className="ghost small table-action-icon"

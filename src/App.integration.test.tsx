@@ -1021,6 +1021,7 @@ describe('App integration', () => {
 
   it('shows import warnings for a mapping to an absent field before applying the file', async () => {
     renderApp();
+    await waitFor(() => expect(getStoredProject()?.methods).toBeDefined());
     const payload = { version: 3, methods: [{ id: 'm1', name: 'Draft', sections: [makeRequestSection({ clientMappings: { id: 'absent' } })] }], groups: [] };
     fireEvent.change(getImportFileInput(), { target: { files: [new File([JSON.stringify(payload)], 'draft.json', { type: 'application/json' })] } });
     const dialog = await screen.findByRole('dialog', { name: /Импорт методов из JSON/i });

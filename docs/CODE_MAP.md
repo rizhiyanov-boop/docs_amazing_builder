@@ -81,6 +81,7 @@ Backend AI обязан сохранить auth, validation, prompt isolation, J
 | Навигация | components/workbench/WorkbenchSidebar.tsx | npm run test:ui |
 | Parsed section | components/ParsedSectionEditor.tsx | npm run test:ui |
 | Таблицы | components/tables/WorkbenchTables.tsx | npm run test:ui |
+| Таблицы параметров: ширины колонок и горизонтальная прокрутка | components/tables/ParsedTableFrame.tsx | npm run test:ui |
 | Ошибки | components/ErrorsSectionEditor.tsx | npm run test:ui |
 | Диаграммы | components/DiagramSectionEditor.tsx | npm run test:ui |
 | Project docs/flows | components/ProjectDocsEditor.tsx, ProjectFlowsEditor.tsx | npm run test:ui |

@@ -1983,17 +1983,18 @@ button.primary {
 
 .panes {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
 }
 
 .editor-stream {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
 }
 
 .editor-section {
+  min-width: 0;
   scroll-margin-top: calc(var(--sticky-topbar-offset) + var(--space-4));
 }
 
@@ -2527,6 +2528,34 @@ select {
   border-radius: var(--radius-sm);
   overflow-x: auto;
   overflow-y: hidden;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.parsed-table-viewport {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.parsed-table-viewport:focus-visible {
+  outline: calc(var(--space-1) / 2) solid var(--accent-solid);
+  outline-offset: calc(var(--space-1) * -1);
+}
+
+.parsed-table .field-actions {
+  flex: 0 0 auto;
+}
+
+.parsed-table .field-edit,
+.parsed-table .inline-edit {
+  min-width: 0;
+  width: 100%;
+}
+
+.parsed-table .mapping-cell select {
+  flex: 1 1 0;
+  width: 0;
 }
 
 .table-actions {

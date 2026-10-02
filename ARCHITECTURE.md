@@ -56,6 +56,7 @@ The workspace is stored as `WorkspaceProjectData`:
 - `src/components/cards/Card.tsx`: Kraft card primitive.
 - `src/components/cards/MethodHeaderCard.tsx`: method header card with HTTP method, path, and description.
 - `src/components/tables/WorkbenchTables.tsx`: classic/gallery/mini table views, inline editing, required marker, type selector, row grouping, and row copy affordances.
+- `src/components/tables/ParsedTableFrame.tsx`: parameter table column widths and local horizontal scrolling. Columns retain space for field paths and inline editors when the editor pane is narrow.
 - `src/components/primitives/WorkbenchPrimitives.tsx`: HTTP chips, type chips, required marker, buttons, inputs, tabs, sidebar rows, and AI action buttons.
 
 ## Theme & Design System

@@ -94,10 +94,18 @@ export function useWorkspaceHistory({
   }), [projectName, methods, methodGroups, projectSections, flows, activeMethodId, selectedId]);
 
   function applyWorkspaceSnapshot(snapshot: WorkspaceSnapshot): void {
-    historyLastSnapshotRef.current = cloneSnapshot(snapshot);
+    const currentMethods = new Map(methods.map((method) => [method.id, method]));
+    const restoredMethods = snapshot.methods.map((method) => {
+      const current = currentMethods.get(method.id);
+      // Publication metadata records an external side effect and is not an undoable edit.
+      // A restored deleted method has no current metadata, so retain its snapshot binding.
+      return current ? { ...method, confluence: current.confluence } : method;
+    });
+    const restoredSnapshot = { ...snapshot, methods: restoredMethods };
+    historyLastSnapshotRef.current = cloneSnapshot(restoredSnapshot);
     prevVersionRef.current = workspaceVersion;
     setProjectName(snapshot.projectName);
-    setMethodsState(snapshot.methods);
+    setMethodsState(restoredMethods);
     setMethodGroups(snapshot.methodGroups);
     setProjectSections(snapshot.projectSections);
     setFlows(snapshot.flows);

@@ -46,6 +46,9 @@
 | Preview HTML | src/screens/HtmlExportScreen.tsx | App | npm run test:ui |
 | Mock service JSON | src/mockServiceExport.ts | App | npm run test:import |
 | Диаграммы | src/diagramUtils.ts | flowDiagram, projectExport | npm run test:wiki |
+| Публикация Confluence и дерево страниц | src/screens/ConfluenceScreen.tsx | confluenceClient, confluenceTypes, scripts/confluence/bridge.mjs | npm run test:confluence |
+| Wiki с нативными диаграммами для Confluence | src/confluenceDocument.ts | renderWiki, scripts/confluence/bridge.mjs | npm run test:confluence |
+| Привязка метода к странице Confluence | src/confluenceBinding.ts | workspaceBootstrap, projectImport, useWorkspaceHistory | npm run test:confluence |
 
 Правило: изменение синтаксиса Wiki выполнять в renderWiki.ts. projectExport.ts менять только при изменении полного экспорта проекта. HTML не менять без отдельного требования.
 

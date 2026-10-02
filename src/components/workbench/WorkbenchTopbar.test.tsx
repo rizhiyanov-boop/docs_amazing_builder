@@ -82,6 +82,15 @@ describe('WorkbenchTopbar', () => {
     expect(result.props.onExportFullProjectHtml).toHaveBeenCalledOnce();
   });
 
+  it('opens Confluence without confusing the binding with the project autosave state', async () => {
+    const onOpenConfluence = vi.fn();
+    renderTopbar({ onOpenConfluence, confluenceBound: true });
+    await userEvent.setup().click(screen.getByRole('button', { name: /Confluence/ }));
+    expect(onOpenConfluence).toHaveBeenCalledOnce();
+    expect(screen.getByLabelText('Страница привязана')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Сохранено');
+  });
+
   it('keeps profile auth controls without accent controls', async () => {
     const user = userEvent.setup();
     renderTopbar();

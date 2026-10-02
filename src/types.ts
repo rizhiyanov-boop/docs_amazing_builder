@@ -1,3 +1,5 @@
+import type { ConfluenceBinding } from './confluenceTypes';
+
 export type ParseFormat = 'json' | 'curl' | 'xml';
 export type RequestColumnKey = 'field' | 'type' | 'required' | 'validations' | 'clientField' | 'description' | 'maskInLogs' | 'example';
 export type RequestAuthType = 'none' | 'bearer' | 'basic' | 'api-key';
@@ -129,6 +131,7 @@ export interface MethodDocument {
   responsible?: string;
   externalUrl?: string;
   status?: MethodStatus;
+  confluence?: ConfluenceBinding;
 }
 
 export interface MethodGroupLink {

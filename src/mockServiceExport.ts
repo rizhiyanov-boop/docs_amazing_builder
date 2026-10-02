@@ -283,7 +283,7 @@ export function buildMockServicePayload(method: MethodDocument): Record<string, 
   const failResponse = responseFromErrorRow(defaultFailRow, responseFormat);
 
   const exampleHeaders: Record<string, unknown> = {};
-  let exampleBody: MockBody = isXmlFormat(requestFormat) ? requestSection?.input.trim() ?? '' : {};
+  const exampleBody: MockBody = isXmlFormat(requestFormat) ? requestSection?.input.trim() ?? '' : {};
   const bodyRules: Record<string, unknown> = {};
   const headerRules: Record<string, unknown> = {};
 
@@ -329,7 +329,7 @@ export function buildMockServicePayload(method: MethodDocument): Record<string, 
     ? toMockType((getRequestRows(requestSection).find((row) => normalizeFieldName(row.field) === firstBodyRuleField)?.type ?? 'string'))
     : 'string';
 
-  let successBody: MockBody = isXmlFormat(responseFormat) ? responseSection?.input.trim() ?? '' : {};
+  const successBody: MockBody = isXmlFormat(responseFormat) ? responseSection?.input.trim() ?? '' : {};
   if (!isXmlFormat(responseFormat) && responseRows.length > 0 && typeof successBody !== 'string') {
     for (const row of responseRows) {
       const field = normalizeFieldName(row.field);

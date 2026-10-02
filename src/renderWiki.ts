@@ -8,7 +8,7 @@ import {
   replaceDocumentationUrls
 } from './documentationBaseUrl';
 import { normalizeArrayFieldPath } from './fieldPath';
-import type { DiagramSection, DocSection, ErrorsSection, ParseFormat, ParsedRow, ParsedSection, TextSection } from './types';
+import type { DiagramItem, DiagramSection, DocSection, ErrorsSection, ParseFormat, ParsedRow, ParsedSection, TextSection } from './types';
 
 const EMPTY_WIKI_CELL = '\u00A0';
 
@@ -27,6 +27,8 @@ export interface WikiRenderOptions {
   includeToc?: boolean;
   includeTemplateIntro?: boolean;
   headingOffset?: number;
+  /** Replace the diagram image and source block while preserving its title and description. */
+  renderDiagram?: (diagram: DiagramItem) => string[];
 }
 
 function escapeWiki(value: string): string {
@@ -528,7 +530,7 @@ function renderParsedSection(section: ParsedSection): string[] {
   return lines;
 }
 
-function renderDiagramSection(section: DiagramSection): string[] {
+function renderDiagramSection(section: DiagramSection, options: WikiRenderOptions): string[] {
   const lines: string[] = [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`];
 
   if (!section.enabled) {
@@ -541,25 +543,30 @@ function renderDiagramSection(section: DiagramSection): string[] {
     .filter((diagram) => diagram.code.trim())
     .forEach((diagram, index) => {
       const title = diagram.title.trim() || `Диаграмма ${index + 1}`;
-      const imageUrl = getDiagramImageUrl(resolveDiagramEngine(diagram.code, diagram.engine), diagram.code, 'jpeg');
-
       lines.push('');
       lines.push(`h3. ${escapeWiki(title)}`);
-      lines.push(`!${escapeWiki(imageUrl)}!`);
+      if (options.renderDiagram) {
+        lines.push(...options.renderDiagram(diagram));
+      } else {
+        const imageUrl = getDiagramImageUrl(resolveDiagramEngine(diagram.code, diagram.engine), diagram.code, 'jpeg');
+        lines.push(`!${escapeWiki(imageUrl)}!`);
+      }
       if (diagram.description?.trim()) {
         lines.push(...toWikiTextBlock(diagram.description));
       }
-      lines.push('{expand:title=Код диаграммы}');
-      lines.push('{code}');
-      lines.push(escapeWiki(diagram.code));
-      lines.push('{code}');
-      lines.push('{expand}');
+      if (!options.renderDiagram) {
+        lines.push('{expand:title=Код диаграммы}');
+        lines.push('{code}');
+        lines.push(escapeWiki(diagram.code));
+        lines.push('{code}');
+        lines.push('{expand}');
+      }
     });
 
   return lines;
 }
 
-function renderProcessDiagramSection(section: DiagramSection): string[] {
+function renderProcessDiagramSection(section: DiagramSection, options: WikiRenderOptions): string[] {
   const lines: string[] = ['h2. Диаграмма процесса'];
 
   if (!section.enabled) {
@@ -571,18 +578,23 @@ function renderProcessDiagramSection(section: DiagramSection): string[] {
   section.diagrams
     .filter((diagram) => diagram.code.trim())
     .forEach((diagram) => {
-      const imageUrl = getDiagramImageUrl(resolveDiagramEngine(diagram.code, diagram.engine), diagram.code, 'jpeg');
-
       lines.push('');
-      lines.push(`!${escapeWiki(imageUrl)}!`);
+      if (options.renderDiagram) {
+        lines.push(...options.renderDiagram(diagram));
+      } else {
+        const imageUrl = getDiagramImageUrl(resolveDiagramEngine(diagram.code, diagram.engine), diagram.code, 'jpeg');
+        lines.push(`!${escapeWiki(imageUrl)}!`);
+      }
       if (diagram.description?.trim()) {
         lines.push(...toWikiTextBlock(diagram.description));
       }
-      lines.push('{expand:title=Код диаграммы}');
-      lines.push('{code}');
-      lines.push(escapeWiki(diagram.code));
-      lines.push('{code}');
-      lines.push('{expand}');
+      if (!options.renderDiagram) {
+        lines.push('{expand:title=Код диаграммы}');
+        lines.push('{code}');
+        lines.push(escapeWiki(diagram.code));
+        lines.push('{code}');
+        lines.push('{expand}');
+      }
     });
 
   return lines;
@@ -684,7 +696,7 @@ export function renderWikiDocument(sections: DocSection[], meta: WikiRenderMeta 
     : undefined;
   if (processDiagramSection && shouldRenderDiagramSection(processDiagramSection)) {
     lines.push('');
-    lines.push(...renderProcessDiagramSection(processDiagramSection).map((line) => shiftWikiHeadingLine(line, headingOffset)));
+    lines.push(...renderProcessDiagramSection(processDiagramSection, options).map((line) => shiftWikiHeadingLine(line, headingOffset)));
   }
 
   for (const section of sections) {
@@ -701,8 +713,8 @@ export function renderWikiDocument(sections: DocSection[], meta: WikiRenderMeta 
           : section.kind === 'diagram'
             ? shouldRenderDiagramSection(section)
               ? isProcessDiagramSection(section)
-                ? renderProcessDiagramSection(section)
-                : renderDiagramSection(section)
+                ? renderProcessDiagramSection(section, options)
+                : renderDiagramSection(section, options)
               : []
             : shouldRenderErrorsSection(section)
               ? renderErrorsSection(section)

@@ -184,7 +184,8 @@ function resolveSchemaRef(schema: JsonSchema, context: JsonSchemaContext, seenRe
   const nextSeenRefs = new Set(seenRefs);
   nextSeenRefs.add(schema.$ref);
   const targetSchema = resolveSchemaRef(resolveLocalSchemaRef(context.root, schema.$ref), context, nextSeenRefs);
-  const { $ref: _ref, ...siblingSchema } = schema;
+  const siblingSchema = { ...schema };
+  delete siblingSchema.$ref;
   return { ...targetSchema, ...siblingSchema };
 }
 

@@ -23,6 +23,7 @@ Backend endpoints live in `api/` and are consumed through `src/serverSyncClient.
 - Autosave: `useRemoteProjectAutosave` builds a `WorkspaceProjectData` snapshot and posts it to the backend after idle delay and hash dedupe.
 - AI: `/api/ai` requires an authenticated session and delegates model calls through `api/_lib/openrouterClient.ts`.
 - Import/export: JSON import is handled client-side; HTML/Wiki renderers run in the client and downloads are triggered from preview screens.
+- Confluence: src/confluenceClient.ts calls the loopback bridge at 127.0.0.1:18771. The user enters the HTTPS Confluence origin and PAT only in the local form; scripts/confluence/bridge.mjs keeps them in process memory. Each request is scoped to the expected origin and captured session. The hosted backend never receives the PAT. Trees and remote page bodies remain ephemeral; method publication bindings use the existing workspace persistence.
 
 ## Data Model
 
@@ -43,6 +44,7 @@ The workspace is stored as `WorkspaceProjectData`:
 
 - `src/screens/HtmlExportScreen.tsx`: rendered HTML preview, TOC/search, copy and download actions.
 - `src/screens/WikiScreen.tsx`: Wiki source/preview modes with copy and download.
+- src/screens/ConfluenceScreen.tsx: connection status, fresh lazy page tree, read-only page inspection, method create/update, conflict handling and uncertain-outcome reconciliation.
 - Project docs and flows remain separate editor surfaces inside the workspace.
 
 ### Workbench Shell

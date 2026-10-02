@@ -6,6 +6,7 @@ export type WorkbenchAccent = 'blue' | 'warm' | 'violet';
 export type TopbarAutosaveState = 'idle' | 'saving' | 'saved' | 'error';
 
 type WorkbenchTopbarProps = {
+  disabled?: boolean;
   topbarRef: RefObject<HTMLElement | null>;
   importInputRef: RefObject<HTMLInputElement | null>;
   methodName: string;
@@ -21,6 +22,8 @@ type WorkbenchTopbarProps = {
   onImportProjectJson: (files: File[]) => void;
   onExportHtml: () => void;
   onExportWiki: () => void;
+  onOpenConfluence?: () => void;
+  confluenceBound?: boolean;
   onExportFullProjectHtml: () => void;
   onExportFullProjectWiki: () => void;
   onExportJson: () => void;
@@ -73,6 +76,7 @@ function IconButton({
 }
 
 export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
+  disabled,
   topbarRef,
   importInputRef,
   methodName,
@@ -88,6 +92,8 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
   onImportProjectJson,
   onExportHtml,
   onExportWiki,
+  onOpenConfluence,
+  confluenceBound,
   onExportFullProjectHtml,
   onExportFullProjectWiki,
   onExportJson,
@@ -141,7 +147,7 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
   };
 
   return (
-    <header ref={topbarRef} className="wb-topbar">
+    <header ref={topbarRef} className="wb-topbar" inert={disabled || undefined}>
       <button type="button" className="wb-mobile-menu-button" aria-label="Открыть навигацию" onClick={onToggleSidebar}>☰</button>
 
       <div className="wb-topbar-brand" aria-label="doc-builder">
@@ -161,6 +167,16 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
         <IconButton label="JSON" icon="json" onClick={onExportJson} />
         <IconButton label="HTML" icon="html" onClick={onExportHtml} />
         <IconButton label="Wiki" icon="wiki" onClick={onExportWiki} />
+        {onOpenConfluence && (
+          <button
+            type="button"
+            className="wb-topbar-confluence"
+            onClick={onOpenConfluence}
+            title={confluenceBound ? 'Метод связан со страницей Confluence' : 'Опубликовать метод в Confluence'}
+          >
+            Confluence{confluenceBound && <span aria-label="Страница привязана"> · ↗</span>}
+          </button>
+        )}
         <span className="wb-topbar-divider" />
         <IconButton label="Отменить" icon="undo" onClick={onUndo} disabled={!canUndo} />
         <IconButton label="Повторить" icon="redo" onClick={onRedo} disabled={!canRedo} />

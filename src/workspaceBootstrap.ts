@@ -3,6 +3,7 @@ import { parseToRows, wrapNonDomainResponseJson } from './parsers';
 import { sanitizeSections } from './sectionTitles';
 import { withSectionRowIds } from './sectionHelpers';
 import { createInitialSections } from './sectionFactories';
+import { normalizeConfluenceBinding } from './confluenceBinding';
 import type {
   DocSection,
   MethodDocument,
@@ -196,6 +197,7 @@ export function normalizeMethodDocument(
     responsible: typeof method.responsible === 'string' ? method.responsible : undefined,
     externalUrl: typeof method.externalUrl === 'string' ? method.externalUrl : undefined,
     status: method.status === 'draft' || method.status === 'review' || method.status === 'done' ? method.status : undefined,
+    confluence: normalizeConfluenceBinding(method.confluence),
     sections: sanitizeSections(method.sections as DocSection[]).map(withSectionRowIds)
   };
 }
@@ -409,6 +411,7 @@ export function asWorkspaceProjectData(
     activeMethodId: resolvedActiveMethodId,
     methods: normalizedMethods.map((method) => ({
       ...method,
+      confluence: normalizeConfluenceBinding(method.confluence),
       updatedAt: method.updatedAt || new Date().toISOString(),
       sections: sanitizeSections(method.sections).map(withSectionRowIds)
     })),

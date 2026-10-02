@@ -24,6 +24,7 @@ type ProjectSwitcherProps = {
 };
 
 type WorkbenchSidebarProps = {
+  disabled?: boolean;
   projectName: string;
   methods: MethodDocument[];
   groups: MethodGroup[];
@@ -271,6 +272,7 @@ function ProjectSwitcher({
 }
 
 export const WorkbenchSidebar = React.memo(function WorkbenchSidebar({
+  disabled,
   projectName,
   methods,
   groups,
@@ -318,7 +320,7 @@ export const WorkbenchSidebar = React.memo(function WorkbenchSidebar({
   }, [groups, methods, normalizedQuery]);
 
   return (
-    <aside className="wb-sidebar" style={{ position: 'relative' }}>
+    <aside className="wb-sidebar" style={{ position: 'relative' }} inert={disabled || undefined}>
       <div style={{ padding: '12px 14px 10px', display: 'flex', alignItems: 'center', gap: 8, borderBottom: '1px solid var(--wb-border)' }}>
         <div style={{ width: 22, height: 22, borderRadius: 6, background: 'var(--wb-text)', color: 'var(--wb-bg-surface)', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>D</div>
         <ProjectSwitcher

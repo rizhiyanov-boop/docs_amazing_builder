@@ -130,6 +130,9 @@ import { WorkspaceHome } from './components/workbench/WorkspaceHome';
 import { TableClassic, TableGallery, TableMiniCards } from './components/tables/WorkbenchTables';
 import { HtmlExportScreen } from './screens/HtmlExportScreen';
 import { WikiScreen } from './screens/WikiScreen';
+import { ConfluenceScreen } from './screens/ConfluenceScreen';
+import { normalizeConfluenceBinding } from './confluenceBinding';
+import type { ConfluenceBinding } from './confluenceTypes';
 import { useRemoteProjectAutosave } from './hooks/useRemoteProjectAutosave';
 import { useServerSync } from './hooks/useServerSync';
 import { useWorkspaceHistory } from './hooks/useWorkspaceHistory';
@@ -331,7 +334,7 @@ function getSectionWorkbenchMeta(section: DocSection): {
   return { emoji: '□', eyebrow: 'Текст' };
 }
 
-type TabKey = 'editor' | 'html' | 'wiki';
+type TabKey = 'editor' | 'html' | 'wiki' | 'confluence';
 type WorkspaceScope = 'methods' | 'project-docs' | 'flows';
 type WikiReturnTarget = {
   tab: TabKey;
@@ -620,6 +623,9 @@ export default function App() {
   const [activeMethodId, setActiveMethodId] = useState<string>(() => initialWorkspace.activeMethodId ?? initialWorkspace.methods[0]?.id ?? createMethodId());
   const [selectedId, setSelectedId] = useState<string>(() => initialWorkspace.methods[0]?.sections[0]?.id ?? createInitialSections()[0].id);
   const [tab, setTab] = useState<TabKey>('editor');
+  const [confluenceBusy, setConfluenceBusy] = useState(false);
+  const confluenceWorkspaceRef = useRef(0);
+  const confluenceWorkspaceGeneration = confluenceWorkspaceRef.current;
   const [exportPreviewScope, setExportPreviewScope] = useState<'method' | 'project'>('method');
   const [projectExportDetailMode, setProjectExportDetailMode] = useState<ProjectExportDetailMode>('full');
   const [workspaceScope, setWorkspaceScope] = useState<WorkspaceScope>('methods');
@@ -1101,6 +1107,7 @@ export default function App() {
   }, []);
 
   function applyWorkspaceState(workspace: WorkspaceProjectData): void {
+    confluenceWorkspaceRef.current += 1;
     const resolvedActiveMethod = workspace.methods.find((method) => method.id === workspace.activeMethodId) ?? workspace.methods[0];
     const nextProjectSections = sanitizeProjectSections(workspace.projectSections);
     const nextFlows = sanitizeProjectFlows(workspace.flows, workspace.methods);
@@ -1985,6 +1992,7 @@ export default function App() {
       if (isEditable) return;
 
       event.preventDefault();
+      if (confluenceBusy) return;
       if (isUndoCombo) {
         if (deletedRowUndo) {
           undoDeletedRowRef.current();
@@ -1999,7 +2007,7 @@ export default function App() {
 
     window.addEventListener('keydown', handleHistoryHotkeys);
     return () => window.removeEventListener('keydown', handleHistoryHotkeys);
-  }, [deletedRowUndo]);
+  }, [confluenceBusy, deletedRowUndo]);
 
   useEffect(() => {
     setTab('editor');
@@ -7372,6 +7380,20 @@ export default function App() {
     if (isCompactLayout) setIsSidebarHidden(true);
   }, [isCompactLayout]);
 
+  const handleOpenConfluence = useCallback(() => {
+    setWorkspaceScope('methods');
+    setTab('confluence');
+    if (isCompactLayout) setIsSidebarHidden(true);
+  }, [isCompactLayout]);
+
+  const handleConfluencePublished = useCallback((methodId: string, binding: ConfluenceBinding) => {
+    const normalized = normalizeConfluenceBinding(binding);
+    if (!normalized) return;
+    setMethodsState((current) => current.map((method) => method.id === methodId
+      ? { ...method, confluence: normalized }
+      : method));
+  }, []);
+
   const rememberWikiReturnTarget = useCallback(() => {
     if (tab === 'wiki') return;
     wikiReturnTargetRef.current = { tab, workspaceScope, isSidebarHidden };
@@ -8416,6 +8438,7 @@ export default function App() {
       <Toast message={toastMessage} />
 
       <WorkbenchSidebar
+        disabled={confluenceBusy}
         projectName={normalizedProjectName}
         methods={methods}
         groups={methodGroups}
@@ -8452,6 +8475,7 @@ export default function App() {
 
       <div className="wb-shell-content">
         <WorkbenchTopbar
+          disabled={confluenceBusy}
           topbarRef={topbarRef}
           importInputRef={importInputRef}
           methodName={activeMethod?.name ?? DEFAULT_METHOD_NAME}
@@ -8474,6 +8498,8 @@ export default function App() {
           onImportProjectJson={handleImportProjectJsonFiles}
           onExportHtml={handleOpenMethodHtmlPreview}
           onExportWiki={handleOpenMethodWikiPreview}
+          onOpenConfluence={handleOpenConfluence}
+          confluenceBound={Boolean(activeMethod?.confluence)}
           onExportFullProjectHtml={handleOpenProjectHtmlPreview}
           onExportFullProjectWiki={handleOpenProjectWikiPreview}
           onExportJson={exportProjectJson}
@@ -8867,6 +8893,20 @@ export default function App() {
                   />
                 );
               })()}
+
+              {tab === 'confluence' && workspaceScope === 'methods' && activeMethod && (
+                <ConfluenceScreen
+                  key={activeMethod.id}
+                  method={activeMethod}
+                  onPublished={(methodId, binding) => {
+                    if (confluenceWorkspaceRef.current === confluenceWorkspaceGeneration) {
+                      handleConfluencePublished(methodId, binding);
+                    }
+                  }}
+                  onBusyChange={setConfluenceBusy}
+                  onBack={() => setTab('editor')}
+                />
+              )}
 
               {tab === 'wiki' && workspaceScope === 'methods' && (() => {
                 const isProjectPreview = exportPreviewScope === 'project';

@@ -6112,6 +6112,16 @@ body[data-wb-accent] {
   color: var(--wb-text-soft); background: transparent; border: 1px solid transparent;
   border-radius: var(--wb-radius); cursor: pointer;
 }
+.wb-topbar-confluence {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--radius-xs);
+  color: var(--wb-text);
+  background: var(--wb-bg-soft);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+}
+.wb-topbar-confluence:hover { background: var(--wb-bg-hover); }
 .wb-topbar-icon-button:hover:not(:disabled) { color: var(--wb-text); background: var(--wb-bg-hover); }
 .wb-topbar-icon-button.active { color: var(--wb-accent); background: var(--wb-accent-soft); border-color: var(--wb-accent); }
 .wb-topbar-icon-button:disabled { cursor: not-allowed; opacity: 0.35; }

@@ -181,6 +181,7 @@ export function prepareMethodsMerge(workspaces: WorkspaceProjectData[], existing
 
       importedMethods.push({
         ...method,
+        confluence: undefined,
         id: nextId,
         name: nextName,
         updatedAt: method.updatedAt || new Date().toISOString()

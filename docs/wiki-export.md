@@ -27,6 +27,8 @@
 renderWikiDocument(sections, meta, options)
 ```
 
+Для прямой публикации в Confluence функция renderConfluenceDocument из src/confluenceDocument.ts использует renderDiagram в options. В Wiki попадают только уникальные маркеры, исходники диаграмм передаются отдельно в локальный сервис. После конвертации Wiki в storage сервис заменяет маркеры на макросы plantuml и mermaiddiagram. Этот путь не вызывает внешний image renderer. Подробности подключения: [confluence-local.md](confluence-local.md).
+
 Источник данных:
 
 - `sections`: секции активного метода;
@@ -382,7 +384,7 @@ P3: Project Wiki не использует `methodGroups` для группир�
 
 P3: Wiki preview в приложении ограничен и может отличаться от фактического Confluence отображения.
 
-P3: Diagram export зависит от внешнего image URL. Если Confluence или сеть блокируют remote images, диаграммы могут не отобразиться.
+P3: Обычный Wiki-файл использует внешние image URL для диаграмм. Если Confluence или сеть блокируют remote images, диаграммы могут не отобразиться. Прямая публикация через локальный сервис использует нативные макросы; их отрисовка зависит от установленных плагинов Confluence.
 
 P3: `updatedAt` для project export ставится временем генерации, а не временем последнего изменения проекта.
 

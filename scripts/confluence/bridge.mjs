@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 
-export const BRIDGE_VERSION = '1.2.2';
+export const BRIDGE_VERSION = '1.2.3';
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const MAX_TIMER_DELAY = 2_147_483_647;
 export const DEFAULT_ORIGINS = ['https://docsamazingbuilder.vercel.app', 'http://localhost:5173', 'http://127.0.0.1:5173'];
@@ -44,6 +44,11 @@ export function validateAdditionalOrigin(value) {
   try { parsed = new URL(value); } catch { throw new Error('Origin должен быть полным HTTPS origin без пути.'); }
   if (parsed.protocol !== 'https:' || parsed.origin !== value || parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) throw new Error('Origin должен быть полным HTTPS origin без пути.');
   return value;
+}
+function connectionToken(value) {
+  const token = text(value, 4096, 'token').trim();
+  if (/[\s\u007f]/.test(token)) throw invalid('Некорректный токен.');
+  return token;
 }
 
 export function validateConfluenceBaseUrl(value) {
@@ -134,20 +139,22 @@ async function readJsonBody(req) {
   try { return requireRecord(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
   catch (error) { if (error instanceof BridgeError) throw error; throw invalid('Некорректный JSON.'); }
 }
-function connectionHtml(nonce, origin, connection) {
+function connectionHtml(nonce, origin, connection, preferences) {
   const cspNonce = randomBytes(24).toString('base64');
   const escapeHtml = value => value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
   const html = `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DocBuilder — подключение Confluence</title>
-<style nonce="${cspNonce}">body{margin:48px auto;padding:0 24px;max-width:720px;font:16px/1.6 system-ui;color:#292e35;background:#f9f8f6}h1{font-size:28px}label{display:block;margin-top:24px}input{box-sizing:border-box;width:100%;padding:12px;font:inherit;border:1px solid #c7c4be;border-radius:8px}button{margin:16px 12px 0 0;padding:10px 16px;font:inherit;border:1px solid #b9b2a7;border-radius:8px;background:#fff;cursor:pointer}button[type=submit]{background:#255b51;color:#fff;border-color:#255b51}.note{color:#5e6470}#status{padding:16px;background:#fff;border-radius:8px;overflow-wrap:anywhere}</style></head>
+<style nonce="${cspNonce}">body{margin:48px auto;padding:0 24px;max-width:720px;font:16px/1.6 system-ui;color:#292e35;background:#f9f8f6}h1{font-size:28px}label{display:block;margin-top:24px}input{box-sizing:border-box;width:100%;padding:12px;font:inherit;border:1px solid #c7c4be;border-radius:8px}input[type=checkbox]{width:auto;margin-right:8px}button{margin:16px 12px 0 0;padding:10px 16px;font:inherit;border:1px solid #b9b2a7;border-radius:8px;background:#fff;cursor:pointer}button[type=submit]{background:#255b51;color:#fff;border-color:#255b51}.note{color:#5e6470}#status{padding:16px;background:#fff;border-radius:8px;overflow-wrap:anywhere}</style></head>
 <body><h1>Подключение Confluence</h1><p class="note">Локальный сервис · версия ${BRIDGE_VERSION}</p><p>Введите адрес своего Confluence. Токен отправляется только этому локальному сервису и на указанный HTTPS адрес. DocBuilder получает состояние подключения, дерево и страницы; токен в него не передаётся.</p>
-<p class="note">Адрес и токен хранятся только в памяти. Сессия действует 30 дней после последнего успешного обращения к Confluence. Закрытие сервиса, перезапуск или кнопка «Забыть токен» завершают её. Дерево страниц не сохраняется.</p>
-<form id="form"><label for="base-url">Адрес Confluence</label><input id="base-url" name="baseUrl" type="url" value="${escapeHtml(connection?.baseUrl ?? '')}" placeholder="https://confluence.example" autocomplete="off" spellcheck="false" required maxlength="512">
-<label for="pat">Личный токен доступа (PAT)</label><input id="pat" name="pat" type="password" autocomplete="off" spellcheck="false" required maxlength="4096"><button type="submit" id="connect">Подключить</button><button type="button" id="forget">Забыть токен</button></form>
-<p id="status" role="status">${connection ? `Подключено. Сессия до ${new Date(connection.expiresAt).toISOString()}.` : 'Введите адрес Confluence и PAT в этой локальной форме.'}</p><p class="note">После подключения вернитесь в DocBuilder и нажмите «Проверить подключение». Эта страница ничего не публикует.</p>
+<p class="note">Сессия действует 30 дней после последнего успешного обращения к Confluence. Сохранённое подключение восстанавливается после перезапуска сервиса. «Забыть токен» удаляет подключение из памяти и с этого компьютера. Дерево страниц не сохраняется.</p>
+<form id="form"><label for="base-url">Адрес Confluence</label><input id="base-url" name="baseUrl" type="url" value="${escapeHtml(connection?.baseUrl ?? preferences.baseUrl)}" placeholder="https://confluence.example" autocomplete="off" spellcheck="false" required maxlength="512">
+<label for="pat">Личный токен доступа (PAT)</label><input id="pat" name="pat" type="password" autocomplete="off" spellcheck="false" ${preferences.remembered ? 'placeholder="Оставьте пустым, чтобы использовать сохранённый PAT"' : 'required'} maxlength="4096">
+<label><input id="remember" type="checkbox" ${preferences.available ? (preferences.remembered || !connection ? 'checked' : '') : 'disabled'}>Запомнить на этом компьютере</label><p class="note">${preferences.available ? 'Адрес и PAT сохраняются зашифрованными для вашего пользователя Windows.' : 'Защищённое сохранение доступно в Windows. Подключение будет храниться только в памяти.'}</p>
+<button type="submit" id="connect">Подключить</button><button type="button" id="forget">Забыть токен</button></form>
+<p id="status" role="status">${connection ? `Подключено. Сессия до ${new Date(connection.expiresAt).toISOString()}.${preferences.remembered ? ' Подключение сохранено на этом компьютере.' : ''}` : escapeHtml(preferences.message || (preferences.remembered ? 'Подключение сохранено. Нажмите «Подключить», чтобы повторить проверку без ввода PAT.' : 'Введите адрес Confluence и PAT в этой локальной форме.'))}</p><p class="note">После подключения вернитесь в DocBuilder и нажмите «Проверить подключение». Эта страница ничего не публикует.</p>
 <script nonce="${cspNonce}">const nonce=${JSON.stringify(nonce)};
-const form=document.getElementById('form');const baseUrl=document.getElementById('base-url');const pat=document.getElementById('pat');const status=document.getElementById('status');const connect=document.getElementById('connect');const forget=document.getElementById('forget');
-async function request(path,body){connect.disabled=forget.disabled=true;status.textContent='Проверяем подключение…';try{const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-DocBuilder-Local-Nonce':nonce},body:JSON.stringify(body),credentials:'omit',cache:'no-store'});const result=await response.json();status.textContent=response.ok?(result.connected?'Подключено. Сессия до '+result.expiresAt+'.':'Подключение удалено из памяти.'):(result.message||'Не удалось подключиться.');}catch{status.textContent='Локальный сервис недоступен. Откройте его повторно.';}finally{connect.disabled=forget.disabled=false;}}
-form.addEventListener('submit',event=>{event.preventDefault();const token=pat.value;pat.value='';request('/local/session',{baseUrl:baseUrl.value.trim(),token});});forget.addEventListener('click',()=>{pat.value='';baseUrl.value='';request('/local/forget',{});});</script></body></html>`;
+const form=document.getElementById('form');const baseUrl=document.getElementById('base-url');const pat=document.getElementById('pat');const remember=document.getElementById('remember');const status=document.getElementById('status');const connect=document.getElementById('connect');const forget=document.getElementById('forget');
+async function request(path,body){connect.disabled=forget.disabled=true;status.textContent='Проверяем подключение…';try{const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-DocBuilder-Local-Nonce':nonce},body:JSON.stringify(body),credentials:'omit',cache:'no-store'});const result=await response.json();if(response.ok)pat.required=!result.remembered;status.textContent=response.ok?(result.connected?'Подключено. Сессия до '+result.expiresAt+'.'+(result.remembered?' Подключение сохранено на этом компьютере.':' Подключение хранится только в памяти.'):'Подключение удалено из памяти и с этого компьютера.'):(result.message||'Не удалось подключиться.');}catch{status.textContent='Локальный сервис недоступен. Откройте его повторно.';}finally{connect.disabled=forget.disabled=false;}}
+form.addEventListener('submit',event=>{event.preventDefault();const token=pat.value;pat.value='';request('/local/session',{baseUrl:baseUrl.value.trim(),token,remember:remember.checked});});forget.addEventListener('click',()=>{pat.value='';baseUrl.value='';request('/local/forget',{});});</script></body></html>`;
   return { html, csp: `default-src 'none'; script-src 'nonce-${cspNonce}'; style-src 'nonce-${cspNonce}'; connect-src ${origin}; form-action 'self'; frame-ancestors 'none'; base-uri 'none'` };
 }
 
@@ -169,12 +176,16 @@ export function createBridge(options = {}) {
   const origins = new Set(DEFAULT_ORIGINS);
   for (const origin of options.origins ?? []) origins.add(validateAdditionalOrigin(origin));
   const nonce = randomBytes(32).toString('hex');
+  const credentialStore = options.credentialStore ?? null;
   const operations = new Map();
   const operationByDocument = new Map();
   let session = null;
   let expiryTimer = null;
   let sessionGeneration = 0;
   let authenticating = false;
+  let remembered = false;
+  let lastBaseUrl = '';
+  let persistenceMessage = '';
   function forgetSession() { session = null; sessionGeneration += 1; clearTimer(expiryTimer); expiryTimer = null; }
   function activeSession() { if (session && session.expiresAt <= now()) forgetSession(); return session; }
   function scheduleExpiry() {
@@ -186,7 +197,11 @@ export function createBridge(options = {}) {
     expiryTimer?.unref?.();
   }
   function renewSession(connection) { if (session === connection) { session.expiresAt = now() + SESSION_TTL_MS; scheduleExpiry(); } }
-  function status() { const current = activeSession(); return { connected: Boolean(current), baseUrl: current?.baseUrl ?? '', expiresAt: current ? new Date(current.expiresAt).toISOString() : null, bridgeVersion: BRIDGE_VERSION }; }
+  function status() { const current = activeSession(); return { connected: Boolean(current), baseUrl: current?.baseUrl ?? '', expiresAt: current ? new Date(current.expiresAt).toISOString() : null, bridgeVersion: BRIDGE_VERSION, remembered }; }
+  async function clearSavedConnection() {
+    if (credentialStore) await credentialStore.clear();
+    remembered = false;
+  }
   function requiredConnection(expectedBaseUrl) {
     const current = activeSession();
     if (!current) throw new BridgeError(401, 'NOT_CONNECTED', 'Подключите Confluence через локальную форму.');
@@ -213,7 +228,13 @@ export function createBridge(options = {}) {
     try {
       const response = await fetchImpl(url, { method, headers: { Accept: 'application/json', Authorization: `Bearer ${connection.token}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, body: body === undefined ? undefined : JSON.stringify(body), redirect: 'manual', signal: controller.signal });
       if (!response.ok) void response.body?.cancel().catch(() => {});
-      if (response.status === 401) { if (session === connection) forgetSession(); throw new BridgeError(401, 'AUTH_EXPIRED', 'Confluence отклонил токен. Подключитесь заново.'); }
+      if (response.status === 401) {
+        if (session === connection) {
+          forgetSession();
+          if (connection.persisted) await clearSavedConnection().catch(() => { persistenceMessage = 'Не удалось удалить сохранённый PAT. Нажмите «Забыть токен» в локальной форме.'; });
+        }
+        throw new BridgeError(401, 'AUTH_EXPIRED', 'Confluence отклонил токен. Подключитесь заново.');
+      }
       if (response.status === 403) throw new BridgeError(403, 'ACCESS_DENIED', 'Confluence не разрешает это действие.');
       if (response.status === 404) throw new BridgeError(404, 'NOT_FOUND', 'Страница или пространство не найдены либо недоступны.');
       if (response.status === 409) throw new BridgeError(409, 'VERSION_CONFLICT', 'Страница изменилась в Confluence. Загрузите актуальную версию.');
@@ -233,6 +254,34 @@ export function createBridge(options = {}) {
     finally { clearTimeout(timer); }
   }
   const readPage = async (id, connection) => fullPage(await upstream(`/rest/api/content/${pageId(id)}?expand=space,version,ancestors,body.storage`, { connection }), connection.baseUrl);
+  async function verifyConnection(connection, generation) {
+    const identity = await upstream('/rest/api/user/current', { connection, authenticatingConnection: true });
+    if (identity.type !== 'known') throw new BridgeError(401, 'AUTH_EXPIRED', 'Confluence не подтвердил авторизацию.');
+    if (generation !== sessionGeneration) throw new BridgeError(409, 'SESSION_CHANGED', 'Сессия была завершена во время проверки.');
+  }
+  function acceptConnection(connection) {
+    connection.expiresAt = now() + SESSION_TTL_MS;
+    session = connection; sessionGeneration += 1; lastBaseUrl = connection.baseUrl; persistenceMessage = ''; scheduleExpiry();
+  }
+  async function restoreConnection() {
+    if (!credentialStore || authenticating || activeSession()) return Boolean(activeSession());
+    authenticating = true; const generation = sessionGeneration;
+    try {
+      const saved = await credentialStore.load();
+      if (!saved || generation !== sessionGeneration) return false;
+      const connection = { baseUrl: connectionBaseUrl(saved.baseUrl), token: connectionToken(saved.token), expiresAt: now() + SESSION_TTL_MS, persisted: true };
+      lastBaseUrl = connection.baseUrl; remembered = true;
+      await verifyConnection(connection, generation);
+      acceptConnection(connection); return true;
+    } catch (error) {
+      if (generation !== sessionGeneration) return false;
+      if (error instanceof BridgeError && error.code === 'AUTH_EXPIRED') {
+        await clearSavedConnection().catch(() => {});
+        persistenceMessage = 'Сохранённый PAT отклонён Confluence. Введите новый токен.';
+      } else persistenceMessage = remembered ? 'Не удалось восстановить подключение. Проверьте сеть и нажмите «Подключить» без повторного ввода PAT.' : 'Сохранённое подключение недоступно. Введите адрес и PAT заново.';
+      return false;
+    } finally { authenticating = false; }
+  }
   function collection(data, path, start, map, connection) { assertConnection(connection); if (!Array.isArray(data.results)) throw new BridgeError(502, 'UPSTREAM_INVALID', 'Confluence не вернул список.'); return { items: data.results.map(map), nextStart: nextStart(data._links?.next, path, start, connection.baseUrl) }; }
   async function prepare(body, connection) {
     if (body.baseUrl !== connection.baseUrl) throw new BridgeError(409, 'SESSION_CHANGED', 'Подготовка относится к другому подключению Confluence.');
@@ -377,24 +426,45 @@ export function createBridge(options = {}) {
       }
       if (url.pathname === '/' && req.method === 'GET') {
         if (origin && origin !== localOrigin) throw new BridgeError(403, 'ORIGIN_DENIED', 'Откройте форму напрямую на локальном адресе.');
-        const current = activeSession(); const page = connectionHtml(nonce, localOrigin, current);
+        const current = activeSession(); const page = connectionHtml(nonce, localOrigin, current, { available: Boolean(credentialStore), remembered, baseUrl: lastBaseUrl, message: persistenceMessage });
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': page.csp, 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff' }); res.end(page.html); return;
       }
       if (url.pathname.startsWith('/local/')) {
         if (origin !== localOrigin || !safeEqual(req.headers['x-docbuilder-local-nonce'], nonce)) throw new BridgeError(403, 'CSRF_DENIED', 'Запрос должен исходить из локальной формы подключения.');
         if (req.method !== 'POST') throw new BridgeError(405, 'METHOD_NOT_ALLOWED', 'Метод не поддерживается.');
         const body = await readJsonBody(req);
-        if (url.pathname === '/local/forget') { forgetSession(); send(200, status()); return; }
+        if (url.pathname === '/local/forget') {
+          forgetSession(); lastBaseUrl = ''; persistenceMessage = '';
+          try { await clearSavedConnection(); }
+          catch { throw new BridgeError(500, 'LOCAL_FAILURE', 'Сессия завершена, но сохранённое подключение удалить не удалось. Повторите «Забыть токен».'); }
+          send(200, status()); return;
+        }
         if (url.pathname !== '/local/session') throw new BridgeError(404, 'NOT_FOUND', 'Маршрут не найден.');
         if (authenticating) throw new BridgeError(409, 'OPERATION_PENDING', 'Проверка подключения ещё выполняется.');
-        const token = text(body.token, 4096, 'token').trim(); if (/[\s\u007f]/.test(token)) throw invalid('Некорректный токен.');
-        const connection = { token, baseUrl: connectionBaseUrl(body.baseUrl), expiresAt: now() + SESSION_TTL_MS };
+        if (body.remember !== undefined && typeof body.remember !== 'boolean') throw invalid('Некорректный признак сохранения подключения.');
+        const remember = body.remember === true;
+        if (remember && !credentialStore) throw new BridgeError(500, 'LOCAL_FAILURE', 'Защищённое сохранение недоступно. Снимите «Запомнить на этом компьютере».');
         authenticating = true; const generation = sessionGeneration;
+        let fromStorage = false;
         try {
-          const identity = await upstream('/rest/api/user/current', { connection, authenticatingConnection: true });
-          if (identity.type !== 'known') throw new BridgeError(401, 'AUTH_EXPIRED', 'Confluence не подтвердил авторизацию.');
+          const baseUrl = connectionBaseUrl(body.baseUrl);
+          let token;
+          if (body.token === '') {
+            const saved = credentialStore && remembered ? await credentialStore.load() : null;
+            if (!saved || saved.baseUrl !== baseUrl) throw invalid('Для этого адреса введите PAT. Сохранённый токен нельзя использовать для другого Confluence.');
+            token = connectionToken(saved.token); fromStorage = true;
+          } else token = connectionToken(body.token);
           if (generation !== sessionGeneration) throw new BridgeError(409, 'SESSION_CHANGED', 'Сессия была завершена во время проверки.');
-          connection.expiresAt = now() + SESSION_TTL_MS; session = connection; sessionGeneration += 1; scheduleExpiry(); send(200, status());
+          const connection = { token, baseUrl, expiresAt: now() + SESSION_TTL_MS, persisted: remember };
+          await verifyConnection(connection, generation);
+          if (remember) await credentialStore.save({ baseUrl, token });
+          else await clearSavedConnection();
+          if (generation !== sessionGeneration) throw new BridgeError(409, 'SESSION_CHANGED', 'Сессия была завершена во время сохранения.');
+          remembered = remember; acceptConnection(connection); send(200, status());
+        } catch (error) {
+          if (fromStorage && generation === sessionGeneration && error instanceof BridgeError && error.code === 'AUTH_EXPIRED') { forgetSession(); await clearSavedConnection().catch(() => {}); }
+          if (error instanceof BridgeError) throw error;
+          throw new BridgeError(500, 'LOCAL_FAILURE', 'Не удалось сохранить или прочитать защищённое подключение. Введите PAT заново или снимите «Запомнить на этом компьютере».');
         } finally { authenticating = false; }
         return;
       }
@@ -464,5 +534,5 @@ export function createBridge(options = {}) {
   });
   server.requestTimeout = 30_000; server.headersTimeout = 10_000; server.maxHeadersCount = 32;
   server.on('close', () => { forgetSession(); operations.clear(); operationByDocument.clear(); });
-  return { server, close: () => new Promise((resolve, reject) => { forgetSession(); server.close(error => error ? reject(error) : resolve()); server.closeIdleConnections(); }) };
+  return { server, restoreConnection, close: () => new Promise((resolve, reject) => { forgetSession(); server.close(error => error ? reject(error) : resolve()); server.closeIdleConnections(); }) };
 }

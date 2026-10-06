@@ -22,6 +22,8 @@ export interface ConfluenceStatus {
   baseUrl: string;
   expiresAt?: string | null;
   user?: string;
+  bridgeVersion?: string;
+  remembered?: boolean;
 }
 export interface ConfluenceDiagram {
   placeholder: string;

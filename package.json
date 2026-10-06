@@ -1,7 +1,7 @@
 {
   "name": "doc-builder",
   "private": true,
-  "version": "1.2.2",
+  "version": "1.2.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,7 +13,7 @@
     "test:import": "vitest run src/codexImportValidation.test.ts src/projectImport.test.ts src/projectImportValidation.test.ts src/parsers.test.ts src/sourceSync.test.ts src/requestHeaders.test.ts src/sectionHelpers.test.ts src/sectionDefaults.test.ts src/schemaValidationRules.test.ts src/mockServiceExport.test.ts",
     "validate:import": "node scripts/validate-import.mjs",
     "examples:import": "node scripts/generate-import-examples.mjs",
-    "test:confluence": "vitest run src/App.confluence.test.tsx src/confluenceBinding.test.ts src/confluenceDocument.test.ts src/confluenceClient.test.ts src/confluenceSpaces.test.ts src/components/ConfluenceSpacePicker.test.tsx src/screens/ConfluenceScreen.test.tsx src/useWorkspaceHistory.test.tsx && node --test --experimental-test-isolation=none scripts/confluence/bridge.test.mjs",
+    "test:confluence": "vitest run src/App.confluence.test.tsx src/confluenceBinding.test.ts src/confluenceDocument.test.ts src/confluenceClient.test.ts src/confluenceSpaces.test.ts src/components/ConfluenceSpacePicker.test.tsx src/screens/ConfluenceScreen.test.tsx src/useWorkspaceHistory.test.tsx && node --test --experimental-test-isolation=none scripts/confluence/bridge.test.mjs scripts/confluence/credential-store.test.mjs",
     "confluence:start": "node scripts/confluence/server.mjs",
     "package:confluence": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-confluence.ps1",
     "test:ai": "vitest run src/aiEndpoint.test.ts src/openrouterClient.test.ts src/components/dialogs/AiDescriptionContextDialog.test.tsx src/components/dialogs/AiDescriptionsPreview.test.tsx",
@@ -21,7 +21,7 @@
     "test:ui": "vitest run src/components src/App.integration.test.tsx src/mermaidLivePreview.test.tsx src/tableVerticalNavigation.test.ts --testTimeout=10000",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:ci": "npm run lint && npm run test:coverage && node --test --experimental-test-isolation=none scripts/confluence/bridge.test.mjs && npm run build",
+    "test:ci": "npm run lint && npm run test:coverage && node --test --experimental-test-isolation=none scripts/confluence/bridge.test.mjs scripts/confluence/credential-store.test.mjs && npm run build",
     "lint:tokens": "node scripts/check-css-tokens.mjs",
     "lint:all": "npm run lint && npm run lint:tokens",
     "preview": "vite preview",

@@ -1,4 +1,5 @@
 import { createBridge, validateAdditionalOrigin } from './bridge.mjs';
+import { createWindowsCredentialStore } from './credential-store.mjs';
 
 function argumentsForBridge(args) {
   const origins = []; let port = 18771;
@@ -11,12 +12,13 @@ function argumentsForBridge(args) {
 }
 try {
   if (Number(process.versions.node.split('.')[0]) < 22) throw new Error('Нужен Node.js 22 или новее.');
-  const { origins, port } = argumentsForBridge(process.argv.slice(2)); const bridge = createBridge({ origins });
+  const { origins, port } = argumentsForBridge(process.argv.slice(2)); const bridge = createBridge({ origins, credentialStore: createWindowsCredentialStore() });
   bridge.server.on('error', error => { console.error(error.code === 'EADDRINUSE' ? `Порт ${port} занят. Закройте предыдущий сервис или задайте --port.` : 'Не удалось запустить локальный сервис.'); process.exitCode = 1; });
+  await bridge.restoreConnection();
   bridge.server.listen(port, '127.0.0.1', () => {
     console.log(`DocBuilder Confluence: http://127.0.0.1:${port}/`);
-    console.log('Адрес Confluence и PAT вводятся только в локальной форме; подключение хранится только в RAM.');
-    console.log('Для остановки нажмите Ctrl+C. Перезапуск завершает сессию и очищает журнал операций.');
+    console.log('Адрес Confluence и PAT вводятся только в локальной форме. Windows может сохранить их зашифрованными для текущего пользователя.');
+    console.log('Для остановки нажмите Ctrl+C. Перезапуск очищает журнал операций; сохранённое подключение восстанавливается автоматически.');
   });
   let stopping = false;
   const stop = async () => { if (stopping) return; stopping = true; await bridge.close(); };

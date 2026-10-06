@@ -91,8 +91,9 @@ async function fixture(t, options = {}) {
       return fetch(upstreamUrl + target.pathname + target.search, { ...request, headers: { ...request.headers, 'X-Test-Target-Origin': target.origin } });
     },
   } : { upstream: upstreamUrl, allowTestUpstream: true, ...bridgeOptions });
+  await bridge.restoreConnection();
   const base = await listen(bridge.server);
-  t.after(async () => { state.release?.(); await bridge.close(); await closeServer(upstream); });
+  t.after(async () => { state.release?.(); if (bridge.server.listening) await bridge.close(); await closeServer(upstream); });
   const formResponse = await fetch(base);
   const html = await formResponse.text();
   const nonce = html.match(/const nonce="([a-f0-9]+)"/)?.[1];
@@ -111,10 +112,71 @@ async function fixture(t, options = {}) {
     if (response.status === 200) connectionOrigin = response.body.baseUrl;
     return response;
   };
-  return { state, pages, base, local, api, connect, html, formResponse, upstreamUrl, transportRequests };
+  return { state, pages, base, local, api, connect, html, formResponse, upstreamUrl, transportRequests, bridge };
 }
 const createRequest = (operationId = OPERATION) => ({ operationId, mode: 'create', title: 'Published', spaceKey: 'DI', parentId: '10', storage: '<p>Published content</p>' });
 const updateRequest = (expectedVersion = 1) => ({ ...createRequest(), mode: 'update', parentId: undefined, pageId: '20', expectedVersion });
+function memoryCredentialStore(initial = null, beforeSave = async () => {}) {
+  let saved = initial; let queue = Promise.resolve();
+  const serial = action => { const result = queue.then(action); queue = result.catch(() => {}); return result; };
+  const store = { clearRequested: false, load: () => serial(async () => saved && { ...saved }),
+    save: value => serial(async () => { await beforeSave(); saved = { ...value }; }),
+    clear: () => { store.clearRequested = true; return serial(async () => { saved = null; }); } };
+  return store;
+}
+
+test('remembered connection restores after restart, never replays PAT to a changed origin, and forget clears it', async t => {
+  const credentialStore = memoryCredentialStore();
+  const options = { credentialStore, httpsOrigins: [TEST_CONFLUENCE_ORIGIN, SECOND_CONFLUENCE_ORIGIN] };
+  const first = await fixture(t, options);
+  const connected = await first.local('/local/session', { baseUrl: TEST_CONFLUENCE_ORIGIN, token: TEST_TOKEN, remember: true });
+  assert.equal(connected.status, 200); assert.equal(connected.body.remembered, true);
+  assert.doesNotMatch(JSON.stringify(connected.body), /test-only-not-a-real-token|Bearer/);
+  await first.bridge.close();
+  assert.ok(await credentialStore.load());
+  const next = await fixture(t, options);
+  assert.equal((await next.api('/api/status')).body.connected, true);
+  assert.match(next.html, /Подключение сохранено/); assert.doesNotMatch(next.html, /test-only-not-a-real-token/);
+  const reads = next.transportRequests.length;
+  assert.equal((await next.local('/local/session', { baseUrl: SECOND_CONFLUENCE_ORIGIN, token: '', remember: true })).status, 400);
+  assert.equal(next.transportRequests.length, reads);
+  assert.equal((await next.local('/local/session', { baseUrl: TEST_CONFLUENCE_ORIGIN, token: '', remember: true })).status, 200);
+  assert.equal((await next.local('/local/forget', {})).status, 200);
+  assert.equal(await credentialStore.load(), null);
+  assert.equal((await next.api('/api/status')).body.connected, false);
+  assert.equal((await next.local('/local/session', { baseUrl: TEST_CONFLUENCE_ORIGIN, token: '', remember: true })).status, 400);
+});
+
+test('opt-out stays in RAM, failed saves are explicit, and a rejected remembered PAT is deleted', async t => {
+  const credentialStore = memoryCredentialStore({ baseUrl: TEST_CONFLUENCE_ORIGIN, token: TEST_TOKEN });
+  const f = await fixture(t, { credentialStore, httpsOrigins: [TEST_CONFLUENCE_ORIGIN] });
+  const once = await f.local('/local/session', { baseUrl: TEST_CONFLUENCE_ORIGIN, token: '', remember: false });
+  assert.equal(once.status, 200); assert.equal(once.body.remembered, false); assert.equal(await credentialStore.load(), null);
+  await f.local('/local/session', { baseUrl: TEST_CONFLUENCE_ORIGIN, token: TEST_TOKEN, remember: true });
+  f.state.mode = 'unauthorized';
+  assert.equal((await f.api('/api/page?id=10')).body.code, 'AUTH_EXPIRED');
+  assert.equal(await credentialStore.load(), null); assert.equal((await f.api('/api/status')).body.connected, false);
+  const failed = await fixture(t, { httpsOrigins: [TEST_CONFLUENCE_ORIGIN], credentialStore: { load: async () => null, save: async () => { throw new Error(TEST_TOKEN); }, clear: async () => {} } });
+  const result = await failed.local('/local/session', { baseUrl: TEST_CONFLUENCE_ORIGIN, token: TEST_TOKEN, remember: true });
+  assert.equal(result.status, 500); assert.equal((await failed.api('/api/status')).body.connected, false);
+  assert.doesNotMatch(JSON.stringify(result.body), /test-only-not-a-real-token/);
+});
+
+test('forget during credential saving cancels authentication and removes the queued saved connection', async t => {
+  let release; let saving = false;
+  t.after(() => release?.());
+  const credentialStore = memoryCredentialStore(null, async () => { saving = true; await new Promise(resolve => { release = resolve; }); });
+  const f = await fixture(t, { credentialStore, httpsOrigins: [TEST_CONFLUENCE_ORIGIN] });
+  const connecting = f.local('/local/session', { baseUrl: TEST_CONFLUENCE_ORIGIN, token: TEST_TOKEN, remember: true });
+  await waitFor(() => saving);
+  const forgetting = f.local('/local/forget', {});
+  await waitFor(() => credentialStore.clearRequested);
+  release();
+  assert.equal((await connecting).body.code, 'SESSION_CHANGED');
+  assert.equal((await forgetting).status, 200);
+  assert.equal(await credentialStore.load(), null);
+  assert.equal((await f.api('/api/status')).body.connected, false);
+});
 
 test('space listing expands categories and preserves global/personal type without returning other metadata', async t => {
   const f = await fixture(t); await f.connect(); f.state.mode = 'space-metadata';

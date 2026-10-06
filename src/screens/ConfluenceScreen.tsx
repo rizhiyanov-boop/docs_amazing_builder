@@ -57,17 +57,21 @@ function navigationState(client: ConfluenceClient): NavigationState {
   return state;
 }
 
-function PageTree({ spaceKey, baseUrl, client, selectedId, onSelect }: {
+function PageTree({ spaceKey, baseUrl, client, selectedId, revealPage, onSelect }: {
   spaceKey: string; baseUrl: string; client: ConfluenceClient; selectedId?: string;
+  revealPage?: ConfluencePage;
   onSelect: (page: ConfluencePageSummary) => void;
 }): ReactNode {
   const [levels, setLevels] = useState<Record<string, TreeLevel>>({ root: { items: [], nextStart: null, loading: true } });
   const treeKey = `${baseUrl}/${spaceKey}`;
   const rememberedBranches = navigationState(client).branches;
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(rememberedBranches.get(treeKey)));
-  const lifetime = useRef({ active: true });
+  const lifetime = useRef({ active: true, pending: new Set<string>() });
+  const treeElement = useRef<HTMLDivElement>(null);
+  const selectedElement = useRef<HTMLButtonElement>(null);
+  const scrolledPage = useRef<ConfluencePage | undefined>(undefined);
   useEffect(() => {
-    const generation = { active: true };
+    const generation = { active: true, pending: new Set<string>() };
     lifetime.current = generation;
     client.getTree(spaceKey, undefined, 0, baseUrl).then(result => {
       if (generation.active) setLevels({ root: { ...result, loading: false } });
@@ -77,9 +81,11 @@ function PageTree({ spaceKey, baseUrl, client, selectedId, onSelect }: {
     return () => { generation.active = false; };
   }, [client, spaceKey, baseUrl]);
 
-  async function load(parentId?: string, start = 0) {
+  const load = useCallback(async (parentId?: string, start = 0) => {
     const key = parentId ?? 'root';
     const generation = lifetime.current;
+    if (!generation.active || generation.pending.has(key)) return;
+    generation.pending.add(key);
     setLevels(old => ({ ...old, [key]: { ...(old[key] ?? { items: [], nextStart: null }), loading: true, error: undefined } }));
     try {
       const result = await client.getTree(spaceKey, parentId, start, baseUrl);
@@ -90,8 +96,8 @@ function PageTree({ spaceKey, baseUrl, client, selectedId, onSelect }: {
       });
     } catch (error) {
       if (generation.active) setLevels(old => ({ ...old, [key]: { ...(old[key] ?? { items: [], nextStart: null }), loading: false, error: errorMessage(error) } }));
-    }
-  }
+    } finally { generation.pending.delete(key); }
+  }, [client, spaceKey, baseUrl]);
   function toggle(page: ConfluencePageSummary) {
     const open = !expanded.has(page.id);
     setExpanded(old => { const next = new Set(old); if (open) next.add(page.id); else next.delete(page.id); rememberedBranches.set(treeKey, next); return next; });
@@ -102,8 +108,40 @@ function PageTree({ spaceKey, baseUrl, client, selectedId, onSelect }: {
       for (const page of level.items) if (expanded.has(page.id) && !levels[page.id]) void load(page.id);
     }
     // Fetch remembered branches only as their parents become available.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [levels, expanded]);
+  }, [levels, expanded, load]);
+  useEffect(() => {
+    if (!revealPage) return;
+    scrolledPage.current = undefined;
+    setExpanded(old => {
+      const next = new Set(old);
+      for (const ancestor of revealPage.ancestors) next.add(ancestor.id);
+      rememberedBranches.set(treeKey, next);
+      return next;
+    });
+  }, [revealPage, rememberedBranches, treeKey]);
+  useEffect(() => {
+    if (!revealPage) return;
+    let parentId: string | undefined;
+    for (const page of [...revealPage.ancestors, revealPage]) {
+      const level = levels[parentId ?? 'root'];
+      if (!level || level.loading || level.error) return;
+      if (!level.items.some(item => item.id === page.id)) {
+        if (level.nextStart !== null) void load(parentId, level.nextStart);
+        return;
+      }
+      parentId = page.id;
+    }
+  }, [revealPage, levels, load]);
+  useEffect(() => {
+    const tree = treeElement.current;
+    const selected = selectedElement.current;
+    if (!revealPage || !tree || !selected || scrolledPage.current === revealPage) return;
+    const viewport = tree.getBoundingClientRect();
+    const row = selected.getBoundingClientRect();
+    if (row.top < viewport.top) tree.scrollTop += row.top - viewport.top;
+    else if (row.bottom > viewport.bottom) tree.scrollTop += row.bottom - viewport.bottom;
+    scrolledPage.current = revealPage;
+  }, [revealPage, levels, expanded]);
   function renderLevel(parentId?: string, path: string[] = []): ReactNode {
     const level = levels[parentId ?? 'root'];
     if (!level) return null;
@@ -111,7 +149,7 @@ function PageTree({ spaceKey, baseUrl, client, selectedId, onSelect }: {
       {level.items.filter(page => !path.includes(page.id)).map(page => <li key={page.id}>
         <div className="cf-tree-row">
           <button type="button" className="cf-tree-toggle" aria-label={`${expanded.has(page.id) ? 'Свернуть' : 'Раскрыть'} ${page.title}`} aria-expanded={expanded.has(page.id)} onClick={() => toggle(page)}>{expanded.has(page.id) ? '▾' : '▸'}</button>
-          <button type="button" className="cf-tree-select" aria-pressed={selectedId === page.id} onClick={() => onSelect(page)}>{page.title}</button>
+          <button ref={selectedId === page.id ? selectedElement : undefined} type="button" className="cf-tree-select" aria-pressed={selectedId === page.id} onClick={() => onSelect(page)}>{page.title}</button>
         </div>
         {expanded.has(page.id) && renderLevel(page.id, [...path, page.id])}
       </li>)}
@@ -121,7 +159,7 @@ function PageTree({ spaceKey, baseUrl, client, selectedId, onSelect }: {
       {level.nextStart !== null && !level.error && <li><WBButton size="sm" disabled={level.loading} onClick={() => void load(parentId, level.nextStart ?? 0)}>Загрузить ещё {parentId ? 'дочерние страницы' : 'корневые страницы'}</WBButton></li>}
     </ul>;
   }
-  return <div className="cf-tree" aria-label="Дерево доступных страниц Confluence">{renderLevel()}</div>;
+  return <div ref={treeElement} className="cf-tree" aria-label="Дерево доступных страниц Confluence">{renderLevel()}</div>;
 }
 
 export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, client = confluenceClient }: ConfluenceScreenProps): ReactNode {
@@ -145,6 +183,7 @@ export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, cl
   const [browsePage, setBrowsePage] = useState<ConfluencePage>();
   const [pageBusy, setPageBusy] = useState(false);
   const [link, setLink] = useState('');
+  const [revealTarget, setRevealTarget] = useState<{ tab: Tab; page: ConfluencePage }>();
   const [prepared, setPrepared] = useState<Prepared>();
   const [preparing, setPreparing] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -187,7 +226,7 @@ export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, cl
       currentOrigin.current = nextOrigin;
       if (changed) {
         pageSequence.current++; preparationSequence.current++;
-        setParent(undefined); setBoundPage(undefined); setBrowsePage(undefined);
+        setParent(undefined); setBoundPage(undefined); setBrowsePage(undefined); setRevealTarget(undefined);
         setPrepared(undefined); setResult(undefined); setConflict(false); setShowPreview(false);
         setPageBusy(false); setPreparing(false); setSpacesBusy(false); setLink(''); setRecoveryLink('');
         setSpaceKey(bindingBaseUrl === nextOrigin ? bindingSpaceKey ?? '' : '');
@@ -244,7 +283,7 @@ export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, cl
     return () => { active = false; };
   }, [client, connected, bindingMatches, boundPageId, baseUrl, mode, reportError]);
 
-  async function selectPage(id: string, context = tab) {
+  async function selectPage(id: string, context = tab, reveal = false) {
     if (!connected) return;
     const origin = baseUrl;
     const sequence = ++pageSequence.current;
@@ -253,19 +292,20 @@ export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, cl
       const page = await client.getPage(id, origin);
       if (!alive.current || sequence !== pageSequence.current || currentOrigin.current !== origin) return;
       rememberSpace(origin, page.spaceKey);
+      setRevealTarget(reveal ? { tab: context, page: { ...page } } : undefined);
       if (context === 'browse') { setBrowsePage(page); setBrowseSpaceKey(page.spaceKey); }
       else { setParent(page); setPrepared(undefined); setSpaceKey(page.spaceKey); }
     } catch (failure) { if (alive.current && sequence === pageSequence.current && currentOrigin.current === origin) reportError(failure); }
     finally { if (alive.current && sequence === pageSequence.current && currentOrigin.current === origin) setPageBusy(false); }
   }
   function changeSpace(value: string) {
-    pageSequence.current++; setPageBusy(false);
+    pageSequence.current++; setPageBusy(false); setRevealTarget(undefined);
     if (tab === 'browse') { setBrowsePage(undefined); setBrowseSpaceKey(value); }
     else { setSpaceKey(value); setParent(undefined); setPrepared(undefined); }
   }
   function createNew() {
     setMode('create'); setPrepared(undefined); setResult(undefined); setConflict(false);
-    setParent(undefined); setError(''); setTab('publish');
+    setParent(undefined); setRevealTarget(undefined); setError(''); setTab('publish');
   }
   async function preparePublication() {
     if (!connected || busy || unknown || !spaceKey) return;
@@ -401,11 +441,11 @@ export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, cl
         <WBButton size="sm" disabled={!activeSpaceKey || busy} onClick={() => setTreeRevision(old => old + 1)}>Обновить дерево</WBButton>
       </div>
       <p className="cf-muted">Раскройте раздел и выберите страницу. Загружаются только открытые ветви.</p>
-      {connected && activeSpaceKey && <PageTree key={`${baseUrl}:${tab}:${activeSpaceKey}:${treeRevision}`} baseUrl={baseUrl} spaceKey={activeSpaceKey} client={client} selectedId={tab === 'browse' ? browsePage?.id : parent?.id} onSelect={page => void selectPage(page.id)} />}
+      {connected && activeSpaceKey && <PageTree key={`${baseUrl}:${tab}:${activeSpaceKey}:${treeRevision}`} baseUrl={baseUrl} spaceKey={activeSpaceKey} client={client} selectedId={tab === 'browse' ? browsePage?.id : parent?.id} revealPage={revealTarget?.tab === tab && revealTarget.page.spaceKey === activeSpaceKey ? revealTarget.page : undefined} onSelect={page => void selectPage(page.id)} />}
       <details className="cf-link-entry"><summary>Перейти по ссылке на страницу</summary>
         <WBInput label="Ссылка Confluence" value={link} onChange={event => setLink(event.target.value)} />
         <WBButton size="sm" disabled={pageBusy || !link.trim()} onClick={() => {
-          try { void selectPage(confluencePageIdFromLink(link, baseUrl)); } catch (failure) { reportError(failure); }
+          try { void selectPage(confluencePageIdFromLink(link, baseUrl), tab, true); } catch (failure) { reportError(failure); }
         }}>Открыть страницу</WBButton>
       </details>
     </section>;

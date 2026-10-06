@@ -44,6 +44,36 @@ async function publishCreate(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('Confluence workbench screen', () => {
+  it.each(['publish', 'browse'] as const)('reveals a linked page through paginated ancestors in %s', async tab => {
+    const client = mockClient();
+    vi.mocked(client.getTree).mockImplementation(async (space, parentId, start = 0) => {
+      if (space !== 'PERSONAL') return { items: [{ id: '123', title: 'Раздел' }], nextStart: null };
+      const target = parentId === undefined ? { id: '700', title: 'Корневой раздел' }
+        : parentId === '700' ? { id: '701', title: 'Вложенный раздел' }
+        : { id: '702', title: 'Страница по ссылке' };
+      return { items: start === 0 ? [{ id: `other-${parentId ?? 'root'}`, title: 'Соседняя страница' }] : [target], nextStart: start === 0 ? 50 : null };
+    });
+    vi.mocked(client.getPage).mockResolvedValue({ ...page('702', 1, 'PERSONAL'), title: 'Страница по ссылке', ancestors: [{ id: '700', title: 'Корневой раздел' }, { id: '701', title: 'Вложенный раздел' }] });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const bottom = this.classList.contains('cf-tree') ? 100 : 300;
+      return { top: 0, bottom, left: 0, right: 100, width: 100, height: bottom, x: 0, y: 0, toJSON: () => ({}) };
+    });
+    const { user } = setup(client);
+    await screen.findByRole('button', { name: 'Раздел', exact: true });
+    if (tab === 'browse') await user.click(screen.getByRole('button', { name: 'Страницы', exact: true }));
+    await user.click(screen.getByText('Перейти по ссылке на страницу'));
+    await user.type(screen.getByRole('textbox', { name: 'Ссылка Confluence' }), `${baseUrl}/spaces/PERSONAL/pages/702/Example`);
+    await user.click(screen.getByRole('button', { name: 'Открыть страницу', exact: true }));
+    const selected = await screen.findByRole('button', { name: 'Страница по ссылке', exact: true });
+    expect(selected).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Свернуть Корневой раздел' })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: 'Свернуть Вложенный раздел' })).toHaveAttribute('aria-expanded', 'true');
+    await waitFor(() => expect(selected.closest('.cf-tree')?.scrollTop).toBe(200));
+    for (const parentId of [undefined, '700', '701']) expect(client.getTree).toHaveBeenCalledWith('PERSONAL', parentId, 50, baseUrl);
+    expect(client.getTree).not.toHaveBeenCalledWith('PERSONAL', '702', 0, baseUrl);
+    expect(client.publish).not.toHaveBeenCalled();
+  });
+
   it('loads roots without a search and loads children only on explicit expansion, with pagination', async () => {
     const { client, user, view } = setup();
     const setItem = vi.spyOn(Storage.prototype, 'setItem');

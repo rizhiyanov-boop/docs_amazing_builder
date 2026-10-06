@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ConfluenceClientError, type ConfluenceClient } from '../confluenceClient';
@@ -28,6 +28,19 @@ function mockClient(): ConfluenceClient {
     confirmOperation: vi.fn(async () => page('127'))
   };
 }
+it('shows selected parent content beside the new page form without preparing or writing', async () => {
+  const client = mockClient();
+  vi.mocked(client.getPage).mockResolvedValue({ ...page(), view: '<h2>Parent heading</h2><table><tbody><tr><td>Parent cell</td></tr></tbody></table>' });
+  const { user } = setup(client);
+  const preview = screen.getByRole('region', { name: 'Просмотр родительской страницы' });
+  expect(await within(preview).findByText(/Выберите страницу в дереве/)).toBeInTheDocument();
+  await user.click(await screen.findByRole('button', { name: 'Раздел', exact: true }));
+  expect(await within(preview).findByRole('heading', { name: 'Parent heading' })).toBeInTheDocument();
+  expect(within(preview).getByRole('cell', { name: 'Parent cell' })).toBeInTheDocument();
+  expect(screen.getByText('Новая страница будет создана внутри: Раздел')).toBeInTheDocument();
+  expect(client.prepare).not.toHaveBeenCalled();
+  expect(client.publish).not.toHaveBeenCalled();
+});
 function linkedMethod(): MethodDocument {
   return { ...method, confluence: { baseUrl, pageId: '126', spaceKey: 'TEST', lastPublishedVersion: 1, publishedAt: '2026-10-02T12:00:00Z', publishedFingerprint: renderConfluenceDocument(method).fingerprint } };
 }

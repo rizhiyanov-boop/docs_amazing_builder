@@ -16,6 +16,7 @@ export interface ConfluencePage extends ConfluencePageSummary {
   url: string;
   ancestors: ConfluencePageSummary[];
   storage?: string;
+  view?: string;
 }
 export interface ConfluenceStatus {
   connected: boolean;

@@ -456,6 +456,17 @@ test('manual recovery after journal loss verifies the supplied original snapshot
   assert.equal(f.state.writes, 0); assert.equal(f.state.requests.some(value => ['POST', 'PUT'].includes(value.method)), false);
 });
 
+test('page inspection returns Confluence view without publishing or following asset links', async t => {
+  const f = await fixture(t); await f.connect();
+  f.pages.get('10').body.view = { value: '<h2>Rendered parent</h2><img src="https://outside.example/image">', representation: 'view' };
+  const result = await f.api('/api/page?id=10');
+  assert.equal(result.status, 200);
+  assert.equal(result.body.view, f.pages.get('10').body.view.value);
+  assert.equal(f.state.requests.at(-1).expand, 'space,version,ancestors,body.storage,body.view');
+  assert.equal(f.state.writes, 0);
+  assert.ok(f.state.requests.every(request => !request.path.includes('image')));
+});
+
 test('uncertain native diagram publication is also blocked with newly generated macro ids', async t => {
   const f = await fixture(t); await f.connect(); f.state.mode = 'drop-write';
   const first = { ...createRequest(), storage: diagramMacro('mermaid', 'A --> B', 'first') };

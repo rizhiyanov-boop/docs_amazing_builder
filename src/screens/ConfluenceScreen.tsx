@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { WBButton, WBInput } from '../components/primitives/WorkbenchPrimitives';
 import { ConfluenceSpacePicker } from '../components/ConfluenceSpacePicker';
+import { ConfluencePagePreview } from '../components/ConfluencePagePreview';
 import { isPersonalSpace, loadConfluenceSpaces, rememberSpace } from '../confluenceSpaces';
 import {
   CONFLUENCE_BRIDGE_URL, ConfluenceClientError, confluenceClient,
@@ -288,6 +289,7 @@ export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, cl
     const origin = baseUrl;
     const sequence = ++pageSequence.current;
     setPageBusy(true); setError('');
+    if (context === 'publish') { setParent(undefined); setPrepared(undefined); }
     try {
       const page = await client.getPage(id, origin);
       if (!alive.current || sequence !== pageSequence.current || currentOrigin.current !== origin) return;
@@ -479,8 +481,9 @@ export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, cl
       {!result && !prepared && !unknown && <>
         {binding && <div className="cf-actions"><WBButton aria-pressed={mode === 'update'} disabled={busy || !connected || !bindingMatches} onClick={() => setMode('update')}>Обновить привязанную страницу</WBButton><WBButton aria-pressed={mode === 'create'} disabled={busy} onClick={createNew}>Опубликовать как новую страницу</WBButton></div>}
         {mode === 'create' ? <div className="cf-grid">{connected ? treeControls() : <p className="cf-muted">После подключения здесь появится дерево пространств.</p>}<section><h3>Новая страница</h3><WBInput label="Заголовок страницы" value={title} disabled={busy} onChange={event => setTitle(event.target.value)} />
-          <p className="cf-muted">Выберите родительскую страницу в дереве. Её содержимое останется без изменений.</p>
-        </section></div> : <section><h3>Обновление привязанной страницы</h3><p className="cf-destination">{binding?.baseUrl}<br />{!connected || !bindingMatches ? 'Подключите Confluence привязанной страницы или создайте отдельную страницу в текущем подключении.' : boundPage ? pagePath(boundPage) : 'Читаем актуальное название и путь…'}</p><p className="cf-notice">Документ DocBuilder заменит всё содержимое этой страницы. Версия проверяется перед записью.</p></section>}
+          <p className="cf-muted">{parent ? `Новая страница будет создана внутри: ${parent.title}` : 'Выберите родительскую страницу в дереве. Её содержимое останется без изменений.'}</p>
+          <ConfluencePagePreview page={parent} baseUrl={baseUrl} connected={connected} loading={pageBusy} />
+        </section></div> : <section><h3>Обновление привязанной страницы</h3><p className="cf-destination">{binding?.baseUrl}<br />{!connected || !bindingMatches ? 'Подключите Confluence привязанной страницы или создайте отдельную страницу в текущем подключении.' : boundPage ? pagePath(boundPage) : 'Читаем актуальное название и путь…'}</p><p className="cf-notice">Документ DocBuilder заменит всё содержимое этой страницы. Версия проверяется перед записью.</p><ConfluencePagePreview page={boundPage} baseUrl={baseUrl} connected={connected && Boolean(bindingMatches)} loading={connected && Boolean(bindingMatches) && !boundPage && !error} updating /></section>}
         <footer className="cf-footer"><WBButton variant="accent" disabled={!connected || busy || (mode === 'update' && !bindingMatches) || (mode === 'create' && (!title.trim() || !spaceKey || !parent))} onClick={() => void preparePublication()}>{preparing || publishing ? 'Публикация…' : 'Опубликовать'}</WBButton></footer>
       </>}
       {prepared && !result && <section><h3>{prepared.mode === 'update' ? 'Проверка обновления' : 'Проверка новой страницы'}</h3><p className="cf-destination">{prepared.baseUrl}<br />{shownPage ? pagePath(shownPage) : `${prepared.spaceKey} / Корень пространства`}<br />{prepared.mode === 'create' && <strong>{prepared.title}</strong>}</p>

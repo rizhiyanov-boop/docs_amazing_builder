@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 
-export const BRIDGE_VERSION = '1.2.3';
+export const BRIDGE_VERSION = '1.2.4';
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const MAX_TIMER_DELAY = 2_147_483_647;
 export const DEFAULT_ORIGINS = ['https://docsamazingbuilder.vercel.app', 'http://localhost:5173', 'http://127.0.0.1:5173'];
@@ -111,7 +111,8 @@ function summary(value, parentId = undefined) {
 function fullPage(value, baseUrl) {
   const page = summary(value);
   if (!isRecord(value.space) || typeof value.space.key !== 'string' || !Number.isSafeInteger(value.version?.number) || value.version.number < 1 || !Array.isArray(value.ancestors) || typeof value.body?.storage?.value !== 'string') throw new BridgeError(502, 'UPSTREAM_INVALID', 'Confluence вернул неполные данные страницы.');
-  return { ...page, spaceKey: value.space.key, version: value.version.number, url: `${baseUrl}/pages/viewpage.action?pageId=${page.id}`, ancestors: value.ancestors.map(value => summary(value)), storage: value.body.storage.value };
+  return { ...page, spaceKey: value.space.key, version: value.version.number, url: `${baseUrl}/pages/viewpage.action?pageId=${page.id}`, ancestors: value.ancestors.map(value => summary(value)), storage: value.body.storage.value,
+    ...(typeof value.body?.view?.value === 'string' ? { view: value.body.view.value } : {}) };
 }
 /** A complete successful POST/PUT response acknowledges the write without comparing rewritten storage. */
 function writeConfirmation(value, baseUrl) {
@@ -253,7 +254,7 @@ export function createBridge(options = {}) {
     } catch (error) { if (error instanceof BridgeError) throw error; throw new BridgeError(502, 'UPSTREAM_UNAVAILABLE', 'Не удалось завершить запрос к Confluence. Проверьте сеть и VPN.'); }
     finally { clearTimeout(timer); }
   }
-  const readPage = async (id, connection) => fullPage(await upstream(`/rest/api/content/${pageId(id)}?expand=space,version,ancestors,body.storage`, { connection }), connection.baseUrl);
+  const readPage = async (id, connection, withView = false) => fullPage(await upstream(`/rest/api/content/${pageId(id)}?expand=space,version,ancestors,body.storage${withView ? ',body.view' : ''}`, { connection }), connection.baseUrl);
   async function verifyConnection(connection, generation) {
     const identity = await upstream('/rest/api/user/current', { connection, authenticatingConnection: true });
     if (identity.type !== 'known') throw new BridgeError(401, 'AUTH_EXPIRED', 'Confluence не подтвердил авторизацию.');
@@ -523,7 +524,7 @@ export function createBridge(options = {}) {
         const path = parent === null ? `/rest/api/space/${encodeURIComponent(key)}/content/page?depth=root&expand=ancestors&start=${start}&limit=${limit}` : `/rest/api/content/${parent}/child/page?expand=ancestors&start=${start}&limit=${limit}`;
         send(200, collection(await upstream(path, { connection }), path, start, value => { if (parent === null && (!isRecord(value) || !Array.isArray(value.ancestors) || value.ancestors.length !== 0)) throw new BridgeError(502, 'UPSTREAM_INVALID', 'Confluence не подтвердил корневые страницы пространства.'); return summary(value, parent); }, connection)); return;
       }
-      if (url.pathname === '/api/page' && req.method === 'GET') { send(200, await readPage(pageId(url.searchParams.get('id')), connection)); return; }
+      if (url.pathname === '/api/page' && req.method === 'GET') { send(200, await readPage(pageId(url.searchParams.get('id')), connection, true)); return; }
       if (url.pathname === '/api/prepare' && req.method === 'POST') { send(200, await prepare(await readJsonBody(req), connection)); return; }
       if (url.pathname === '/api/publish' && req.method === 'POST') { send(200, await publish(await readJsonBody(req), connection)); return; }
       throw new BridgeError(404, 'NOT_FOUND', 'Маршрут не найден.');

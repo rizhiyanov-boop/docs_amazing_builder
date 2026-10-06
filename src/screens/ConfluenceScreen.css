@@ -44,5 +44,20 @@
 .cf-publication-state { color: var(--wb-accent); font-size: var(--font-size-xs); }
 .cf-content { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 30rem; overflow: auto; padding: var(--space-6); border: 1px solid var(--wb-border); border-radius: var(--wb-radius); background: var(--wb-bg-soft); font: inherit; line-height: 1.55; }
 .cf-check-list { padding-left: var(--space-7); line-height: 1.8; }
+.cf-page-preview { display: flex; flex-direction: column; min-height: 32rem; height: min(65vh, 44rem); overflow: hidden; border: 1px solid var(--wb-border); border-radius: var(--wb-radius); background: var(--wb-bg-surface); }
+.cf-preview-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-4) var(--space-6); border-bottom: 1px solid var(--wb-border); }
+.cf-preview-header a { font-size: var(--font-size-xs); }
+.cf-preview-meta { padding: var(--space-6); border-bottom: 1px solid var(--wb-border); overflow-wrap: anywhere; }
+.cf-preview-meta h3, .cf-preview-meta p { margin: 0; }
+.cf-preview-body { flex: 1; min-height: 0; overflow: auto; padding: var(--space-6); line-height: 1.55; overflow-wrap: anywhere; }
+.cf-preview-body table { border-collapse: collapse; width: 100%; }
+.cf-preview-body td, .cf-preview-body th { border: 1px solid var(--wb-border); padding: var(--space-2); vertical-align: top; }
+.cf-preview-body th { background: var(--wb-bg-soft); text-align: left; }
+.cf-preview-body pre { white-space: pre-wrap; background: var(--wb-bg-soft); padding: var(--space-4); font-family: var(--wb-font-mono); }
+.cf-preview-body ul, .cf-preview-body ol { padding-left: var(--space-7); }
+.cf-preview-body h1, .cf-preview-body h2 { font-size: var(--font-size-xl); }
+.cf-preview-empty { color: var(--wb-text-soft); padding: var(--space-8); margin: auto !important; text-align: center; }
+.cf-preview-unavailable { display: block; padding: var(--space-4); background: var(--wb-bg-soft); color: var(--wb-text-soft); }
+.cf-page-preview .cf-preview-note { margin: 0; padding: var(--space-4) var(--space-6); border-top: 1px solid var(--wb-border); }
 .cf-footer { display: flex; gap: var(--space-4); justify-content: flex-end; flex-wrap: wrap; margin-top: var(--space-8); padding-top: var(--space-6); border-top: 1px solid var(--wb-border); }
 @media (max-width: 760px) { .cf-screen { padding: var(--space-6); } .cf-grid { grid-template-columns: minmax(0, 1fr); } .cf-connection { max-width: 100%; justify-content: flex-start; } }

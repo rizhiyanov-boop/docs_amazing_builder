@@ -17,7 +17,7 @@ function fixture(options = {}) {
     else if (path.endsWith('/issue/OLD-3')) result = { fields: { project: { id: '101' } } };
     else if (path.endsWith('/field')) result = [{ id: 'customfield_10203', schema: { custom: 'com.pyxis.greenhopper.jira:gh-epic-link' } }];
     else if (path.includes('/createmeta/')) result = { total: 4, values: [{ fieldId: 'summary', required: true, name: 'Summary' }, { fieldId: 'reporter', required: true, hasDefaultValue: false, name: 'Reporter' }, { fieldId: 'customfield_10203', name: 'Epic Link' }, { fieldId: 'description', name: 'Description' }] };
-    else if (path.endsWith('/issue/DI-5')) result = { fields: { issuetype: { name: 'Epic' } } };
+    else if (path.endsWith('/issue/DI-5')) result = { fields: { issuetype: { name: 'Epic' }, project: { id: '101' } } };
     else if (path.endsWith('/issue') && init.method === 'POST') { postCount++; if (options.unknown) throw Error('network'); result = { id: '555', key: 'IN-17' }; }
     else if (path.endsWith('/remotelink')) { if (options.linkFailure) return new Response('{}', { status: 403 }); result = { id: 99 }; }
     else if (path.endsWith('/issue/IN-17')) result = { id: '555', fields: { project: { id: '101' }, issuetype: { id: '7' }, summary: 'Story', customfield_10203: 'DI-5' } };
@@ -69,6 +69,26 @@ test('missing User Story blocks task substitution; stale project blocks all requ
   assert.equal((await f.handle(f.jira, 'metadata')).story, null);
   await assert.rejects(f.create(f.jira), error => error.code === 'PROJECT_NOT_READY'); assert.equal(f.postCount(), 0);
   await assert.rejects(f.jira.handle('/api/jira/create', 'POST', new URLSearchParams(), {}, baseUrl, '999'), error => error.code === 'SESSION_CHANGED');
+});
+test('explicit Task mode uses project Task metadata, labels and priority; another project epic is rejected', async () => {
+  const f = fixture({ project: { ...project, issueTypes: [{ id: '1', name: 'Задача' }] }, respond: async (url) => {
+    if (new URL(url).pathname.includes('/createmeta/')) return Response.json({ values: [{ fieldId: 'summary', required: true, name: 'Summary' }, { fieldId: 'description' }, { fieldId: 'customfield_10203' }, { fieldId: 'labels' }, { fieldId: 'priority', allowedValues: [{ id: '3', name: 'Medium' }] }] });
+    if (new URL(url).pathname.endsWith('/issue/OTHER-1')) return Response.json({ fields: { issuetype: { name: 'Epic' }, project: { id: '999' } } });
+  } });
+  await f.connect();
+  const query = new URLSearchParams({ issueKind: 'task' });
+  assert.equal((await f.handle(f.jira, 'metadata', 'GET', null, query)).story.name, 'Задача');
+  const body = { methodId: 'task-method', issueKind: 'task', summary: 'Implement integration', description: 'Short description', epic: 'OTHER-1', labels: ['business', 'qaa'], priorityId: '3' };
+  await assert.rejects(f.handle(f.jira, 'create', 'POST', body), error => error.code === 'INVALID_REQUEST');
+  assert.equal(f.postCount(), 0);
+  const result = await f.handle(f.jira, 'create', 'POST', { ...body, epic: 'DI-5' });
+  assert.equal(result.state, 'success');
+  const fields = JSON.parse(f.calls.find(call => call.url === `${baseUrl}/rest/api/2/issue`).body).fields;
+  assert.deepEqual(fields.issuetype, { id: '1' }); assert.deepEqual(fields.labels, ['business', 'qaa']); assert.deepEqual(fields.priority, { id: '3' });
+  await f.handle(f.jira, 'create', 'POST', { ...body, epic: 'DI-5', issueKind: 'story' }); assert.equal(f.postCount(), 1);
+  await f.handle(f.jira, 'epics');
+  const search = new URL(f.calls.find(call => call.url.includes('/search?')).url);
+  assert.match(search.searchParams.get('jql'), /^project = 101 AND issuetype = Epic/);
 });
 test('remote link failure cannot cause a second issue creation', async () => {
   const f = fixture({ linkFailure: true }); await f.connect(); const result = await f.create(f.jira); assert.equal(result.state, 'success'); assert.equal(result.linkedUrl, null);

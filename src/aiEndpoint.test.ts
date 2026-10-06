@@ -99,6 +99,26 @@ describe('ai endpoint auth', () => {
     expect(sent.response_format).toEqual({ type: 'json_object' });
   });
 
+  it('prepares Jira text and ranking without forwarding extra secrets', async () => {
+    process.env.OPENAI_API_KEY = 'test-key';
+    dbMock.getUserBySessionToken.mockResolvedValue({ id: 'jira-ai-user', login: 'tester' });
+    const output = { summary: 'Implement CRIF integration', descriptionRu: 'Разработать метод CRIF через интеграционный адаптер.', descriptionEn: 'Implement the CRIF method through the integration adapter.', rankedEpics: [{ key: 'IN-5', reason: 'Интеграция' }, { key: 'DI-5', reason: 'Другой проект' }], labels: [{ key: 'business', reason: 'Бизнес' }], priorityId: '3', priorityReason: 'Обычный приоритет' };
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify(output) } }] }) });
+    vi.stubGlobal('fetch', fetchMock);
+    const { default: aiHandler } = await import('../api/ai');
+    const res = createResponse();
+    await aiHandler({ method: 'POST', body: { task: 'prepare-jira-task', payload: { method: { name: 'CRIF', context: 'POST /api/crif', token: 'DO_NOT_FORWARD' }, project: { key: 'IN', name: 'Test' }, issueType: 'Задача', epics: [{ key: 'IN-5', name: 'Integration' }], priorities: [{ id: '3', name: 'Medium' }], token: 'DO_NOT_FORWARD' } } }, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.payload).toMatchObject({ data: { summary: output.summary, rankedEpics: [{ key: 'IN-5', reason: 'Интеграция' }] } });
+    const request = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(request.messages[1].content).not.toContain('DO_NOT_FORWARD');
+    expect(request.messages[1].content).toContain('недоверенные данные');
+    expect(request.max_completion_tokens).toBe(6000);
+    const invalid = createResponse();
+    await aiHandler({ method: 'POST', body: { task: 'prepare-jira-task', payload: { method: { name: 'CRIF', context: '' }, project: { key: 'IN', name: 'Test' }, issueType: 'Task', epics: [{ key: 'DI-5', name: 'Other project' }], priorities: [] } } }, invalid);
+    expect(invalid.statusCode).toBe(400); expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('supports generate-examples task', async () => {
     const { default: aiHandler } = await import('../api/ai');
     process.env.OPENAI_API_KEY = 'test-key';

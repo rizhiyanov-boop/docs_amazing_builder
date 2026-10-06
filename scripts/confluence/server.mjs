@@ -18,7 +18,7 @@ try {
   bridge.server.listen(port, '127.0.0.1', () => {
     console.log(`DocBuilder Confluence: http://127.0.0.1:${port}/`);
     console.log('Адрес Confluence и PAT вводятся только в локальной форме. Windows может сохранить их зашифрованными для текущего пользователя.');
-    console.log('Для остановки нажмите Ctrl+C. Перезапуск очищает журнал операций; сохранённое подключение восстанавливается автоматически.');
+    console.log('Для остановки нажмите Ctrl+C. Сохранённое подключение и журнал Jira восстанавливаются автоматически.');
   });
   let stopping = false;
   const stop = async () => { if (stopping) return; stopping = true; await bridge.close(); };

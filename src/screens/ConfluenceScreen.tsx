@@ -3,6 +3,7 @@ import { WBButton, WBInput } from '../components/primitives/WorkbenchPrimitives'
 import { ConfluenceSpacePicker } from '../components/ConfluenceSpacePicker';
 import { ConfluencePagePreview } from '../components/ConfluencePagePreview';
 import { JiraPanel } from '../components/JiraPanel';
+import { jiraMethodContext } from '../jiraMethodContext';
 import { isPersonalSpace, loadConfluenceSpaces, rememberSpace } from '../confluenceSpaces';
 import {
   CONFLUENCE_BRIDGE_URL, ConfluenceClientError, confluenceClient,
@@ -19,6 +20,7 @@ import './ConfluenceScreen.css';
 export type ConfluenceScreenProps = {
   method: MethodDocument;
   onPublished: (methodId: string, binding: ConfluenceBinding) => void;
+  onJiraLinked?: (methodId: string, issueUrl: string) => void;
   onBack: () => void;
   onBusyChange?: (busy: boolean) => void;
   client?: ConfluenceClient;
@@ -164,7 +166,7 @@ function PageTree({ spaceKey, baseUrl, client, selectedId, revealPage, onSelect 
   return <div ref={treeElement} className="cf-tree" aria-label="Дерево доступных страниц Confluence">{renderLevel()}</div>;
 }
 
-export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, client = confluenceClient }: ConfluenceScreenProps): ReactNode {
+export function ConfluenceScreen({ method, onPublished, onJiraLinked, onBack, onBusyChange, client = confluenceClient }: ConfluenceScreenProps): ReactNode {
   const binding = method.confluence;
   const rememberedSpaces = navigationState(client).spaces;
   const bindingBaseUrl = binding?.baseUrl;
@@ -470,7 +472,7 @@ export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, cl
       <WBButton aria-pressed={tab === 'browse'} disabled={busy || Boolean(unknown)} onClick={() => { setTab('browse'); setTreeRevision(old => old + 1); }}>Страницы</WBButton>
       <WBButton aria-pressed={tab === 'jira'} disabled={busy || Boolean(unknown)} onClick={() => { setJiraVisited(true); setTab('jira'); }}>Jira</WBButton>
     </nav>
-    {jiraVisited && <div hidden={tab !== 'jira'}><JiraPanel key={method.id} methodId={method.id} methodName={method.name} confluenceUrl={binding ? confluencePageUrl(binding.pageId, binding.baseUrl) : undefined} onBusyChange={setJiraBusy} /></div>}
+    {jiraVisited && <div hidden={tab !== 'jira'}><JiraPanel key={method.id} methodId={method.id} methodName={method.name} methodContext={jiraMethodContext(method)} jiraTicket={method.jiraTicket} confluenceUrl={binding ? confluencePageUrl(binding.pageId, binding.baseUrl) : undefined} onBusyChange={setJiraBusy} onLinked={onJiraLinked} /></div>}
     {error && <p className="cf-notice cf-error" role="alert">{error}</p>}
     {!connected && !connectionBusy && tab !== 'jira' && <div className="cf-notice"><h3>Подключите Confluence</h3><p>Токен вводится в локальном приложении и передаётся только вашему Confluence. Проект сохраняется в DocBuilder как прежде.</p><p><a href="/docbuilder-confluence-local.zip" download>Скачать локальное приложение</a> · Распакуйте и запустите start-confluence.cmd.</p></div>}
     {connected && tab === 'browse' && <div className="cf-grid">{treeControls()}<section><h3>Просмотр страницы</h3>

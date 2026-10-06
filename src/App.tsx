@@ -7394,6 +7394,14 @@ export default function App() {
       : method));
   }, []);
 
+  const handleJiraLinked = useCallback((methodId: string, issueUrl: string) => {
+    setMethodsState((current) => current.map((method) => method.id === methodId && method.jiraTicket !== issueUrl
+      ? { ...method, jiraTicket: issueUrl, updatedAt: new Date().toISOString() }
+      : method));
+    // Metadata changes do not replace sections, so invalidate the cached Wiki explicitly.
+    wikiPreviewCacheRef.current = null;
+  }, []);
+
   const rememberWikiReturnTarget = useCallback(() => {
     if (tab === 'wiki') return;
     wikiReturnTargetRef.current = { tab, workspaceScope, isSidebarHidden };
@@ -8904,6 +8912,9 @@ export default function App() {
                     }
                   }}
                   onBusyChange={setConfluenceBusy}
+                  onJiraLinked={(methodId, issueUrl) => {
+                    if (confluenceWorkspaceRef.current === confluenceWorkspaceGeneration) handleJiraLinked(methodId, issueUrl);
+                  }}
                   onBack={() => setTab('editor')}
                 />
               )}

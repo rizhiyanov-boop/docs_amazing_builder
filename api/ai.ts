@@ -1,6 +1,7 @@
 import { getUserBySessionToken } from './_lib/db.js';
 import { getSessionToken } from './_lib/http.js';
 import { openAiCompletionOptions, resolveOpenAiModel } from './_lib/aiModel.js';
+import { buildJiraDraftPrompt, normalizeJiraDraft, normalizeJiraDraftInput } from '../src/jiraDraft.js';
 
 type VercelRequest = {
   method?: string;
@@ -18,7 +19,7 @@ type VercelResponse = {
   setHeader: (name: string, value: string) => void;
 };
 
-type RequestTask = 'repair-json' | 'fill-descriptions' | 'generate-examples' | 'suggest-mappings' | 'mask-fields' | 'build-validation-rules';
+type RequestTask = 'repair-json' | 'fill-descriptions' | 'generate-examples' | 'suggest-mappings' | 'mask-fields' | 'build-validation-rules' | 'prepare-jira-task';
 
 type RequestBody = {
   task?: RequestTask;
@@ -109,7 +110,7 @@ function isAbortError(error: unknown): boolean {
 }
 
 function getMaxOutputTokens(task: RequestTask): number {
-  const fallback = task === 'build-validation-rules'
+  const fallback = task === 'build-validation-rules' || task === 'prepare-jira-task'
     ? DEFAULT_VALIDATION_RULES_MAX_OUTPUT_TOKENS
     : DEFAULT_OPENAI_MAX_OUTPUT_TOKENS;
   return readPositiveIntegerEnv('OPENAI_MAX_OUTPUT_TOKENS', fallback, 12_000);
@@ -164,6 +165,10 @@ function getManualContext(payload: Record<string, unknown>): string {
 }
 
 function normalizePayloadForTask(task: RequestTask, payload: Record<string, unknown>): Record<string, unknown> {
+  if (task === 'prepare-jira-task') {
+    try { return normalizeJiraDraftInput(payload); }
+    catch (error) { throw new AiBadRequestError(error instanceof Error ? error.message : 'Некорректные данные Jira.'); }
+  }
   if (task !== 'fill-descriptions') {
     const next = { ...payload };
     delete next.manualContext;
@@ -191,6 +196,7 @@ function extractJsonObject(raw: string): unknown {
 }
 
 function buildTaskPrompt(task: RequestTask, payload: Record<string, unknown>): string {
+  if (task === 'prepare-jira-task') return buildJiraDraftPrompt(normalizeJiraDraftInput(payload));
   if (task === 'repair-json') {
     return [
       'Ты исправляешь только синтаксис JSON.',
@@ -494,7 +500,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       provider: 'openai',
       model: resolveOpenAiModel(process.env.OPENAI_MODEL),
       message: 'Use POST with JSON body: { task, payload }',
-      tasks: ['repair-json', 'fill-descriptions', 'generate-examples', 'suggest-mappings', 'mask-fields', 'build-validation-rules']
+      tasks: ['repair-json', 'fill-descriptions', 'generate-examples', 'suggest-mappings', 'mask-fields', 'build-validation-rules', 'prepare-jira-task']
     });
     return;
   }
@@ -509,7 +515,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const task = body.task;
     const payload = body.payload ?? {};
 
-    if (!task || !['repair-json', 'fill-descriptions', 'generate-examples', 'suggest-mappings', 'mask-fields', 'build-validation-rules'].includes(task)) {
+    if (!task || !['repair-json', 'fill-descriptions', 'generate-examples', 'suggest-mappings', 'mask-fields', 'build-validation-rules', 'prepare-jira-task'].includes(task)) {
       res.status(400).json({ error: 'Некорректный task' });
       return;
     }
@@ -518,6 +524,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     checkAiRateLimit(user.id);
     const prompt = buildTaskPrompt(task, normalizedPayload);
     const raw = await callOpenAi(task, prompt);
+
+    if (task === 'prepare-jira-task') {
+      res.status(200).json({ data: normalizeJiraDraft(raw, normalizeJiraDraftInput(normalizedPayload)) });
+      return;
+    }
 
     if (task === 'repair-json') {
       res.status(200).json({ data: normalizeRepairJsonResult(raw) });

@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { TabPill, TabsPill, WBButton } from '../components/primitives/WorkbenchPrimitives';
 import type { ProjectExportDetailMode } from '../projectExport';
+import { renderWikiPreviewInline, splitWikiPreviewRow } from '../wikiPreviewLinks';
 
 type WikiScreenProps = {
   wiki: string;
@@ -56,8 +57,8 @@ function renderWiki(wiki: string): string {
         output.push('<table><tbody>');
         tableOpen = true;
       }
-      const cols = line.split('|').filter(Boolean);
-      output.push(`<tr>${cols.map((col) => `<td>${escapeHtml(col.trim())}</td>`).join('')}</tr>`);
+      const cols = splitWikiPreviewRow(line);
+      output.push(`<tr>${cols.map((col) => `<td>${renderWikiPreviewInline(col.trim())}</td>`).join('')}</tr>`);
       continue;
     }
 

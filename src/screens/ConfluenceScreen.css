@@ -62,4 +62,18 @@
 .cf-footer { display: flex; gap: var(--space-4); justify-content: flex-end; flex-wrap: wrap; margin-top: var(--space-8); padding-top: var(--space-6); border-top: 1px solid var(--wb-border); }
 .cf-jira-description { padding: var(--space-4); background: var(--wb-bg-soft); color: var(--wb-text); border: 1px solid var(--wb-border); border-radius: var(--wb-radius); font: inherit; resize: vertical; }
 .cf-jira-panel .cf-field + .cf-field { margin-top: var(--space-6); }
+.cf-jira-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-6); margin: var(--space-6) 0; }
+.cf-jira-toolbar .cf-field { min-width: 12rem; }
+.cf-jira-search { display: flex; align-items: flex-end; gap: var(--space-2); margin-bottom: var(--space-6); }
+.cf-jira-search > label { flex: 1; min-width: 0; }
+.cf-jira-description { min-width: 0; width: 100%; }
+.cf-jira-labels { margin: var(--space-6) 0; }
+.cf-jira-labels .cf-actions { margin: var(--space-2) 0; }
+.cf-jira-labels button[aria-pressed="true"] { background: var(--wb-bg-active) !important; border-color: var(--wb-accent) !important; }
+.cf-jira-labels summary { cursor: pointer; color: var(--wb-accent); }
+.cf-jira-tag-list { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-2); margin: var(--space-4) 0; }
+.cf-jira-tag { display: flex; align-items: flex-start; gap: var(--space-2); padding: var(--space-2); border: 1px solid var(--wb-border); border-radius: var(--wb-radius-sm); overflow-wrap: anywhere; }
+.cf-jira-tag span.cf-muted { display: block; }
+.cf-jira-panel .cf-footer { align-items: center; justify-content: space-between; }
+@media (max-width: 760px) { .cf-jira-tag-list { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 760px) { .cf-screen { padding: var(--space-6); } .cf-grid { grid-template-columns: minmax(0, 1fr); } .cf-connection { max-width: 100%; justify-content: flex-start; } }

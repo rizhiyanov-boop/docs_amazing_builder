@@ -1,4 +1,5 @@
 import type { ValidationRuleRow } from './types';
+import { normalizeJiraDraft, normalizeJiraDraftInput, type JiraDraft, type JiraDraftInput } from './jiraDraft';
 
 type RepairJsonResponse = {
   fixedJson: string;
@@ -45,7 +46,7 @@ type BuildValidationRulesResponse = {
   rules: ValidationRuleRow[];
 };
 
-type ApiTask = 'repair-json' | 'fill-descriptions' | 'generate-examples' | 'suggest-mappings' | 'mask-fields' | 'build-validation-rules';
+type ApiTask = 'repair-json' | 'fill-descriptions' | 'generate-examples' | 'suggest-mappings' | 'mask-fields' | 'build-validation-rules' | 'prepare-jira-task';
 
 type ApiRequestBody = {
   task: ApiTask;
@@ -54,6 +55,11 @@ type ApiRequestBody = {
 
 const AI_API_CANDIDATES = ['/api/ai', '/api/openrouter'];
 const AI_REQUEST_TIMEOUT_MS = 90_000;
+
+export async function prepareJiraTaskWithAi(payload: JiraDraftInput): Promise<JiraDraft> {
+  const input = normalizeJiraDraftInput(payload);
+  return normalizeJiraDraft(await callAiApi<unknown>('prepare-jira-task', input), input);
+}
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';

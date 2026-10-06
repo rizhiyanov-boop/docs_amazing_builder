@@ -624,6 +624,12 @@ function renderErrorsSection(section: ErrorsSection): string[] {
 }
 
 function renderWikiTemplateIntro(meta: WikiRenderMeta): string[] {
+  let jiraCell = toWikiCell(meta.jiraTicket ?? '');
+  try {
+    const link = new URL(meta.jiraTicket?.trim() ?? '');
+    const key = link.pathname.match(/^\/browse\/([A-Z][A-Z0-9_]*-[1-9]\d*)\/?$/)?.[1];
+    if (link.protocol === 'https:' && !link.username && !link.password && key && !link.search && !link.hash) jiraCell = `[${key}|${link.href}]`;
+  } catch { /* Existing plain Jira keys retain their export format. */ }
   const methodCell = meta.httpMethod && meta.path
     ? toWikiCell(`${meta.httpMethod} ${meta.path}`)
     : meta.httpMethod
@@ -635,7 +641,7 @@ function renderWikiTemplateIntro(meta: WikiRenderMeta): string[] {
 
   const historyTable = wrapWikiTable([
     '||Версия||Описание||Исполнитель||Дата||Jira||',
-    `|v.1|Создание документа|${toWikiCell(meta.responsible ?? '')}|${dateCell}|${toWikiCell(meta.jiraTicket ?? '')}|`
+    `|v.1|Создание документа|${toWikiCell(meta.responsible ?? '')}|${dateCell}|${jiraCell}|`
   ]);
 
   const taskTable = wrapWikiTable([

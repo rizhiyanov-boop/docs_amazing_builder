@@ -359,7 +359,10 @@ function normalizeExamplesResult(raw: unknown): { examples: Array<{ field: strin
   const value = raw as { examples?: Array<{ field?: unknown; example?: unknown }> };
   const examples = Array.isArray(value.examples)
     ? value.examples
-      .filter((row) => typeof row?.field === 'string' && typeof row?.example === 'string')
+      .filter((row) => typeof row?.field === 'string' && (
+        typeof row?.example === 'string' || typeof row?.example === 'boolean'
+        || (typeof row?.example === 'number' && Number.isFinite(row.example))
+      ))
       .map((row) => ({ field: String(row.field).trim(), example: String(row.example).trim() }))
       .filter((row) => row.field && row.example)
     : [];

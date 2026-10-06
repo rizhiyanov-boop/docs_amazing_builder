@@ -134,6 +134,23 @@ describe('ai endpoint auth', () => {
     });
   });
 
+  it('preserves numeric and boolean examples returned by the model as strings', async () => {
+    process.env.OPENAI_API_KEY = 'test-key';
+    dbMock.getUserBySessionToken.mockResolvedValue({ id: 'u_1', login: 'tester' });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify({ examples: [
+      { field: 'amount', example: 12500.5 }, { field: 'count', example: 0 }, { field: 'active', example: false },
+      { field: 'name', example: 'Test' }, { field: 'metadata', example: {} }, { field: 'missing', example: null }
+    ] }) } }] }) }));
+    const { default: aiHandler } = await import('../api/ai');
+    const res = createResponse();
+    await aiHandler({ method: 'POST', body: { task: 'generate-examples', payload: { sectionType: 'request', rows: [] } } }, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.payload).toEqual({ data: { examples: [
+      { field: 'amount', example: '12500.5' }, { field: 'count', example: '0' },
+      { field: 'active', example: 'false' }, { field: 'name', example: 'Test' }
+    ] } });
+  });
+
   it('wraps fill-description manual context as untrusted prompt material', async () => {
     const { default: aiHandler } = await import('../api/ai');
     process.env.OPENAI_API_KEY = 'test-key';

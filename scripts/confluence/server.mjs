@@ -12,7 +12,7 @@ function argumentsForBridge(args) {
 }
 try {
   if (Number(process.versions.node.split('.')[0]) < 22) throw new Error('Нужен Node.js 22 или новее.');
-  const { origins, port } = argumentsForBridge(process.argv.slice(2)); const bridge = createBridge({ origins, credentialStore: createWindowsCredentialStore() });
+  const { origins, port } = argumentsForBridge(process.argv.slice(2)); const bridge = createBridge({ origins, credentialStore: createWindowsCredentialStore(), jiraCredentialStore: createWindowsCredentialStore({ service: 'Jira' }) });
   bridge.server.on('error', error => { console.error(error.code === 'EADDRINUSE' ? `Порт ${port} занят. Закройте предыдущий сервис или задайте --port.` : 'Не удалось запустить локальный сервис.'); process.exitCode = 1; });
   await bridge.restoreConnection();
   bridge.server.listen(port, '127.0.0.1', () => {

@@ -1,7 +1,9 @@
 import http from 'node:http';
+import { createJira, JiraError } from './jira.mjs';
+import { jiraForm } from './jira-form.mjs';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 
-export const BRIDGE_VERSION = '1.2.4';
+export const BRIDGE_VERSION = '1.3.0';
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const MAX_TIMER_DELAY = 2_147_483_647;
 export const DEFAULT_ORIGINS = ['https://docsamazingbuilder.vercel.app', 'http://localhost:5173', 'http://127.0.0.1:5173'];
@@ -140,10 +142,10 @@ async function readJsonBody(req) {
   try { return requireRecord(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
   catch (error) { if (error instanceof BridgeError) throw error; throw invalid('Некорректный JSON.'); }
 }
-function connectionHtml(nonce, origin, connection, preferences) {
+function connectionHtml(nonce, origin, connection, preferences, jira) {
   const cspNonce = randomBytes(24).toString('base64');
   const escapeHtml = value => value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
-  const html = `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DocBuilder — подключение Confluence</title>
+  let html = `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DocBuilder — подключение Confluence и Jira</title>
 <style nonce="${cspNonce}">body{margin:48px auto;padding:0 24px;max-width:720px;font:16px/1.6 system-ui;color:#292e35;background:#f9f8f6}h1{font-size:28px}label{display:block;margin-top:24px}input{box-sizing:border-box;width:100%;padding:12px;font:inherit;border:1px solid #c7c4be;border-radius:8px}input[type=checkbox]{width:auto;margin-right:8px}button{margin:16px 12px 0 0;padding:10px 16px;font:inherit;border:1px solid #b9b2a7;border-radius:8px;background:#fff;cursor:pointer}button[type=submit]{background:#255b51;color:#fff;border-color:#255b51}.note{color:#5e6470}#status{padding:16px;background:#fff;border-radius:8px;overflow-wrap:anywhere}</style></head>
 <body><h1>Подключение Confluence</h1><p class="note">Локальный сервис · версия ${BRIDGE_VERSION}</p><p>Введите адрес своего Confluence. Токен отправляется только этому локальному сервису и на указанный HTTPS адрес. DocBuilder получает состояние подключения, дерево и страницы; токен в него не передаётся.</p>
 <p class="note">Сессия действует 30 дней после последнего успешного обращения к Confluence. Сохранённое подключение восстанавливается после перезапуска сервиса. «Забыть токен» удаляет подключение из памяти и с этого компьютера. Дерево страниц не сохраняется.</p>
@@ -156,6 +158,7 @@ function connectionHtml(nonce, origin, connection, preferences) {
 const form=document.getElementById('form');const baseUrl=document.getElementById('base-url');const pat=document.getElementById('pat');const remember=document.getElementById('remember');const status=document.getElementById('status');const connect=document.getElementById('connect');const forget=document.getElementById('forget');
 async function request(path,body){connect.disabled=forget.disabled=true;status.textContent='Проверяем подключение…';try{const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-DocBuilder-Local-Nonce':nonce},body:JSON.stringify(body),credentials:'omit',cache:'no-store'});const result=await response.json();if(response.ok)pat.required=!result.remembered;status.textContent=response.ok?(result.connected?'Подключено. Сессия до '+result.expiresAt+'.'+(result.remembered?' Подключение сохранено на этом компьютере.':' Подключение хранится только в памяти.'):'Подключение удалено из памяти и с этого компьютера.'):(result.message||'Не удалось подключиться.');}catch{status.textContent='Локальный сервис недоступен. Откройте его повторно.';}finally{connect.disabled=forget.disabled=false;}}
 form.addEventListener('submit',event=>{event.preventDefault();const token=pat.value;pat.value='';request('/local/session',{baseUrl:baseUrl.value.trim(),token,remember:remember.checked});});forget.addEventListener('click',()=>{pat.value='';baseUrl.value='';request('/local/forget',{});});</script></body></html>`;
+  html = html.replace('</body>', `${jiraForm(cspNonce, jira)}</body>`);
   return { html, csp: `default-src 'none'; script-src 'nonce-${cspNonce}'; style-src 'nonce-${cspNonce}'; connect-src ${origin}; form-action 'self'; frame-ancestors 'none'; base-uri 'none'` };
 }
 
@@ -178,6 +181,7 @@ export function createBridge(options = {}) {
   for (const origin of options.origins ?? []) origins.add(validateAdditionalOrigin(origin));
   const nonce = randomBytes(32).toString('hex');
   const credentialStore = options.credentialStore ?? null;
+  const jira = createJira({ store: options.jiraCredentialStore, fetchImpl, now, timeoutMs });
   const operations = new Map();
   const operationByDocument = new Map();
   let session = null;
@@ -427,13 +431,15 @@ export function createBridge(options = {}) {
       }
       if (url.pathname === '/' && req.method === 'GET') {
         if (origin && origin !== localOrigin) throw new BridgeError(403, 'ORIGIN_DENIED', 'Откройте форму напрямую на локальном адресе.');
-        const current = activeSession(); const page = connectionHtml(nonce, localOrigin, current, { available: Boolean(credentialStore), remembered, baseUrl: lastBaseUrl, message: persistenceMessage });
+        const current = activeSession(); const page = connectionHtml(nonce, localOrigin, current, { available: Boolean(credentialStore), remembered, baseUrl: lastBaseUrl, message: persistenceMessage }, jira.status());
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': page.csp, 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff' }); res.end(page.html); return;
       }
       if (url.pathname.startsWith('/local/')) {
         if (origin !== localOrigin || !safeEqual(req.headers['x-docbuilder-local-nonce'], nonce)) throw new BridgeError(403, 'CSRF_DENIED', 'Запрос должен исходить из локальной формы подключения.');
         if (req.method !== 'POST') throw new BridgeError(405, 'METHOD_NOT_ALLOWED', 'Метод не поддерживается.');
         const body = await readJsonBody(req);
+        if (url.pathname === '/local/jira/session') { send(200, await jira.connect(body)); return; }
+        if (url.pathname === '/local/jira/forget') { send(200, await jira.forget()); return; }
         if (url.pathname === '/local/forget') {
           forgetSession(); lastBaseUrl = ''; persistenceMessage = '';
           try { await clearSavedConnection(); }
@@ -476,13 +482,14 @@ export function createBridge(options = {}) {
       if (req.method === 'OPTIONS') {
         if (!['GET', 'POST'].includes(req.headers['access-control-request-method'])) throw new BridgeError(405, 'METHOD_NOT_ALLOWED', 'Метод не поддерживается.');
         const headers = String(req.headers['access-control-request-headers'] ?? '').toLowerCase().split(',').map(value => value.trim()).filter(Boolean);
-        if (headers.some(value => !['content-type', 'x-docbuilder-request', 'x-docbuilder-confluence-origin'].includes(value))) throw new BridgeError(403, 'CSRF_DENIED', 'Заголовок не разрешён.');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST'); res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-DocBuilder-Request, X-DocBuilder-Confluence-Origin');
+        if (headers.some(value => !['content-type', 'x-docbuilder-request', 'x-docbuilder-confluence-origin', 'x-docbuilder-jira-origin', 'x-docbuilder-jira-project'].includes(value))) throw new BridgeError(403, 'CSRF_DENIED', 'Заголовок не разрешён.');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST'); res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-DocBuilder-Request, X-DocBuilder-Confluence-Origin, X-DocBuilder-Jira-Origin, X-DocBuilder-Jira-Project');
         if (req.headers['access-control-request-private-network'] === 'true') res.setHeader('Access-Control-Allow-Private-Network', 'true');
         res.writeHead(204, { 'Cache-Control': 'no-store' }); res.end(); return;
       }
       if (req.headers['x-docbuilder-request'] !== '1') throw new BridgeError(403, 'CSRF_DENIED', 'Нужен заголовок запроса DocBuilder.');
       if (url.pathname === '/api/status' && req.method === 'GET') { send(200, status()); return; }
+      if (url.pathname.startsWith('/api/jira/')) { send(200, await jira.handle(url.pathname, req.method, url.searchParams, req.method === 'POST' ? await readJsonBody(req) : null, req.headers['x-docbuilder-jira-origin'], req.headers['x-docbuilder-jira-project'])); return; }
       const connection = requiredConnection(req.headers['x-docbuilder-confluence-origin']);
       if (url.pathname === '/api/operation' && req.method === 'GET') {
         const id = text(url.searchParams.get('id'), 128, 'id'); const operation = operations.get(id);
@@ -529,11 +536,11 @@ export function createBridge(options = {}) {
       if (url.pathname === '/api/publish' && req.method === 'POST') { send(200, await publish(await readJsonBody(req), connection)); return; }
       throw new BridgeError(404, 'NOT_FOUND', 'Маршрут не найден.');
     } catch (error) {
-      const failure = error instanceof BridgeError ? error : new BridgeError(500, 'LOCAL_FAILURE', 'Локальный сервис не завершил запрос.');
+      const failure = error instanceof BridgeError || error instanceof JiraError ? error : new BridgeError(500, 'LOCAL_FAILURE', 'Локальный сервис не завершил запрос.');
       if (!res.writableEnded) send(failure.status, { code: failure.code, message: failure.message, ...failure.details });
     }
   });
   server.requestTimeout = 30_000; server.headersTimeout = 10_000; server.maxHeadersCount = 32;
-  server.on('close', () => { forgetSession(); operations.clear(); operationByDocument.clear(); });
-  return { server, restoreConnection, close: () => new Promise((resolve, reject) => { forgetSession(); server.close(error => error ? reject(error) : resolve()); server.closeIdleConnections(); }) };
+  server.on('close', () => { forgetSession(); jira.close(); operations.clear(); operationByDocument.clear(); });
+  return { server, restoreConnection: async () => { await restoreConnection(); await jira.restore(); }, close: () => new Promise((resolve, reject) => { forgetSession(); jira.close(); server.close(error => error ? reject(error) : resolve()); server.closeIdleConnections(); }) };
 }

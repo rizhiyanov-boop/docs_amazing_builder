@@ -60,4 +60,6 @@
 .cf-preview-unavailable { display: block; padding: var(--space-4); background: var(--wb-bg-soft); color: var(--wb-text-soft); }
 .cf-page-preview .cf-preview-note { margin: 0; padding: var(--space-4) var(--space-6); border-top: 1px solid var(--wb-border); }
 .cf-footer { display: flex; gap: var(--space-4); justify-content: flex-end; flex-wrap: wrap; margin-top: var(--space-8); padding-top: var(--space-6); border-top: 1px solid var(--wb-border); }
+.cf-jira-description { padding: var(--space-4); background: var(--wb-bg-soft); color: var(--wb-text); border: 1px solid var(--wb-border); border-radius: var(--wb-radius); font: inherit; resize: vertical; }
+.cf-jira-panel .cf-field + .cf-field { margin-top: var(--space-6); }
 @media (max-width: 760px) { .cf-screen { padding: var(--space-6); } .cf-grid { grid-template-columns: minmax(0, 1fr); } .cf-connection { max-width: 100%; justify-content: flex-start; } }

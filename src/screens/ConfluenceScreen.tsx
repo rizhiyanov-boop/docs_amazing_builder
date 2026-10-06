@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { WBButton, WBInput } from '../components/primitives/WorkbenchPrimitives';
 import { ConfluenceSpacePicker } from '../components/ConfluenceSpacePicker';
 import { ConfluencePagePreview } from '../components/ConfluencePagePreview';
+import { JiraPanel } from '../components/JiraPanel';
 import { isPersonalSpace, loadConfluenceSpaces, rememberSpace } from '../confluenceSpaces';
 import {
   CONFLUENCE_BRIDGE_URL, ConfluenceClientError, confluenceClient,
@@ -22,7 +23,7 @@ export type ConfluenceScreenProps = {
   onBusyChange?: (busy: boolean) => void;
   client?: ConfluenceClient;
 };
-type Tab = 'publish' | 'browse';
+type Tab = 'publish' | 'browse' | 'jira';
 type TreeLevel = ConfluenceCollection<ConfluencePageSummary> & { loading: boolean; error?: string };
 type Prepared = {
   document: ConfluenceDocument; storage: string; methodId: string; mode: 'create' | 'update';
@@ -170,6 +171,7 @@ export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, cl
   const bindingSpaceKey = binding?.spaceKey;
   const document = useMemo(() => renderConfluenceDocument(method), [method]);
   const [tab, setTab] = useState<Tab>('publish');
+  const [jiraVisited, setJiraVisited] = useState(false);
   const [status, setStatus] = useState<ConfluenceStatus | null>(null);
   const [connectionBusy, setConnectionBusy] = useState(true);
   const [spaces, setSpaces] = useState<ConfluenceCollection<ConfluenceSpace>>({ items: [], nextStart: null });
@@ -188,6 +190,7 @@ export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, cl
   const [prepared, setPrepared] = useState<Prepared>();
   const [preparing, setPreparing] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [jiraBusy, setJiraBusy] = useState(false);
   const [result, setResult] = useState<{ page: ConfluencePage; fingerprint: string; baseUrl: string }>();
   const [conflict, setConflict] = useState(false);
   const [unknown, setUnknown] = useState<Attempt>();
@@ -206,11 +209,11 @@ export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, cl
   const connected = status?.connected === true && Boolean(baseUrl);
   const bindingMatches = binding?.baseUrl === baseUrl;
   const unknownMatches = connected && unknown?.prepared.baseUrl === baseUrl;
-  const busy = preparing || publishing || pageBusy;
+  const busy = preparing || publishing || pageBusy || jiraBusy;
   const activeSpaceKey = tab === 'browse' ? browseSpaceKey : spaceKey;
   const boundPageId = binding?.pageId;
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
-  useEffect(() => { onBusyChange?.(publishing || Boolean(unknown)); }, [onBusyChange, publishing, unknown]);
+  useEffect(() => { onBusyChange?.(publishing || jiraBusy || Boolean(unknown)); }, [onBusyChange, publishing, jiraBusy, unknown]);
   useEffect(() => () => onBusyChange?.(false), [onBusyChange]);
 
   const reportError = useCallback((failure: unknown) => {
@@ -455,7 +458,7 @@ export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, cl
 
   return <section className="cf-screen" aria-label="Confluence">
     <header className="cf-header">
-      <div><button type="button" className="cf-back" aria-label="Назад в редактор" title="Назад в редактор" onClick={onBack} disabled={publishing || Boolean(unknown)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5m7-7-7 7 7 7" /></svg></button><h2>Confluence</h2><p className="cf-muted">{method.name}</p></div>
+      <div><button type="button" className="cf-back" aria-label="Назад в редактор" title="Назад в редактор" onClick={onBack} disabled={publishing || jiraBusy || Boolean(unknown)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5m7-7-7 7 7 7" /></svg></button><h2>Confluence</h2><p className="cf-muted">{method.name}</p></div>
       <div className="cf-connection"><span className={`cf-status ${connected ? 'cf-status-active' : ''}`} role="status" aria-label={connectionBusy ? 'Проверка подключения' : connected ? 'Локальное подключение активно' : 'Нет подключения'} title={connectionBusy ? 'Проверка подключения…' : connected ? 'Локальное подключение активно' : 'Нет подключения'}>●</span>{status?.user && <span className="cf-muted">{status.user}</span>}
         {connected && <span className="cf-muted">{baseUrl}</span>}
         {!connected && !connectionBusy && <a href={`${CONFLUENCE_BRIDGE_URL}/`} target="_blank" rel="noopener noreferrer">Открыть локальное подключение</a>}
@@ -463,11 +466,13 @@ export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, cl
       </div>
     </header>
     <nav className="cf-tabs" aria-label="Действия Confluence">
-      <WBButton aria-pressed={tab === 'publish'} disabled={publishing || Boolean(unknown)} onClick={() => { setTab('publish'); setTreeRevision(old => old + 1); }}>Публикация</WBButton>
+      <WBButton aria-pressed={tab === 'publish'} disabled={publishing || jiraBusy || Boolean(unknown)} onClick={() => { setTab('publish'); setTreeRevision(old => old + 1); }}>Публикация</WBButton>
       <WBButton aria-pressed={tab === 'browse'} disabled={busy || Boolean(unknown)} onClick={() => { setTab('browse'); setTreeRevision(old => old + 1); }}>Страницы</WBButton>
+      <WBButton aria-pressed={tab === 'jira'} disabled={busy || Boolean(unknown)} onClick={() => { setJiraVisited(true); setTab('jira'); }}>Jira</WBButton>
     </nav>
+    {jiraVisited && <div hidden={tab !== 'jira'}><JiraPanel key={method.id} methodId={method.id} methodName={method.name} confluenceUrl={binding ? confluencePageUrl(binding.pageId, binding.baseUrl) : undefined} onBusyChange={setJiraBusy} /></div>}
     {error && <p className="cf-notice cf-error" role="alert">{error}</p>}
-    {!connected && !connectionBusy && <div className="cf-notice"><h3>Подключите Confluence</h3><p>Токен вводится в локальном приложении и передаётся только вашему Confluence. Проект сохраняется в DocBuilder как прежде.</p><p><a href="/docbuilder-confluence-local.zip" download>Скачать локальное приложение</a> · Распакуйте и запустите start-confluence.cmd.</p></div>}
+    {!connected && !connectionBusy && tab !== 'jira' && <div className="cf-notice"><h3>Подключите Confluence</h3><p>Токен вводится в локальном приложении и передаётся только вашему Confluence. Проект сохраняется в DocBuilder как прежде.</p><p><a href="/docbuilder-confluence-local.zip" download>Скачать локальное приложение</a> · Распакуйте и запустите start-confluence.cmd.</p></div>}
     {connected && tab === 'browse' && <div className="cf-grid">{treeControls()}<section><h3>Просмотр страницы</h3>
       {pageBusy ? <p role="status">Чтение страницы…</p> : browsePage ? <><p className="cf-destination">{pagePath(browsePage)}</p><p className="cf-muted">Версия {browsePage.version}</p><a href={confluencePageUrl(browsePage.id, baseUrl)} target="_blank" rel="noopener noreferrer">Открыть в Confluence</a><pre className="cf-content">{confluenceContentText(browsePage.storage ?? '')}</pre><p className="cf-muted">Показан текст страницы. Диаграммы и макросы просматриваются в Confluence. Обратный импорт в редактируемый метод пока не реализован.</p></> : <p className="cf-muted">Выберите страницу в дереве. Просмотр не изменяет проект и место публикации.</p>}
     </section></div>}
@@ -493,7 +498,7 @@ export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, cl
           <p className="cf-muted">Отрисовка плагинов проверяется на странице Confluence. Внешние сервисы изображений не используются.</p><WBButton onClick={() => setShowPreview(old => !old)}>{showPreview ? 'Скрыть предпросмотр' : 'Предпросмотр документа'}</WBButton>{showPreview && <pre className="cf-content">{confluenceContentText(prepared.storage)}</pre>}
           {document.fingerprint !== prepared.document.fingerprint && <p className="cf-notice">Документ изменился после проверки. Будет опубликован проверенный снимок; новые изменения останутся неопубликованными.</p>}
         </>}
-        <footer className="cf-footer"><WBButton disabled={publishing || Boolean(unknown)} onClick={() => { setPrepared(undefined); setConflict(false); }}>Вернуться к назначению</WBButton><WBButton variant="accent" disabled={!connected || prepared.baseUrl !== baseUrl || publishing || conflict || Boolean(unknown)} onClick={() => void publish()}>{publishing ? 'Публикация…' : prepared.mode === 'update' ? 'Обновить страницу' : 'Создать страницу'}</WBButton></footer>
+        <footer className="cf-footer"><WBButton disabled={publishing || jiraBusy || Boolean(unknown)} onClick={() => { setPrepared(undefined); setConflict(false); }}>Вернуться к назначению</WBButton><WBButton variant="accent" disabled={!connected || prepared.baseUrl !== baseUrl || publishing || conflict || Boolean(unknown)} onClick={() => void publish()}>{publishing ? 'Публикация…' : prepared.mode === 'update' ? 'Обновить страницу' : 'Создать страницу'}</WBButton></footer>
       </section>}
     </>}
   </section>;

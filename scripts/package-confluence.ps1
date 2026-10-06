@@ -6,7 +6,7 @@ $packageStage = [IO.Path]::GetFullPath((Join-Path $packageTempRoot ('docbuilder-
 if (-not $packageStage.StartsWith($packageTempRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Invalid package staging directory' }
 New-Item -ItemType Directory -Path $packageStage | Out-Null
 try {
-  foreach ($packageName in @('server.mjs', 'bridge.mjs', 'credential-store.mjs')) {
+  foreach ($packageName in @('server.mjs', 'bridge.mjs', 'credential-store.mjs', 'jira.mjs', 'jira-form.mjs')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot ('confluence\' + $packageName)) -Destination (Join-Path $packageStage $packageName)
   }
   Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'confluence\start.cmd') -Destination (Join-Path $packageStage 'start-confluence.cmd')

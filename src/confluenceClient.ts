@@ -26,7 +26,7 @@ export interface ConfluenceClient {
   prepare(wiki: string, diagrams: ConfluenceDiagram[], baseUrl: string): Promise<{ storage: string }>;
   publish(request: ConfluencePublishRequest): Promise<ConfluencePage>;
   getOperation(id: string, baseUrl: string): Promise<ConfluenceOperation>;
-  confirmOperation(operationId: string, pageId: string, baseUrl: string): Promise<ConfluencePage>;
+  confirmOperation(operationId: string, pageId: string, baseUrl: string, publication?: ConfluencePublishRequest): Promise<ConfluencePage>;
 }
 
 export function confluenceOrigin(baseUrl: string): string {
@@ -78,7 +78,7 @@ export const confluenceClient: ConfluenceClient = {
   prepare: async (wiki, diagrams, baseUrl) => request('prepare', { wiki, diagrams, baseUrl: confluenceOrigin(baseUrl) }, false, baseUrl),
   publish: value => request('publish', value, true, value.baseUrl),
   getOperation: (id, baseUrl) => request(`operation?${new URLSearchParams({ id })}`, undefined, false, baseUrl),
-  confirmOperation: (operationId, pageId, baseUrl) => request('operation/confirm', { operationId, pageId }, false, baseUrl)
+  confirmOperation: (operationId, pageId, baseUrl, publication) => request('operation/confirm', { operationId, pageId, ...(publication ? { publication } : {}) }, false, baseUrl)
 };
 
 export function confluencePageIdFromLink(value: string, baseUrl: string): string {

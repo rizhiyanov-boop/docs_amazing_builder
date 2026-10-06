@@ -9,7 +9,7 @@ import {
 import { renderConfluenceDocument } from '../confluenceDocument';
 import type {
   ConfluenceBinding, ConfluenceCollection, ConfluenceDocument, ConfluencePage,
-  ConfluencePageSummary, ConfluenceSpace, ConfluenceStatus
+  ConfluencePageSummary, ConfluencePublishRequest, ConfluenceSpace, ConfluenceStatus
 } from '../confluenceTypes';
 import type { MethodDocument } from '../types';
 import './ConfluenceScreen.css';
@@ -28,6 +28,14 @@ type Prepared = {
   baseUrl: string; title: string; spaceKey: string; sectionTitles: string[]; parent?: ConfluencePage; target?: ConfluencePage;
 };
 type Attempt = { operationId: string; prepared: Prepared };
+
+function publicationRequest(attempt: Attempt): ConfluencePublishRequest {
+  const { operationId, prepared } = attempt;
+  return { operationId, baseUrl: prepared.baseUrl, mode: prepared.mode, title: prepared.title,
+    spaceKey: prepared.spaceKey, storage: prepared.storage,
+    ...(prepared.parent ? { parentId: prepared.parent.id } : {}),
+    ...(prepared.target ? { pageId: prepared.target.id, expectedVersion: prepared.target.version } : {}) };
+}
 
 function errorMessage(error: unknown): string {
   if (error instanceof ConfluenceClientError) {
@@ -327,12 +335,7 @@ export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, cl
         if (currentOrigin.current !== prepared.baseUrl) throw new ConfluenceClientError('SESSION_CHANGED', 'Подключение изменилось. Подготовьте публикацию заново.');
         if (latest.spaceKey !== prepared.spaceKey) throw new ConfluenceClientError('INVALID_TARGET', 'Родительская страница перемещена. Выберите место публикации заново.');
       }
-      const page = await client.publish({
-        operationId: attempt.operationId, baseUrl: prepared.baseUrl, mode: prepared.mode, title: prepared.title,
-        spaceKey: prepared.spaceKey, storage: prepared.storage,
-        ...(prepared.parent ? { parentId: prepared.parent.id } : {}),
-        ...(prepared.target ? { pageId: prepared.target.id, expectedVersion: prepared.target.version } : {})
-      });
+      const page = await client.publish(publicationRequest(attempt));
       finish(page, attempt);
     } catch (failure) {
       if (!alive.current) return;
@@ -358,7 +361,7 @@ export function ConfluenceScreen({ method, onPublished, onBack, onBusyChange, cl
     setCheckingOperation(true); setError('');
     try {
       const pageId = confluencePageIdFromLink(recoveryLink, unknown.prepared.baseUrl);
-      const page = await client.confirmOperation(unknown.operationId, pageId, unknown.prepared.baseUrl);
+      const page = await client.confirmOperation(unknown.operationId, pageId, unknown.prepared.baseUrl, publicationRequest(unknown));
       finish(page, unknown);
     } catch (failure) {
       if (!alive.current) return;

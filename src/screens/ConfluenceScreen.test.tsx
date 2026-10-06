@@ -134,7 +134,7 @@ describe('Confluence workbench screen', () => {
     await user.type(screen.getByLabelText('Ссылка на опубликованную страницу'), `${baseUrl}/pages/viewpage.action?pageId=127`);
     await user.click(screen.getByRole('button', { name: 'Проверить эту страницу' }));
     await screen.findByRole('heading', { name: 'Страница создана' });
-    expect(client.confirmOperation).toHaveBeenCalledWith('original-operation', '127', baseUrl);
+    expect(client.confirmOperation).toHaveBeenCalledWith('original-operation', '127', baseUrl, expect.objectContaining({ operationId: 'original-operation', baseUrl, mode: 'create' }));
     expect(onPublished).toHaveBeenCalledWith('method-1', expect.objectContaining({ pageId: '127', baseUrl, lastPublishedVersion: 1 }));
     expect(client.publish).toHaveBeenCalledOnce();
   });
@@ -225,7 +225,7 @@ describe('Confluence workbench screen', () => {
     await user.type(screen.getByLabelText('Ссылка на опубликованную страницу'), `${baseUrl}/pages/viewpage.action?pageId=127`);
     await user.click(screen.getByRole('button', { name: 'Проверить эту страницу' }));
     await screen.findByRole('heading', { name: 'Страница создана' });
-    expect(client.confirmOperation).toHaveBeenCalledWith('original-operation', '127', baseUrl);
+    expect(client.confirmOperation).toHaveBeenCalledWith('original-operation', '127', baseUrl, expect.objectContaining({ operationId: 'original-operation', baseUrl, mode: 'create' }));
     expect(onPublished).toHaveBeenCalledWith(method.id, expect.objectContaining({ baseUrl }));
     expect(client.publish).toHaveBeenCalledOnce();
   });

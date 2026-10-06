@@ -19,11 +19,11 @@ async function waitFor(predicate) {
 }
 function json(res, status, value, headers = {}) { res.writeHead(status, { 'Content-Type': 'application/json', ...headers }); res.end(JSON.stringify(value)); }
 function page(id, title = 'Page', parentId = null, version = 1, storage = '<p>old</p>') {
-  return { id, title, space: { key: 'DI' }, version: { number: version }, ancestors: parentId ? [{ id: parentId, title: 'Parent' }] : [], body: { storage: { value: storage, representation: 'storage' } } };
+  return { id, type: 'page', status: 'current', title, space: { key: 'DI' }, version: { number: version }, ancestors: parentId ? [{ id: parentId, title: 'Parent' }] : [], body: { storage: { value: storage, representation: 'storage' } } };
 }
 async function fixture(t, options = {}) {
   const pages = new Map([['10', page('10', 'Root')], ['20', page('20', 'Child', '10')]]);
-  const state = { writes: 0, reads: 0, treeReads: 0, requests: [], mode: 'normal', release: null };
+  const state = { writes: 0, reads: 0, treeReads: 0, requests: [], mode: 'normal', release: null, writeResponse: value => ({ id: value.id }) };
   const upstream = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1');
     state.requests.push({ path: url.pathname, method: req.method, expand: url.searchParams.get('expand'), origin: req.headers['x-test-target-origin'], authorizationPresent: req.headers.authorization === `Bearer ${TEST_TOKEN}` });
@@ -66,14 +66,14 @@ async function fixture(t, options = {}) {
       pages.set('101', created);
       if (state.mode === 'drop-write') { req.socket.destroy(); return; }
       if (state.mode === 'hold-write') await new Promise(resolve => { state.release = resolve; });
-      json(res, 200, { id: created.id }); return;
+      json(res, 200, state.writeResponse(structuredClone(created))); return;
     }
     if (req.method === 'PUT' && /^\/rest\/api\/content\/\d+$/.test(url.pathname)) {
       if (state.mode === 'put-conflict') { json(res, 409, { message: TEST_TOKEN }); return; }
       state.writes += 1;
       const existing = pages.get(body.id);
       existing.title = body.title; existing.version.number = body.version.number; existing.body.storage.value = body.body.storage.value;
-      json(res, 200, { id: existing.id }); return;
+      json(res, 200, state.writeResponse(structuredClone(existing))); return;
     }
     json(res, 404, {});
   });
@@ -378,6 +378,22 @@ test('manual confirmation verifies supplied page, title, parent, version and con
   assert.equal(f.state.writes, 1); assert.equal((await f.api('/api/operation?id=' + OPERATION)).body.state, 'success');
 });
 
+test('manual recovery after journal loss verifies the supplied original snapshot with GET only', async t => {
+  const f = await fixture(t, { httpsOrigins: [TEST_CONFLUENCE_ORIGIN] }); await f.connect();
+  const publication = { ...createRequest(), baseUrl: TEST_CONFLUENCE_ORIGIN, storage: '<p>Saved&nbsp;content</p>' };
+  f.pages.set('101', page('101', publication.title, publication.parentId, 1, '<p>Saved\u00a0content</p>'));
+  const confirm = snapshot => f.api('/api/operation/confirm', { operationId: OPERATION, pageId: '101', publication: snapshot });
+  assert.equal((await f.api('/api/operation/confirm', { operationId: OPERATION, pageId: '101' })).status, 404);
+  for (const field of [{ title: 'Wrong' }, { parentId: '20' }, { storage: '<p>Wrong</p>' }, { mode: 'update', pageId: '20', expectedVersion: 1 }]) {
+    assert.equal((await confirm({ ...publication, ...field })).body.code, 'VERIFICATION_MISMATCH');
+  }
+  assert.equal((await confirm({ ...publication, baseUrl: SECOND_CONFLUENCE_ORIGIN })).body.code, 'SESSION_CHANGED');
+  assert.equal((await confirm({ ...publication, operationId: 'operation_000000000002' })).status, 400);
+  const result = await confirm(publication);
+  assert.equal(result.status, 200); assert.equal(result.body.id, '101'); assert.equal(result.body.storage, undefined);
+  assert.equal(f.state.writes, 0); assert.equal(f.state.requests.some(value => ['POST', 'PUT'].includes(value.method)), false);
+});
+
 test('uncertain native diagram publication is also blocked with newly generated macro ids', async t => {
   const f = await fixture(t); await f.connect(); f.state.mode = 'drop-write';
   const first = { ...createRequest(), storage: diagramMacro('mermaid', 'A --> B', 'first') };
@@ -404,6 +420,42 @@ test('bounded journal evicts completed entries but never pending or unknown entr
   assert.equal((await f.api('/api/operation?id=operation_000000000002')).body.state, 'unknown');
   const blocked = await f.api('/api/publish', { ...createRequest('operation_000000000004'), title: 'Unknown 3' });
   assert.equal(blocked.body.code, 'OPERATION_LIMIT'); assert.equal(f.state.writes, 3);
+});
+
+test('complete POST and PUT acknowledgements confirm publication without a readback dependency', async t => {
+  for (const request of [createRequest(), updateRequest()]) {
+    for (const mode of ['readback-fail', 'readback-changed']) {
+      const f = await fixture(t); await f.connect(); f.state.mode = mode;
+      f.state.writeResponse = value => { delete value.body; return value; };
+      const result = await f.api('/api/publish', request);
+      assert.equal(result.status, 200); assert.equal(result.body.version, request.mode === 'create' ? 1 : 2);
+      assert.equal(result.body.parentId, '10'); assert.equal(result.body.storage, undefined);
+      assert.equal(f.state.writes, 1); assert.equal(f.state.reads, 1);
+      assert.equal(f.state.requests.find(value => ['POST', 'PUT'].includes(value.method) && value.path.startsWith('/rest/api/content')).expand, 'space,version,ancestors');
+      f.state.mode = 'normal';
+      assert.equal((await f.api('/api/operation?id=' + OPERATION)).body.state, 'success');
+      assert.deepEqual((await f.api('/api/publish', request)).body, result.body);
+      assert.equal(f.state.writes, 1);
+    }
+  }
+});
+
+test('successful HTTP responses with conflicting destination metadata cannot confirm a publication', async t => {
+  for (const mutate of [
+    value => { value.type = 'blogpost'; },
+    value => { value.status = 'draft'; },
+    value => { value.title = 'Wrong'; },
+    value => { value.space.key = 'OTHER'; },
+    value => { value.version.number = 9; },
+    value => { value.ancestors = []; },
+  ]) {
+    const f = await fixture(t); await f.connect();
+    f.state.writeResponse = value => { mutate(value); return value; };
+    const result = await f.api('/api/publish', createRequest());
+    assert.equal(result.body.code, 'OUTCOME_UNKNOWN'); assert.equal(f.state.writes, 1);
+    assert.equal((await f.api('/api/publish', createRequest())).body.code, 'OUTCOME_UNKNOWN');
+    assert.equal(f.state.writes, 1);
+  }
 });
 
 test('before local connection no Confluence origin is exposed or selected implicitly', async t => {

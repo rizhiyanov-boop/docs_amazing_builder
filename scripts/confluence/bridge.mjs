@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 
+export const BRIDGE_VERSION = '1.2.2';
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const MAX_TIMER_DELAY = 2_147_483_647;
 export const DEFAULT_ORIGINS = ['https://docsamazingbuilder.vercel.app', 'http://localhost:5173', 'http://127.0.0.1:5173'];
@@ -107,6 +108,17 @@ function fullPage(value, baseUrl) {
   if (!isRecord(value.space) || typeof value.space.key !== 'string' || !Number.isSafeInteger(value.version?.number) || value.version.number < 1 || !Array.isArray(value.ancestors) || typeof value.body?.storage?.value !== 'string') throw new BridgeError(502, 'UPSTREAM_INVALID', 'Confluence вернул неполные данные страницы.');
   return { ...page, spaceKey: value.space.key, version: value.version.number, url: `${baseUrl}/pages/viewpage.action?pageId=${page.id}`, ancestors: value.ancestors.map(value => summary(value)), storage: value.body.storage.value };
 }
+/** A complete successful POST/PUT response acknowledges the write without comparing rewritten storage. */
+function writeConfirmation(value, baseUrl) {
+  if ((value.type !== undefined && value.type !== 'page') || (value.status !== undefined && value.status !== 'current')) {
+    throw new BridgeError(502, 'UPSTREAM_INVALID', 'Confluence не подтвердил сохранение актуальной страницы.');
+  }
+  if (value.type !== 'page' || value.status !== 'current' || !isRecord(value.space) || typeof value.space.key !== 'string'
+    || !Number.isSafeInteger(value.version?.number) || value.version.number < 1 || !Array.isArray(value.ancestors)
+    || value.ancestors.some(ancestor => !isRecord(ancestor) || typeof ancestor.id !== 'string' || !/^[1-9]\d{0,19}$/.test(ancestor.id))) return null;
+  const page = summary(value);
+  return { ...page, spaceKey: value.space.key, version: value.version.number, url: `${baseUrl}/pages/viewpage.action?pageId=${page.id}`, ancestors: [] };
+}
 const pageWithoutStorage = page => {
   return { id: page.id, title: page.title, spaceKey: page.spaceKey, version: page.version,
     url: page.url, parentId: page.parentId ?? null, ancestors: [] };
@@ -127,7 +139,7 @@ function connectionHtml(nonce, origin, connection) {
   const escapeHtml = value => value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
   const html = `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DocBuilder — подключение Confluence</title>
 <style nonce="${cspNonce}">body{margin:48px auto;padding:0 24px;max-width:720px;font:16px/1.6 system-ui;color:#292e35;background:#f9f8f6}h1{font-size:28px}label{display:block;margin-top:24px}input{box-sizing:border-box;width:100%;padding:12px;font:inherit;border:1px solid #c7c4be;border-radius:8px}button{margin:16px 12px 0 0;padding:10px 16px;font:inherit;border:1px solid #b9b2a7;border-radius:8px;background:#fff;cursor:pointer}button[type=submit]{background:#255b51;color:#fff;border-color:#255b51}.note{color:#5e6470}#status{padding:16px;background:#fff;border-radius:8px;overflow-wrap:anywhere}</style></head>
-<body><h1>Подключение Confluence</h1><p>Введите адрес своего Confluence. Токен отправляется только этому локальному сервису и на указанный HTTPS адрес. DocBuilder получает состояние подключения, дерево и страницы; токен в него не передаётся.</p>
+<body><h1>Подключение Confluence</h1><p class="note">Локальный сервис · версия ${BRIDGE_VERSION}</p><p>Введите адрес своего Confluence. Токен отправляется только этому локальному сервису и на указанный HTTPS адрес. DocBuilder получает состояние подключения, дерево и страницы; токен в него не передаётся.</p>
 <p class="note">Адрес и токен хранятся только в памяти. Сессия действует 30 дней после последнего успешного обращения к Confluence. Закрытие сервиса, перезапуск или кнопка «Забыть токен» завершают её. Дерево страниц не сохраняется.</p>
 <form id="form"><label for="base-url">Адрес Confluence</label><input id="base-url" name="baseUrl" type="url" value="${escapeHtml(connection?.baseUrl ?? '')}" placeholder="https://confluence.example" autocomplete="off" spellcheck="false" required maxlength="512">
 <label for="pat">Личный токен доступа (PAT)</label><input id="pat" name="pat" type="password" autocomplete="off" spellcheck="false" required maxlength="4096"><button type="submit" id="connect">Подключить</button><button type="button" id="forget">Забыть токен</button></form>
@@ -174,7 +186,7 @@ export function createBridge(options = {}) {
     expiryTimer?.unref?.();
   }
   function renewSession(connection) { if (session === connection) { session.expiresAt = now() + SESSION_TTL_MS; scheduleExpiry(); } }
-  function status() { const current = activeSession(); return { connected: Boolean(current), baseUrl: current?.baseUrl ?? '', expiresAt: current ? new Date(current.expiresAt).toISOString() : null }; }
+  function status() { const current = activeSession(); return { connected: Boolean(current), baseUrl: current?.baseUrl ?? '', expiresAt: current ? new Date(current.expiresAt).toISOString() : null, bridgeVersion: BRIDGE_VERSION }; }
   function requiredConnection(expectedBaseUrl) {
     const current = activeSession();
     if (!current) throw new BridgeError(401, 'NOT_CONNECTED', 'Подключите Confluence через локальную форму.');
@@ -231,11 +243,13 @@ export function createBridge(options = {}) {
     const converted = await upstream('/rest/api/contentbody/convert/storage', { method: 'POST', body: { representation: 'wiki', value: wiki }, connection });
     return { storage: insertDiagrams(converted.value, body.diagrams) };
   }
-  function matchesOperation(operation, page) {
+  function matchesDestination(operation, page) {
     const expected = operation.expected;
     return page.spaceKey === expected.spaceKey && page.title === expected.title && page.version === expected.version
-      && (expected.mode === 'update' ? page.id === expected.pageId : (page.parentId ?? null) === expected.parentId)
-      && storageDigest(page.storage) === expected.storageDigest;
+      && (expected.mode === 'update' ? page.id === expected.pageId : (page.parentId ?? null) === expected.parentId);
+  }
+  function matchesOperation(operation, page) {
+    return matchesDestination(operation, page) && storageDigest(page.storage) === operation.expected.storageDigest;
   }
   async function reconcileOperation(operation, id, connection, explicit = false) {
     assertOperationOrigin(operation, connection);
@@ -267,8 +281,8 @@ export function createBridge(options = {}) {
     }
     finally { delete operation.reconciling; }
   }
-  async function publish(body, connection) {
-    assertConnection(connection);
+  function publicationIntent(body, connection) {
+    requireRecord(body);
     if (body.baseUrl !== connection.baseUrl) throw new BridgeError(409, 'SESSION_CHANGED', 'Публикация относится к другому подключению Confluence.');
     const id = text(body.operationId, 128, 'operationId');
     if (!/^[A-Za-z0-9_-]{16,128}$/.test(id)) throw invalid('Некорректный идентификатор операции.');
@@ -282,6 +296,12 @@ export function createBridge(options = {}) {
     if (mode === 'update' && (!Number.isSafeInteger(body.expectedVersion) || body.expectedVersion < 1 || body.expectedVersion >= Number.MAX_SAFE_INTEGER)) throw invalid('Укажите ожидаемую версию страницы.');
     const contentDigest = storageDigest(storage);
     const digest = createHash('sha256').update(JSON.stringify({ baseUrl: connection.baseUrl, mode, title, key, contentDigest, targetId, parentId, expectedVersion: body.expectedVersion })).digest('hex');
+    return { id, mode, title, key, storage, targetId, parentId, digest,
+      expected: { mode, title, spaceKey: key, pageId: targetId, parentId, version: mode === 'update' ? body.expectedVersion + 1 : 1, storageDigest: contentDigest } };
+  }
+  async function publish(body, connection) {
+    assertConnection(connection);
+    const { id, mode, title, key, storage, targetId, parentId, digest, expected } = publicationIntent(body, connection);
     const previous = operations.get(id);
     if (previous) {
       assertOperationOrigin(previous, connection);
@@ -301,7 +321,7 @@ export function createBridge(options = {}) {
       operations.delete(expiredId);
       if (operationByDocument.get(expired.digest) === expiredId) operationByDocument.delete(expired.digest);
     }
-    const operation = { state: 'pending', baseUrl: connection.baseUrl, digest, expected: { mode, title, spaceKey: key, pageId: targetId, parentId, version: mode === 'update' ? body.expectedVersion + 1 : 1, storageDigest: contentDigest } };
+    const operation = { state: 'pending', baseUrl: connection.baseUrl, digest, expected };
     operations.set(id, operation); operationByDocument.set(digest, id);
     let writeStarted = false; let knownPage = null;
     try {
@@ -317,11 +337,18 @@ export function createBridge(options = {}) {
       if (mode === 'create') { payload.space = { key }; if (parentId) payload.ancestors = [{ id: parentId }]; }
       else { payload.id = targetId; payload.version = { number: version, message: 'Опубликовано из DocBuilder' }; }
       assertConnection(connection); writeStarted = true;
-      const written = await upstream(mode === 'create' ? '/rest/api/content' : `/rest/api/content/${targetId}`, { method: mode === 'create' ? 'POST' : 'PUT', body: payload, connection });
+      const writePath = mode === 'create' ? '/rest/api/content' : `/rest/api/content/${targetId}`;
+      const written = await upstream(`${writePath}?expand=space,version,ancestors`, { method: mode === 'create' ? 'POST' : 'PUT', body: payload, connection });
       if (typeof written.id !== 'string' || !/^[1-9]\d{0,19}$/.test(written.id) || (mode === 'update' && written.id !== targetId)) throw new BridgeError(502, 'UPSTREAM_INVALID', 'Confluence не подтвердил идентификатор опубликованной страницы.');
       knownPage = { id: written.id, title, spaceKey: key, version: mode === 'update' ? version : 1, url: `${connection.baseUrl}/pages/viewpage.action?pageId=${written.id}`, parentId, ancestors: [] };
-      const verified = await readPage(written.id, connection); knownPage = pageWithoutStorage(verified);
-      if (!matchesOperation(operation, verified)) throw new BridgeError(502, 'UPSTREAM_INVALID', 'Повторное чтение не подтвердило версию и содержимое публикации.');
+      const confirmed = writeConfirmation(written, connection.baseUrl);
+      if (confirmed) {
+        if (!matchesDestination(operation, confirmed)) throw new BridgeError(502, 'UPSTREAM_INVALID', 'Ответ Confluence не подтвердил назначение и версию публикации.');
+        knownPage = confirmed;
+      } else {
+        const verified = await readPage(written.id, connection); knownPage = pageWithoutStorage(verified);
+        if (!matchesOperation(operation, verified)) throw new BridgeError(502, 'UPSTREAM_INVALID', 'Неполный ответ Confluence и повторное чтение не подтвердили публикацию.');
+      }
       operation.state = 'success'; operation.page = knownPage; return knownPage;
     } catch (error) {
       const failure = error instanceof BridgeError ? error : new BridgeError(502, 'UPSTREAM_UNAVAILABLE', 'Публикацию не удалось завершить.');
@@ -399,7 +426,13 @@ export function createBridge(options = {}) {
         const body = await readJsonBody(req);
         const operationId = text(body.operationId, 128, 'operationId');
         const operation = operations.get(operationId);
-        if (!operation) throw new BridgeError(404, 'NOT_FOUND', 'Операция не найдена. После перезапуска проверяйте результат в Confluence.');
+        if (!operation) {
+          if (!body.publication) throw new BridgeError(404, 'NOT_FOUND', 'Операция не найдена. После перезапуска проверяйте результат в Confluence.');
+          const intent = publicationIntent(body.publication, connection);
+          if (intent.id !== operationId) throw invalid('Снимок относится к другой операции.');
+          const recovered = { state: 'unknown', baseUrl: connection.baseUrl, expected: intent.expected };
+          send(200, await reconcileOperation(recovered, pageId(body.pageId), connection, true)); return;
+        }
         send(200, await reconcileOperation(operation, pageId(body.pageId), connection, true)); return;
       }
       if (url.pathname === '/api/spaces' && req.method === 'GET') {

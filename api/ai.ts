@@ -1,5 +1,6 @@
 import { getUserBySessionToken } from './_lib/db.js';
 import { getSessionToken } from './_lib/http.js';
+import { openAiCompletionOptions, resolveOpenAiModel } from './_lib/aiModel.js';
 
 type VercelRequest = {
   method?: string;
@@ -281,7 +282,6 @@ async function callOpenAi(task: RequestTask, prompt: string): Promise<unknown> {
     throw new Error('OPENAI_API_KEY не настроен на сервере');
   }
 
-  const model = process.env.OPENAI_MODEL?.trim() || 'gpt-4.1-nano';
   const timeoutMs = readPositiveIntegerEnv('OPENAI_TIMEOUT_MS', DEFAULT_OPENAI_TIMEOUT_MS, 180_000);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -296,9 +296,7 @@ async function callOpenAi(task: RequestTask, prompt: string): Promise<unknown> {
       },
       signal: controller.signal,
       body: JSON.stringify({
-        model,
-        temperature: 0.1,
-        max_tokens: getMaxOutputTokens(task),
+        ...openAiCompletionOptions(process.env.OPENAI_MODEL, getMaxOutputTokens(task)),
         response_format: { type: 'json_object' },
         messages: [
           {
@@ -491,7 +489,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       ok: true,
       endpoint: '/api/ai',
       provider: 'openai',
-      model: process.env.OPENAI_MODEL?.trim() || 'gpt-4.1-nano',
+      model: resolveOpenAiModel(process.env.OPENAI_MODEL),
       message: 'Use POST with JSON body: { task, payload }',
       tasks: ['repair-json', 'fill-descriptions', 'generate-examples', 'suggest-mappings', 'mask-fields', 'build-validation-rules']
     });

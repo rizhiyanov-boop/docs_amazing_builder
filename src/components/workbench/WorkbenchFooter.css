@@ -1,0 +1,17 @@
+.wb-footer { flex-shrink: 0; display: flex; justify-content: flex-end; padding: var(--space-1) var(--space-6); border-top: 1px solid var(--wb-border-soft); background: var(--wb-bg-canvas); }
+.wb-footer-version { padding: var(--space-0-5) var(--space-1); border: 0; border-radius: var(--wb-radius-sm); background: transparent; color: var(--wb-text-muted); font-family: var(--wb-font-sans); font-size: var(--font-size-xs); cursor: pointer; }
+.wb-footer-version:hover { color: var(--wb-accent); background: var(--wb-bg-soft); }
+.wb-footer-version:focus-visible { outline: 2px solid var(--wb-accent); outline-offset: 2px; }
+.wb-release-dialog { width: min(42rem, calc(100vw - var(--space-8) * 2)); max-width: none; max-height: min(80vh, 44rem); margin: auto; padding: 0; overflow: hidden; border: 1px solid var(--wb-border); border-radius: var(--wb-radius); background: var(--wb-bg-surface); color: var(--wb-text); font-family: var(--wb-font-sans); font-size: var(--font-size-sm); box-shadow: var(--wb-shadow-pop); }
+.wb-release-dialog::backdrop { background: color-mix(in srgb, var(--wb-bg-canvas) 75%, transparent); }
+.wb-release-dialog[open] { display: flex; }
+.wb-release-card { display: flex; flex-direction: column; width: 100%; min-height: 0; max-height: min(80vh, 44rem); }
+.wb-release-header { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-6); border-bottom: 1px solid var(--wb-border-soft); }
+.wb-release-header h2 { margin: 0; font-size: var(--font-size-lg); }
+.wb-release-list { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: var(--space-6); }
+.wb-release-entry + .wb-release-entry { margin-top: var(--space-6); padding-top: var(--space-6); border-top: 1px solid var(--wb-border-soft); }
+.wb-release-entry h3 { display: flex; align-items: center; gap: var(--space-2); margin: 0; font-size: var(--font-size-md); }
+.wb-release-current { padding: var(--space-0-5) var(--space-2); border-radius: var(--wb-radius-sm); color: var(--wb-accent); background: var(--wb-bg-active); font-size: var(--font-size-xs); font-weight: 400; }
+.wb-release-title { margin: var(--space-2) 0; font-weight: 600; }
+.wb-release-entry ul { margin: 0; padding-left: var(--space-7); line-height: 1.6; }
+.wb-release-entry li + li { margin-top: var(--space-1); }

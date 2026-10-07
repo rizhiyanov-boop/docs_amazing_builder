@@ -127,6 +127,7 @@ import { AiTableButton } from './components/primitives/WorkbenchPrimitives';
 import { WorkbenchSidebar } from './components/workbench/WorkbenchSidebar';
 import { WorkbenchDiagramPreview } from './components/workbench/WorkbenchDiagramPreview';
 import { WorkbenchTopbar, type WorkbenchAccent } from './components/workbench/WorkbenchTopbar';
+import { WorkbenchFooter } from './components/workbench/WorkbenchFooter';
 import { WorkspaceHome } from './components/workbench/WorkspaceHome';
 import { TableClassic, TableGallery, TableMiniCards } from './components/tables/WorkbenchTables';
 import { HtmlExportScreen } from './screens/HtmlExportScreen';
@@ -8950,6 +8951,7 @@ export default function App() {
       </div>
         </div>
       </div>
+      <WorkbenchFooter />
     </div>
     </div>
   );

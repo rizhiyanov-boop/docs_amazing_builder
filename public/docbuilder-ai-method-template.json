@@ -1,6 +1,6 @@
 {
   "format": "docbuilder-ai-method-template",
-  "version": 1,
+  "version": 2,
   "updatedAt": "2026-10-07",
   "title": "Шаблон генерации одного метода DocBuilder через ИИ",
   "usage": {
@@ -9,12 +9,12 @@
       "Прочитай instructions, referenceData, examples и outputSchema.",
       "Изучи приложенные требования, публичный контракт, downstream-контракты и код/БД/процедуры. Установи физические роли Server и Client по материалам.",
       "При существенных неизвестных или конфликтах сначала задай вопросы. После согласования заполни documentTemplate по материалам ровно одного метода.",
-      "Верни только заполненное содержимое documentTemplate как отдельный JSON-документ. Затем пользователь загрузит его через Импорт → добавить методы в текущий проект."
+      "Верни только заполненное содержимое documentTemplate как отдельный JSON метода. Затем пользователь загрузит его через Импорт и подтвердит «Импортировать метод»."
     ],
-    "output": "После согласования верни корневой workspace JSON с importProfile codex-v1 и version 3: без Markdown-ограждения, пояснений, оболочки этого файла, instructions, referenceData, examples и outputSchema. Если пользователь просит файл, сохрани итоговый JSON отдельным файлом.",
+    "output": "После согласования верни один корневой объект метода: id, name, updatedAt, jiraTicket, epic, initiators, responsible, externalUrl, status и sections. Без Markdown-ограждения, пояснений, проектной обёртки, importProfile, version, methods, groups, projectSections, flows и оболочки этого файла. Если пользователь просит файл, сохрани итоговый JSON отдельным файлом.",
     "promptToCopy": "Используй приложенный docbuilder-ai-method-template.json и материалы задачи. Подготовь один метод для импорта в DocBuilder по instructions и outputSchema. Сначала уточни существенные неизвестные. После согласования верни только заполненный documentTemplate отдельным JSON, без оболочки шаблона.",
-    "editing": "Редактировать instructions и referenceData непосредственно в этом JSON. При изменении структуры documentTemplate сверять outputSchema и проверять импорт. outputSchema является снимком действующей схемы приложения; самостоятельно менять контракт приложения этим файлом нельзя.",
-    "templateDefaults": "PROJECT_NAME_TO_REPLACE, METHOD_NAME_TO_REPLACE и FLOW_NAME_TO_REPLACE заменить. POST, REST, authType none, data как object, timestamps и технические значения ответа — структурные заготовки, а не факты о новом методе: подтвердить/заменить по материалам. Пустые строки и массивы означают незаполненную документацию. Структурная валидность не означает полноту или согласование требований."
+    "editing": "Редактировать instructions и referenceData непосредственно в этом JSON. При изменении структуры documentTemplate сверять outputSchema и проверять отдельный импорт метода. outputSchema содержит определения метода из действующей схемы приложения; изменение этого файла не меняет код импортёра.",
+    "templateDefaults": "METHOD_NAME_TO_REPLACE заменить. POST, REST, authType none, data как object, updatedAt и технические значения ответа — структурные заготовки, а не факты о новом методе: подтвердить/заменить по материалам. Пустые строки и массивы означают незаполненную документацию. Структурная валидность не означает полноту или согласование требований."
   },
   "sources": {
     "snapshotDate": "2026-10-07",
@@ -30,7 +30,8 @@
     "documentationRules": "docs/standards/API_DOCUMENTATION.md",
     "errorReference": "error-handling-classification-reference.md",
     "jiraReference": "src/jiraLabels.ts",
-    "precedence": "Согласованный публичный контракт и явно подтверждённые требования имеют приоритет в описании конкретного метода. Этот файл задаёт общие правила и формат импорта. При конфликте источников не выбирать трактовку молча: сформулировать finding и запросить решение."
+    "precedence": "Согласованный публичный контракт и явно подтверждённые требования имеют приоритет в описании конкретного метода. Этот файл задаёт общие правила и формат импорта. При конфликте источников не выбирать трактовку молча: сформулировать finding и запросить решение.",
+    "importContract": "Отдельный объект MethodDocument с name/id и sections распознаётся parseProjectImportText и обрабатывается buildWorkspaceImportFromMethodPayload. importProfile codex-v1 относится к полному workspace и не добавляется в JSON отдельного метода."
   },
   "instructions": {
     "scope": [
@@ -90,7 +91,7 @@
       "Для нового публичного контракта адаптера: дата DD.MM.YYYY; дата и время DD.MM.YYYY HH:mm:ss как во входе, так и в ответе.",
       "При вызове downstream преобразовывать публичную дату в его согласованный формат; дату из downstream-ответа преобразовывать обратно.",
       "Если публичный формат уже явно зафиксирован и изменение нарушит совместимость, сохранить его и отдельно отметить исключение. Не менять downstream-контракт.",
-      "Служебные createdAt/updatedAt самого workspace имеют ISO UTC с Z, как требует outputSchema. На них правило публичных бизнес-дат не распространяется."
+      "Служебное updatedAt самого метода имеет ISO UTC с Z, как требует outputSchema. На него правило публичных бизнес-дат не распространяется."
     ],
     "mapping": [
       "Физические роли Server/Client установить по источникам. Названия вкладок сами по себе не определяют направление вызова.",
@@ -102,10 +103,10 @@
       "Для orchestration фиксировать endpoint, downstream-методы, порядок вызовов, idempotency/retry, error mapping, response wrapper, технические параметры и источники их заполнения в соответствующих разделах."
     ],
     "import": [
-      "Финальный корень содержит только поля outputSchema: importProfile codex-v1, version 3, projectName, updatedAt, activeMethodId, methods, groups, projectSections и flows. Даже один метод находится в methods.",
-      "В methods ровно один метод для этой задачи. Обязательны request и response с каноническими id/kind. Остальные стандартные секции сохранять по documentTemplate и заполнять по материалам.",
-      "methods, projectSections и flows непустые. При отсутствии проектных материалов сохранить явный пустой Overview и структурный Start → метод → End; не считать этот каркас описанием реального бизнес-сценария.",
-      "ID — стабильные уникальные ASCII-строки. ID строк уникальны во всём методе, включая обе стороны и секции. Все ссылки activeMethodId, methodRef, groups, edges и mappings указывают на существующие объекты.",
+      "Финальный корень — один объект метода: id, name, updatedAt, jiraTicket, epic, initiators, responsible, externalUrl, status и sections. Заполнить только поддерживаемые поля outputSchema.",
+      "Обязательны request и response с каноническими id/kind. Остальные стандартные секции сохранять по documentTemplate и заполнять по материалам.",
+      "Не добавлять проектную обёртку: importProfile, version, projectName, activeMethodId, methods, groups, projectSections и flows в финальный JSON метода не входят. Не генерировать фиктивные проектные разделы или сценарии.",
+      "ID — стабильные ASCII-строки. ID секций уникальны в методе, ID строк уникальны во всём методе, включая обе стороны и секции; ID диаграмм уникальны в своей секции.",
       "rows/clientRows — канонические таблицы. input/clientInput — source, записанный строкой. schemaInput/clientSchemaInput/error/clientError пустые. Не рассчитывать, что импортёр создаст rows из source.",
       "Непустой JSON source должен совпадать с body, восстановленным из строк; headers/query/url в body не входят. Source неизвестного примера допускается оставить пустым.",
       "В строке field = sourceField = полный путь, origin generated, clientField пустой. Все обязательные поля строки присутствуют. Значение required только + или -; неизвестную обязательность сначала согласовать.",
@@ -119,9 +120,9 @@
       "Неиспользуемые auth поля пустые. Для активной bearer/basic/api-key схемы использовать TOKEN_EXAMPLE, USERNAME_EXAMPLE, PASSWORD_EXAMPLE, API_KEY_EXAMPLE. Реальные токены, пароли и cookies запрещены.",
       "HTTP statuses и internalCode в errors.rows — строки. errorType — только CommonException, BusinessException, AlertException или -. serverHttpStatus BusinessException строго 422.",
       "Поля clientResponseCode и responseCode содержат валидный JSON-пример, записанный строкой, либо пустую строку. Не вкладывать JSON-объект вместо строки.",
-      "projectSections.order равен индексу; diagramEngine/diagramCode допустимы только для type diagram. Mermaid/PlantUML хранить исходным code.",
+      "Диаграммы метода находятся в секции process-diagram; Mermaid/PlantUML хранить исходным code вместе с engine, title и description. Не переносить диаграммы в проектный flows.",
       "Не переносить учебные payload из examples в конкретный метод без соответствия материалам. Не добавлять неподдерживаемые поля со ссылкой на ИИ-инструкцию.",
-      "При наличии локального репозитория проверить итоговый файл командой npm run validate:import -- путь/к/файлу.json. Исправить ошибки до передачи. Если исполнить валидатор невозможно, не утверждать, что проверка выполнена."
+      "Проверять JSON по outputSchema и текущему пути отдельного импорта parseProjectImportText/buildWorkspaceImportFromMethodPayload. В UI загрузить JSON через Импорт, проверить предпросмотр и нажать «Импортировать метод». CLI npm run validate:import проверяет workspace и для отдельного метода не подходит. Если проверки не выполнялись, не утверждать обратное."
     ],
     "jira": [
       "Применять этот блок только по отдельному запросу на подготовку задачи Jira; он не расширяет outputSchema метода.",
@@ -715,66 +716,10 @@
   },
   "outputSchema": {
     "$schema": "http://json-schema.org/draft-07/schema#",
-    "$id": "urn:doc-builder:import:codex-v1",
-    "title": "DocBuilder workspace v3 — Codex generation profile v1",
-    "description": "Strict generation profile. Cross-references and source semantics are checked by validateCodexProjectImport in addition to this schema.",
-    "type": "object",
-    "additionalProperties": false,
-    "required": [
-      "importProfile",
-      "version",
-      "projectName",
-      "updatedAt",
-      "activeMethodId",
-      "methods",
-      "groups",
-      "projectSections",
-      "flows"
-    ],
-    "properties": {
-      "importProfile": {
-        "const": "codex-v1"
-      },
-      "version": {
-        "const": 3
-      },
-      "projectName": {
-        "$ref": "#/definitions/nonBlank"
-      },
-      "updatedAt": {
-        "$ref": "#/definitions/timestamp"
-      },
-      "activeMethodId": {
-        "$ref": "#/definitions/id"
-      },
-      "methods": {
-        "type": "array",
-        "minItems": 1,
-        "items": {
-          "$ref": "#/definitions/method"
-        }
-      },
-      "groups": {
-        "type": "array",
-        "items": {
-          "$ref": "#/definitions/group"
-        }
-      },
-      "projectSections": {
-        "type": "array",
-        "minItems": 1,
-        "items": {
-          "$ref": "#/definitions/projectSection"
-        }
-      },
-      "flows": {
-        "type": "array",
-        "minItems": 1,
-        "items": {
-          "$ref": "#/definitions/flow"
-        }
-      }
-    },
+    "$id": "urn:doc-builder:template:single-method:2",
+    "title": "DocBuilder — отдельный метод для импорта",
+    "description": "Снимок определений метода из workspace-v3.schema.json для подготовки JSON отдельного метода. Отдельный импорт выполняется через parseProjectImportText; проектный профиль codex-v1 не используется.",
+    "$ref": "#/definitions/method",
     "definitions": {
       "id": {
         "type": "string",
@@ -1567,815 +1512,331 @@
             "type": "string"
           }
         }
-      },
-      "group": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "id",
-          "name",
-          "methodIds",
-          "links"
-        ],
-        "properties": {
-          "id": {
-            "$ref": "#/definitions/id"
-          },
-          "name": {
-            "$ref": "#/definitions/nonBlank"
-          },
-          "methodIds": {
-            "type": "array",
-            "minItems": 1,
-            "uniqueItems": true,
-            "items": {
-              "$ref": "#/definitions/id"
-            }
-          },
-          "links": {
-            "type": "array",
-            "items": {
-              "$ref": "#/definitions/groupLink"
-            }
-          }
-        }
-      },
-      "groupLink": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "fromMethodId",
-          "toMethodId",
-          "relationType",
-          "note"
-        ],
-        "properties": {
-          "fromMethodId": {
-            "$ref": "#/definitions/id"
-          },
-          "toMethodId": {
-            "$ref": "#/definitions/id"
-          },
-          "relationType": {
-            "enum": [
-              "request-response",
-              "event",
-              "sync",
-              "async",
-              "custom"
-            ]
-          },
-          "note": {
-            "type": "string"
-          }
-        }
-      },
-      "projectSection": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "id",
-          "title",
-          "enabled",
-          "type",
-          "content",
-          "order"
-        ],
-        "properties": {
-          "id": {
-            "$ref": "#/definitions/id"
-          },
-          "title": {
-            "$ref": "#/definitions/nonBlank"
-          },
-          "enabled": {
-            "type": "boolean"
-          },
-          "type": {
-            "enum": [
-              "text",
-              "markdown",
-              "note",
-              "checklist",
-              "diagram"
-            ]
-          },
-          "content": {
-            "type": "string"
-          },
-          "order": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "diagramEngine": {
-            "enum": [
-              "mermaid",
-              "plantuml"
-            ]
-          },
-          "diagramCode": {
-            "type": "string"
-          }
-        },
-        "allOf": [
-          {
-            "if": {
-              "properties": {
-                "type": {
-                  "const": "diagram"
-                }
-              },
-              "required": [
-                "type"
-              ]
-            },
-            "then": {
-              "required": [
-                "diagramEngine",
-                "diagramCode"
-              ]
-            }
-          }
-        ]
-      },
-      "flow": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "id",
-          "name",
-          "description",
-          "createdAt",
-          "updatedAt",
-          "nodes",
-          "edges"
-        ],
-        "properties": {
-          "id": {
-            "$ref": "#/definitions/id"
-          },
-          "name": {
-            "$ref": "#/definitions/nonBlank"
-          },
-          "description": {
-            "type": "string"
-          },
-          "createdAt": {
-            "$ref": "#/definitions/timestamp"
-          },
-          "updatedAt": {
-            "$ref": "#/definitions/timestamp"
-          },
-          "nodes": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "$ref": "#/definitions/node"
-            }
-          },
-          "edges": {
-            "type": "array",
-            "items": {
-              "$ref": "#/definitions/edge"
-            }
-          }
-        }
-      },
-      "node": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "id",
-          "type",
-          "position",
-          "label",
-          "description",
-          "actor",
-          "noteContent",
-          "preconditions",
-          "postconditions"
-        ],
-        "properties": {
-          "id": {
-            "$ref": "#/definitions/id"
-          },
-          "type": {
-            "enum": [
-              "start",
-              "method",
-              "end",
-              "note"
-            ]
-          },
-          "position": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "x",
-              "y"
-            ],
-            "properties": {
-              "x": {
-                "type": "number"
-              },
-              "y": {
-                "type": "number"
-              }
-            }
-          },
-          "label": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "actor": {
-            "type": "string"
-          },
-          "noteContent": {
-            "type": "string"
-          },
-          "preconditions": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "postconditions": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "methodRef": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "methodId"
-            ],
-            "properties": {
-              "methodId": {
-                "$ref": "#/definitions/id"
-              }
-            }
-          }
-        },
-        "allOf": [
-          {
-            "if": {
-              "properties": {
-                "type": {
-                  "const": "method"
-                }
-              },
-              "required": [
-                "type"
-              ]
-            },
-            "then": {
-              "required": [
-                "methodRef"
-              ]
-            },
-            "else": {
-              "not": {
-                "required": [
-                  "methodRef"
-                ]
-              }
-            }
-          }
-        ]
-      },
-      "edge": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "id",
-          "type",
-          "fromNodeId",
-          "toNodeId",
-          "label",
-          "condition",
-          "mappings"
-        ],
-        "properties": {
-          "id": {
-            "$ref": "#/definitions/id"
-          },
-          "type": {
-            "const": "sequence"
-          },
-          "fromNodeId": {
-            "$ref": "#/definitions/id"
-          },
-          "toNodeId": {
-            "$ref": "#/definitions/id"
-          },
-          "label": {
-            "type": "string"
-          },
-          "condition": {
-            "type": "string"
-          },
-          "mappings": {
-            "type": "array",
-            "items": {
-              "$ref": "#/definitions/mapping"
-            }
-          }
-        }
-      },
-      "fieldRef": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "nodeId",
-          "side",
-          "rowId",
-          "fieldPath"
-        ],
-        "properties": {
-          "nodeId": {
-            "$ref": "#/definitions/id"
-          },
-          "side": {
-            "enum": [
-              "request",
-              "response",
-              "context"
-            ]
-          },
-          "rowId": {
-            "type": "string"
-          },
-          "fieldPath": {
-            "$ref": "#/definitions/nonBlank"
-          }
-        }
-      },
-      "mapping": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "id",
-          "source",
-          "target",
-          "transform",
-          "note"
-        ],
-        "properties": {
-          "id": {
-            "$ref": "#/definitions/id"
-          },
-          "source": {
-            "$ref": "#/definitions/fieldRef"
-          },
-          "target": {
-            "allOf": [
-              {
-                "$ref": "#/definitions/fieldRef"
-              },
-              {
-                "properties": {
-                  "side": {
-                    "enum": [
-                      "request",
-                      "context"
-                    ]
-                  }
-                }
-              }
-            ]
-          },
-          "transform": {
-            "type": "string"
-          },
-          "note": {
-            "type": "string"
-          }
-        }
       }
     }
   },
   "documentTemplate": {
-    "importProfile": "codex-v1",
-    "version": 3,
-    "projectName": "PROJECT_NAME_TO_REPLACE",
+    "id": "method-template",
+    "name": "METHOD_NAME_TO_REPLACE",
     "updatedAt": "2026-10-07T00:00:00.000Z",
-    "activeMethodId": "method-template",
-    "methods": [
+    "jiraTicket": "",
+    "epic": "",
+    "initiators": "",
+    "responsible": "",
+    "externalUrl": "",
+    "status": "draft",
+    "sections": [
       {
-        "id": "method-template",
-        "name": "METHOD_NAME_TO_REPLACE",
-        "updatedAt": "2026-10-07T00:00:00.000Z",
-        "jiraTicket": "",
-        "epic": "",
-        "initiators": "",
-        "responsible": "",
-        "externalUrl": "",
-        "status": "draft",
-        "sections": [
-          {
-            "id": "goal",
-            "title": "Цель",
-            "enabled": true,
-            "kind": "text",
-            "value": ""
-          },
-          {
-            "id": "functional",
-            "title": "Функциональные требования",
-            "enabled": true,
-            "kind": "text",
-            "value": ""
-          },
-          {
-            "id": "process-diagram",
-            "title": "Диаграмма процесса",
-            "enabled": true,
-            "kind": "diagram",
-            "diagrams": []
-          },
-          {
-            "id": "request",
-            "title": "Request",
-            "enabled": true,
-            "kind": "parsed",
-            "sectionType": "request",
-            "format": "json",
-            "lastSyncedFormat": "json",
-            "input": "",
-            "schemaInput": "",
-            "rows": [
-              {
-                "id": "method-template-header-1",
-                "field": "X-CLIENT-ID",
-                "sourceField": "X-CLIENT-ID",
-                "type": "string",
-                "required": "-",
-                "validations": "",
-                "description": "ID клиента",
-                "example": "",
-                "origin": "generated",
-                "source": "header",
-                "enabled": true,
-                "maskInLogs": true,
-                "clientField": ""
-              },
-              {
-                "id": "method-template-header-2",
-                "field": "X-USER-ID",
-                "sourceField": "X-USER-ID",
-                "type": "string",
-                "required": "-",
-                "validations": "",
-                "description": "ID пользователя",
-                "example": "",
-                "origin": "generated",
-                "source": "header",
-                "enabled": true,
-                "maskInLogs": true,
-                "clientField": ""
-              },
-              {
-                "id": "method-template-header-3",
-                "field": "X-SOURCE-SYSTEM",
-                "sourceField": "X-SOURCE-SYSTEM",
-                "type": "string",
-                "required": "-",
-                "validations": "",
-                "description": "Система-инициатор",
-                "example": "",
-                "origin": "generated",
-                "source": "header",
-                "enabled": true,
-                "maskInLogs": false,
-                "clientField": ""
-              },
-              {
-                "id": "method-template-header-4",
-                "field": "X-BP-ID",
-                "sourceField": "X-BP-ID",
-                "type": "string",
-                "required": "-",
-                "validations": "",
-                "description": "ID бизнес-процесса",
-                "example": "",
-                "origin": "generated",
-                "source": "header",
-                "enabled": true,
-                "maskInLogs": false,
-                "clientField": ""
-              },
-              {
-                "id": "method-template-header-5",
-                "field": "X-BP-NAME",
-                "sourceField": "X-BP-NAME",
-                "type": "string",
-                "required": "-",
-                "validations": "",
-                "description": "Название бизнес-процесса",
-                "example": "",
-                "origin": "generated",
-                "source": "header",
-                "enabled": true,
-                "maskInLogs": false,
-                "clientField": ""
-              },
-              {
-                "id": "method-template-header-6",
-                "field": "traceparent",
-                "sourceField": "traceparent",
-                "type": "string",
-                "required": "-",
-                "validations": "",
-                "description": "TraceParent для распределенного трейсинга",
-                "example": "",
-                "origin": "generated",
-                "source": "header",
-                "enabled": true,
-                "maskInLogs": false,
-                "clientField": ""
-              }
-            ],
-            "error": "",
-            "domainModelEnabled": false,
-            "clientFormat": "json",
-            "clientLastSyncedFormat": "json",
-            "clientInput": "",
-            "clientSchemaInput": "",
-            "clientRows": [],
-            "clientError": "",
-            "clientMappings": {},
-            "requestColumnOrder": [
-              "field",
-              "type",
-              "required",
-              "validations",
-              "clientField",
-              "description",
-              "maskInLogs",
-              "example"
-            ],
-            "requestUrl": "",
-            "requestMethod": "POST",
-            "requestProtocol": "REST",
-            "authType": "none",
-            "authHeaderName": "",
-            "authTokenExample": "",
-            "authUsername": "",
-            "authPassword": "",
-            "authApiKeyExample": "",
-            "externalRequestUrl": "",
-            "externalRequestMethod": "POST",
-            "externalAuthType": "none",
-            "externalAuthHeaderName": "",
-            "externalAuthTokenExample": "",
-            "externalAuthUsername": "",
-            "externalAuthPassword": "",
-            "externalAuthApiKeyExample": ""
-          },
-          {
-            "id": "response",
-            "title": "Response",
-            "enabled": true,
-            "kind": "parsed",
-            "sectionType": "response",
-            "format": "json",
-            "lastSyncedFormat": "json",
-            "input": "{\"data\":{},\"techData\":{\"traceId\":\"ed816fd75322d6769b06ea61026c34cd\",\"spanId\":\"9a5a60a44b08eefe\",\"appVersion\":\"1.0.1\",\"appTag\":\"1\"},\"warnings\":{}}",
-            "schemaInput": "",
-            "rows": [
-              {
-                "id": "method-template-response-data",
-                "field": "data",
-                "sourceField": "data",
-                "type": "object",
-                "required": "+",
-                "validations": "",
-                "description": "Все доменные данные ответа. Заполнить по материалам метода; data может быть объектом или массивом объектов.",
-                "example": "{}",
-                "origin": "generated",
-                "source": "body",
-                "enabled": true,
-                "maskInLogs": false,
-                "clientField": ""
-              },
-              {
-                "id": "method-template-response-tech",
-                "field": "techData",
-                "sourceField": "techData",
-                "type": "object",
-                "required": "+",
-                "validations": "",
-                "description": "Технические данные ответа.",
-                "example": "{}",
-                "origin": "generated",
-                "source": "body",
-                "enabled": true,
-                "maskInLogs": false,
-                "clientField": ""
-              },
-              {
-                "id": "method-template-response-traceId",
-                "field": "techData.traceId",
-                "sourceField": "techData.traceId",
-                "type": "string",
-                "required": "+",
-                "validations": "",
-                "description": "Идентификатор трассировки.",
-                "example": "ed816fd75322d6769b06ea61026c34cd",
-                "origin": "generated",
-                "source": "body",
-                "enabled": true,
-                "maskInLogs": false,
-                "clientField": ""
-              },
-              {
-                "id": "method-template-response-spanId",
-                "field": "techData.spanId",
-                "sourceField": "techData.spanId",
-                "type": "string",
-                "required": "+",
-                "validations": "",
-                "description": "Идентификатор span.",
-                "example": "9a5a60a44b08eefe",
-                "origin": "generated",
-                "source": "body",
-                "enabled": true,
-                "maskInLogs": false,
-                "clientField": ""
-              },
-              {
-                "id": "method-template-response-appVersion",
-                "field": "techData.appVersion",
-                "sourceField": "techData.appVersion",
-                "type": "string",
-                "required": "+",
-                "validations": "",
-                "description": "Версия приложения.",
-                "example": "1.0.1",
-                "origin": "generated",
-                "source": "body",
-                "enabled": true,
-                "maskInLogs": false,
-                "clientField": ""
-              },
-              {
-                "id": "method-template-response-appTag",
-                "field": "techData.appTag",
-                "sourceField": "techData.appTag",
-                "type": "string",
-                "required": "+",
-                "validations": "",
-                "description": "Тег приложения.",
-                "example": "1",
-                "origin": "generated",
-                "source": "body",
-                "enabled": true,
-                "maskInLogs": false,
-                "clientField": ""
-              },
-              {
-                "id": "method-template-response-warnings",
-                "field": "warnings",
-                "sourceField": "warnings",
-                "type": "object",
-                "required": "+",
-                "validations": "",
-                "description": "Предупреждения по отсутствующим необязательным заголовкам; пустой объект, если предупреждений нет.",
-                "example": "{}",
-                "origin": "generated",
-                "source": "body",
-                "enabled": true,
-                "maskInLogs": false,
-                "clientField": ""
-              }
-            ],
-            "error": "",
-            "domainModelEnabled": false,
-            "clientFormat": "json",
-            "clientLastSyncedFormat": "json",
-            "clientInput": "",
-            "clientSchemaInput": "",
-            "clientRows": [],
-            "clientError": "",
-            "clientMappings": {},
-            "requestColumnOrder": [
-              "field",
-              "type",
-              "required",
-              "validations",
-              "clientField",
-              "description",
-              "maskInLogs",
-              "example"
-            ]
-          },
-          {
-            "id": "errors",
-            "title": "Ошибки",
-            "enabled": true,
-            "kind": "errors",
-            "rows": [],
-            "validationRules": []
-          },
-          {
-            "id": "non-functional",
-            "title": "Нефункциональные требования",
-            "enabled": true,
-            "kind": "text",
-            "value": ""
-          }
-        ]
-      }
-    ],
-    "groups": [],
-    "projectSections": [
-      {
-        "id": "overview",
-        "title": "Overview",
+        "id": "goal",
+        "title": "Цель",
         "enabled": true,
-        "type": "text",
-        "content": "",
-        "order": 0
-      }
-    ],
-    "flows": [
+        "kind": "text",
+        "value": ""
+      },
       {
-        "id": "flow-template",
-        "name": "FLOW_NAME_TO_REPLACE",
-        "description": "",
-        "createdAt": "2026-10-07T00:00:00.000Z",
-        "updatedAt": "2026-10-07T00:00:00.000Z",
-        "nodes": [
+        "id": "functional",
+        "title": "Функциональные требования",
+        "enabled": true,
+        "kind": "text",
+        "value": ""
+      },
+      {
+        "id": "process-diagram",
+        "title": "Диаграмма процесса",
+        "enabled": true,
+        "kind": "diagram",
+        "diagrams": []
+      },
+      {
+        "id": "request",
+        "title": "Request",
+        "enabled": true,
+        "kind": "parsed",
+        "sectionType": "request",
+        "format": "json",
+        "lastSyncedFormat": "json",
+        "input": "",
+        "schemaInput": "",
+        "rows": [
           {
-            "id": "start",
-            "type": "start",
-            "position": {
-              "x": 0,
-              "y": 100
-            },
-            "label": "Начало",
-            "description": "",
-            "actor": "",
-            "noteContent": "",
-            "preconditions": [],
-            "postconditions": []
+            "id": "method-template-header-1",
+            "field": "X-CLIENT-ID",
+            "sourceField": "X-CLIENT-ID",
+            "type": "string",
+            "required": "-",
+            "validations": "",
+            "description": "ID клиента",
+            "example": "",
+            "origin": "generated",
+            "source": "header",
+            "enabled": true,
+            "maskInLogs": true,
+            "clientField": ""
           },
           {
-            "id": "call-method",
-            "type": "method",
-            "position": {
-              "x": 260,
-              "y": 100
-            },
-            "label": "METHOD_NAME_TO_REPLACE",
-            "description": "",
-            "actor": "",
-            "noteContent": "",
-            "preconditions": [],
-            "postconditions": [],
-            "methodRef": {
-              "methodId": "method-template"
-            }
+            "id": "method-template-header-2",
+            "field": "X-USER-ID",
+            "sourceField": "X-USER-ID",
+            "type": "string",
+            "required": "-",
+            "validations": "",
+            "description": "ID пользователя",
+            "example": "",
+            "origin": "generated",
+            "source": "header",
+            "enabled": true,
+            "maskInLogs": true,
+            "clientField": ""
           },
           {
-            "id": "end",
-            "type": "end",
-            "position": {
-              "x": 520,
-              "y": 100
-            },
-            "label": "Завершение",
-            "description": "",
-            "actor": "",
-            "noteContent": "",
-            "preconditions": [],
-            "postconditions": []
+            "id": "method-template-header-3",
+            "field": "X-SOURCE-SYSTEM",
+            "sourceField": "X-SOURCE-SYSTEM",
+            "type": "string",
+            "required": "-",
+            "validations": "",
+            "description": "Система-инициатор",
+            "example": "",
+            "origin": "generated",
+            "source": "header",
+            "enabled": true,
+            "maskInLogs": false,
+            "clientField": ""
+          },
+          {
+            "id": "method-template-header-4",
+            "field": "X-BP-ID",
+            "sourceField": "X-BP-ID",
+            "type": "string",
+            "required": "-",
+            "validations": "",
+            "description": "ID бизнес-процесса",
+            "example": "",
+            "origin": "generated",
+            "source": "header",
+            "enabled": true,
+            "maskInLogs": false,
+            "clientField": ""
+          },
+          {
+            "id": "method-template-header-5",
+            "field": "X-BP-NAME",
+            "sourceField": "X-BP-NAME",
+            "type": "string",
+            "required": "-",
+            "validations": "",
+            "description": "Название бизнес-процесса",
+            "example": "",
+            "origin": "generated",
+            "source": "header",
+            "enabled": true,
+            "maskInLogs": false,
+            "clientField": ""
+          },
+          {
+            "id": "method-template-header-6",
+            "field": "traceparent",
+            "sourceField": "traceparent",
+            "type": "string",
+            "required": "-",
+            "validations": "",
+            "description": "TraceParent для распределенного трейсинга",
+            "example": "",
+            "origin": "generated",
+            "source": "header",
+            "enabled": true,
+            "maskInLogs": false,
+            "clientField": ""
           }
         ],
-        "edges": [
+        "error": "",
+        "domainModelEnabled": false,
+        "clientFormat": "json",
+        "clientLastSyncedFormat": "json",
+        "clientInput": "",
+        "clientSchemaInput": "",
+        "clientRows": [],
+        "clientError": "",
+        "clientMappings": {},
+        "requestColumnOrder": [
+          "field",
+          "type",
+          "required",
+          "validations",
+          "clientField",
+          "description",
+          "maskInLogs",
+          "example"
+        ],
+        "requestUrl": "",
+        "requestMethod": "POST",
+        "requestProtocol": "REST",
+        "authType": "none",
+        "authHeaderName": "",
+        "authTokenExample": "",
+        "authUsername": "",
+        "authPassword": "",
+        "authApiKeyExample": "",
+        "externalRequestUrl": "",
+        "externalRequestMethod": "POST",
+        "externalAuthType": "none",
+        "externalAuthHeaderName": "",
+        "externalAuthTokenExample": "",
+        "externalAuthUsername": "",
+        "externalAuthPassword": "",
+        "externalAuthApiKeyExample": ""
+      },
+      {
+        "id": "response",
+        "title": "Response",
+        "enabled": true,
+        "kind": "parsed",
+        "sectionType": "response",
+        "format": "json",
+        "lastSyncedFormat": "json",
+        "input": "{\"data\":{},\"techData\":{\"traceId\":\"ed816fd75322d6769b06ea61026c34cd\",\"spanId\":\"9a5a60a44b08eefe\",\"appVersion\":\"1.0.1\",\"appTag\":\"1\"},\"warnings\":{}}",
+        "schemaInput": "",
+        "rows": [
           {
-            "id": "edge-start-call",
-            "type": "sequence",
-            "fromNodeId": "start",
-            "toNodeId": "call-method",
-            "label": "",
-            "condition": "",
-            "mappings": []
+            "id": "method-template-response-data",
+            "field": "data",
+            "sourceField": "data",
+            "type": "object",
+            "required": "+",
+            "validations": "",
+            "description": "Все доменные данные ответа. Заполнить по материалам метода; data может быть объектом или массивом объектов.",
+            "example": "{}",
+            "origin": "generated",
+            "source": "body",
+            "enabled": true,
+            "maskInLogs": false,
+            "clientField": ""
           },
           {
-            "id": "edge-call-end",
-            "type": "sequence",
-            "fromNodeId": "call-method",
-            "toNodeId": "end",
-            "label": "",
-            "condition": "",
-            "mappings": []
+            "id": "method-template-response-tech",
+            "field": "techData",
+            "sourceField": "techData",
+            "type": "object",
+            "required": "+",
+            "validations": "",
+            "description": "Технические данные ответа.",
+            "example": "{}",
+            "origin": "generated",
+            "source": "body",
+            "enabled": true,
+            "maskInLogs": false,
+            "clientField": ""
+          },
+          {
+            "id": "method-template-response-traceId",
+            "field": "techData.traceId",
+            "sourceField": "techData.traceId",
+            "type": "string",
+            "required": "+",
+            "validations": "",
+            "description": "Идентификатор трассировки.",
+            "example": "ed816fd75322d6769b06ea61026c34cd",
+            "origin": "generated",
+            "source": "body",
+            "enabled": true,
+            "maskInLogs": false,
+            "clientField": ""
+          },
+          {
+            "id": "method-template-response-spanId",
+            "field": "techData.spanId",
+            "sourceField": "techData.spanId",
+            "type": "string",
+            "required": "+",
+            "validations": "",
+            "description": "Идентификатор span.",
+            "example": "9a5a60a44b08eefe",
+            "origin": "generated",
+            "source": "body",
+            "enabled": true,
+            "maskInLogs": false,
+            "clientField": ""
+          },
+          {
+            "id": "method-template-response-appVersion",
+            "field": "techData.appVersion",
+            "sourceField": "techData.appVersion",
+            "type": "string",
+            "required": "+",
+            "validations": "",
+            "description": "Версия приложения.",
+            "example": "1.0.1",
+            "origin": "generated",
+            "source": "body",
+            "enabled": true,
+            "maskInLogs": false,
+            "clientField": ""
+          },
+          {
+            "id": "method-template-response-appTag",
+            "field": "techData.appTag",
+            "sourceField": "techData.appTag",
+            "type": "string",
+            "required": "+",
+            "validations": "",
+            "description": "Тег приложения.",
+            "example": "1",
+            "origin": "generated",
+            "source": "body",
+            "enabled": true,
+            "maskInLogs": false,
+            "clientField": ""
+          },
+          {
+            "id": "method-template-response-warnings",
+            "field": "warnings",
+            "sourceField": "warnings",
+            "type": "object",
+            "required": "+",
+            "validations": "",
+            "description": "Предупреждения по отсутствующим необязательным заголовкам; пустой объект, если предупреждений нет.",
+            "example": "{}",
+            "origin": "generated",
+            "source": "body",
+            "enabled": true,
+            "maskInLogs": false,
+            "clientField": ""
           }
+        ],
+        "error": "",
+        "domainModelEnabled": false,
+        "clientFormat": "json",
+        "clientLastSyncedFormat": "json",
+        "clientInput": "",
+        "clientSchemaInput": "",
+        "clientRows": [],
+        "clientError": "",
+        "clientMappings": {},
+        "requestColumnOrder": [
+          "field",
+          "type",
+          "required",
+          "validations",
+          "clientField",
+          "description",
+          "maskInLogs",
+          "example"
         ]
+      },
+      {
+        "id": "errors",
+        "title": "Ошибки",
+        "enabled": true,
+        "kind": "errors",
+        "rows": [],
+        "validationRules": []
+      },
+      {
+        "id": "non-functional",
+        "title": "Нефункциональные требования",
+        "enabled": true,
+        "kind": "text",
+        "value": ""
       }
     ]
   }

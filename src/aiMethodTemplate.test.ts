@@ -1,17 +1,18 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import Ajv from 'ajv';
+import addFormats from 'ajv-formats';
 import { describe, expect, it } from 'vitest';
 import schema from './importContract/workspace-v3.schema.json';
-import { validateCodexProjectImport } from './codexImportValidation';
 import { parseProjectImportText } from './projectImport';
 import { ERROR_CATALOG } from './errorCatalog';
 import { JIRA_LABELS, JIRA_PRIORITY_RULES } from './jiraLabels';
 import { DEFAULT_REQUEST_HEADERS } from './requestHeaders';
-import type { ErrorRow, ParsedRow, WorkspaceProjectData } from './types';
+import type { ErrorRow, MethodDocument, ParsedRow } from './types';
 
 type AuthoringTemplate = {
-  outputSchema: unknown;
-  documentTemplate: WorkspaceProjectData & { importProfile: string };
+  outputSchema: { $ref: string; definitions: Record<string, object> };
+  documentTemplate: MethodDocument;
   referenceData: {
     rowTypes: string[];
     headers: Array<{ field: string; type: string; required: string }>;
@@ -26,10 +27,23 @@ function readTemplate(): AuthoringTemplate {
   return JSON.parse(readFileSync(resolve('public/docbuilder-ai-method-template.json'), 'utf8'));
 }
 
+function assertMethodSchema(template: AuthoringTemplate) {
+  const ajv = new Ajv({ allErrors: true, strict: true, strictTypes: false, strictRequired: false });
+  addFormats(ajv, ['date-time']);
+  const validate = ajv.compile(template.outputSchema);
+  expect(validate(template.documentTemplate), JSON.stringify(validate.errors)).toBe(true);
+  expect(validate({ methods: [template.documentTemplate] })).toBe(false);
+}
+
 describe('Static AI method authoring template', () => {
   it('keeps the offline schema and dictionaries aligned with the application', () => {
     const template = readTemplate();
-    expect(template.outputSchema).toEqual(schema);
+    expect(template.outputSchema.$ref).toBe('#/definitions/method');
+    for (const [key, definition] of Object.entries(template.outputSchema.definitions)) {
+      expect(definition).toEqual(schema.definitions[key as keyof typeof schema.definitions]);
+    }
+    expect(template.outputSchema.definitions).not.toHaveProperty('flow');
+    expect(template.outputSchema.definitions).not.toHaveProperty('projectSection');
     expect(template.referenceData.rowTypes).toEqual(schema.definitions.row.properties.type.enum);
     expect(template.referenceData.jiraLabels).toEqual(JIRA_LABELS);
     expect(template.referenceData.jiraPriorityGuidelines).toEqual(JIRA_PRIORITY_RULES);
@@ -44,27 +58,30 @@ describe('Static AI method authoring template', () => {
     expect(template.referenceData.errorCodes.some(code => code.internalCode === '400101')).toBe(false);
   });
 
-  it('imports the standalone document skeleton without diagnostics or normalization drift', () => {
-    const document = readTemplate().documentTemplate;
-    expect(validateCodexProjectImport(document)).toEqual([]);
+  it('imports the standalone skeleton through the existing method import path', () => {
+    const template = readTemplate();
+    const document = template.documentTemplate;
+    assertMethodSchema(template);
+    expect(document).not.toHaveProperty('methods');
+    expect(document).not.toHaveProperty('importProfile');
     const imported = parseProjectImportText(JSON.stringify(document), 'generated-method.json');
     if (imported.kind !== 'workspace') throw new Error('Expected a workspace document');
-    expect(imported.warnings).toEqual([]);
+    // The importer creates internal workspace defaults; only the method is merged by the UI.
+    expect(imported.warnings.map(issue => issue.path)).toEqual(['projectSections', 'flows']);
     expect(imported.workspace.methods).toHaveLength(1);
-    expect(imported.workspace.activeMethodId).toBe(document.activeMethodId);
-    const roundtrip = JSON.parse(JSON.stringify({ ...imported.workspace, importProfile: document.importProfile }));
-    expect(validateCodexProjectImport(roundtrip)).toEqual([]);
+    expect(imported.workspace.activeMethodId).toBe(document.id);
+    expect(imported.workspace.methods[0]).toMatchObject(document);
   });
 
   it('preserves the date, masking and BusinessException examples through the real importer', () => {
     const template = readTemplate();
     const document = template.documentTemplate;
-    const request = document.methods[0].sections.find(section => section.id === 'request');
-    const errors = document.methods[0].sections.find(section => section.id === 'errors');
+    const request = document.sections.find(section => section.id === 'request');
+    const errors = document.sections.find(section => section.id === 'errors');
     if (request?.kind !== 'parsed' || errors?.kind !== 'errors') throw new Error('Expected canonical sections');
     request.rows.push(template.examples.publicDateRow, template.examples.maskedPersonalField);
     errors.rows.push(template.examples.businessErrorRow);
-    expect(validateCodexProjectImport(document)).toEqual([]);
+    assertMethodSchema(template);
     const imported = parseProjectImportText(JSON.stringify(document), 'generated-method.json');
     if (imported.kind !== 'workspace') throw new Error('Expected a workspace document');
     const loadedRequest = imported.workspace.methods[0].sections.find(section => section.id === 'request');

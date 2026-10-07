@@ -50,13 +50,14 @@ export function createJira({ store = null, fetchImpl = globalThis.fetch, now = D
     return session;
   }
   async function api(connection, path, { method = 'GET', body } = {}) {
+    const writing = method !== 'GET';
     const currentGeneration = generation;
     const target = new URL(path, connection.baseUrl);
     if (!path.startsWith('/rest/api/2/') || target.origin !== connection.baseUrl) throw fail('Недопустимый адрес API Jira.');
     let response;
     try {
       response = await fetchImpl(target.href, { method, headers: { Authorization: `Bearer ${connection.token}`, Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}), redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) });
-    } catch { throw new JiraError(502, method === 'POST' ? 'OUTCOME_UNKNOWN' : 'UPSTREAM_UNAVAILABLE', method === 'POST' ? 'Jira могла сохранить задачу. Повторное создание заблокировано; проверьте результат.' : 'Jira недоступна. Проверьте сеть.'); }
+    } catch { throw new JiraError(502, writing ? 'OUTCOME_UNKNOWN' : 'UPSTREAM_UNAVAILABLE', writing ? 'Jira могла сохранить изменения. Проверьте результат операции.' : 'Jira недоступна. Проверьте сеть.'); }
     if (currentGeneration !== generation) { await response.body?.cancel(); throw new JiraError(409, 'SESSION_CHANGED', 'Подключение Jira изменилось.'); }
     if (!response.ok) {
       await response.body?.cancel();
@@ -69,7 +70,8 @@ export function createJira({ store = null, fetchImpl = globalThis.fetch, now = D
       if (response.status === 404) throw new JiraError(404, 'NOT_FOUND', 'Проект, задача или REST метод Jira недоступны.');
       if (response.status >= 300 && response.status < 400) throw new JiraError(502, 'REDIRECT_DENIED', 'Jira перенаправляет запрос. Проверьте адрес и PAT.');
       if (response.status === 400) throw new JiraError(400, 'JIRA_VALIDATION', 'Jira отклонила поля. Проверьте настройки выбранного типа задачи, эпика и обязательных полей.');
-      throw new JiraError(502, method === 'POST' ? 'OUTCOME_UNKNOWN' : 'UPSTREAM_UNAVAILABLE', 'Jira не подтвердила результат запроса.');
+      if (response.status === 409) throw new JiraError(409, 'ISSUE_CHANGED', 'Задача изменена в Jira. Загрузите текущую версию перед обновлением.');
+      throw new JiraError(502, writing ? 'OUTCOME_UNKNOWN' : 'UPSTREAM_UNAVAILABLE', 'Jira не подтвердила результат запроса.');
     }
     if (response.status === 204) return {};
     try {
@@ -80,7 +82,7 @@ export function createJira({ store = null, fetchImpl = globalThis.fetch, now = D
       if (currentGeneration !== generation) throw new JiraError(409, 'SESSION_CHANGED', 'Подключение Jira изменилось.');
       if (session === connection) session.expiresAt = now() + TTL;
       return result;
-    } catch (error) { if (error instanceof JiraError) throw error; throw new JiraError(502, method === 'POST' ? 'OUTCOME_UNKNOWN' : 'UPSTREAM_INVALID', 'Jira вернула неполный ответ.'); }
+    } catch (error) { if (error instanceof JiraError) throw error; throw new JiraError(502, writing ? 'OUTCOME_UNKNOWN' : 'UPSTREAM_INVALID', 'Jira вернула неполный ответ.'); }
   }
   async function persist(connection) {
     if (!store || !saved) throw new JiraError(409, 'PERSISTENCE_REQUIRED', 'Для создания задач включите «Запомнить на этом компьютере»: журнал защищает от повторного создания после перезапуска.');
@@ -141,7 +143,97 @@ export function createJira({ store = null, fetchImpl = globalThis.fetch, now = D
   }
   function operationId(connection, methodId) { return createHash('sha256').update(`${connection.project.id}:${text(methodId, 128)}`).digest('hex'); }
   function operation(connection, methodId) { return connection.operations.find(item => item.id === operationId(connection, methodId)) ?? null; }
-  function publicOperation(item) { return item ? { state: item.state, issue: item.issue ?? null, linkedUrl: item.linkedUrl ?? null, message: item.message ?? '' } : { state: 'none', issue: null, linkedUrl: null }; }
+  function publicOperation(item) { return item ? { state: item.state, issue: item.issue ?? null, linkedUrl: item.linkedUrl ?? null, message: item.message ?? '', ...(item.update ? { updateState: item.update.state } : {}) } : { state: 'none', issue: null, linkedUrl: null }; }
+  function issueKey(connection, methodId, link) {
+    const item = operation(connection, methodId);
+    if (item?.state === 'unknown') throw new JiraError(409, 'OUTCOME_UNKNOWN', 'Сначала подтвердите результат создания задачи.');
+    let selected;
+    if (link) {
+      selected = parseJiraLink(issuePattern.test(link) ? `${connection.baseUrl}/browse/${link}` : link);
+      if (selected.baseUrl !== connection.baseUrl || !selected.issue) throw fail('Подключите Jira, к которой относится задача метода.');
+    }
+    if (item?.issue && selected && selected.issue !== item.issue.key && selected.issue !== item.issue.id) throw new JiraError(409, 'BINDING_CONFLICT', 'Ссылка метода отличается от сохранённой задачи. Проверьте привязку.');
+    const key = item?.issue?.key ?? selected?.issue;
+    if (!key) throw fail('У метода нет связанной задачи Jira.');
+    return key;
+  }
+  async function readIssue(connection, key, epicField) {
+    const fields = ['project', 'issuetype', 'summary', 'description', 'labels', 'priority', 'updated', ...(epicField ? [epicField] : [])];
+    const result = await api(connection, `/rest/api/2/issue/${key}?fields=${fields.join(',')}`);
+    if (result.fields?.project?.id !== connection.project.id) throw new JiraError(409, 'PROJECT_MISMATCH', 'Задача относится к другому проекту. Выберите её проект в локальном подключении.');
+    if (!issuePattern.test(result.key ?? '') || !/^\d+$/.test(result.id ?? '') || typeof result.fields?.summary !== 'string' || result.fields.description != null && typeof result.fields.description !== 'string' || !Array.isArray(result.fields.labels) || result.fields.labels.some(label => typeof label !== 'string')) throw new JiraError(502, 'UPSTREAM_INVALID', 'Jira не вернула поля задачи в поддерживаемом формате.');
+    const data = { id: result.id, key: result.key, url: `${connection.baseUrl}/browse/${result.key}`, issueType: result.fields.issuetype, summary: result.fields.summary, description: result.fields.description ?? '', labels: result.fields.labels, priorityId: result.fields.priority?.id ?? '', epic: epicField ? result.fields[epicField] ?? '' : '', updated: result.fields.updated ?? '' };
+    data.fingerprint = createHash('sha256').update(JSON.stringify({ ...data, labels: [...data.labels].sort() })).digest('hex');
+    return data;
+  }
+  async function loadIssue(connection, methodId, link) {
+    const key = issueKey(connection, methodId, link);
+    const fields = await api(connection, '/rest/api/2/field');
+    const epicField = Array.isArray(fields) ? fields.find(field => field.schema?.custom === 'com.pyxis.greenhopper.jira:gh-epic-link' && /^customfield_\d+$/.test(field.id))?.id ?? null : null;
+    const issue = await readIssue(connection, key, epicField);
+    const edit = await api(connection, `/rest/api/2/issue/${issue.key}/editmeta`);
+    if (!edit.fields || typeof edit.fields !== 'object' || Array.isArray(edit.fields)) throw new JiraError(502, 'UPSTREAM_INVALID', 'Jira не вернула права редактирования задачи.');
+    const editableFields = Object.keys(edit.fields).filter(key => edit.fields[key].operations?.includes('set'));
+    const issueKind = taskNames.has(issue.issueType?.name?.toLowerCase()) ? 'task' : storyNames.has(issue.issueType?.name?.toLowerCase()) ? 'story' : null;
+    const priorities = edit.fields.priority ? edit.fields.priority.allowedValues ?? await api(connection, '/rest/api/2/priority') : [];
+    const meta = { project: connection.project, issueKind, story: issue.issueType, epicField: editableFields.includes(epicField) ? epicField : null, epicRequired: Boolean(edit.fields[epicField]?.required), requiredFields: [], priorities: priorities.map(priority => ({ id: text(priority.id, 20), name: text(priority.name) })), labelsSupported: editableFields.includes('labels'), priorityRequired: Boolean(edit.fields.priority?.required), editableFields, message: !issueKind ? 'Редактирование этого типа задачи в DocBuilder не поддерживается.' : !editableFields.includes('summary') || !editableFields.includes('description') ? 'Jira ограничивает редактирование названия или описания этой задачи.' : '' };
+    let item = operation(connection, methodId);
+    if (!item) {
+      if (connection.operations.length >= 256) throw new JiraError(409, 'JOURNAL_FULL', 'Локальный журнал Jira заполнен.');
+      item = { id: operationId(connection, methodId), projectId: connection.project.id, storyId: issue.issueType.id, summary: issue.summary, epic: issue.epic || null, epicField, state: 'success', issue: { id: issue.id, key: issue.key, url: issue.url } };
+      connection.operations.push(item);
+      if (saved) await persist(connection);
+    }
+    item.epicField = epicField;
+    if (item.update?.state === 'unknown' && Object.entries(item.update.fields).every(([field, expected]) => JSON.stringify(field === 'labels' ? [...issue.labels].sort() : field === 'priority' ? issue.priorityId ? { id: issue.priorityId } : null : field === epicField ? issue.epic || null : issue[field]) === JSON.stringify(field === 'labels' ? [...expected].sort() : expected))) {
+      delete item.update; await persist(connection);
+    }
+    return { issue, metadata: meta, operation: publicOperation(item) };
+  }
+  async function updateIssue(connection, body) {
+    const loaded = await loadIssue(connection, body.methodId, body.link);
+    const { issue, metadata: config } = loaded; const item = operation(connection, body.methodId);
+    if (item.update?.state === 'unknown') throw new JiraError(409, 'OUTCOME_UNKNOWN', 'Результат обновления не подтверждён. Сначала проверьте задачу.');
+    if (body.fingerprint !== issue.fingerprint) throw new JiraError(409, 'ISSUE_CHANGED', 'Задача изменилась в Jira. Загрузите текущую версию; местный черновик сохранён.');
+    if (!config.issueKind) throw fail('Этот тип задачи не поддерживает обновление из DocBuilder.');
+    const summary = text(body.summary); text(body.description, 100_000); const description = body.description;
+    const fields = {};
+    if (summary !== issue.summary) fields.summary = summary;
+    if (description !== issue.description) fields.description = description;
+    const labels = body.labels;
+    if (!Array.isArray(labels) || labels.length > 100 || labels.some(label => typeof label !== 'string' || !labelNames.has(label) && !issue.labels.includes(label)) || new Set(labels).size !== labels.length) throw fail('Некорректные теги Jira.');
+    if (JSON.stringify([...labels].sort()) !== JSON.stringify([...issue.labels].sort())) {
+      if (!labels.some(label => primaryLabelNames.has(label))) throw fail('Выберите хотя бы один основной тег.');
+      fields.labels = labels;
+    }
+    const epic = body.epic || null;
+    if (epic !== (issue.epic || null)) {
+      if (!config.epicField || epic && !issuePattern.test(epic) || !epic && config.epicRequired) throw fail('Проверьте доступность и обязательность эпика.');
+      if (epic) {
+        const selected = await api(connection, `/rest/api/2/issue/${epic}?fields=issuetype,project`);
+        if (!['epic', 'эпик'].includes(selected.fields?.issuetype?.name?.toLowerCase()) || selected.fields?.project?.id !== connection.project.id) throw fail('Выберите эпик текущего проекта.');
+      }
+      fields[config.epicField] = epic;
+    }
+    if (body.priorityId !== issue.priorityId) {
+      if (body.priorityId && !config.priorities.some(priority => priority.id === body.priorityId) || !body.priorityId && config.priorityRequired) throw fail('Выберите доступный приоритет Jira.');
+      fields.priority = body.priorityId ? { id: body.priorityId } : null;
+    }
+    if (Object.keys(fields).some(field => !config.editableFields.includes(field))) throw new JiraError(403, 'ACCESS_DENIED', 'Jira запрещает изменение выбранного поля.');
+    if (!Object.keys(fields).length) return loaded;
+    // Re-read after validation, before PUT. Unrelated fields are never sent back to Jira.
+    if ((await readIssue(connection, issue.key, item.epicField)).fingerprint !== body.fingerprint) throw new JiraError(409, 'ISSUE_CHANGED', 'Задача изменилась в Jira. Загрузите текущую версию.');
+    item.update = { state: 'unknown', fields }; await persist(connection);
+    try {
+      await api(connection, `/rest/api/2/issue/${issue.key}`, { method: 'PUT', body: { fields } });
+      delete item.update; item.summary = summary; item.epic = epic; await persist(connection);
+    } catch (error) {
+      if (['JIRA_VALIDATION', 'ACCESS_DENIED', 'AUTH_EXPIRED', 'NOT_FOUND', 'REDIRECT_DENIED', 'ISSUE_CHANGED'].includes(error.code)) { delete item.update; await persist(connection); }
+      throw error;
+    }
+    if (body.confluenceUrl) { try { await link(connection, item, body.confluenceUrl); } catch { item.message = 'Задача обновлена. Добавление ссылки Confluence нужно повторить отдельно.'; } }
+    return loadIssue(connection, body.methodId, issue.url);
+  }
   async function link(connection, item, value) {
     if (!item.issue) throw fail('Сначала подтвердите созданную задачу.');
     let url; try { url = new URL(value); } catch { throw fail('Некорректная ссылка Confluence.'); }
@@ -198,6 +290,14 @@ export function createJira({ store = null, fetchImpl = globalThis.fetch, now = D
     if (busy) throw new JiraError(409, 'OPERATION_PENDING', 'Дождитесь текущей операции Jira.');
     busy = true;
     try {
+      if (method === 'GET' && path === '/api/jira/issue') return await loadIssue(connection, query.get('methodId'), query.get('link'));
+      if (method === 'POST' && path === '/api/jira/update') return await updateIssue(connection, body);
+      if (method === 'POST' && path === '/api/jira/accept-current') {
+        const loaded = await loadIssue(connection, body.methodId, body.link);
+        if (loaded.issue.fingerprint !== body.fingerprint) throw new JiraError(409, 'ISSUE_CHANGED', 'Задача снова изменилась. Прочитайте её ещё раз.');
+        const item = operation(connection, body.methodId); delete item.update; await persist(connection);
+        loaded.operation = publicOperation(item); return loaded;
+      }
       if (method === 'GET' && path === '/api/jira/metadata') return await metadata(connection, query.get('issueKind') ?? 'story');
       if (method === 'GET' && path === '/api/jira/epics') {
         const search = query.get('q') ?? ''; if (search.length > 255) throw fail('Слишком длинный поиск.');

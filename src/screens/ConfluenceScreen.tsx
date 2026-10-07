@@ -472,7 +472,7 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onBack, on
       <WBButton aria-pressed={tab === 'browse'} disabled={busy || Boolean(unknown)} onClick={() => { setTab('browse'); setTreeRevision(old => old + 1); }}>Страницы</WBButton>
       <WBButton aria-pressed={tab === 'jira'} disabled={busy || Boolean(unknown)} onClick={() => { setJiraVisited(true); setTab('jira'); }}>Jira</WBButton>
     </nav>
-    {jiraVisited && <div hidden={tab !== 'jira'}><JiraPanel key={method.id} methodId={method.id} methodName={method.name} methodContext={jiraMethodContext(method)} jiraTicket={method.jiraTicket} confluenceUrl={binding ? confluencePageUrl(binding.pageId, binding.baseUrl) : undefined} onBusyChange={setJiraBusy} onLinked={onJiraLinked} /></div>}
+    {jiraVisited && <div hidden={tab !== 'jira'}><JiraPanel key={method.id} active={tab === 'jira'} methodId={method.id} methodName={method.name} methodContext={jiraMethodContext(method)} jiraTicket={method.jiraTicket} confluenceUrl={binding ? confluencePageUrl(binding.pageId, binding.baseUrl) : undefined} onBusyChange={setJiraBusy} onLinked={onJiraLinked} /></div>}
     {error && <p className="cf-notice cf-error" role="alert">{error}</p>}
     {!connected && !connectionBusy && tab !== 'jira' && <div className="cf-notice"><h3>Подключите Confluence</h3><p>Токен вводится в локальном приложении и передаётся только вашему Confluence. Проект сохраняется в DocBuilder как прежде.</p><p><a href="/docbuilder-confluence-local.zip" download>Скачать локальное приложение</a> · Распакуйте и запустите start-confluence.cmd.</p></div>}
     {connected && tab === 'browse' && <div className="cf-grid">{treeControls()}<section><h3>Просмотр страницы</h3>

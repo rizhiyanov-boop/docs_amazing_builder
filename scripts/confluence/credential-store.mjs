@@ -30,6 +30,18 @@ function validateConnection(value) {
         result.issue = { id: item.issue.id, key: item.issue.key, url: `${value.baseUrl}/browse/${item.issue.key}` };
       }
       if (item.state === 'success' && !result.issue) throw storageError();
+      if (item.update) {
+        if (item.state !== 'success' || item.update.state !== 'unknown' || !item.update.fields || typeof item.update.fields !== 'object' || Array.isArray(item.update.fields)) throw storageError();
+        const fields = item.update.fields;
+        for (const [key, value] of Object.entries(fields)) {
+          if (key === 'summary' || key === 'description') { if (typeof value !== 'string' || value.length > (key === 'summary' ? 255 : 100_000)) throw storageError(); }
+          else if (key === 'labels') { if (!Array.isArray(value) || value.length > 100 || value.some(label => typeof label !== 'string' || label.length > 255)) throw storageError(); }
+          else if (key === 'priority') { if (value !== null && (!value || !/^\d{1,20}$/.test(value.id) || Object.keys(value).length !== 1)) throw storageError(); }
+          else if (key === result.epicField) { if (value !== null && !/^[A-Z][A-Z0-9_]*-[1-9]\d*$/.test(value)) throw storageError(); }
+          else throw storageError();
+        }
+        result.update = { state: 'unknown', fields };
+      }
       if (item.linkedUrl) { const linked = new URL(item.linkedUrl); if (linked.protocol !== 'https:' || linked.username || linked.password || item.linkedUrl.length > 2048) throw storageError(); result.linkedUrl = linked.href; }
       return result;
     });

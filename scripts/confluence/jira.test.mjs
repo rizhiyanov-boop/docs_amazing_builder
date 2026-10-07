@@ -32,6 +32,50 @@ function fixture(options = {}) {
   return { jira, store, fetchImpl, calls, connect, create, handle, saved: () => saved, postCount: () => postCount };
 }
 
+function editableFixture(options = {}) {
+  const fields = { project: { id: '101' }, issuetype: { id: '7', name: 'User Story' }, summary: 'Original story', description: 'Original description', labels: ['business', 'existing-custom-tag'], priority: { id: '3' }, customfield_10203: null, updated: '2026-10-07T10:00:00.000+0500' };
+  const f = fixture({ respond: async (url, init) => {
+    const path = new URL(url).pathname;
+    if (path.endsWith('/IN-17/editmeta')) return Response.json({ fields: Object.fromEntries(['summary', 'description', 'labels', 'customfield_10203', 'priority'].filter(key => key !== options.readonly).map(key => [key, { operations: ['set'], ...(key === 'priority' ? { allowedValues: [{ id: '3', name: 'Medium' }] } : {}) }])) });
+    if (path.endsWith('/issue/IN-17')) {
+      if (init.method === 'PUT') { Object.assign(fields, JSON.parse(init.body).fields, { updated: '2026-10-07T11:00:00.000+0500' }); if (options.unknown) throw Error('lost response'); return new Response(null, { status: 204 }); }
+      return Response.json({ id: '555', key: 'IN-17', fields });
+    }
+  } });
+  const load = manager => f.handle(manager, 'issue', 'GET', null, new URLSearchParams({ methodId: 'bound-method', link: `${baseUrl}/browse/IN-17` }));
+  const body = issue => ({ methodId: 'bound-method', link: issue.url, fingerprint: issue.fingerprint, summary: issue.summary, description: 'Edited description', epic: issue.epic, labels: issue.labels, priorityId: issue.priorityId });
+  return { ...f, fields, load, body };
+}
+
+test('existing issue binding loads Jira fields and edits only changed fields without another create', async () => {
+  const f = editableFixture(); await f.connect(); const loaded = await f.load(f.jira);
+  assert.equal(loaded.issue.description, 'Original description'); assert.equal(loaded.metadata.issueKind, 'story'); assert.equal(loaded.operation.state, 'success');
+  assert.equal(f.saved().operations[0].issue.key, 'IN-17'); assert.equal(JSON.stringify(loaded).includes('synthetic-jira-token'), false);
+  const result = await f.handle(f.jira, 'update', 'POST', f.body(loaded.issue));
+  assert.equal(result.issue.description, 'Edited description');
+  const put = f.calls.find(call => call.method === 'PUT'); assert.deepEqual(JSON.parse(put.body), { fields: { description: 'Edited description' } });
+  assert.deepEqual(result.issue.labels, ['business', 'existing-custom-tag']); assert.equal(f.postCount(), 0);
+  await f.handle(f.jira, 'create', 'POST', { methodId: 'bound-method' }); assert.equal(f.postCount(), 0);
+});
+test('stale Jira snapshot, different project, and noneditable field block PUT', async () => {
+  const f = editableFixture(); await f.connect(); const loaded = await f.load(f.jira);
+  f.fields.description = 'External change';
+  await assert.rejects(f.handle(f.jira, 'update', 'POST', f.body(loaded.issue)), error => error.code === 'ISSUE_CHANGED');
+  f.fields.project.id = 'other'; await assert.rejects(f.load(f.jira), error => error.code === 'PROJECT_MISMATCH');
+  assert.equal(f.calls.filter(call => call.method === 'PUT').length, 0);
+  const readonly = editableFixture({ readonly: 'description' }); await readonly.connect(); const locked = await readonly.load(readonly.jira);
+  await assert.rejects(readonly.handle(readonly.jira, 'update', 'POST', readonly.body(locked.issue)), error => error.code === 'ACCESS_DENIED');
+  assert.equal(readonly.calls.filter(call => call.method === 'PUT').length, 0);
+});
+test('lost PUT response persists the update journal and reconciles by reading Jira after restart', async () => {
+  const f = editableFixture({ unknown: true }); await f.connect(); const loaded = await f.load(f.jira);
+  await assert.rejects(f.handle(f.jira, 'update', 'POST', f.body(loaded.issue)), error => error.code === 'OUTCOME_UNKNOWN');
+  assert.equal(f.saved().operations[0].update.state, 'unknown');
+  const restored = createJira({ store: f.store, fetchImpl: f.fetchImpl }); await restored.restore(); const current = await f.load(restored);
+  assert.equal(current.operation.updateState, undefined); assert.equal(current.issue.description, 'Edited description');
+  assert.equal(f.saved().operations[0].update, undefined); assert.equal(f.calls.filter(call => call.method === 'PUT').length, 1); assert.equal(f.postCount(), 0);
+});
+
 test('Jira links resolve issue, project and board without accepting credentials or HTTP', () => {
   assert.deepEqual(parseJiraLink(`${baseUrl}/browse/IN-3?x=1#comment`), { baseUrl, issue: 'IN-3' });
   assert.deepEqual(parseJiraLink(`${baseUrl}/projects/IN/issues/IN-3?selectedIssue=DI-8`), { baseUrl, issue: 'DI-8' });

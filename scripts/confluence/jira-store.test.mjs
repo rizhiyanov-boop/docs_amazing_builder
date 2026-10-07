@@ -11,6 +11,7 @@ test('Windows Jira store restores project and write journal encrypted, isolated 
   const connection = { baseUrl: 'https://jira.example', token: 'synthetic-jira-only-token', project: { id: '101', key: 'IN', name: 'Interns', url: 'https://jira.example/projects/IN', issueTypes: [{ id: '7', name: 'User Story' }] }, operations: [{ id: 'a'.repeat(64), projectId: '101', storyId: '7', summary: 'Synthetic Story', epic: 'DI-5', epicField: 'customfield_10203', state: 'unknown' }] };
   connection.operations.push({ id: 'b'.repeat(64), projectId: '101', storyId: '7', summary: 'No epic', epic: null, epicField: 'customfield_10203', state: 'unknown' });
   connection.operations.push({ id: 'c'.repeat(64), projectId: '101', storyId: '7', summary: 'No Epic Link field', epic: null, epicField: null, state: 'unknown' });
+  connection.operations.push({ id: 'd'.repeat(64), projectId: '101', storyId: '7', summary: 'Pending edit', epic: null, epicField: 'customfield_10203', state: 'success', issue: { id: '555', key: 'IN-17', url: 'https://jira.example/browse/IN-17' }, update: { state: 'unknown', fields: { description: 'Synthetic pending description', labels: ['business'], priority: { id: '3' }, customfield_10203: null } } });
   const store = createWindowsCredentialStore({ directory, service: 'Jira' }); await store.save(connection);
   const encrypted = await readFile(join(directory, 'connection.dpapi'));
   assert.equal(encrypted.includes(Buffer.from(connection.token)), false); assert.equal(encrypted.includes(Buffer.from('Synthetic Story')), false);

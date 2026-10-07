@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JiraPanel } from './JiraPanel';
 import type { JiraClient } from '../jiraClient';
-afterEach(cleanup);
+afterEach(() => { cleanup(); localStorage.clear(); });
 
 function fixture(ready = true): JiraClient {
   return {
@@ -11,7 +11,8 @@ function fixture(ready = true): JiraClient {
     operation: vi.fn().mockResolvedValue({ state: 'none', issue: null, linkedUrl: null }),
     epics: vi.fn().mockResolvedValue({ items: [{ key: 'IN-5', name: 'Integration' }], nextStart: null }),
     create: vi.fn().mockResolvedValue({ state: 'success', issue: { id: '17', key: 'IN-17', url: 'https://jira.example/browse/IN-17' }, linkedUrl: 'https://confluence.example/pages/viewpage.action?pageId=123' }),
-    link: vi.fn(), confirm: vi.fn()
+    issue: vi.fn().mockResolvedValue({ issue: { id: '17', key: 'IN-17', url: 'https://jira.example/browse/IN-17', issueType: { id: '1', name: 'Задача' }, summary: 'Implement CRIF API', description: 'Description from Jira', epic: '', labels: ['business'], priorityId: '3', updated: '', fingerprint: 'a'.repeat(64) }, metadata: { project: {}, issueKind: 'task', story: { id: '1', name: 'Задача' }, epicField: 'customfield_10203', epicRequired: false, requiredFields: [], priorities: [{ id: '3', name: 'Medium' }], labelsSupported: true, editableFields: ['summary', 'description', 'labels', 'priority', 'customfield_10203'], message: '' }, operation: { state: 'success', issue: { id: '17', key: 'IN-17', url: 'https://jira.example/browse/IN-17' }, linkedUrl: null } }),
+    update: vi.fn(), acceptCurrent: vi.fn(), link: vi.fn(), confirm: vi.fn()
   };
 }
 describe('Jira integration panel', () => {
@@ -58,10 +59,59 @@ describe('Jira integration panel', () => {
   });
   it('preserves a method binding when the local journal or selected Jira project changes', async () => {
     const client = fixture();
+    vi.mocked(client.issue).mockRejectedValue(new Error('Задача относится к другому проекту.'));
     render(<JiraPanel client={client} methodId="method-1" methodName="Method" jiraTicket="https://jira.example/browse/DI-17" onBusyChange={vi.fn()} />);
     await screen.findByText('Метод уже связан с задачей Jira');
     expect(screen.queryByRole('button', { name: 'Создать задачу' })).toBeNull();
     expect(client.create).not.toHaveBeenCalled();
+  });
+  it('restores local input after leaving the screen without leaking drafts across methods', async () => {
+    const client = fixture(); const props = { client, methodId: 'local-1', methodName: 'Method', onBusyChange: vi.fn() };
+    const view = render(<JiraPanel {...props} />);
+    await screen.findByRole('option', { name: 'IN-5 · Integration' });
+    fireEvent.change(screen.getByLabelText('Название · английский, глагол действия'), { target: { value: 'Develop saved draft' } });
+    fireEvent.change(screen.getByLabelText('Описание · русский'), { target: { value: 'Местный текст' } });
+    fireEvent.change(screen.getByLabelText(/Привязать к эпику/), { target: { value: 'IN-5' } });
+    view.unmount();
+    const second = render(<JiraPanel {...props} />);
+    await waitFor(() => expect(screen.getByLabelText('Название · английский, глагол действия')).toHaveValue('Develop saved draft'));
+    expect(screen.getByLabelText('Описание · русский')).toHaveValue('Местный текст');
+    expect(screen.getByLabelText(/Привязать к эпику/)).toHaveValue('IN-5');
+    second.rerender(<JiraPanel {...props} methodId="local-2" />);
+    await waitFor(() => expect(screen.getByLabelText('Название · английский, глагол действия')).toHaveValue(''));
+    expect(client.create).not.toHaveBeenCalled();
+  });
+  it('loads a bound issue, restores unsaved edits, blocks stale drafts and updates the same issue', async () => {
+    const client = fixture(); const linked = await client.issue({ baseUrl: 'https://jira.example', projectId: '101' }, 'bound-1');
+    vi.mocked(client.issue).mockClear();
+    const props = { client, methodId: 'bound-1', methodName: 'Method', jiraTicket: 'https://jira.example/browse/IN-17', onBusyChange: vi.fn(), onLinked: vi.fn() };
+    const view = render(<JiraPanel {...props} />);
+    await waitFor(() => expect(screen.getByLabelText('Описание Jira')).toHaveValue('Description from Jira'));
+    fireEvent.change(screen.getByLabelText('Описание Jira'), { target: { value: 'Local edit' } });
+    view.unmount();
+    const newer = { ...linked, issue: { ...linked.issue, description: 'Remote edit', fingerprint: 'b'.repeat(64) } };
+    vi.mocked(client.issue).mockResolvedValue(newer);
+    vi.mocked(client.update).mockResolvedValue({ ...newer, issue: { ...newer.issue, description: 'Local edit', fingerprint: 'c'.repeat(64) } });
+    render(<JiraPanel {...props} />);
+    await waitFor(() => expect(screen.getByLabelText('Описание Jira')).toHaveValue('Local edit'));
+    expect(screen.getByRole('button', { name: 'Обновить задачу' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Оставить мои правки' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Обновить задачу' }));
+    await waitFor(() => expect(client.update).toHaveBeenCalledWith({ baseUrl: 'https://jira.example', projectId: '101' }, expect.objectContaining({ methodId: 'bound-1', link: props.jiraTicket, fingerprint: 'b'.repeat(64), description: 'Local edit' })));
+    expect(client.create).not.toHaveBeenCalled();
+    expect(props.onLinked).toHaveBeenCalledWith('bound-1', props.jiraTicket);
+  });
+  it('refreshes a clean bound form from Jira on tab return instead of treating the old snapshot as local edits', async () => {
+    const client = fixture(); const linked = await client.issue({ baseUrl: 'https://jira.example', projectId: '101' }, 'clean-bound');
+    const props = { client, methodId: 'clean-bound', methodName: 'Method', jiraTicket: linked.issue.url, onBusyChange: vi.fn() };
+    const view = render(<JiraPanel {...props} />);
+    await waitFor(() => expect(screen.getByLabelText('Описание Jira')).toHaveValue('Description from Jira'));
+    view.rerender(<JiraPanel {...props} active={false} />);
+    vi.mocked(client.issue).mockResolvedValue({ ...linked, issue: { ...linked.issue, description: '\nNew remote description\n', fingerprint: 'd'.repeat(64) } });
+    view.rerender(<JiraPanel {...props} active />);
+    await waitFor(() => expect(screen.getByLabelText('Описание Jira')).toHaveValue('\nNew remote description\n'));
+    expect(screen.queryByRole('button', { name: 'Оставить мои правки' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Обновить задачу' })).toBeDisabled();
   });
   it('prepares and creates without any available epic and explains empty tag recommendations', async () => {
     const client = fixture(); vi.mocked(client.epics).mockResolvedValue({ items: [], nextStart: null });

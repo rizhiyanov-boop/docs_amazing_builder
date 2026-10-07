@@ -16,7 +16,7 @@ function fixture(options = {}) {
     else if (path.endsWith('/project/101') || path.endsWith('/project/IN')) result = options.project ?? project;
     else if (path.endsWith('/issue/OLD-3')) result = { fields: { project: { id: '101' } } };
     else if (path.endsWith('/field')) result = [{ id: 'customfield_10203', schema: { custom: 'com.pyxis.greenhopper.jira:gh-epic-link' } }];
-    else if (path.includes('/createmeta/')) result = { total: 4, values: [{ fieldId: 'summary', required: true, name: 'Summary' }, { fieldId: 'reporter', required: true, hasDefaultValue: false, name: 'Reporter' }, { fieldId: 'customfield_10203', name: 'Epic Link' }, { fieldId: 'description', name: 'Description' }] };
+    else if (path.includes('/createmeta/')) result = { total: 5, values: [{ fieldId: 'summary', required: true, name: 'Summary' }, { fieldId: 'reporter', required: true, hasDefaultValue: false, name: 'Reporter' }, { fieldId: 'customfield_10203', name: 'Epic Link' }, { fieldId: 'description', name: 'Description' }, { fieldId: 'labels' }] };
     else if (path.endsWith('/issue/DI-5')) result = { fields: { issuetype: { name: 'Epic' }, project: { id: '101' } } };
     else if (path.endsWith('/issue') && init.method === 'POST') { postCount++; if (options.unknown) throw Error('network'); result = { id: '555', key: 'IN-17' }; }
     else if (path.endsWith('/remotelink')) { if (options.linkFailure) return new Response('{}', { status: 403 }); result = { id: 99 }; }
@@ -28,7 +28,7 @@ function fixture(options = {}) {
   const jira = createJira({ store, fetchImpl });
   const handle = (manager, path, method = 'GET', body = null, query = new URLSearchParams()) => manager.handle(`/api/jira/${path}`, method, query, body, baseUrl, '101');
   const connect = () => jira.connect({ link: `${baseUrl}/browse/OLD-3`, token: 'synthetic-jira-token', remember: true });
-  const create = manager => handle(manager, 'create', 'POST', { methodId: 'method-1', summary: 'Story', description: 'Description', epic: 'DI-5', confluenceUrl: 'https://confluence.example/pages/viewpage.action?pageId=123' });
+  const create = manager => handle(manager, 'create', 'POST', { methodId: 'method-1', summary: 'Story', description: 'Description', epic: 'DI-5', labels: ['business'], confluenceUrl: 'https://confluence.example/pages/viewpage.action?pageId=123' });
   return { jira, store, fetchImpl, calls, connect, create, handle, saved: () => saved, postCount: () => postCount };
 }
 
@@ -64,11 +64,56 @@ test('unknown POST remains blocked after restart and can be explicitly reconcile
   const result = await f.handle(restored, 'confirm', 'POST', { methodId: 'method-1', link: `${baseUrl}/browse/IN-17` }); assert.equal(result.state, 'success');
   await f.create(restored); assert.equal(f.postCount(), 1);
 });
+
+test('creation without an epic omits Epic Link and reconciliation retains duplicate protection', async () => {
+  let returnedEpic = null;
+  const f = fixture({ unknown: true, respond: async url => {
+    if (new URL(url).pathname.endsWith('/issue/IN-17')) return Response.json({ id: '555', key: 'IN-17', fields: { project: { id: '101' }, issuetype: { id: '7' }, summary: 'Story', customfield_10203: returnedEpic } });
+  } });
+  await f.connect();
+  const body = { methodId: 'without-epic', summary: 'Story', description: 'Description', labels: ['business'] };
+  const meta = await f.handle(f.jira, 'metadata'); assert.equal(meta.epicRequired, false);
+  await assert.rejects(f.handle(f.jira, 'create', 'POST', body), error => error.code === 'OUTCOME_UNKNOWN');
+  const fields = JSON.parse(f.calls.find(call => call.url === `${baseUrl}/rest/api/2/issue`).body).fields;
+  assert.equal('customfield_10203' in fields, false);
+  assert.equal(f.calls.some(call => call.url.includes('/issue/DI-5')), false);
+  assert.equal(f.saved().operations[0].epic, null);
+  const restored = createJira({ store: f.store, fetchImpl: f.fetchImpl }); await restored.restore();
+  await assert.rejects(f.handle(restored, 'create', 'POST', body), error => error.code === 'OUTCOME_UNKNOWN');
+  returnedEpic = 'DI-5';
+  await assert.rejects(f.handle(restored, 'confirm', 'POST', { methodId: body.methodId, link: `${baseUrl}/browse/IN-17` }), error => error.code === 'INVALID_REQUEST');
+  returnedEpic = null;
+  const confirmed = await f.handle(restored, 'confirm', 'POST', { methodId: body.methodId, link: `${baseUrl}/browse/IN-17` }); assert.equal(confirmed.state, 'success');
+  await f.handle(restored, 'create', 'POST', body); assert.equal(f.postCount(), 1);
+});
+
+test('no Epic Link field permits unlinked creation, while a required Epic Link blocks omission', async () => {
+  for (const required of [false, true]) {
+    const f = fixture({ respond: async url => {
+      if (new URL(url).pathname.includes('/createmeta/')) return Response.json({ values: [{ fieldId: 'summary', required: true, name: 'Summary' }, { fieldId: 'labels' }, ...(required ? [{ fieldId: 'customfield_10203', required: true, name: 'Epic Link' }] : [])] });
+    } });
+    await f.connect(); const body = { methodId: 'without-epic', summary: 'Story', description: 'Description', epic: '', labels: ['business'] };
+    const meta = await f.handle(f.jira, 'metadata'); assert.equal(meta.epicRequired, required);
+    if (required) { await assert.rejects(f.handle(f.jira, 'create', 'POST', body), error => error.code === 'INVALID_REQUEST'); assert.equal(f.postCount(), 0); }
+    else { assert.equal(meta.epicField, null); assert.equal((await f.handle(f.jira, 'create', 'POST', body)).state, 'success'); }
+  }
+});
 test('missing User Story blocks task substitution; stale project blocks all requests', async () => {
   const f = fixture({ project: { ...project, issueTypes: [{ id: '1', name: 'Task' }] } }); await f.connect();
   assert.equal((await f.handle(f.jira, 'metadata')).story, null);
   await assert.rejects(f.create(f.jira), error => error.code === 'PROJECT_NOT_READY'); assert.equal(f.postCount(), 0);
   await assert.rejects(f.jira.handle('/api/jira/create', 'POST', new URLSearchParams(), {}, baseUrl, '999'), error => error.code === 'SESSION_CHANGED');
+});
+test('a primary label is required before writing; additional-only labels leave no operation to recover', async () => {
+  const f = fixture(); await f.connect();
+  const body = { methodId: 'primary-label', summary: 'Story', description: 'Description' };
+  for (const labels of [[], ['qaa'], ['hold', 'bss_corp'], ['playwright']]) {
+    await assert.rejects(f.handle(f.jira, 'create', 'POST', { ...body, labels }), error => error.code === 'INVALID_REQUEST' && error.message.includes('основной тег'));
+    assert.equal(f.postCount(), 0); assert.equal(f.saved().operations.length, 0);
+  }
+  const result = await f.handle(f.jira, 'create', 'POST', { ...body, labels: ['platform', 'qaa'] });
+  assert.equal(result.state, 'success'); assert.equal(f.postCount(), 1);
+  assert.deepEqual(JSON.parse(f.calls.find(call => call.url === `${baseUrl}/rest/api/2/issue`).body).fields.labels, ['platform', 'qaa']);
 });
 test('explicit Task mode uses project Task metadata, labels and priority; another project epic is rejected', async () => {
   const f = fixture({ project: { ...project, issueTypes: [{ id: '1', name: 'Задача' }] }, respond: async (url) => {

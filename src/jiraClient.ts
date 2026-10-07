@@ -3,7 +3,7 @@ import { CONFLUENCE_BRIDGE_URL } from './confluenceClient';
 export type JiraProject = { id: string; key: string; name: string; url: string; issueTypes: { id: string; name: string }[] };
 export type JiraStatus = { connected: boolean; remembered: boolean; baseUrl: string; project: JiraProject | null; expiresAt: string | null };
 export type JiraIssueKind = 'task' | 'story';
-export type JiraMetadata = { project: JiraProject; issueKind?: JiraIssueKind; story: { id: string; name: string } | null; epicField: string | null; requiredFields: string[]; message: string; priorities?: { id: string; name: string }[]; labelsSupported?: boolean; labelsRequired?: boolean; priorityRequired?: boolean; defaultPriorityId?: string };
+export type JiraMetadata = { project: JiraProject; issueKind?: JiraIssueKind; story: { id: string; name: string } | null; epicField: string | null; epicRequired?: boolean; requiredFields: string[]; message: string; priorities?: { id: string; name: string }[]; labelsSupported?: boolean; labelsRequired?: boolean; priorityRequired?: boolean; defaultPriorityId?: string };
 export type JiraOperation = { state: 'none' | 'unknown' | 'success'; issue: { id: string; key: string; url: string } | null; linkedUrl: string | null; message?: string };
 export type JiraEpics = { items: { key: string; name: string }[]; nextStart: number | null };
 export class JiraClientError extends Error {
@@ -27,7 +27,7 @@ export const jiraClient = {
   metadata: (scope: JiraScope, issueKind: JiraIssueKind = 'task') => request<JiraMetadata>(`metadata?issueKind=${issueKind}`, scope),
   epics: (scope: JiraScope, q = '', start = 0) => request<JiraEpics>(`epics?q=${encodeURIComponent(q)}&start=${start}`, scope),
   operation: (scope: JiraScope, methodId: string) => request<JiraOperation>(`operation?methodId=${encodeURIComponent(methodId)}`, scope),
-  create: (scope: JiraScope, body: { methodId: string; summary: string; description: string; epic: string; issueKind?: JiraIssueKind; labels?: string[]; priorityId?: string; confluenceUrl?: string }) => request<JiraOperation>('create', scope, body),
+  create: (scope: JiraScope, body: { methodId: string; summary: string; description: string; epic?: string; issueKind?: JiraIssueKind; labels?: string[]; priorityId?: string; confluenceUrl?: string }) => request<JiraOperation>('create', scope, body),
   link: (scope: JiraScope, methodId: string, confluenceUrl: string) => request<JiraOperation>('link', scope, { methodId, confluenceUrl }),
   confirm: (scope: JiraScope, methodId: string, link: string) => request<JiraOperation>('confirm', scope, { methodId, link })
 };

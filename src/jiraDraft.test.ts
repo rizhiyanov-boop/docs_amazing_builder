@@ -10,11 +10,15 @@ describe('Jira AI and export boundary', () => {
   it('whitelists input and rejects epics from another project', () => {
     expect(normalizeJiraDraftInput({ ...input, token: 'secret', baseUrl: 'https://secret.example', project: { ...input.project, token: 'secret' } })).toEqual(input);
     expect(() => normalizeJiraDraftInput({ ...input, epics: [{ key: 'DI-5', name: 'Other' }] })).toThrow('выбранному проекту');
+    expect(normalizeJiraDraftInput({ ...input, epics: [] }).epics).toEqual([]);
   });
   it('rejects invented epic/tag/priority IDs and enforces the two languages', () => {
     const output = { summary: 'Implement CRIF enquiry', descriptionRu: 'Разработать интеграцию CRIF.', descriptionEn: 'Implement the CRIF integration.', rankedEpics: [{ key: 'IN-5', reason: 'Соответствует интеграции' }, { key: 'IN-999', reason: 'Invented' }], labels: [{ key: 'business', reason: 'Задача бизнеса' }, { key: 'automation', reason: 'Test only' }, { key: 'invented', reason: 'Wrong' }], priorityId: '999' };
     expect(normalizeJiraDraft(output, input)).toMatchObject({ rankedEpics: [{ key: 'IN-5', reason: 'Соответствует интеграции' }], labels: [{ key: 'business', reason: 'Задача бизнеса' }], priorityId: '' });
     expect(() => normalizeJiraDraft({ ...output, summary: 'Разработать CRIF' }, input)).toThrow('языки');
+    expect(normalizeJiraDraft(output, input).labelsReason).toContain('Часть рекомендаций');
+    expect(normalizeJiraDraft({ ...output, rankedEpics: [], labels: [], labelsReason: 'Не указан источник задачи.' }, { ...input, epics: [] })).toMatchObject({ rankedEpics: [], labels: [], labelsReason: 'Не указан источник задачи.' });
+    expect(normalizeJiraDraft({ ...output, labels: [] }, input).labelsReason).toContain('нет рекомендаций тегов');
   });
   it('excludes request examples, auth values and endpoint credentials; exports the Jira link in the existing history column', () => {
     const method: MethodDocument = { id: '1', name: 'CRIF', updatedAt: '2026-10-06', sections: [{ id: 'request', title: 'Request', enabled: true, kind: 'parsed', sectionType: 'request', format: 'json', requestMethod: 'POST', requestUrl: 'https://user:password@private.example/api/crif?token=secret', input: '{"token":"secret"}', authTokenExample: 'secret', rows: [], error: '' }] };

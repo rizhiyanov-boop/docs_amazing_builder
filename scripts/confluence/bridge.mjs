@@ -3,7 +3,7 @@ import { createJira, JiraError } from './jira.mjs';
 import { jiraForm } from './jira-form.mjs';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 
-export const BRIDGE_VERSION = '1.3.1';
+export const BRIDGE_VERSION = '1.3.3';
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const MAX_TIMER_DELAY = 2_147_483_647;
 export const DEFAULT_ORIGINS = ['https://docsamazingbuilder.vercel.app', 'http://localhost:5173', 'http://127.0.0.1:5173'];

@@ -12,6 +12,12 @@ type Props = {
   client?: JiraClient; prepareDraft?: (input: JiraDraftInput) => Promise<JiraDraft>;
 };
 
+const tagGroups = [
+  { title: 'Основные', role: 'Основной' },
+  { title: 'Дополнительные', role: 'Дополнительный' },
+  { title: 'Основные / дополнительные', role: 'Основной / дополнительный' }
+] as const;
+
 export function JiraPanel({ methodId, methodName, methodContext = '', confluenceUrl, jiraTicket, onBusyChange, onLinked, client = jiraClient, prepareDraft = prepareJiraTaskWithAi }: Props) {
   const [status, setStatus] = useState<JiraStatus>();
   const [metadata, setMetadata] = useState<JiraMetadata>();
@@ -46,7 +52,7 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
         if (generation.value !== current) return;
         setMetadata(meta); setOperation(op); setPriorityId(meta.defaultPriorityId ?? '');
         if (op.state === 'success' && op.issue) linkedCallback.current?.(methodId, op.issue.url);
-        if (op.state === 'none' && meta.story) {
+        if (op.state === 'none' && meta.story && meta.epicField) {
           const list = await client.epics(scope);
           if (generation.value === current) setEpics(list);
         }
@@ -92,7 +98,6 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
       }
       items = [...new Map(items.map(item => [item.key, item])).values()];
       if (items.length > 500) throw new Error('Найдено больше 500 эпиков. Уточните поиск перед подготовкой.');
-      if (!items.length) throw new Error('В выбранном проекте не найдено эпиков. Измените поиск или создайте эпик в Jira.');
       if (current !== epoch.current.value) return;
       setEpics({ items, nextStart: null });
       const result = await prepareDraft({ method: { name: methodName, context: methodContext }, project: { key: status.project.key, name: status.project.name }, issueType: metadata.story.name, epics: items.map(({ key, name }) => ({ key, name })), priorities: metadata.priorities ?? [] });
@@ -109,15 +114,16 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
   const knownPriority = selectedPriority && ['critical', 'highest', 'high', 'medium', 'low'].includes(selectedPriority.name.toLowerCase());
   const conflicts = labels.filter(label => JIRA_PRIORITY_RULES[label] && knownPriority && !JIRA_PRIORITY_RULES[label].some(name => name.toLowerCase() === selectedPriority.name.toLowerCase()));
   const disabled = busy || generating || loading;
-  const ready = operation?.state === 'none' && metadata?.issueKind === issueKind && metadata.story && !metadata.requiredFields.length;
-  const canCreate = ready && status?.remembered && epic && summary.trim() && descriptionRu.trim() && descriptionEn.trim() && (!metadata.labelsRequired || labels.length) && (!metadata.priorityRequired || priorityId);
+  const hasPrimaryLabel = labels.some(key => JIRA_LABELS.some(label => label.key === key && label.role !== 'Дополнительный'));
+  const ready = operation?.state === 'none' && metadata?.issueKind === issueKind && typeof metadata.epicRequired === 'boolean' && metadata.story && !metadata.requiredFields.length;
+  const canCreate = ready && status?.remembered && metadata.labelsSupported && hasPrimaryLabel && (!metadata.epicRequired || epic) && summary.trim() && descriptionRu.trim() && descriptionEn.trim() && (!metadata.priorityRequired || priorityId);
   const toggleLabel = (key: string) => setLabels(old => old.includes(key) ? old.filter(label => label !== key) : [...old, key]);
   return <section aria-label="Jira" className="cf-jira-panel">
     <div className="cf-actions"><span className={`cf-status ${status?.connected ? 'cf-status-active' : ''}`} title={status?.connected ? 'Jira подключена' : 'Jira не подключена'} aria-label={status?.connected ? 'Jira подключена' : 'Jira не подключена'}>●</span>
       {status?.project && <a href={status.project.url} target="_blank" rel="noopener noreferrer">{status.project.name} · {status.project.key}</a>}
       <a href={`${CONFLUENCE_BRIDGE_URL}/`} target="_blank" rel="noopener noreferrer">{status?.connected ? 'Изменить подключение или проект' : 'Подключить Jira локально'}</a>
     </div>
-    {!status?.connected && <p className="cf-notice">Подключите Jira в той же локальной форме, что и Confluence. Ссылка на любую задачу определит проект. Нужна версия локального приложения 1.3.1 или новее. <a href="/docbuilder-confluence-local.zip" download>Скачать</a></p>}
+    {!status?.connected && <p className="cf-notice">Подключите Jira в той же локальной форме, что и Confluence. Ссылка на любую задачу определит проект. Нужна версия локального приложения 1.3.2 или новее. <a href="/docbuilder-confluence-local.zip" download>Скачать</a></p>}
     {error && <p role="alert" className="cf-notice cf-error">{error}</p>}
     {status?.connected && <>
       {loading && <p role="status">Чтение Jira…</p>}
@@ -129,25 +135,37 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
         {!confluenceUrl && <p className="cf-muted">После публикации страницы здесь можно добавить ссылку Confluence в задачу.</p>}
       </div> : operation?.state === 'unknown' ? <div className="cf-notice"><h3>Результат создания не подтверждён</h3><p>Проверьте Jira. Повторное создание заблокировано, чтобы избежать дублей.</p><WBInput label="Ссылка на созданную задачу" value={recovery} onChange={event => setRecovery(event.target.value)} /><p><WBButton disabled={disabled || !recovery.trim()} onClick={() => void act(() => client.confirm(scope, methodId, recovery.trim()))}>Проверить и привязать задачу</WBButton></p></div> : <>
         {metadata?.message && <p role="alert" className="cf-notice">{metadata.message}</p>}
-        {metadata && metadata.issueKind !== issueKind && <p role="alert" className="cf-notice cf-error">Обновите локальный сервис до версии 1.3.1. Он должен подтверждать выбранный тип задачи.</p>}
-        <div className="cf-jira-toolbar"><label className="cf-field">Тип задачи<select value={issueKind} disabled={disabled} onChange={event => setIssueKind(event.target.value as JiraIssueKind)}><option value="task">Задача · тестирование</option><option value="story">User Story</option></select></label><WBButton disabled={disabled || !ready || !epics.items.length} onClick={() => void prepare()}>{generating ? 'Подготовка через ИИ…' : draft ? 'Подготовить заново' : 'Подготовить через ИИ'}</WBButton></div>
+        {metadata?.story && metadata.labelsSupported === false && <p role="alert" className="cf-notice cf-error">В Jira недоступно поле тегов для выбранного типа задачи. Добавьте его на экран создания в Jira: основной тег обязателен.</p>}
+        {metadata && (metadata.issueKind !== issueKind || typeof metadata.epicRequired !== 'boolean') && <p role="alert" className="cf-notice cf-error">Обновите локальный сервис до версии 1.3.2. Он должен подтверждать тип задачи и обязательность эпика. <a href="/docbuilder-confluence-local.zip" download>Скачать</a></p>}
+        <div className="cf-jira-toolbar"><label className="cf-field">Тип задачи<select value={issueKind} disabled={disabled} onChange={event => setIssueKind(event.target.value as JiraIssueKind)}><option value="task">Задача · тестирование</option><option value="story">User Story</option></select></label><WBButton disabled={disabled || !ready} onClick={() => void prepare()}>{generating ? 'Подготовка через ИИ…' : draft ? 'Подготовить заново' : 'Подготовить через ИИ'}</WBButton></div>
         <p className="cf-muted">{methodName} · одна задача на метод. Проверьте эпик, теги и текст перед созданием.</p>
-        {!loading && ready && !epics.items.length && <p className="cf-notice">{epicQuery ? 'По этому запросу эпики не найдены. Измените поиск.' : 'В выбранном проекте нет доступных эпиков. Создайте эпик в Jira или выберите другой проект в локальном подключении, затем обновите поиск.'}</p>}
+        {metadata?.epicRequired && <p className="cf-notice">В выбранном проекте Jira эпик обязателен. Выберите его вручную, если рекомендации не подходят.</p>}
+        {!loading && ready && !epics.items.length && <p className="cf-notice">{epicQuery ? 'По этому запросу эпики не найдены. Можно изменить поиск.' : 'В выбранном проекте нет доступных эпиков.'}{!metadata.epicRequired && ' Текст, теги и приоритет можно подготовить, а задачу — создать без эпика.'}</p>}
         <div className="cf-grid"><section><h3>Назначение задачи</h3>
-          <div className="cf-jira-search"><WBInput label="Поиск эпика в выбранном проекте" value={search} disabled={disabled} onChange={event => setSearch(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); if (!disabled) void loadEpics(); } }} /><WBButton disabled={disabled} onClick={() => void loadEpics()}>Найти</WBButton></div>
-          <label className="cf-field">Привязать к эпику<select disabled={disabled} value={epic} onChange={event => setEpic(event.target.value)}><option value="">Выберите эпик</option>{recommended.length > 0 && <optgroup label="Рекомендует ИИ · по соответствию, сверху вниз">{recommended.map((item, index) => <option key={item.key} value={item.key}>{index + 1}. {item.key} · {item.name}</option>)}</optgroup>}<optgroup label={recommended.length ? 'Другие эпики проекта' : 'Эпики выбранного проекта'}>{others.map(item => <option key={item.key} value={item.key}>{item.key} · {item.name}</option>)}</optgroup></select></label>
+          <div className="cf-jira-search"><WBInput label="Поиск эпика в выбранном проекте" value={search} disabled={disabled || !metadata?.epicField} onChange={event => setSearch(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); if (!disabled && metadata?.epicField) void loadEpics(); } }} /><WBButton disabled={disabled || !metadata?.epicField} onClick={() => void loadEpics()}>Найти</WBButton></div>
+          <label className="cf-field">Привязать к эпику{metadata?.epicRequired ? ' · обязательно в Jira' : ' · необязательно'}<select disabled={disabled || !metadata?.epicField} value={epic} onChange={event => setEpic(event.target.value)}><option value="">{metadata?.epicRequired ? 'Выберите эпик' : 'Без эпика'}</option>{recommended.length > 0 && <optgroup label="Рекомендует ИИ · по соответствию, сверху вниз">{recommended.map((item, index) => <option key={item.key} value={item.key}>{index + 1}. {item.key} · {item.name}</option>)}</optgroup>}<optgroup label={recommended.length ? 'Другие эпики проекта' : 'Эпики выбранного проекта'}>{others.map(item => <option key={item.key} value={item.key}>{item.key} · {item.name}</option>)}</optgroup></select></label>
           {epic && <p className="cf-muted">{recommended.find(item => item.key === epic)?.reason} <a href={`${origin}/browse/${epic}`} target="_blank" rel="noopener noreferrer">Открыть эпик</a></p>}
-          {draft && !recommended.length && <p className="cf-muted">ИИ не нашёл подходящего эпика. Выберите его вручную.</p>}
+          {draft && !recommended.length && <p className="cf-muted">ИИ не нашёл подходящего эпика. {metadata?.epicRequired ? 'Выберите его вручную: проект Jira требует привязку.' : 'Можно создать задачу без эпика или выбрать его вручную.'}</p>}
           {epics.nextStart !== null && <p><WBButton disabled={disabled} onClick={() => void loadEpics(epics.nextStart ?? 0)}>Загрузить ещё</WBButton><span className="cf-muted"> При подготовке ИИ прочитает остальные эпики.</span></p>}
-          {metadata?.labelsSupported && <div className="cf-jira-labels"><span className="cf-muted">Рекомендованные теги</span><div className="cf-actions">{draft?.labels.map(label => <WBButton key={label.key} size="sm" aria-pressed={labels.includes(label.key)} title={label.reason} onClick={() => toggleLabel(label.key)} disabled={disabled}>{labels.includes(label.key) ? '✓ ' : '+ '}{label.key}</WBButton>)}{!draft?.labels.length && <span className="cf-muted">Можно выбрать вручную</span>}</div>
-            {labels.filter(label => !draft?.labels.some(item => item.key === label)).length > 0 && <p>{labels.filter(label => !draft?.labels.some(item => item.key === label)).join(', ')}</p>}
-            <details><summary>Все теги · {JIRA_LABELS.length}</summary><div className="cf-jira-tag-list">{JIRA_LABELS.map(label => <label key={label.key} className="cf-jira-tag"><input type="checkbox" disabled={disabled} checked={labels.includes(label.key)} onChange={() => toggleLabel(label.key)} /><span>{label.key}<span className="cf-muted">{label.description} · {label.role}</span></span></label>)}</div></details>
+          {metadata?.labelsSupported && <div className="cf-jira-labels"><span className="cf-muted">Теги · основной обязателен</span>
+            {!hasPrimaryLabel && <p className="cf-muted">Для создания задачи выберите хотя бы один основной тег. Теги из группы «Основные / дополнительные» тоже подходят; только дополнительных недостаточно.</p>}
+            {!draft?.labels.length && <p className="cf-muted">{draft ? draft.labelsReason || 'ИИ не предложил теги. Выберите их вручную.' : 'Можно выбрать вручную'}</p>}
+            <div className="cf-jira-tag-groups">{tagGroups.map(group => {
+              const items = JIRA_LABELS.filter(label => label.role === group.role && (labels.includes(label.key) || draft?.labels.some(item => item.key === label.key)));
+              if (!items.length) return null;
+              return <fieldset key={group.role} className={`cf-jira-tag-group${group.role === 'Основной / дополнительный' ? ' cf-jira-tag-group-shared' : ''}`}><legend>{group.title}</legend><div className="cf-actions">{items.map(label => {
+                const recommendation = draft?.labels.find(item => item.key === label.key);
+                return <WBButton key={label.key} size="sm" aria-pressed={labels.includes(label.key)} title={recommendation?.reason || label.description} onClick={() => toggleLabel(label.key)} disabled={disabled}>{labels.includes(label.key) ? '✓ ' : '+ '}{label.key}{recommendation && <span className="cf-jira-tag-ai" title="Рекомендует ИИ">ИИ</span>}</WBButton>;
+              })}</div></fieldset>;
+            })}</div>
+            {draft?.labels.length && draft.labelsReason ? <p className="cf-muted">{draft.labelsReason}</p> : null}
+            <details><summary>Все теги · {JIRA_LABELS.length}</summary><div className="cf-jira-tag-groups" role="group" aria-label="Все теги">{tagGroups.map(group => <fieldset key={group.role} className={`cf-jira-tag-group${group.role === 'Основной / дополнительный' ? ' cf-jira-tag-group-shared' : ''}`}><legend>{group.title}</legend><div className="cf-jira-tag-list">{JIRA_LABELS.filter(label => label.role === group.role).map(label => <label key={label.key} className="cf-jira-tag"><input type="checkbox" disabled={disabled} checked={labels.includes(label.key)} onChange={() => toggleLabel(label.key)} /><span>{label.key}<span className="cf-muted">{label.description}</span></span></label>)}</div></fieldset>)}</div></details>
           </div>}
           {priorities.length > 0 && <><label className="cf-field">Приоритет<select disabled={disabled} value={priorityId} onChange={event => setPriorityId(event.target.value)}><option value="">{metadata?.priorityRequired ? 'Выберите приоритет' : 'По умолчанию в Jira'}</option>{priorities.map(priority => <option key={priority.id} value={priority.id}>{priority.name}</option>)}</select></label>{draft?.priorityReason && <p className="cf-muted">{draft.priorityReason}</p>}{labels.filter(label => JIRA_PRIORITY_RULES[label]).map(label => <p key={label} className="cf-muted">{label}: {JIRA_PRIORITY_RULES[label].join(', ')}</p>)}{conflicts.length > 0 && <p className="cf-error" role="alert">Выбранный приоритет выходит за рекомендованный диапазон: {conflicts.join(', ')}.</p>}</>}
         </section><section><h3>Текст задачи</h3><WBInput label="Название · английский, глагол действия" maxLength={255} disabled={disabled} value={summary} onChange={event => setSummary(event.target.value)} />
           <label className="cf-field">Описание · русский<textarea className="cf-jira-description" rows={6} maxLength={5000} disabled={disabled} value={descriptionRu} onChange={event => setDescriptionRu(event.target.value)} /></label><label className="cf-field">Описание · английский перевод<textarea className="cf-jira-description" rows={6} maxLength={5000} disabled={disabled} value={descriptionEn} onChange={event => setDescriptionEn(event.target.value)} /></label><p className="cf-muted">Кратко: что делаем, как делаем и для чего. Английская версия должна передавать тот же смысл.</p><p className="cf-muted">{confluenceUrl ? 'Ссылка на опубликованную страницу Confluence будет добавлена в задачу.' : 'Страница ещё не опубликована. Ссылку можно добавить после публикации.'}</p>
         </section></div>
-        <footer className="cf-footer"><span className="cf-muted">{!epic ? 'Выберите эпик для создания задачи' : 'Создание после вашего подтверждения'}</span><WBButton variant="accent" disabled={disabled || !canCreate} onClick={() => void act(() => client.create(scope, { methodId, issueKind, summary: summary.trim(), description: jiraDescription(descriptionRu, descriptionEn), epic, labels, ...(priorityId ? { priorityId } : {}), ...(confluenceUrl ? { confluenceUrl } : {}) }))}>{busy ? 'Создание…' : issueKind === 'task' ? 'Создать задачу' : 'Создать User Story'}</WBButton></footer>
+        <footer className="cf-footer"><span className="cf-muted">{!epic ? metadata?.epicRequired ? 'Выберите обязательный эпик для создания задачи' : 'Задача будет создана без эпика' : 'Создание после вашего подтверждения'}</span><WBButton variant="accent" disabled={disabled || !canCreate} onClick={() => void act(() => client.create(scope, { methodId, issueKind, summary: summary.trim(), description: jiraDescription(descriptionRu, descriptionEn), ...(epic ? { epic } : {}), labels, ...(priorityId ? { priorityId } : {}), ...(confluenceUrl ? { confluenceUrl } : {}) }))}>{busy ? 'Создание…' : issueKind === 'task' ? 'Создать задачу' : 'Создать User Story'}</WBButton></footer>
         {!status.remembered && <p className="cf-muted">Включите сохранение Jira в локальной форме для защиты от повторного создания задач.</p>}
       </>}
     </>}

@@ -21,9 +21,10 @@ function validateConnection(value) {
       return { id: type.id, name: type.name, ...(type.subtask !== undefined ? { subtask: type.subtask === true } : {}) };
     }) };
     extra.operations = value.operations.map(item => {
-      if (!item || !/^[a-f0-9]{64}$/.test(item.id) || !/^\d{1,20}$/.test(item.projectId) || typeof item.summary !== 'string' || item.summary.length > 255 || !/^[A-Z][A-Z0-9_]*-[1-9]\d*$/.test(item.epic) || !/^customfield_\d+$/.test(item.epicField) || !['unknown', 'success'].includes(item.state)) throw storageError();
+      if (!item || !/^[a-f0-9]{64}$/.test(item.id) || !/^\d{1,20}$/.test(item.projectId) || typeof item.summary !== 'string' || item.summary.length > 255 || !['unknown', 'success'].includes(item.state)) throw storageError();
+      if (item.epic != null && !/^[A-Z][A-Z0-9_]*-[1-9]\d*$/.test(item.epic) || item.epicField != null && !/^customfield_\d+$/.test(item.epicField) || item.epic != null && item.epicField == null) throw storageError();
       if (!/^\d{1,20}$/.test(item.storyId)) throw storageError();
-      const result = { id: item.id, projectId: item.projectId, storyId: item.storyId, summary: item.summary, epic: item.epic, epicField: item.epicField, state: item.state };
+      const result = { id: item.id, projectId: item.projectId, storyId: item.storyId, summary: item.summary, epic: item.epic ?? null, epicField: item.epicField ?? null, state: item.state };
       if (item.issue) {
         if (!/^\d{1,20}$/.test(item.issue.id) || !/^[A-Z][A-Z0-9_]*-[1-9]\d*$/.test(item.issue.key)) throw storageError();
         result.issue = { id: item.issue.id, key: item.issue.key, url: `${value.baseUrl}/browse/${item.issue.key}` };

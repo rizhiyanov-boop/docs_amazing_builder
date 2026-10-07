@@ -6,6 +6,7 @@ const issuePattern = /^[A-Z][A-Z0-9_]{0,63}-[1-9]\d{0,19}$/;
 const storyNames = new Set(['story', 'user story', 'userstory', 'user-story', 'история', 'пользовательская история', 'юзерстори', 'юзер стори']);
 const taskNames = new Set(['task', 'задача']);
 const labelNames = new Set(['regulatory', 'business', 'cbs', 'improvement', 'qaa', 'prd', 'tst', 'platform', 'hotfix', 'technical_debt', 'hold', 'automation', 'playwright', 'bss_corp']);
+const primaryLabelNames = new Set([...labelNames].filter(key => !['qaa', 'hold', 'playwright', 'bss_corp'].includes(key)));
 export class JiraError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
 }
@@ -120,14 +121,15 @@ export function createJira({ store = null, fetchImpl = globalThis.fetch, now = D
     const project = normalizeProject(await api(connection, `/rest/api/2/project/${connection.project.id}`), connection.baseUrl);
     const names = issueKind === 'task' ? taskNames : storyNames;
     const story = project.issueTypes.find(type => !type.subtask && names.has(type.name.trim().toLowerCase()));
-    if (!story) return { project, issueKind, story: null, epicField: null, requiredFields: [], priorities: [], labelsSupported: false, message: `В этом проекте нет типа ${issueKind === 'task' ? 'Задача' : 'User Story'}. Добавьте его в Jira или выберите другой проект.` };
+    if (!story) return { project, issueKind, story: null, epicField: null, epicRequired: false, requiredFields: [], priorities: [], labelsSupported: false, message: `В этом проекте нет типа ${issueKind === 'task' ? 'Задача' : 'User Story'}. Добавьте его в Jira или выберите другой проект.` };
     const allFields = await api(connection, '/rest/api/2/field');
-    const epicField = Array.isArray(allFields) ? allFields.find(field => field.schema?.custom === 'com.pyxis.greenhopper.jira:gh-epic-link')?.id : null;
-    if (!/^customfield_\d+$/.test(epicField ?? '')) throw new JiraError(409, 'EPIC_FIELD_MISSING', 'Jira не предоставила поле Epic Link.');
+    const epicFieldId = Array.isArray(allFields) ? allFields.find(field => field.schema?.custom === 'com.pyxis.greenhopper.jira:gh-epic-link')?.id : null;
     const meta = await api(connection, `/rest/api/2/issue/createmeta/${project.id}/issuetypes/${story.id}?startAt=0&maxResults=1000`);
     if (!Array.isArray(meta.values) || meta.values.length < (meta.total ?? meta.values.length)) throw new JiraError(502, 'UPSTREAM_INVALID', 'Jira не вернула все поля создания задачи.');
     const fields = meta.values;
-    if (!fields.some(field => (field.fieldId ?? field.key) === epicField)) throw new JiraError(409, 'EPIC_FIELD_MISSING', 'Epic Link недоступен для создания выбранного типа задачи.');
+    const epicMeta = /^customfield_\d+$/.test(epicFieldId ?? '') ? fields.find(field => (field.fieldId ?? field.key) === epicFieldId) : null;
+    const epicField = epicMeta ? epicFieldId : null;
+    const epicRequired = Boolean(epicMeta?.required);
     const labelsField = fields.find(field => (field.fieldId ?? field.key) === 'labels');
     const priorityField = fields.find(field => (field.fieldId ?? field.key) === 'priority');
     const priorityValues = priorityField ? (Array.isArray(priorityField.allowedValues) && priorityField.allowedValues.length ? priorityField.allowedValues : await api(connection, '/rest/api/2/priority')) : [];
@@ -135,7 +137,7 @@ export function createJira({ store = null, fetchImpl = globalThis.fetch, now = D
     const priorities = priorityValues.map(priority => ({ id: text(priority.id, 20), name: text(priority.name) }));
     const requiredFields = fields.filter(field => field.required && !field.hasDefaultValue && !['project', 'issuetype', 'summary', 'description', 'reporter', 'labels', ...(priorities.length ? ['priority'] : []), epicField].includes(field.fieldId ?? field.key)).map(field => text(field.name));
     const reporterRequired = fields.some(field => (field.fieldId ?? field.key) === 'reporter' && field.required && !field.hasDefaultValue);
-    return { project, issueKind, story, epicField, requiredFields, reporterRequired, priorities, labelsSupported: Boolean(labelsField), labelsRequired: Boolean(labelsField?.required && !labelsField.hasDefaultValue), priorityRequired: Boolean(priorityField?.required && !priorityField.hasDefaultValue), defaultPriorityId: priorityField?.defaultValue?.id ?? '', message: requiredFields.length ? `В Jira настроены дополнительные обязательные поля: ${requiredFields.join(', ')}.` : '' };
+    return { project, issueKind, story, epicField, epicRequired, requiredFields, reporterRequired, priorities, labelsSupported: Boolean(labelsField), labelsRequired: Boolean(labelsField?.required && !labelsField.hasDefaultValue), priorityRequired: Boolean(priorityField?.required && !priorityField.hasDefaultValue), defaultPriorityId: priorityField?.defaultValue?.id ?? '', message: requiredFields.length ? `В Jira настроены дополнительные обязательные поля: ${requiredFields.join(', ')}.` : '' };
   }
   function operationId(connection, methodId) { return createHash('sha256').update(`${connection.project.id}:${text(methodId, 128)}`).digest('hex'); }
   function operation(connection, methodId) { return connection.operations.find(item => item.id === operationId(connection, methodId)) ?? null; }
@@ -154,25 +156,31 @@ export function createJira({ store = null, fetchImpl = globalThis.fetch, now = D
       if (item.state !== 'success') throw new JiraError(409, 'OUTCOME_UNKNOWN', 'Результат предыдущего создания не подтверждён. Укажите ссылку на созданную задачу.');
       return publicOperation(item);
     }
-    const summary = text(body.summary); const description = text(body.description, 100_000); const epic = text(body.epic);
-    if (!issuePattern.test(epic)) throw fail('Некорректный ключ эпика.');
+    const summary = text(body.summary); const description = text(body.description, 100_000);
+    const epic = body.epic == null || body.epic === '' ? null : text(body.epic);
+    if (epic && !issuePattern.test(epic)) throw fail('Некорректный ключ эпика.');
     const config = await metadata(connection, body.issueKind ?? 'story');
     if (!config.story || config.requiredFields.length) throw new JiraError(409, 'PROJECT_NOT_READY', config.message);
+    if (!epic && config.epicRequired) throw fail('В этом проекте Jira эпик обязателен. Выберите его перед созданием.');
+    if (epic && !config.epicField) throw fail('Epic Link недоступен для выбранного типа задачи. Создайте задачу без эпика.');
     const labels = body.labels ?? [];
     if (!Array.isArray(labels) || labels.length > labelNames.size || labels.some(label => !labelNames.has(label)) || new Set(labels).size !== labels.length) throw fail('Некорректные теги Jira.');
     if (labels.length && !config.labelsSupported || config.labelsRequired && !labels.length) throw fail('Проверьте теги, разрешённые для этого типа задачи.');
+    if (!labels.some(label => primaryLabelNames.has(label))) throw fail('Выберите хотя бы один основной тег. Только дополнительных тегов недостаточно.');
     const priority = body.priorityId === undefined || body.priorityId === '' ? null : config.priorities.find(value => value.id === body.priorityId);
     if (body.priorityId && !priority || config.priorityRequired && !priority) throw fail('Выберите доступный приоритет Jira.');
     const reporter = config.reporterRequired ? { name: text((await api(connection, '/rest/api/2/myself')).name) } : undefined;
-    const epicValue = await api(connection, `/rest/api/2/issue/${epic}?fields=issuetype,summary,project`);
-    if (epicValue.fields?.issuetype?.name?.toLowerCase() !== 'epic' && epicValue.fields?.issuetype?.name?.toLowerCase() !== 'эпик') throw fail('Выбранная задача не является эпиком.');
-    if (epicValue.fields?.project?.id !== connection.project.id) throw fail('Эпик должен принадлежать выбранному проекту Jira.');
+    if (epic) {
+      const epicValue = await api(connection, `/rest/api/2/issue/${epic}?fields=issuetype,summary,project`);
+      if (epicValue.fields?.issuetype?.name?.toLowerCase() !== 'epic' && epicValue.fields?.issuetype?.name?.toLowerCase() !== 'эпик') throw fail('Выбранная задача не является эпиком.');
+      if (epicValue.fields?.project?.id !== connection.project.id) throw fail('Эпик должен принадлежать выбранному проекту Jira.');
+    }
     if (connection.operations.length >= 256) throw new JiraError(409, 'JOURNAL_FULL', 'Локальный журнал Jira заполнен.');
     item = { id, projectId: connection.project.id, storyId: config.story.id, summary, epic, epicField: config.epicField, state: 'unknown' };
     connection.operations.push(item);
     try { await persist(connection); } catch (error) { connection.operations.pop(); throw error; }
     try {
-      const result = await api(connection, '/rest/api/2/issue', { method: 'POST', body: { fields: { project: { id: connection.project.id }, issuetype: { id: config.story.id }, summary, description, ...(reporter ? { reporter } : {}), ...(labels.length ? { labels } : {}), ...(priority ? { priority: { id: priority.id } } : {}), [config.epicField]: epic } } });
+      const result = await api(connection, '/rest/api/2/issue', { method: 'POST', body: { fields: { project: { id: connection.project.id }, issuetype: { id: config.story.id }, summary, description, ...(reporter ? { reporter } : {}), ...(labels.length ? { labels } : {}), ...(priority ? { priority: { id: priority.id } } : {}), ...(epic ? { [config.epicField]: epic } : {}) } } });
       if (!issuePattern.test(result.key ?? '') || !result.key.startsWith(`${config.project.key}-`) || !/^\d+$/.test(result.id ?? '')) throw new JiraError(502, 'OUTCOME_UNKNOWN', 'Jira не вернула ключ задачи выбранного проекта.');
       item.issue = { id: result.id, key: result.key, url: `${connection.baseUrl}/browse/${result.key}` }; item.state = 'success';
       await persist(connection);
@@ -207,8 +215,11 @@ export function createJira({ store = null, fetchImpl = globalThis.fetch, now = D
       if (method === 'POST' && path === '/api/jira/confirm') {
         const selected = parseJiraLink(body.link);
         if (selected.baseUrl !== connection.baseUrl || !selected.issue || item.state !== 'unknown') throw fail('Укажите задачу текущей операции Jira.');
-        const result = await api(connection, `/rest/api/2/issue/${selected.issue}?fields=project,issuetype,summary,${item.epicField}`);
-        if (result.fields?.project?.id !== item.projectId || result.fields?.issuetype?.id !== item.storyId || result.fields?.summary !== item.summary || result.fields?.[item.epicField] !== item.epic) throw fail('Проект, тип, тема или эпик задачи не совпадают с операцией.');
+        const fields = ['project', 'issuetype', 'summary', ...(item.epicField ? [item.epicField] : [])].join(',');
+        const result = await api(connection, `/rest/api/2/issue/${selected.issue}?fields=${fields}`);
+        const returnedEpic = item.epicField ? result.fields?.[item.epicField] : null;
+        const actualEpic = returnedEpic == null || returnedEpic === '' ? null : returnedEpic;
+        if (result.fields?.project?.id !== item.projectId || result.fields?.issuetype?.id !== item.storyId || result.fields?.summary !== item.summary || actualEpic !== (item.epic ?? null)) throw fail('Проект, тип, тема или эпик задачи не совпадают с операцией.');
         if (!issuePattern.test(result.key ?? selected.issue)) throw new JiraError(502, 'UPSTREAM_INVALID', 'Jira не вернула ключ задачи.');
         const key = result.key ?? selected.issue;
         item.issue = { id: text(result.id), key, url: `${connection.baseUrl}/browse/${key}` }; item.state = 'success'; await persist(connection); return publicOperation(item);

@@ -75,6 +75,9 @@ describe('WorkbenchTopbar', () => {
     expect(screen.queryByRole('button', { name: 'Импорт' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Дополнительные действия' }));
     const menu = screen.getByRole('menu', { name: 'Дополнительные действия' });
+    const templateLink = within(menu).getByRole('menuitem', { name: 'Скачать шаблон метода для ИИ' });
+    expect(templateLink).toHaveAttribute('href', `${import.meta.env.BASE_URL}docbuilder-ai-method-template.json`);
+    expect(templateLink).toHaveAttribute('download', 'docbuilder-ai-method-template.json');
     await user.click(within(menu).getByRole('menuitem', { name: 'Импорт' }));
     expect(result.props.onOpenProjectImport).toHaveBeenCalledOnce();
     await user.click(screen.getByRole('button', { name: 'Дополнительные действия' }));

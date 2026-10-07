@@ -203,6 +203,14 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
         {overflowOpen && (
           <div className="wb-topbar-menu" role="menu" aria-label="Дополнительные действия">
             <button type="button" role="menuitem" onClick={() => runOverflowAction(onOpenProjectImport)}>Импорт</button>
+            <a
+              role="menuitem"
+              href={`${import.meta.env.BASE_URL}docbuilder-ai-method-template.json`}
+              download="docbuilder-ai-method-template.json"
+              onClick={() => setOverflowOpen(false)}
+            >
+              Скачать шаблон метода для ИИ
+            </a>
             <button type="button" role="menuitem" onClick={() => runOverflowAction(onRenameMethod)}>Переименовать метод</button>
             <button
               type="button"

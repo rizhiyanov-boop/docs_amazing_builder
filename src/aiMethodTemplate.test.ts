@@ -4,11 +4,12 @@ import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 import { describe, expect, it } from 'vitest';
 import schema from './importContract/workspace-v3.schema.json';
+import { validateCodexProjectImport } from './codexImportValidation';
 import { parseProjectImportText } from './projectImport';
 import { ERROR_CATALOG } from './errorCatalog';
 import { JIRA_LABELS, JIRA_PRIORITY_RULES } from './jiraLabels';
 import { DEFAULT_REQUEST_HEADERS } from './requestHeaders';
-import type { ErrorRow, MethodDocument, ParsedRow } from './types';
+import type { ErrorRow, MethodDocument, ParsedRow, WorkspaceProjectData } from './types';
 
 type AuthoringTemplate = {
   outputSchema: { $ref: string; definitions: Record<string, object> };
@@ -27,6 +28,13 @@ function readTemplate(): AuthoringTemplate {
   return JSON.parse(readFileSync(resolve('public/docbuilder-ai-method-template.json'), 'utf8'));
 }
 
+function readProjectTemplate(): Omit<AuthoringTemplate, 'outputSchema' | 'documentTemplate'> & {
+  outputSchema: typeof schema;
+  documentTemplate: WorkspaceProjectData & { importProfile: string };
+} {
+  return JSON.parse(readFileSync(resolve('public/docbuilder-ai-project-template.json'), 'utf8'));
+}
+
 function assertMethodSchema(template: AuthoringTemplate) {
   const ajv = new Ajv({ allErrors: true, strict: true, strictTypes: false, strictRequired: false });
   addFormats(ajv, ['date-time']);
@@ -35,7 +43,7 @@ function assertMethodSchema(template: AuthoringTemplate) {
   expect(validate({ methods: [template.documentTemplate] })).toBe(false);
 }
 
-describe('Static AI method authoring template', () => {
+describe('Static AI authoring templates', () => {
   it('keeps the offline schema and dictionaries aligned with the application', () => {
     const template = readTemplate();
     expect(template.outputSchema.$ref).toBe('#/definitions/method');
@@ -93,5 +101,24 @@ describe('Static AI method authoring template', () => {
     ]));
     expect(loadedErrors.rows[0]).toEqual(template.examples.businessErrorRow);
     expect(loadedErrors.rows[0].serverHttpStatus).toBe('422');
+  });
+
+  it('imports the project template with multiple methods and preserves project sections and flows', () => {
+    const template = readProjectTemplate();
+    expect(template.outputSchema).toEqual(schema);
+    expect(template.referenceData).toEqual(readTemplate().referenceData);
+    const document = template.documentTemplate;
+    expect(validateCodexProjectImport(document)).toEqual([]);
+    const secondMethod = JSON.parse(JSON.stringify(document.methods[0])) as MethodDocument;
+    secondMethod.id = 'method-second';
+    secondMethod.name = 'Second method';
+    document.methods.push(secondMethod);
+    expect(validateCodexProjectImport(document)).toEqual([]);
+    const imported = parseProjectImportText(JSON.stringify(document), 'generated-project.json');
+    if (imported.kind !== 'workspace') throw new Error('Expected a workspace document');
+    expect(imported.warnings).toEqual([]);
+    expect(imported.workspace.methods).toHaveLength(2);
+    expect(imported.workspace.projectSections).toEqual(document.projectSections);
+    expect(imported.workspace.flows).toEqual(document.flows);
   });
 });

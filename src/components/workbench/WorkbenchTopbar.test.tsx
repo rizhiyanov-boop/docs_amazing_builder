@@ -78,6 +78,9 @@ describe('WorkbenchTopbar', () => {
     const templateLink = within(menu).getByRole('menuitem', { name: 'Скачать шаблон метода для ИИ' });
     expect(templateLink).toHaveAttribute('href', `${import.meta.env.BASE_URL}docbuilder-ai-method-template.json`);
     expect(templateLink).toHaveAttribute('download', 'docbuilder-ai-method-template.json');
+    const projectTemplateLink = within(menu).getByRole('menuitem', { name: 'Скачать шаблон проекта для ИИ' });
+    expect(projectTemplateLink).toHaveAttribute('href', `${import.meta.env.BASE_URL}docbuilder-ai-project-template.json`);
+    expect(projectTemplateLink).toHaveAttribute('download', 'docbuilder-ai-project-template.json');
     await user.click(within(menu).getByRole('menuitem', { name: 'Импорт' }));
     expect(result.props.onOpenProjectImport).toHaveBeenCalledOnce();
     await user.click(screen.getByRole('button', { name: 'Дополнительные действия' }));

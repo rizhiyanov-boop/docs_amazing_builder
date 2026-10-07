@@ -211,6 +211,14 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
             >
               Скачать шаблон метода для ИИ
             </a>
+            <a
+              role="menuitem"
+              href={`${import.meta.env.BASE_URL}docbuilder-ai-project-template.json`}
+              download="docbuilder-ai-project-template.json"
+              onClick={() => setOverflowOpen(false)}
+            >
+              Скачать шаблон проекта для ИИ
+            </a>
             <button type="button" role="menuitem" onClick={() => runOverflowAction(onRenameMethod)}>Переименовать метод</button>
             <button
               type="button"

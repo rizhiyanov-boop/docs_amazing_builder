@@ -44,6 +44,9 @@ it('shows selected parent content beside the new page form without preparing or 
 function linkedMethod(): MethodDocument {
   return { ...method, confluence: { baseUrl, pageId: '126', spaceKey: 'TEST', lastPublishedVersion: 1, publishedAt: '2026-10-02T12:00:00Z', publishedFingerprint: renderConfluenceDocument(method).fingerprint } };
 }
+function changedMethod(): MethodDocument {
+  return { ...linkedMethod(), sections: [{ id: 'requirements', title: 'Функциональные требования', enabled: true, kind: 'text', value: 'Updated documentation' }] };
+}
 function setup(client = mockClient(), doc = method) {
   const onPublished = vi.fn();
   const onBack = vi.fn();
@@ -135,26 +138,135 @@ describe('Confluence workbench screen', () => {
     await screen.findByRole('button', { name: 'Раздел', exact: true });
   });
 
-  it('blocks replacement when Confluence has changed since the last publication', async () => {
+  it('updates the bound page and title and restores the confirmed binding on reopening', async () => {
+    const client = mockClient();
+    let remote = { ...page('126'), title: 'Published title' };
+    vi.mocked(client.getPage).mockImplementation(async () => remote);
+    vi.mocked(client.publish).mockImplementation(async request => {
+      remote = { ...remote, title: request.title, storage: request.storage, version: remote.version + 1 };
+      return remote;
+    });
+    const { user, view, onPublished, onBack, onBusyChange } = setup(client, linkedMethod());
+    await waitFor(() => expect(screen.getByLabelText('Заголовок страницы')).toHaveValue('Published title'));
+    expect(screen.getByRole('button', { name: 'Обновить страницу', exact: true })).toBeDisabled();
+    expect(screen.getByText('Изменений для публикации нет.')).toBeInTheDocument();
+    const changed = changedMethod();
+    view.rerender(<ConfluenceScreen method={changed} client={client} onPublished={onPublished} onBack={onBack} onBusyChange={onBusyChange} />);
+    const titleInput = screen.getByLabelText('Заголовок страницы');
+    await user.clear(titleInput);
+    expect(screen.getByRole('button', { name: 'Обновить страницу', exact: true })).toBeDisabled();
+    await user.type(titleInput, 'Updated title');
+    await user.click(screen.getByRole('button', { name: 'Обновить страницу', exact: true }));
+    await screen.findByRole('heading', { name: 'Страница обновлена' });
+    expect(client.prepare).toHaveBeenCalledWith(expect.stringContaining('Updated documentation'), expect.any(Array), baseUrl);
+    expect(client.publish).toHaveBeenCalledOnce();
+    expect(client.publish).toHaveBeenCalledWith(expect.objectContaining({ mode: 'update', pageId: '126', expectedVersion: 1, title: 'Updated title', baseUrl, storage: '<p>Prepared document</p>' }));
+    expect(vi.mocked(client.publish).mock.calls[0][0].parentId).toBeUndefined();
+    expect(onPublished).toHaveBeenCalledWith(method.id, expect.objectContaining({ pageId: '126', lastPublishedVersion: 2, publishedFingerprint: renderConfluenceDocument(changed).fingerprint }));
+    const confirmed = { ...changed, confluence: onPublished.mock.calls[0][1] };
+    view.rerender(<ConfluenceScreen method={confirmed} client={client} onPublished={onPublished} onBack={onBack} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Обновить страницу', exact: true })).toBeDisabled());
+    expect(screen.queryByRole('button', { name: 'Подготовить обновление' })).not.toBeInTheDocument();
+    view.unmount();
+    setup(client, confirmed);
+    await waitFor(() => expect(screen.getByLabelText('Заголовок страницы')).toHaveValue('Updated title'));
+    expect(screen.getByRole('button', { name: 'Обновить страницу', exact: true })).toBeDisabled();
+    expect(screen.getByRole('region', { name: 'Текущая страница' })).toHaveTextContent('версия 2');
+    expect(client.publish).toHaveBeenCalledOnce();
+  });
+
+  it('requires explicit confirmation before replacing a newer Confluence version', async () => {
     const client = mockClient();
     vi.mocked(client.getPage).mockResolvedValue(page('126', 2));
+    vi.mocked(client.publish).mockResolvedValue(page('126', 3));
     const { user, onPublished } = setup(client, linkedMethod());
-    await screen.findByRole('status', { name: 'Локальное подключение активно' });
-    await user.click(screen.getByRole('button', { name: 'Опубликовать' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Обновить страницу', exact: true })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Обновить страницу', exact: true }));
     await screen.findByRole('heading', { name: 'Страницу изменили в Confluence' });
-    expect(screen.getByRole('button', { name: 'Обновить страницу', exact: true })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Заменить содержимое', exact: true })).toBeDisabled();
     expect(client.publish).not.toHaveBeenCalled();
     expect(onPublished).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('checkbox', { name: /Я проверил версию 2/ }));
+    await user.click(screen.getByRole('button', { name: 'Заменить содержимое', exact: true }));
+    await screen.findByRole('heading', { name: 'Страница обновлена' });
+    expect(client.publish).toHaveBeenCalledWith(expect.objectContaining({ mode: 'update', pageId: '126', expectedVersion: 2 }));
+    expect(onPublished).toHaveBeenCalledWith(method.id, expect.objectContaining({ pageId: '126', lastPublishedVersion: 3 }));
   });
 
   it('checks the version again immediately before writing', async () => {
     const client = mockClient();
     vi.mocked(client.getPage).mockResolvedValueOnce(page('126', 1)).mockResolvedValueOnce(page('126', 1)).mockResolvedValue(page('126', 2));
-    const { user } = setup(client, linkedMethod());
-    await screen.findByRole('status', { name: 'Локальное подключение активно' });
-    await user.click(screen.getByRole('button', { name: 'Опубликовать' }));
+    const { user } = setup(client, changedMethod());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Обновить страницу', exact: true })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Обновить страницу', exact: true }));
     await screen.findByRole('heading', { name: 'Страницу изменили в Confluence' });
     expect(client.publish).not.toHaveBeenCalled();
+  });
+
+  it('discards overwrite confirmation when the reviewed page changes again', async () => {
+    const client = mockClient();
+    vi.mocked(client.getPage).mockResolvedValue(page('126', 2));
+    vi.mocked(client.publish).mockResolvedValue(page('126', 4));
+    const { user, onPublished } = setup(client, changedMethod());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Обновить страницу', exact: true })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Обновить страницу', exact: true }));
+    await user.click(await screen.findByRole('checkbox', { name: /Я проверил версию 2/ }));
+    vi.mocked(client.getPage).mockResolvedValue({ ...page('126', 3), storage: '<p>Another edit</p>' });
+    const replace = screen.getByRole('button', { name: 'Заменить содержимое', exact: true });
+    fireEvent.click(replace); fireEvent.click(replace);
+    const confirmation = await screen.findByRole('checkbox', { name: /Я проверил версию 3/ });
+    expect(confirmation).not.toBeChecked();
+    expect(screen.getByText('Another edit')).toBeInTheDocument();
+    expect(replace).toBeDisabled();
+    expect(client.publish).not.toHaveBeenCalled();
+    expect(onPublished).not.toHaveBeenCalled();
+    await user.click(confirmation);
+    await user.click(replace);
+    await screen.findByRole('heading', { name: 'Страница обновлена' });
+    expect(client.publish).toHaveBeenCalledOnce();
+    expect(client.publish).toHaveBeenCalledWith(expect.objectContaining({ pageId: '126', expectedVersion: 3 }));
+  });
+
+  it('loads the latest page and resets confirmation after a conflict returned by the bridge', async () => {
+    const client = mockClient();
+    let remote = page('126', 2);
+    vi.mocked(client.getPage).mockImplementation(async () => remote);
+    vi.mocked(client.publish).mockImplementationOnce(async () => {
+      remote = { ...page('126', 4), storage: '<p>Concurrent bridge edit</p>' };
+      throw new ConfluenceClientError('VERSION_CONFLICT', 'Page changed', 409);
+    }).mockResolvedValue(page('126', 5));
+    const { user, onPublished } = setup(client, changedMethod());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Обновить страницу', exact: true })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Обновить страницу', exact: true }));
+    await user.click(await screen.findByRole('checkbox', { name: /Я проверил версию 2/ }));
+    await user.click(screen.getByRole('button', { name: 'Заменить содержимое', exact: true }));
+    const confirmation = await screen.findByRole('checkbox', { name: /Я проверил версию 4/ });
+    expect(confirmation).not.toBeChecked();
+    expect(screen.getByText('Concurrent bridge edit')).toBeInTheDocument();
+    expect(onPublished).not.toHaveBeenCalled();
+    await user.click(confirmation);
+    await user.click(screen.getByRole('button', { name: 'Заменить содержимое', exact: true }));
+    await screen.findByRole('heading', { name: 'Страница обновлена' });
+    expect(client.publish).toHaveBeenNthCalledWith(2, expect.objectContaining({ pageId: '126', expectedVersion: 4 }));
+    expect(onPublished).toHaveBeenCalledWith(method.id, expect.objectContaining({ lastPublishedVersion: 5 }));
+  });
+
+  it('reconciles an uncertain update without issuing another write', async () => {
+    const client = mockClient();
+    vi.mocked(client.getPage).mockResolvedValue(page('126'));
+    vi.mocked(client.publish).mockRejectedValue(new ConfluenceClientError('OUTCOME_UNKNOWN', 'Unknown', 409, 'update-operation'));
+    vi.mocked(client.getOperation).mockResolvedValue({ state: 'success', page: page('126', 2) });
+    const { user, onPublished } = setup(client, changedMethod());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Обновить страницу', exact: true })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Обновить страницу', exact: true }));
+    await screen.findByRole('heading', { name: 'Результат публикации не подтверждён' });
+    expect(screen.queryByRole('button', { name: 'Обновить страницу', exact: true })).not.toBeInTheDocument();
+    expect(onPublished).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Проверить результат операции' }));
+    await screen.findByRole('heading', { name: 'Страница обновлена' });
+    expect(client.getOperation).toHaveBeenCalledWith('update-operation', baseUrl);
+    expect(client.publish).toHaveBeenCalledOnce();
+    expect(onPublished).toHaveBeenCalledWith(method.id, expect.objectContaining({ pageId: '126', lastPublishedVersion: 2 }));
   });
 
   it('retains an unknown operation, prevents double publication and supports verified manual recovery', async () => {
@@ -219,7 +331,7 @@ describe('Confluence workbench screen', () => {
     await screen.findByRole('status', { name: 'Локальное подключение активно' });
     expect(client.getPage).not.toHaveBeenCalled();
     expect(client.prepare).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'Опубликовать' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Обновить страницу' })).toBeDisabled();
     await user.click(screen.getByRole('button', { name: 'Опубликовать как новую страницу' }));
     await publishCreate(user);
     expect(client.prepare).toHaveBeenCalledWith(expect.any(String), expect.any(Array), otherBaseUrl);

@@ -44,6 +44,8 @@
 .cf-publication-state { color: var(--wb-accent); font-size: var(--font-size-xs); }
 .cf-content { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 30rem; overflow: auto; padding: var(--space-6); border: 1px solid var(--wb-border); border-radius: var(--wb-radius); background: var(--wb-bg-soft); font: inherit; line-height: 1.55; }
 .cf-check-list { padding-left: var(--space-7); line-height: 1.8; }
+.cf-overwrite-confirm { display: flex; align-items: flex-start; gap: var(--space-2); padding: var(--space-6); border: 1px solid var(--wb-border); border-radius: var(--wb-radius); background: var(--wb-bg-soft); cursor: pointer; line-height: 1.55; }
+.cf-overwrite-confirm input { flex-shrink: 0; accent-color: var(--wb-accent); }
 .cf-page-preview { display: flex; flex-direction: column; min-height: 32rem; height: min(65vh, 44rem); overflow: hidden; border: 1px solid var(--wb-border); border-radius: var(--wb-radius); background: var(--wb-bg-surface); }
 .cf-preview-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-4) var(--space-6); border-bottom: 1px solid var(--wb-border); }
 .cf-preview-header a { font-size: var(--font-size-xs); }

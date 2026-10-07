@@ -21,4 +21,4 @@ export const JIRA_PRIORITY_RULES: Record<string, readonly string[]> = {
   platform: ['Critical', 'Highest', 'High', 'Medium', 'Low']
 };
 
-export function jiraDescription(ru: string, en: string): string { return `Русский\n${ru.trim()}\n\nEnglish\n${en.trim()}`; }
+export function jiraDescription(ru: string, en: string, uz: string): string { return [ru.trim(), en.trim(), uz.trim()].join('\n\n'); }

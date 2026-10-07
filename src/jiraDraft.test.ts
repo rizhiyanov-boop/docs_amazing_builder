@@ -13,9 +13,12 @@ describe('Jira AI and export boundary', () => {
     expect(normalizeJiraDraftInput({ ...input, epics: [] }).epics).toEqual([]);
   });
   it('rejects invented epic/tag/priority IDs and enforces the two languages', () => {
-    const output = { summary: 'Implement CRIF enquiry', descriptionRu: 'Разработать интеграцию CRIF.', descriptionEn: 'Implement the CRIF integration.', rankedEpics: [{ key: 'IN-5', reason: 'Соответствует интеграции' }, { key: 'IN-999', reason: 'Invented' }], labels: [{ key: 'business', reason: 'Задача бизнеса' }, { key: 'automation', reason: 'Test only' }, { key: 'invented', reason: 'Wrong' }], priorityId: '999' };
+    const output = { summary: 'Implement CRIF enquiry', descriptionRu: 'Разработать интеграцию CRIF.', descriptionEn: 'Implement the CRIF integration.', descriptionUz: 'CRIF integratsiyasini ishlab chiqish.', rankedEpics: [{ key: 'IN-5', reason: 'Соответствует интеграции' }, { key: 'IN-999', reason: 'Invented' }], labels: [{ key: 'business', reason: 'Задача бизнеса' }, { key: 'automation', reason: 'Test only' }, { key: 'invented', reason: 'Wrong' }], priorityId: '999' };
     expect(normalizeJiraDraft(output, input)).toMatchObject({ rankedEpics: [{ key: 'IN-5', reason: 'Соответствует интеграции' }], labels: [{ key: 'business', reason: 'Задача бизнеса' }], priorityId: '' });
     expect(() => normalizeJiraDraft({ ...output, summary: 'Разработать CRIF' }, input)).toThrow('языки');
+    expect(normalizeJiraDraft(output, input).descriptionUz).toBe(output.descriptionUz);
+    expect(() => normalizeJiraDraft({ ...output, descriptionUz: undefined }, input)).toThrow('узбекский перевод');
+    expect(() => normalizeJiraDraft({ ...output, descriptionUz: '   ' }, input)).toThrow('узбекский перевод');
     expect(normalizeJiraDraft(output, input).labelsReason).toContain('Часть рекомендаций');
     expect(normalizeJiraDraft({ ...output, rankedEpics: [], labels: [], labelsReason: 'Не указан источник задачи.' }, { ...input, epics: [] })).toMatchObject({ rankedEpics: [], labels: [], labelsReason: 'Не указан источник задачи.' });
     expect(normalizeJiraDraft({ ...output, labels: [] }, input).labelsReason).toContain('нет рекомендаций тегов');

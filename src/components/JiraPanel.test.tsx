@@ -18,7 +18,7 @@ describe('Jira integration panel', () => {
   it('loads all epic pages for AI ranking without selecting an epic automatically and creates one Task with the chosen epic', async () => {
     const client = fixture();
     vi.mocked(client.epics).mockResolvedValueOnce({ items: [{ key: 'IN-5', name: 'Integration' }], nextStart: 50 }).mockResolvedValue({ items: [{ key: 'IN-9', name: 'Credit' }], nextStart: null });
-    const prepareDraft = vi.fn().mockResolvedValue({ summary: 'Implement CRIF API', descriptionRu: 'Разработать метод CRIF через адаптер для кредитного процесса.', descriptionEn: 'Implement the CRIF API through the adapter for the credit process.', rankedEpics: [{ key: 'IN-9', reason: 'Кредитный процесс' }, { key: 'IN-5', reason: 'Интеграция' }], labels: [{ key: 'business', reason: 'Бизнес' }], priorityId: '3', priorityReason: 'Обычная задача' });
+    const prepareDraft = vi.fn().mockResolvedValue({ summary: 'Implement CRIF API', descriptionRu: 'Разработать метод CRIF через адаптер для кредитного процесса.', descriptionEn: 'Implement the CRIF API through the adapter for the credit process.', descriptionUz: 'Kredit jarayoni uchun adapter orqali CRIF usulini ishlab chiqish.', rankedEpics: [{ key: 'IN-9', reason: 'Кредитный процесс' }, { key: 'IN-5', reason: 'Интеграция' }], labels: [{ key: 'business', reason: 'Бизнес' }], priorityId: '3', priorityReason: 'Обычная задача' });
     const onLinked = vi.fn();
     render(<JiraPanel client={client} prepareDraft={prepareDraft} methodId="method-1" methodName="Method" methodContext="Документация CRIF" confluenceUrl="https://confluence.example/pages/viewpage.action?pageId=123" onBusyChange={vi.fn()} onLinked={onLinked} />);
     await waitFor(() => expect(screen.getByRole('option', { name: 'IN-5 · Integration' })).toBeTruthy());
@@ -33,10 +33,14 @@ describe('Jira integration panel', () => {
     fireEvent.click(within(catalog.getByRole('group', { name: 'Дополнительные', exact: true })).getByRole('checkbox', { name: /qaa/ }));
     expect(within(catalog.getByRole('group', { name: 'Основные / дополнительные', exact: true })).getByRole('checkbox', { name: /technical_debt/ })).not.toBeChecked();
     fireEvent.change(screen.getByLabelText(/Привязать к эпику/), { target: { value: 'IN-9' } });
+    expect(screen.getByLabelText('Описание · узбекский перевод (латиница)')).toHaveValue('Kredit jarayoni uchun adapter orqali CRIF usulini ishlab chiqish.');
+    fireEvent.change(screen.getByLabelText('Описание · узбекский перевод (латиница)'), { target: { value: '' } });
+    expect(screen.getByRole('button', { name: 'Создать задачу' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Описание · узбекский перевод (латиница)'), { target: { value: 'Kredit jarayoni uchun adapter orqali CRIF usulini ishlab chiqish.' } });
     fireEvent.click(screen.getByRole('button', { name: 'Создать задачу' }));
     await screen.findByRole('link', { name: 'IN-17' });
     expect(client.create).toHaveBeenCalledTimes(1);
-    expect(client.create).toHaveBeenCalledWith({ baseUrl: 'https://jira.example', projectId: '101' }, { methodId: 'method-1', issueKind: 'task', summary: 'Implement CRIF API', description: 'Русский\nРазработать метод CRIF через адаптер для кредитного процесса.\n\nEnglish\nImplement the CRIF API through the adapter for the credit process.', epic: 'IN-9', labels: ['business', 'qaa'], priorityId: '3', confluenceUrl: 'https://confluence.example/pages/viewpage.action?pageId=123' });
+    expect(client.create).toHaveBeenCalledWith({ baseUrl: 'https://jira.example', projectId: '101' }, { methodId: 'method-1', issueKind: 'task', summary: 'Implement CRIF API', description: 'Разработать метод CRIF через адаптер для кредитного процесса.\n\nImplement the CRIF API through the adapter for the credit process.\n\nKredit jarayoni uchun adapter orqali CRIF usulini ishlab chiqish.', epic: 'IN-9', labels: ['business', 'qaa'], priorityId: '3', confluenceUrl: 'https://confluence.example/pages/viewpage.action?pageId=123' });
     expect(onLinked).toHaveBeenCalledWith('method-1', 'https://jira.example/browse/IN-17');
     expect(screen.queryByRole('button', { name: 'Создать задачу' })).toBeNull();
   });
@@ -61,7 +65,7 @@ describe('Jira integration panel', () => {
   });
   it('prepares and creates without any available epic and explains empty tag recommendations', async () => {
     const client = fixture(); vi.mocked(client.epics).mockResolvedValue({ items: [], nextStart: null });
-    const prepareDraft = vi.fn().mockResolvedValue({ summary: 'Implement CRIF API', descriptionRu: 'Реализовать метод CRIF.', descriptionEn: 'Implement the CRIF API.', rankedEpics: [], labels: [], labelsReason: 'В документации не указан источник задачи.', priorityId: '', priorityReason: '' });
+    const prepareDraft = vi.fn().mockResolvedValue({ summary: 'Implement CRIF API', descriptionRu: 'Реализовать метод CRIF.', descriptionEn: 'Implement the CRIF API.', descriptionUz: 'CRIF usulini amalga oshirish.', rankedEpics: [], labels: [], labelsReason: 'В документации не указан источник задачи.', priorityId: '', priorityReason: '' });
     render(<JiraPanel client={client} prepareDraft={prepareDraft} methodId="method-1" methodName="Method" onBusyChange={vi.fn()} />);
     await waitFor(() => expect(screen.getByRole('button', { name: 'Подготовить через ИИ' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'Подготовить через ИИ' }));
@@ -85,7 +89,7 @@ describe('Jira integration panel', () => {
   it('respects an Epic Link required by Jira project settings', async () => {
     const client = fixture(); const meta = await client.metadata({ baseUrl: 'https://jira.example', projectId: '101' });
     vi.mocked(client.metadata).mockResolvedValue({ ...meta, epicRequired: true });
-    const prepareDraft = vi.fn().mockResolvedValue({ summary: 'Implement CRIF API', descriptionRu: 'Реализовать метод CRIF.', descriptionEn: 'Implement the CRIF API.', rankedEpics: [], labels: [{ key: 'business', reason: 'Задача бизнеса' }], priorityId: '', priorityReason: '' });
+    const prepareDraft = vi.fn().mockResolvedValue({ summary: 'Implement CRIF API', descriptionRu: 'Реализовать метод CRIF.', descriptionEn: 'Implement the CRIF API.', descriptionUz: 'CRIF usulini amalga oshirish.', rankedEpics: [], labels: [{ key: 'business', reason: 'Задача бизнеса' }], priorityId: '', priorityReason: '' });
     render(<JiraPanel client={client} prepareDraft={prepareDraft} methodId="method-1" methodName="Method" onBusyChange={vi.fn()} />);
     await screen.findByRole('option', { name: 'IN-5 · Integration' });
     fireEvent.click(screen.getByRole('button', { name: 'Подготовить через ИИ' }));

@@ -1,7 +1,8 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JiraPanel } from './JiraPanel';
-import type { JiraClient } from '../jiraClient';
+import type { JiraClient, JiraEpics } from '../jiraClient';
+import type { JiraDraft } from '../jiraDraft';
 afterEach(() => { cleanup(); localStorage.clear(); });
 
 function fixture(ready = true): JiraClient {
@@ -16,6 +17,29 @@ function fixture(ready = true): JiraClient {
   };
 }
 describe('Jira integration panel', () => {
+  it('shows preparation stages until the AI request settles and allows retry after failure', async () => {
+    const client = fixture();
+    let resolveEpics!: (value: JiraEpics) => void;
+    let rejectDraft!: (error: Error) => void;
+    vi.mocked(client.epics).mockResolvedValueOnce({ items: [{ key: 'IN-5', name: 'Integration' }], nextStart: 50 })
+      .mockImplementationOnce(() => new Promise(resolve => { resolveEpics = resolve; }));
+    const prepareDraft = vi.fn(() => new Promise<JiraDraft>((_resolve, reject) => { rejectDraft = reject; }));
+    const onBusyChange = vi.fn();
+    render(<JiraPanel client={client} prepareDraft={prepareDraft} methodId="progress-method" methodName="Method" onBusyChange={onBusyChange} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Подготовить через ИИ' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Подготовить через ИИ' }));
+    expect(screen.getByRole('status', { name: 'Статус запроса к ИИ' })).toHaveTextContent('загружаем эпики проекта');
+    expect(prepareDraft).not.toHaveBeenCalled();
+    await act(async () => { resolveEpics({ items: [{ key: 'IN-9', name: 'Credit' }], nextStart: null }); });
+    expect(screen.getByRole('status', { name: 'Статус запроса к ИИ' })).toHaveTextContent('готовим название, описание и рекомендации');
+    expect(screen.getByRole('button', { name: 'Подготовка через ИИ…' })).toBeDisabled();
+    expect(prepareDraft).toHaveBeenCalledOnce();
+    await act(async () => { rejectDraft(new Error('Тестовая ошибка ИИ')); });
+    expect(screen.getByRole('alert')).toHaveTextContent('Тестовая ошибка ИИ');
+    expect(screen.queryByRole('status', { name: 'Статус запроса к ИИ' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Подготовить через ИИ' })).toBeEnabled();
+    expect(onBusyChange).toHaveBeenLastCalledWith(false);
+  });
   it('loads all epic pages for AI ranking without selecting an epic automatically and creates one Task with the chosen epic', async () => {
     const client = fixture();
     vi.mocked(client.epics).mockResolvedValueOnce({ items: [{ key: 'IN-5', name: 'Integration' }], nextStart: 50 }).mockResolvedValue({ items: [{ key: 'IN-9', name: 'Credit' }], nextStart: null });

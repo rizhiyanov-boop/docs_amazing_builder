@@ -2523,6 +2523,33 @@ select {
   }
 }
 
+.ai-request-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--wb-text);
+}
+
+.ai-request-progress-copy { min-width: 0; }
+.ai-request-progress-title { font-size: var(--font-size-sm); font-weight: 600; }
+.ai-request-progress-detail {
+  margin-top: var(--space-1);
+  color: var(--wb-text-muted);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+.ai-loading-card { display: grid; gap: var(--space-3); padding: var(--space-1-5) 0; }
+.ai-loading-placeholder {
+  height: calc(var(--space-2) * 4);
+  border-radius: var(--wb-radius-sm);
+  background: var(--wb-bg-soft);
+  border: 1px solid var(--wb-border-soft);
+  opacity: 0.75;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-request-progress .ai-loader { animation: none; }
+}
+
 .table-wrap {
   border: calc(var(--space-1) / 4) solid var(--border);
   border-radius: var(--radius-sm);

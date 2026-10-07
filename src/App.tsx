@@ -106,6 +106,7 @@ import { emitOnboardingEvent } from './onboarding/telemetry';
 import { buildValidationRulesWithAi, fillDescriptionsWithAi, generateExamplesWithAi, repairJsonWithAi, suggestMappingsWithAi, suggestMaskFieldsWithAi } from './openrouterClient';
 import { Card } from './components/cards/Card';
 import { AiLoadingCard } from './components/cards/AiLoadingCard';
+import { AiRequestProgress } from './components/AiRequestProgress';
 import { MethodHeaderCard } from './components/cards/MethodHeaderCard';
 import { ContractSideAccordion } from './components/ContractSideAccordion';
 import { DiagramSectionEditor } from './components/DiagramSectionEditor';
@@ -7591,7 +7592,7 @@ export default function App() {
 
     if (section.kind === 'parsed') {
       if (aiRequestStatus?.state === 'loading') {
-        return <AiLoadingCard message={aiRequestStatus.message} processed={0} total={section.rows.length} onCancel={() => setAiRequestStatus(null)} />;
+        return <AiLoadingCard message={aiRequestStatus.message} />;
       }
       return (
         <div style={{ display: 'grid', gap: 10 }}>
@@ -8536,9 +8537,10 @@ export default function App() {
 
       <div className="sync-alert-stack">
         {aiRequestStatus && (
-          <div className={`alert ai-status ${aiRequestStatus.state}`} role="status">
-            {aiRequestStatus.state === 'loading' && <span className="ai-loader" aria-hidden="true" />}
-            <span>{aiRequestStatus.message}</span>
+          <div className={`alert ai-status ${aiRequestStatus.state}`}>
+            {aiRequestStatus.state === 'loading'
+              ? <AiRequestProgress message={aiRequestStatus.message} />
+              : <span role="status">{aiRequestStatus.message}</span>}
           </div>
         )}
         {authRequestStatus && (

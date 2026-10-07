@@ -6,6 +6,7 @@ import type { JiraDraft, JiraDraftInput } from '../jiraDraft';
 import { JIRA_LABELS, JIRA_PRIORITY_RULES, jiraDescription } from '../jiraLabels';
 import { jiraFormCacheKey, readJiraFormCache, writeJiraFormCache, type JiraFormCache } from '../jiraFormCache';
 import { WBButton, WBInput } from './primitives/WorkbenchPrimitives';
+import { AiRequestProgress } from './AiRequestProgress';
 
 type Props = {
   methodId: string; methodName: string; methodContext?: string; confluenceUrl?: string; jiraTicket?: string; active?: boolean;
@@ -35,6 +36,7 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
   const [draft, setDraft] = useState<JiraDraft>(); const [operation, setOperation] = useState<JiraOperation>();
   const [recovery, setRecovery] = useState(''); const [error, setError] = useState('');
   const [busy, setBusy] = useState(false); const [generating, setGenerating] = useState(false); const [loading, setLoading] = useState(false);
+  const [preparationPhase, setPreparationPhase] = useState<'epics' | 'ai'>('epics');
   const lock = useRef(false); const epoch = useRef({ value: 0 }); const linkedCallback = useRef(onLinked);
   const origin = status?.baseUrl ?? ''; const projectId = status?.project?.id;
   const bindingRef = useRef(jiraTicket);
@@ -159,7 +161,7 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
   };
   const prepare = async () => {
     if (lock.current || !status?.project || !metadata?.story || !issue && metadata.issueKind !== issueKind) return;
-    lock.current = true; setGenerating(true); onBusyChange(true); setError(''); const current = epoch.current.value;
+    lock.current = true; setPreparationPhase('epics'); setGenerating(true); onBusyChange(true); setError(''); const current = epoch.current.value;
     try {
       // Rank the whole current project/search, not only the first 50 epics.
       let items = [...epics.items]; let next = epics.nextStart;
@@ -174,6 +176,7 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
       if (items.length > 500) throw new Error('Найдено больше 500 эпиков. Уточните поиск перед подготовкой.');
       if (current !== epoch.current.value) return;
       setEpics({ items, nextStart: null });
+      setPreparationPhase('ai');
       const result = await prepareDraft({ method: { name: methodName, context: methodContext }, project: { key: status.project.key, name: status.project.name }, issueType: metadata.story.name, epics: items.map(({ key, name }) => ({ key, name })), priorities: metadata.priorities ?? [] });
       if (current !== epoch.current.value) return;
       setDraft(result); setSummary(result.summary); setDescriptionRu(result.descriptionRu); setDescriptionEn(result.descriptionEn);
@@ -204,6 +207,7 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
     {!status?.connected && <p className="cf-notice">Подключите Jira в той же локальной форме, что и Confluence. Ссылка на любую задачу определит проект. Нужна версия локального приложения 1.3.4 или новее. <a href="/docbuilder-confluence-local.zip" download>Скачать</a></p>}
     {error && <p role="alert" className="cf-notice cf-error">{error}</p>}
     {cacheWarning && <p role="alert" className="cf-notice">Браузер не смог сохранить черновик локально. Не закрывайте форму до сохранения в Jira.</p>}
+    {generating && <div className="cf-notice"><AiRequestProgress message={preparationPhase === 'epics' ? 'Подготовка ИИ: загружаем эпики проекта…' : 'ИИ: готовим название, описание и рекомендации…'} /></div>}
     {status?.connected && <>
       {loading && <p role="status">Чтение Jira…</p>}
       {(operation?.state === 'none' && jiraTicket?.trim() || operation?.state === 'success') && <div className="cf-notice"><h3>Метод уже связан с задачей Jira</h3>{operation?.issue ? <a href={operation.issue.url} target="_blank" rel="noopener noreferrer">{operation.issue.key}</a> : <p>{jiraTicket}</p>}

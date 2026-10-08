@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { DocSection, MethodDocument, MethodGroup, RequestMethod } from '../../types';
 import { HttpChip, SidebarItem, WBButton } from '../primitives/WorkbenchPrimitives';
+import { WORKBENCH_FEATURES } from '../../workbenchFeatures';
 
 type ServerProjectPreview = {
   id: string;
@@ -323,7 +324,7 @@ export const WorkbenchSidebar = React.memo(function WorkbenchSidebar({
     <aside className="wb-sidebar" style={{ position: 'relative' }} inert={disabled || undefined}>
       <div style={{ padding: '12px 14px 10px', display: 'flex', alignItems: 'center', gap: 8, borderBottom: '1px solid var(--wb-border)' }}>
         <div style={{ width: 22, height: 22, borderRadius: 6, background: 'var(--wb-text)', color: 'var(--wb-bg-surface)', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>D</div>
-        <ProjectSwitcher
+        {WORKBENCH_FEATURES.projects ? <ProjectSwitcher
           projectName={projectName}
           editingProjectName={editingProjectName}
           editingProjectNameDraft={editingProjectNameDraft}
@@ -337,7 +338,7 @@ export const WorkbenchSidebar = React.memo(function WorkbenchSidebar({
           onProjectNameDraftChange={onProjectNameDraftChange}
           onFinishProjectRename={onFinishProjectRename}
           onCancelProjectRename={onCancelProjectRename}
-        />
+        /> : <span style={{ flex: 1, fontSize: 'var(--font-size-sm)', fontWeight: 600 }}>DocBuilder</span>}
         <button type="button" onClick={onOpenSearch} style={{ border: 0, background: 'transparent', color: 'var(--wb-text-muted)', cursor: 'pointer', fontSize: 14 }}>⌘K</button>
       </div>
 
@@ -492,7 +493,7 @@ export const WorkbenchSidebar = React.memo(function WorkbenchSidebar({
 
       <div style={{ borderTop: '1px solid var(--wb-border)', padding: 10, display: 'flex', gap: 6 }}>
         <WBButton size="sm" variant="accent" onClick={onCreateMethod} fullWidth>+ Метод</WBButton>
-        <WBButton size="sm" variant="secondary" onClick={onCreateProject} fullWidth>+ Сервис</WBButton>
+        {WORKBENCH_FEATURES.projects && <WBButton size="sm" variant="secondary" onClick={onCreateProject} fullWidth>+ Сервис</WBButton>}
       </div>
     </aside>
   );

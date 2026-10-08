@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import type { MethodDocument, MethodGroup, RequestMethod } from '../../types';
 import { HttpChip, WBButton } from '../primitives/WorkbenchPrimitives';
+import { WORKBENCH_FEATURES } from '../../workbenchFeatures';
 
 type WorkspaceHomeProps = {
   projectName: string;
@@ -17,14 +18,14 @@ export function WorkspaceHome({ projectName, methods, groups, getMethodHttpMetho
   return (
     <div className="wb-workspace-home">
       <div style={{ fontSize: 42, marginBottom: 8 }}>▣</div>
-      <h1 style={{ margin: 0, fontSize: 38, fontWeight: 700 }}>{projectName || 'doc-builder'}</h1>
+      <h1 style={{ margin: 0, fontSize: 38, fontWeight: 700 }}>{WORKBENCH_FEATURES.projects ? projectName || 'DocBuilder' : 'DocBuilder'}</h1>
       <p style={{ fontSize: 15, color: 'var(--wb-text-soft)', marginTop: 6, maxWidth: 580 }}>
-        Workspace для API-документации. Методы сгруппированы по сервисам, а Workbench собирает документацию карточками.
+        Создайте метод или импортируйте документацию, чтобы начать работу.
       </p>
       <div style={{ display: 'flex', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
         <WBButton variant="accent" icon="+" onClick={onCreateMethod}>Новый метод</WBButton>
         <WBButton variant="secondary" icon="↑" onClick={onImportOpenApi}>Импорт OpenAPI</WBButton>
-        <WBButton variant="ghost" icon="▣" onClick={onCreateService}>Новый сервис</WBButton>
+        {WORKBENCH_FEATURES.projects && <WBButton variant="ghost" icon="▣" onClick={onCreateService}>Новый сервис</WBButton>}
       </div>
 
       <h2 style={{ marginTop: 32, marginBottom: 10, fontSize: 14, fontWeight: 700, color: 'var(--wb-text-soft)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>Недавнее</h2>
@@ -44,6 +45,7 @@ export function WorkspaceHome({ projectName, methods, groups, getMethodHttpMetho
         </div>
       )}
 
+      {WORKBENCH_FEATURES.projects && <>
       <h2 style={{ marginTop: 36, marginBottom: 10, fontSize: 14, fontWeight: 700, color: 'var(--wb-text-soft)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>Структура проекта</h2>
       <div style={{ background: 'var(--wb-bg-surface)', borderRadius: 'var(--wb-radius-lg)', boxShadow: 'var(--wb-shadow-card)', padding: 16 }}>
         {(groups.length > 0 ? groups : [{ id: 'methods', name: 'Methods', methodIds: methods.map((method) => method.id), links: [] }]).map((group) => {
@@ -60,6 +62,7 @@ export function WorkspaceHome({ projectName, methods, groups, getMethodHttpMetho
           );
         })}
       </div>
+      </>}
     </div>
   );
 }

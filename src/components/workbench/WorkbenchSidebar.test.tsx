@@ -5,6 +5,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DocSection, MethodDocument } from '../../types';
 import { WorkbenchSidebar } from './WorkbenchSidebar';
 
+// Exercise the retained project implementation explicitly; production hides these tools.
+vi.mock('../../workbenchFeatures', () => ({ WORKBENCH_FEATURES: { projects: true } }));
+
 afterEach(() => {
   cleanup();
 });

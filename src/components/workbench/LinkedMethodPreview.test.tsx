@@ -45,7 +45,7 @@ describe('LinkedMethodPreview', () => {
     expect(screen.getByText('Customer')).toBeInTheDocument();
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Project Docs' })).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
   });
 
   it('filters and selects a method, then restores focus', async () => {
@@ -64,7 +64,7 @@ describe('LinkedMethodPreview', () => {
     const picker = screen.getByRole('button', { name: /First method/ });
     await user.click(picker);
     await user.type(screen.getByRole('textbox', { name: 'Поиск связанного метода' }), 'Second');
-    const listbox = screen.getByRole('listbox', { name: 'Методы проекта' });
+    const listbox = screen.getByRole('listbox', { name: 'Методы' });
     await user.click(within(listbox).getByRole('option', { name: /Second method/ }));
     expect(onSelectMethod).toHaveBeenCalledWith('two');
     expect(picker).toHaveFocus();

@@ -6,6 +6,9 @@ import { makeRequestSection } from './test/fixtures';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+const workbenchFeatures = vi.hoisted(() => ({ projects: false }));
+vi.mock('./workbenchFeatures', () => ({ WORKBENCH_FEATURES: workbenchFeatures }));
+
 const STORAGE_KEY = 'doc-builder-project-v2';
 const ONBOARDING_ENTRY_SUPPRESS_KEY = 'doc-builder-onboarding-entry-suppressed-v1';
 
@@ -155,6 +158,7 @@ async function applyWorkspaceImportIfDialogPresent(user: ReturnType<typeof userE
 
 describe('App integration', () => {
   afterEach(() => {
+    workbenchFeatures.projects = false;
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     window.localStorage.clear();
@@ -177,6 +181,40 @@ describe('App integration', () => {
       expect(raw).toBeTruthy();
       expect(raw).toContain('"version":3');
       expect(raw).toContain('"methods"');
+    });
+  });
+
+  it('hides project tools while editing methods preserves stored project sections and flows', async () => {
+    const user = userEvent.setup();
+    seedProjectPreviewWorkspace();
+    const workspace = getStoredProject()!;
+    workspace.flows = [{
+      id: 'flow-existing', name: 'Existing flow', description: 'Keep existing flow',
+      nodes: [{ id: 'note-existing', type: 'note', label: 'Existing note', position: { x: 80, y: 120 } }],
+      edges: [], createdAt: '2026-05-07T10:00:00.000Z', updatedAt: '2026-05-07T10:00:00.000Z'
+    }];
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(workspace));
+    renderApp();
+
+    expect(screen.queryByRole('tablist', { name: 'Контекст редактора' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Preview Project|\+ Сервис/ })).not.toBeInTheDocument();
+    const menu = await openTopbarOverflow(user);
+    expect(within(menu).queryByRole('menuitem', { name: /Проект HTML|Проект Wiki|шаблон проекта/ })).not.toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: 'Скачать шаблон метода для ИИ' })).toBeInTheDocument();
+    await user.click(findTopbarButton(/Дополнительные действия/));
+
+    await user.dblClick(within(getNavigationTree()).getByText('First Method'));
+    const methodName = screen.getByRole('textbox', { name: 'Method name' });
+    await user.clear(methodName);
+    await user.type(methodName, 'Updated Method{Enter}');
+    await waitFor(() => {
+      const stored = getStoredProject();
+      expect(stored).toMatchObject({
+        projectName: 'Preview Project',
+        projectSections: [{ id: 'project-summary', content: 'Full project overview' }],
+        flows: [{ id: 'flow-existing', name: 'Existing flow', nodes: [{ id: 'note-existing', label: 'Existing note' }] }],
+        methods: [{ id: 'm_first', name: 'Updated Method', sections: [{ value: 'A' }] }, { id: 'm_second' }]
+      });
     });
   });
 
@@ -376,7 +414,7 @@ describe('App integration', () => {
     expect(linkedPreview).toHaveTextContent('Second Method');
     expect(linkedPreview).toHaveTextContent('Detailed second method body');
     expect(within(linkedPreview).queryByRole('textbox')).not.toBeInTheDocument();
-    expect(within(linkedPreview).getByRole('tab', { name: 'Project Docs' })).toHaveAttribute('aria-disabled', 'true');
+    expect(within(linkedPreview).queryByRole('tablist')).not.toBeInTheDocument();
     expect(document.querySelector('.wb-meta-panel')).toBeNull();
     expect(findTopbarButton(/Сплит-режим/)).toHaveAttribute('aria-pressed', 'true');
 
@@ -613,6 +651,7 @@ describe('App integration', () => {
   });
 
   it('creates a diagram section in Project Docs', async () => {
+    workbenchFeatures.projects = true;
     const user = userEvent.setup();
     seedSingleMethodWorkspace({ id: 's_goal', title: 'Goal', enabled: true, kind: 'text', value: 'A' });
     renderApp();
@@ -678,6 +717,7 @@ describe('App integration', () => {
   });
 
   it('returns from Wiki to the previous workspace context', async () => {
+    workbenchFeatures.projects = true;
     const user = userEvent.setup();
     seedSingleMethodWorkspace({ id: 's_goal', title: 'Goal', enabled: true, kind: 'text', value: 'A' });
     renderApp();
@@ -723,6 +763,7 @@ describe('App integration', () => {
   });
 
   it('opens full project HTML preview from export split menu', async () => {
+    workbenchFeatures.projects = true;
     const user = userEvent.setup();
     seedProjectPreviewWorkspace();
     renderApp();
@@ -756,6 +797,7 @@ describe('App integration', () => {
   });
 
   it('opens full project Wiki preview from export split menu', async () => {
+    workbenchFeatures.projects = true;
     const user = userEvent.setup();
     seedProjectPreviewWorkspace();
     renderApp();
@@ -777,6 +819,7 @@ describe('App integration', () => {
   });
 
   it('downloads project HTML and Wiki from project preview screens', async () => {
+    workbenchFeatures.projects = true;
     const user = userEvent.setup();
     const downloads: string[] = [];
     const originalCreateElement = document.createElement.bind(document);

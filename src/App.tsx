@@ -125,6 +125,7 @@ import { SearchPalette } from './components/dialogs/SearchPalette';
 import { Toast } from './components/Toast';
 import { AiTableButton } from './components/primitives/WorkbenchPrimitives';
 import { WorkbenchSidebar } from './components/workbench/WorkbenchSidebar';
+import { WORKBENCH_FEATURES } from './workbenchFeatures';
 import { WorkbenchDiagramPreview } from './components/workbench/WorkbenchDiagramPreview';
 import { WorkbenchTopbar, type WorkbenchAccent } from './components/workbench/WorkbenchTopbar';
 import { WorkbenchFooter } from './components/workbench/WorkbenchFooter';
@@ -8588,7 +8589,7 @@ export default function App() {
         <main className={`workspace ${workspaceScope === 'flows' && tab === 'editor' ? 'workspace-flow-focus' : ''}`} role="main">
           {canRenderWorkspace ? (
             <>
-              {tab === 'editor' && (
+              {WORKBENCH_FEATURES.projects && tab === 'editor' && (
                 <div className="workspace-context-tabs" role="tablist" aria-label="Контекст редактора">
                   <button
                     type="button"
@@ -8846,7 +8847,7 @@ export default function App() {
                 </div>
               )}
 
-              {tab === 'editor' && workspaceScope === 'project-docs' && (
+              {WORKBENCH_FEATURES.projects && tab === 'editor' && workspaceScope === 'project-docs' && (
                 <ProjectDocsEditor
                   sections={projectSections}
                   activeSectionId={activeProjectSectionId}
@@ -8863,7 +8864,7 @@ export default function App() {
                 />
               )}
 
-              {tab === 'editor' && workspaceScope === 'flows' && (
+              {WORKBENCH_FEATURES.projects && tab === 'editor' && workspaceScope === 'flows' && (
                 <ProjectFlowsEditor
                   methods={methods}
                   flows={flows}

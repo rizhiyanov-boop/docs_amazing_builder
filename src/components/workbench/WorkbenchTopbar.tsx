@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, type ReactNode, type RefObject } fr
 import type { RequestMethod } from '../../types';
 import { HttpChip, WBButton } from '../primitives/WorkbenchPrimitives';
 import { confluenceClient } from '../../confluenceClient';
+import { WORKBENCH_FEATURES } from '../../workbenchFeatures';
 
 export type WorkbenchAccent = 'blue' | 'warm' | 'violet';
 export type TopbarAutosaveState = 'idle' | 'saving' | 'saved' | 'error';
@@ -211,14 +212,14 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
             >
               Скачать шаблон метода для ИИ
             </a>
-            <a
+            {WORKBENCH_FEATURES.projects && <a
               role="menuitem"
               href={`${import.meta.env.BASE_URL}docbuilder-ai-project-template.json`}
               download="docbuilder-ai-project-template.json"
               onClick={() => setOverflowOpen(false)}
             >
               Скачать шаблон проекта для ИИ
-            </a>
+            </a>}
             <button type="button" role="menuitem" onClick={() => runOverflowAction(onRenameMethod)}>Переименовать метод</button>
             <button
               type="button"
@@ -229,9 +230,11 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
             >
               Удалить метод
             </button>
+            {WORKBENCH_FEATURES.projects && <>
             <span className="wb-topbar-menu-divider" />
             <button type="button" role="menuitem" onClick={() => runOverflowAction(onExportFullProjectHtml)}>Проект HTML</button>
             <button type="button" role="menuitem" onClick={() => runOverflowAction(onExportFullProjectWiki)}>Проект Wiki</button>
+            </>}
           </div>
         )}
       </div>

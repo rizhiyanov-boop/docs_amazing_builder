@@ -45,11 +45,11 @@ The workspace is stored as `WorkspaceProjectData`:
 - `src/screens/HtmlExportScreen.tsx`: rendered HTML preview, TOC/search, copy and download actions.
 - `src/screens/WikiScreen.tsx`: Wiki source/preview modes with copy and download.
 - src/screens/ConfluenceScreen.tsx: connection status, fresh lazy page tree, read-only page inspection, method create/update, conflict handling and uncertain-outcome reconciliation.
-- Project docs and flows remain separate editor surfaces inside the workspace.
+- The visible workspace focuses on methods. workbenchFeatures.ts disables the unfinished project switcher, project creation, Project Docs, Flows and project HTML/Wiki actions. Project metadata, sections, flows and the JSON import/export format remain compatible with existing documents.
 
 ### Workbench Shell
 
-- `src/components/workbench/WorkbenchSidebar.tsx`: project/service switcher, method tree, section tree, search entry.
+- `src/components/workbench/WorkbenchSidebar.tsx`: method tree, section tree, search and method creation. The project/service switcher and project creation are hidden while project tools are disabled.
 - `src/components/workbench/WorkbenchTopbar.tsx`: current method context, Workbench/Editor mode, layout toggle, import, preview/export actions, user/theme menu.
 - `src/components/workbench/MethodMetaPanel.tsx`: right-side method metadata editor.
 

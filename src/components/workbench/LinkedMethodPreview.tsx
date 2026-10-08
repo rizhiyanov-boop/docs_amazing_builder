@@ -4,6 +4,7 @@ import { richTextToHtml } from '../../richText';
 import { getSectionRows } from '../../sectionHelpers';
 import { HttpChip } from '../primitives/WorkbenchPrimitives';
 import { WorkbenchDiagramPreview } from './WorkbenchDiagramPreview';
+import { WORKBENCH_FEATURES } from '../../workbenchFeatures';
 
 type LinkedMethodPreviewProps = {
   methods: MethodDocument[];
@@ -200,7 +201,7 @@ export function LinkedMethodPreview({
                     aria-label="Поиск связанного метода"
                   />
                 </label>
-                <div role="listbox" aria-label="Методы проекта">
+                <div role="listbox" aria-label="Методы">
                   {filteredMethods.map((item) => (
                     <button
                       key={item.id}
@@ -227,10 +228,10 @@ export function LinkedMethodPreview({
           <span className="linked-preview-badge">◉ Ссылка</span>
           <button type="button" className="linked-preview-close" onClick={onClose} aria-label="Закрыть сплит">×</button>
         </div>
-        <div className="linked-preview-tabs" role="tablist" aria-label="Контекст связанного метода">
+        {WORKBENCH_FEATURES.projects && <div className="linked-preview-tabs" role="tablist" aria-label="Контекст связанного метода">
           <button type="button" role="tab" aria-selected="true">Methods</button>
           <button type="button" role="tab" aria-selected="false" aria-disabled="true">Project Docs</button>
-        </div>
+        </div>}
       </header>
       <div className="linked-preview-body">
         <div className="linked-preview-method-meta">

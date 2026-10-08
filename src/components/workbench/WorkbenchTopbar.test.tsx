@@ -4,6 +4,8 @@ import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WorkbenchTopbar } from './WorkbenchTopbar';
 
+vi.mock('../../workbenchFeatures', () => ({ WORKBENCH_FEATURES: { projects: true } }));
+
 afterEach(cleanup);
 
 function renderTopbar(overrides: Partial<React.ComponentProps<typeof WorkbenchTopbar>> = {}) {

@@ -176,6 +176,8 @@ export function SidebarItem({ depth = 0, emoji, http, children, active, dim, exp
   return (
     <button
       type="button"
+      className={`wb-sidebar-item${active ? ' active' : ''}${dim ? ' dim' : ''}`}
+      title={typeof children === 'string' ? children : undefined}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
       style={{

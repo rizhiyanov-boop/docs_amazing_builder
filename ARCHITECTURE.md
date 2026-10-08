@@ -50,7 +50,9 @@ The workspace is stored as `WorkspaceProjectData`:
 ### Workbench Shell
 
 - `src/components/workbench/WorkbenchSidebar.tsx`: method tree, section tree, search and method creation. The project/service switcher and project creation are hidden while project tools are disabled.
-- `src/components/workbench/WorkbenchTopbar.tsx`: current method context, Workbench/Editor mode, layout toggle, import, preview/export actions, user/theme menu.
+- src/components/workbench/WorkbenchTopbar.tsx: method name and endpoint, local autosave status, undo/redo, grouped HTML/Wiki/JSON export, Confluence action and account menu. Menus support arrow keys, Home/End and Escape with focus return.
+- src/components/workbench/workbench-shell.css: neutral shell surfaces, compact navigation, shared control sizing and legacy editor styling through Workbench tokens. Small viewports keep the export menu and connection action accessible.
+- src/components/workbench/WorkbenchIcon.tsx: shared SVG icons for shell actions and navigation.
 - `src/components/workbench/MethodMetaPanel.tsx`: right-side method metadata editor.
 
 ### Cards and Tables

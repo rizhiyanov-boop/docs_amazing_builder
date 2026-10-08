@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState, type KeyboardEvent as Reac
 import type { DocSection, MethodDocument, MethodGroup, RequestMethod } from '../../types';
 import { HttpChip, SidebarItem, WBButton } from '../primitives/WorkbenchPrimitives';
 import { WORKBENCH_FEATURES } from '../../workbenchFeatures';
+import { WorkbenchIcon } from './WorkbenchIcon';
 
 type ServerProjectPreview = {
   id: string;
@@ -322,8 +323,8 @@ export const WorkbenchSidebar = React.memo(function WorkbenchSidebar({
 
   return (
     <aside className="wb-sidebar" style={{ position: 'relative' }} inert={disabled || undefined}>
-      <div style={{ padding: '12px 14px 10px', display: 'flex', alignItems: 'center', gap: 8, borderBottom: '1px solid var(--wb-border)' }}>
-        <div style={{ width: 22, height: 22, borderRadius: 6, background: 'var(--wb-text)', color: 'var(--wb-bg-surface)', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>D</div>
+      <div className="wb-sidebar-header">
+        <span className="wb-sidebar-mark"><WorkbenchIcon name="document" /></span>
         {WORKBENCH_FEATURES.projects ? <ProjectSwitcher
           projectName={projectName}
           editingProjectName={editingProjectName}
@@ -338,42 +339,23 @@ export const WorkbenchSidebar = React.memo(function WorkbenchSidebar({
           onProjectNameDraftChange={onProjectNameDraftChange}
           onFinishProjectRename={onFinishProjectRename}
           onCancelProjectRename={onCancelProjectRename}
-        /> : <span style={{ flex: 1, fontSize: 'var(--font-size-sm)', fontWeight: 600 }}>DocBuilder</span>}
-        <button type="button" onClick={onOpenSearch} style={{ border: 0, background: 'transparent', color: 'var(--wb-text-muted)', cursor: 'pointer', fontSize: 14 }}>⌘K</button>
+        /> : <span className="wb-sidebar-brand">DocBuilder</span>}
+        <button type="button" className="wb-sidebar-command" onClick={onOpenSearch} aria-label="Поиск по документации (Ctrl+K)" title="Поиск по документации (Ctrl+K)"><WorkbenchIcon name="command" /></button>
       </div>
 
-      <div style={{ padding: '8px' }}>
-        <label
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            background: 'var(--wb-bg-surface)',
-            border: '1px solid var(--wb-border-soft)',
-            borderRadius: 'var(--wb-radius-sm)',
-            padding: '4px 8px',
-            fontSize: 12,
-            color: 'var(--wb-text-muted)'
-          }}
-        >
-          <span aria-hidden>⌕</span>
+      <div className="wb-sidebar-search-wrap">
+        <label className="wb-sidebar-search">
+          <WorkbenchIcon name="search" />
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Поиск метода..."
-            style={{
-              minWidth: 0,
-              flex: 1,
-              border: 0,
-              outline: 0,
-              background: 'transparent',
-              color: 'var(--wb-text)',
-              fontFamily: 'var(--wb-font-sans)',
-              fontSize: 12
-            }}
+            aria-label="Поиск метода"
           />
         </label>
       </div>
+
+      <div className="wb-sidebar-list-heading"><span>Методы</span><span>{methods.length}</span></div>
 
       <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
         {switchingProjectId && (
@@ -402,9 +384,9 @@ export const WorkbenchSidebar = React.memo(function WorkbenchSidebar({
           ) : (
             visibleGroups.map((group) => (
               <div key={group.id} style={{ marginBottom: 8 }}>
-                <div role="treeitem" aria-expanded="true">
+                {(WORKBENCH_FEATURES.projects || group.id !== 'ungrouped') && <div role="treeitem" aria-expanded="true">
                   <SidebarItem emoji="▣" expandable expanded>{group.name}</SidebarItem>
-                </div>
+                </div>}
                 {group.methods.map((method) => {
                   const isActiveMethod = method.id === activeMethodId;
                   const isEditingMethod = editingMethodId === method.id;
@@ -465,7 +447,7 @@ export const WorkbenchSidebar = React.memo(function WorkbenchSidebar({
                           </div>
                         ) : (
                           <SidebarItem
-                            depth={1}
+                            depth={group.id === 'ungrouped' && !WORKBENCH_FEATURES.projects ? 0 : 1}
                             http={getMethodHttpMethod(method)}
                             active={isActiveMethod}
                             onClick={() => onSwitchMethod(method)}
@@ -477,7 +459,7 @@ export const WorkbenchSidebar = React.memo(function WorkbenchSidebar({
                       </div>
                     {method.id === activeMethodId && sections.map((section) => (
                       <div key={section.id} role="treeitem" aria-selected={section.id === selectedSectionId}>
-                        <SidebarItem depth={2} active={section.id === selectedSectionId} dim={!section.enabled} onClick={() => onSelectSection(section.id)}>
+                        <SidebarItem depth={group.id === 'ungrouped' && !WORKBENCH_FEATURES.projects ? 1 : 2} active={section.id === selectedSectionId} dim={!section.enabled} onClick={() => onSelectSection(section.id)}>
                           {resolveSectionTitle(section)}
                         </SidebarItem>
                       </div>
@@ -491,8 +473,8 @@ export const WorkbenchSidebar = React.memo(function WorkbenchSidebar({
         </div>
       </div>
 
-      <div style={{ borderTop: '1px solid var(--wb-border)', padding: 10, display: 'flex', gap: 6 }}>
-        <WBButton size="sm" variant="accent" onClick={onCreateMethod} fullWidth>+ Метод</WBButton>
+      <div className="wb-sidebar-footer">
+        <WBButton size="sm" variant="accent" icon={<WorkbenchIcon name="plus" />} onClick={onCreateMethod} fullWidth>Новый метод</WBButton>
         {WORKBENCH_FEATURES.projects && <WBButton size="sm" variant="secondary" onClick={onCreateProject} fullWidth>+ Сервис</WBButton>}
       </div>
     </aside>

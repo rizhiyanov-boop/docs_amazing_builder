@@ -3,6 +3,7 @@ import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as 
 import './tokens.css';
 import './tokens-workbench.css';
 import './App.css';
+import './components/workbench/workbench-shell.css';
 import { parseCurlMeta, parseJsonSchemaToRows, parseToRows, wrapNonDomainResponseJson } from './parsers';
 import { getDiagramExportFileName, getDiagramImageUrl, resolveDiagramEngine } from './diagramUtils';
 import { ERROR_CATALOG_BY_CODE } from './errorCatalog';
@@ -8641,7 +8642,7 @@ export default function App() {
                   )}
                   {sections.map((section) => {
                     const isSelectedSection = selectedSection?.id === section.id;
-                    const isActiveSection = true;
+                    const isActiveSection = isSelectedSection;
                     const isJumpHighlighted = sectionJumpHighlightId === section.id;
                     return (
                       <section

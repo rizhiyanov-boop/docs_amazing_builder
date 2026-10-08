@@ -31,7 +31,7 @@ describe('Confluence workspace integration', () => {
         updatedAt: '2026-10-02T10:00:00Z', sections: [{ id: 'goal', kind: 'text', title: 'Цель', enabled: true, value: 'Content' }] }], groups: [] }));
     render(<App />);
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: '+ Метод', exact: true }));
+    await user.click(screen.getByRole('button', { name: 'Новый метод', exact: true }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Отменить', exact: true })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: /Confluence/ }));
     await user.click(await screen.findByRole('button', { name: parent.title, exact: true }));

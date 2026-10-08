@@ -128,6 +128,11 @@ async function openTopbarOverflow(user: ReturnType<typeof userEvent.setup>): Pro
   return screen.getByRole('menu', { name: 'Дополнительные действия' });
 }
 
+async function clickTopbarExport(user: ReturnType<typeof userEvent.setup>, format: 'HTML' | 'Wiki' | 'JSON'): Promise<void> {
+  await user.click(findTopbarButton(/^Экспорт$/));
+  await user.click(within(screen.getByRole('menu', { name: 'Экспорт' })).getByRole('menuitem', { name: format, exact: true }));
+}
+
 function getNavigationTree(): HTMLElement {
   return screen.getByRole('tree');
 }
@@ -174,7 +179,7 @@ describe('App integration', () => {
     expect(screen.getByText('REQUEST')).toBeInTheDocument();
     expect(screen.getAllByRole('textbox', { name: 'Содержимое текстовой секции' }).length).toBeGreaterThan(1);
     expect(screen.queryByRole('toolbar', { name: 'Форматирование текста' })).not.toBeInTheDocument();
-    expect(findTopbarButton(/^HTML$/)).toBeInTheDocument();
+    expect(findTopbarButton(/^Экспорт$/)).toBeInTheDocument();
 
     await waitFor(() => {
       const raw = getStoredProjectRaw();
@@ -706,10 +711,10 @@ describe('App integration', () => {
     expect(screen.queryByText(/Published HTML/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: /^Wiki$/i })).not.toBeInTheDocument();
 
-    await user.click(findTopbarButton(/^HTML$/));
+    await clickTopbarExport(user, 'HTML');
     expect(screen.getByText(/Published HTML/i)).toBeInTheDocument();
 
-    await user.click(findTopbarButton(/^Wiki$/));
+    await clickTopbarExport(user, 'Wiki');
     expect(screen.getByRole('heading', { name: /^Wiki$/i })).toBeInTheDocument();
     expect(createObjectURL).not.toHaveBeenCalled();
     expect(revokeObjectURL).not.toHaveBeenCalled();
@@ -725,22 +730,22 @@ describe('App integration', () => {
     await user.click(screen.getByRole('tab', { name: 'Project Docs' }));
     expect(screen.getByRole('tab', { name: 'Project Docs' })).toHaveAttribute('aria-selected', 'true');
 
-    await user.click(findTopbarButton(/^Wiki$/));
+    await clickTopbarExport(user, 'Wiki');
     expect(screen.getByRole('heading', { name: /^Wiki$/i })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Вернуться в предыдущий раздел' }));
     expect(screen.getByRole('tab', { name: 'Project Docs' })).toHaveAttribute('aria-selected', 'true');
 
-    await user.click(findTopbarButton(/^Wiki$/));
+    await clickTopbarExport(user, 'Wiki');
     expect(screen.getByRole('heading', { name: /^Wiki$/i })).toBeInTheDocument();
 
-    await user.click(findTopbarButton(/^Wiki$/));
+    await clickTopbarExport(user, 'Wiki');
     expect(screen.getByRole('tab', { name: 'Project Docs' })).toHaveAttribute('aria-selected', 'true');
 
     await user.click(screen.getByRole('tab', { name: 'Flows' }));
     expect(screen.getByRole('tab', { name: 'Flows' })).toHaveAttribute('aria-selected', 'true');
 
-    await user.click(findTopbarButton(/^Wiki$/));
+    await clickTopbarExport(user, 'Wiki');
     expect(screen.getByRole('heading', { name: /^Wiki$/i })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Вернуться в предыдущий раздел' }));
@@ -752,10 +757,10 @@ describe('App integration', () => {
     seedSingleMethodWorkspace({ id: 's_goal', title: 'Goal', enabled: true, kind: 'text', value: 'A' });
     renderApp();
 
-    await user.click(findTopbarButton(/^HTML$/));
+    await clickTopbarExport(user, 'HTML');
     expect(screen.getByText(/Published HTML/i)).toBeInTheDocument();
 
-    await user.click(findTopbarButton(/^Wiki$/));
+    await clickTopbarExport(user, 'Wiki');
     expect(screen.getByRole('heading', { name: /^Wiki$/i })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Вернуться в предыдущий раздел' }));
@@ -788,7 +793,7 @@ describe('App integration', () => {
     seedProjectPreviewWorkspace();
     renderApp();
 
-    await user.click(findTopbarButton(/^HTML$/));
+    await clickTopbarExport(user, 'HTML');
 
     expect(screen.getByText(/Published HTML/i)).toBeInTheDocument();
     expect(screen.getAllByText('First Method').length).toBeGreaterThan(0);

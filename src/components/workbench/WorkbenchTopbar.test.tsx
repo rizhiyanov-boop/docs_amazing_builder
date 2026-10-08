@@ -46,24 +46,24 @@ describe('WorkbenchTopbar', () => {
   it('renders the action order and autosave status without split, theme, save or search controls', () => {
     renderTopbar();
     const topbar = screen.getByRole('banner');
-    expect(within(topbar).getByLabelText('doc-builder')).toHaveTextContent('dbdoc-builder');
+    expect(within(topbar).getByLabelText('Текущий метод')).toHaveTextContent('Create order');
     expect(within(topbar).getByText('/orders')).toBeInTheDocument();
-    expect(within(topbar).getByRole('button', { name: 'JSON' })).toBeInTheDocument();
-    expect(within(topbar).getByRole('button', { name: 'HTML' })).toBeInTheDocument();
-    expect(within(topbar).getByRole('button', { name: 'Wiki' })).toBeInTheDocument();
+    expect(within(topbar).getByRole('button', { name: 'Экспорт' })).toHaveAttribute('aria-expanded', 'false');
     expect(within(topbar).queryByRole('button', { name: /Сплит-режим/ })).not.toBeInTheDocument();
     expect(within(topbar).queryByRole('button', { name: 'Переключить тему' })).not.toBeInTheDocument();
     expect(within(topbar).queryByRole('button', { name: 'Сохранить' })).not.toBeInTheDocument();
     expect(within(topbar).queryByRole('button', { name: 'Поиск (Ctrl+K)' })).not.toBeInTheDocument();
-    expect(within(topbar).getByRole('status')).toHaveTextContent('Сохранено · 10:30');
+    expect(within(topbar).getByRole('status')).toHaveTextContent('Сохранено');
+    expect(within(topbar).getByRole('status')).toHaveAttribute('title', 'Сохранено в этом браузере · 10:30');
   });
 
   it('runs export and history actions', async () => {
     const user = userEvent.setup();
     const result = renderTopbar();
-    await user.click(screen.getByRole('button', { name: 'JSON' }));
-    await user.click(screen.getByRole('button', { name: 'HTML' }));
-    await user.click(screen.getByRole('button', { name: 'Wiki' }));
+    for (const format of ['JSON', 'HTML', 'Wiki']) {
+      await user.click(screen.getByRole('button', { name: 'Экспорт' }));
+      await user.click(screen.getByRole('menuitem', { name: format, exact: true }));
+    }
     await user.click(screen.getByRole('button', { name: 'Отменить' }));
     expect(result.props.onExportJson).toHaveBeenCalledOnce();
     expect(result.props.onExportHtml).toHaveBeenCalledOnce();
@@ -105,6 +105,25 @@ describe('WorkbenchTopbar', () => {
     await user.click(screen.getByRole('button', { name: /User/ }));
     expect(screen.queryByText('Акцент')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Dusk' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Выйти' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Выйти' })).toBeInTheDocument();
+  });
+
+  it('navigates export with the keyboard, restores focus and opens only one menu', async () => {
+    const user = userEvent.setup();
+    renderTopbar();
+    const exportButton = screen.getByRole('button', { name: 'Экспорт' });
+    await user.click(exportButton);
+    expect(screen.getByRole('menuitem', { name: 'HTML' })).toHaveFocus();
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByRole('menuitem', { name: 'Wiki' })).toHaveFocus();
+    await user.keyboard('{End}');
+    expect(screen.getByRole('menuitem', { name: 'JSON' })).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(exportButton).toHaveFocus();
+    expect(exportButton).toHaveAttribute('aria-expanded', 'false');
+    await user.click(exportButton);
+    await user.click(screen.getByRole('button', { name: 'Дополнительные действия' }));
+    expect(screen.queryByRole('menu', { name: 'Экспорт' })).not.toBeInTheDocument();
+    expect(screen.getByRole('menu', { name: 'Дополнительные действия' })).toBeInTheDocument();
   });
 });

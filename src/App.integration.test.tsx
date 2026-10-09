@@ -133,8 +133,8 @@ async function clickTopbarExport(user: ReturnType<typeof userEvent.setup>, forma
   await user.click(within(screen.getByRole('menu', { name: 'Экспорт' })).getByRole('menuitem', { name: format, exact: true }));
 }
 
-function getNavigationTree(): HTMLElement {
-  return screen.getByRole('tree');
+function getMethodNavigation(): HTMLElement {
+  return screen.getByRole('navigation', { name: 'Методы' });
 }
 
 function getImportFileInput(): HTMLInputElement {
@@ -173,7 +173,7 @@ describe('App integration', () => {
   it('renders the Editor shell without legacy mode controls and autosaves initial workspace', async () => {
     renderApp();
 
-    expect(getNavigationTree()).toBeInTheDocument();
+    expect(getMethodNavigation()).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Workbench' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Editor' })).not.toBeInTheDocument();
     expect(screen.getByText('REQUEST')).toBeInTheDocument();
@@ -208,7 +208,7 @@ describe('App integration', () => {
     expect(within(menu).getByRole('menuitem', { name: 'Скачать шаблон метода для ИИ' })).toBeInTheDocument();
     await user.click(findTopbarButton(/Дополнительные действия/));
 
-    await user.dblClick(within(getNavigationTree()).getByText('First Method'));
+    await user.dblClick(within(getMethodNavigation()).getByText('First Method'));
     const methodName = screen.getByRole('textbox', { name: 'Method name' });
     await user.clear(methodName);
     await user.type(methodName, 'Updated Method{Enter}');
@@ -440,7 +440,7 @@ describe('App integration', () => {
     await user.click(within(linkedPreview).getByRole('option', { name: /First Method/ }));
 
     expect(within(linkedPreview).getByText('Detailed first method body')).toBeInTheDocument();
-    expect(within(getNavigationTree()).getByRole('treeitem', { name: /First Method/ })).toHaveAttribute('aria-selected', 'true');
+    expect(within(getMethodNavigation()).getByRole('button', { name: /^POST First Method$/ })).toHaveAttribute('aria-current', 'page');
 
     fireEvent.keyDown(document, { key: '\\', ctrlKey: true });
     expect(screen.queryByRole('complementary', { name: 'Связанный метод' })).not.toBeInTheDocument();
@@ -472,8 +472,8 @@ describe('App integration', () => {
 
     await user.click(findTopbarButton(/Сплит-режим/));
     expect(screen.getByRole('complementary', { name: 'Связанный метод' })).toHaveTextContent('Second Method');
-    const secondMethodTreeItem = within(getNavigationTree()).getByRole('treeitem', { name: /Second Method/ });
-    await user.click(within(secondMethodTreeItem).getByRole('button'));
+    const secondMethodButton = within(getMethodNavigation()).getByRole('button', { name: /^POST Second Method$/ });
+    await user.click(secondMethodButton);
     await waitFor(() => expect(document.querySelector('.wb-topbar-crumb')).toHaveAttribute('title', 'Second Method'));
     const menu = await openTopbarOverflow(user);
     await user.click(within(menu).getByRole('menuitem', { name: 'Удалить метод' }));
@@ -885,7 +885,7 @@ describe('App integration', () => {
     const user = userEvent.setup();
     renderApp();
 
-    await user.click(within(getNavigationTree()).getByRole('treeitem', { name: /Request/i }));
+    await user.click(within(screen.getByRole('navigation', { name: 'Разделы метода' })).getByRole('button', { name: 'Request', exact: true }));
 
     const parseButton = document.querySelector(
       'button[title*="парсер"], button[title*="Parser"], button[title*="parse"]'
@@ -1002,7 +1002,7 @@ describe('App integration', () => {
 
     await user.click(getDialogButton(previewDialog, /Импортировать метод|Импортировать методы|Import/i));
     await waitFor(() => {
-      expect(within(getNavigationTree()).getByText(/Customer Lookup/i)).toBeInTheDocument();
+      expect(within(getMethodNavigation()).getByText(/Customer Lookup/i)).toBeInTheDocument();
     });
   });
 
@@ -1030,7 +1030,7 @@ describe('App integration', () => {
 
     await user.click(getDialogButton(previewDialog, /Импортировать метод|Импортировать методы|Import/i));
     await waitFor(() => {
-      expect(within(getNavigationTree()).getByText(/Partial Rows Method/i)).toBeInTheDocument();
+      expect(within(getMethodNavigation()).getByText(/Partial Rows Method/i)).toBeInTheDocument();
     });
   });
 
@@ -1136,7 +1136,7 @@ describe('App integration', () => {
     renderApp();
 
     await user.click(screen.getByRole('button', { name: 'Копировать секцию' }));
-    await user.click(within(getNavigationTree()).getByRole('button', { name: /POST Method B/i }));
+    await user.click(within(getMethodNavigation()).getByRole('button', { name: /POST Method B/i }));
 
     await user.click(screen.getByRole('button', { name: 'Дополнительные действия секции' }));
     await user.click(screen.getByRole('menuitem', { name: 'Вставить копию ниже' }));

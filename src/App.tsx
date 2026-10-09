@@ -195,7 +195,7 @@ const MAX_TABLE_FIELD_COLUMN_WIDTH = 640;
 const DEFAULT_SIDEBAR_WIDTH = 280;
 const MIN_SIDEBAR_WIDTH = 240;
 const MAX_SIDEBAR_WIDTH = 520;
-const COMPACT_LAYOUT_MEDIA_QUERY = '(max-width: 64rem)';
+const COMPACT_LAYOUT_MEDIA_QUERY = '(max-width: 780px)';
 const EMPTY_SECTIONS: DocSection[] = [];
 const ENABLE_MULTI_METHODS = true;
 const DEFAULT_RICH_TEXT_HIGHLIGHT = '#fef08a';
@@ -8483,6 +8483,8 @@ export default function App() {
         onCreateMethod={createMethod}
         onCreateProject={createProject}
         onOpenSearch={handleOpenSearchPalette}
+        onDeleteActiveMethod={deleteActiveMethod}
+        canDeleteActiveMethod={methods.length > 1}
       />
 
       <div className="wb-shell-content">
@@ -8516,6 +8518,8 @@ export default function App() {
           onExportFullProjectWiki={handleOpenProjectWikiPreview}
           onExportJson={exportProjectJson}
           onToggleSidebar={handleToggleSidebar}
+          isSidebarHidden={isSidebarHidden}
+          onOpenSearch={handleOpenSearchPalette}
           onUndo={undoWorkspace}
           onRedo={redoWorkspace}
           onLogout={handleLogoutClick}

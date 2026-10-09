@@ -19,7 +19,7 @@ function normalizeTypeKind(type: string): 'string' | 'number' | 'boolean' | 'obj
   return 'string';
 }
 
-export function HttpChip({ method = 'POST', size = 'md' }: { method?: RequestMethod | string; size?: 'sm' | 'md' }): ReactNode {
+export function HttpChip({ method = 'POST', size = 'md', appearance = 'solid' }: { method?: RequestMethod | string; size?: 'sm' | 'md'; appearance?: 'solid' | 'soft' }): ReactNode {
   const normalized = String(method || 'POST').toUpperCase() as RequestMethod;
   const colors = HTTP_STYLES[normalized] ?? HTTP_STYLES.POST;
   const compact = size === 'sm';
@@ -30,8 +30,9 @@ export function HttpChip({ method = 'POST', size = 'md' }: { method?: RequestMet
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        background: colors.bg,
-        color: colors.fg,
+        background: appearance === 'soft' ? `color-mix(in srgb, ${colors.bg} 12%, var(--wb-bg-surface))` : colors.bg,
+        color: appearance === 'soft' ? colors.bg : colors.fg,
+        border: appearance === 'soft' ? `1px solid color-mix(in srgb, ${colors.bg} 25%, var(--wb-bg-surface))` : undefined,
         fontFamily: 'var(--wb-font-mono)',
         fontWeight: 600,
         fontSize: compact ? 10 : 11,
@@ -159,7 +160,7 @@ export function WBInput({ label, error, style, ...props }: WBInputProps): ReactN
   );
 }
 
-type SidebarItemProps = {
+type SidebarItemProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   depth?: number;
   emoji?: ReactNode;
   http?: RequestMethod | string | null;
@@ -168,41 +169,45 @@ type SidebarItemProps = {
   dim?: boolean;
   expandable?: boolean;
   expanded?: boolean;
+  navigationKind?: 'method' | 'section';
   onClick?: () => void;
   onDoubleClick?: () => void;
 };
 
-export function SidebarItem({ depth = 0, emoji, http, children, active, dim, expandable, expanded, onClick, onDoubleClick }: SidebarItemProps): ReactNode {
+export function SidebarItem({ depth = 0, emoji, http, children, active, dim, expandable, expanded, navigationKind, onClick, onDoubleClick, className, style, ...props }: SidebarItemProps): ReactNode {
   return (
     <button
       type="button"
-      className={`wb-sidebar-item${active ? ' active' : ''}${dim ? ' dim' : ''}`}
+      {...props}
+      className={['wb-sidebar-item', active && 'active', dim && 'dim', navigationKind && `wb-sidebar-item-${navigationKind}`, className].filter(Boolean).join(' ')}
       title={typeof children === 'string' ? children : undefined}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
       style={{
-        width: 'calc(100% - 8px)',
-        padding: `5px 10px 5px ${10 + depth * 14}px`,
-        fontSize: 13,
+        width: navigationKind ? '100%' : 'calc(100% - 8px)',
+        padding: navigationKind ? 'var(--space-2) var(--space-3)' : `5px 10px 5px ${10 + depth * 14}px`,
+        fontSize: navigationKind ? 'var(--font-size-md)' : 13,
         color: dim ? 'var(--wb-text-muted)' : 'var(--wb-text)',
-        background: active ? 'var(--wb-bg-active)' : 'transparent',
+        background: navigationKind ? 'var(--wb-nav-item-bg, transparent)' : active ? 'var(--wb-bg-active)' : 'transparent',
         borderRadius: 'var(--wb-radius-sm)',
-        margin: '0 4px',
-        border: 0,
+        margin: navigationKind ? 0 : '0 4px',
+        border: navigationKind ? 'var(--wb-nav-item-border, 1px solid transparent)' : 0,
+        borderLeft: navigationKind ? 'var(--wb-nav-item-border-left, var(--wb-nav-item-border, 1px solid transparent))' : undefined,
         display: 'flex',
         alignItems: 'center',
         gap: 6,
         fontWeight: active ? 500 : 400,
         cursor: 'pointer',
-        fontFamily: 'var(--wb-font-sans)',
-        textAlign: 'left'
+        fontFamily: navigationKind ? 'var(--font-sans)' : 'var(--wb-font-sans)',
+        textAlign: 'left',
+        ...style
       }}
     >
       {expandable && <span style={{ fontSize: 9, color: 'var(--wb-text-muted)', width: 10 }}>{expanded ? '▾' : '▸'}</span>}
       {!expandable && depth > 0 && <span style={{ width: 10 }} />}
       {emoji && <span style={{ fontSize: 14 }}>{emoji}</span>}
-      {http && <HttpChip method={http} size="sm" />}
-      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{children}</span>
+      {http && <HttpChip method={http} size="sm" appearance={navigationKind ? 'soft' : 'solid'} />}
+      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: navigationKind ? 'normal' : 'nowrap', overflowWrap: navigationKind ? 'anywhere' : undefined }}>{children}</span>
     </button>
   );
 }

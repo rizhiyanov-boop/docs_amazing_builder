@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createRef } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -6,10 +6,12 @@ import type { DocSection, MethodDocument } from '../../types';
 import { WorkbenchSidebar } from './WorkbenchSidebar';
 
 // Exercise the retained project implementation explicitly; production hides these tools.
-vi.mock('../../workbenchFeatures', () => ({ WORKBENCH_FEATURES: { projects: true } }));
+const featureFlags = vi.hoisted(() => ({ projects: true }));
+vi.mock('../../workbenchFeatures', () => ({ WORKBENCH_FEATURES: featureFlags }));
 
 afterEach(() => {
   cleanup();
+  featureFlags.projects = true;
 });
 
 const methods: MethodDocument[] = [
@@ -191,7 +193,68 @@ describe('WorkbenchSidebar project switcher', () => {
     await user.dblClick(projectButton as HTMLButtonElement);
     expect(onStartProjectRename).toHaveBeenCalledTimes(1);
 
-    await user.dblClick(screen.getByRole('button', { name: /Create order/i }));
+    await user.dblClick(screen.getByRole('button', { name: /^POST Create order$/i }));
     expect(onStartMethodRename).toHaveBeenCalledWith(methods[0]);
+  });
+});
+
+describe('WorkbenchSidebar two-block production navigation', () => {
+  it('keeps selected document sections available when the method filter has no matches', async () => {
+    featureFlags.projects = false;
+    const user = userEvent.setup();
+    const onSelectSection = vi.fn();
+    renderSidebar({ onSelectSection });
+    await user.type(screen.getByRole('textbox', { name: 'Поиск метода' }), 'unmatched');
+    expect(within(screen.getByRole('navigation', { name: 'Методы' })).getByText('Ничего не найдено')).toBeInTheDocument();
+    const section = within(screen.getByRole('navigation', { name: 'Разделы метода' })).getByRole('button', { name: 'Goal' });
+    expect(section).toHaveAttribute('aria-current', 'location');
+    await user.click(section);
+    expect(onSelectSection).toHaveBeenCalledWith('goal');
+    expect(screen.queryByRole('button', { name: '+ Сервис' })).not.toBeInTheDocument();
+  });
+
+  it('routes method selection, rename, search and creation through existing callbacks', async () => {
+    featureFlags.projects = false;
+    const user = userEvent.setup();
+    const onSwitchMethod = vi.fn(), onOpenSearch = vi.fn(), onCreateMethod = vi.fn();
+    const view = renderSidebar({ onSwitchMethod, onOpenSearch, onCreateMethod });
+    await user.click(screen.getByRole('button', { name: /^POST Create order$/ }));
+    expect(onSwitchMethod).toHaveBeenCalledWith(methods[0]);
+    await user.click(screen.getByRole('button', { name: 'Переименовать Create order' }));
+    expect(view.onStartMethodRename).toHaveBeenCalledWith(methods[0]);
+    expect(onSwitchMethod).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: 'Новый метод' }));
+    expect(screen.queryByRole('button', { name: 'Поиск по документации (Ctrl+K)' })).not.toBeInTheDocument();
+    expect(onCreateMethod).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers deletion only for the active method and respects the last-method guard', async () => {
+    featureFlags.projects = false;
+    const user = userEvent.setup();
+    const onDeleteActiveMethod = vi.fn();
+    const view = renderSidebar({ methods: [...methods, { ...methods[0], id: 'method-2', name: 'Second method' }], onDeleteActiveMethod, canDeleteActiveMethod: true });
+    expect(screen.queryByRole('button', { name: 'Удалить Second method' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Удалить Create order' }));
+    expect(onDeleteActiveMethod).toHaveBeenCalledTimes(1);
+    view.unmount();
+    renderSidebar({ onDeleteActiveMethod, canDeleteActiveMethod: false });
+    const guarded = screen.getByRole('button', { name: 'Удалить Create order' });
+    expect(guarded).toBeDisabled();
+    await user.click(guarded);
+    expect(onDeleteActiveMethod).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves keyboard rename and navigation to dim sections', async () => {
+    featureFlags.projects = false;
+    const user = userEvent.setup();
+    const onFinishMethodRename = vi.fn(), onCancelMethodRename = vi.fn(), onSelectSection = vi.fn();
+    renderSidebar({ editingMethodId: 'method-1', editingMethodNameDraft: 'Draft name', onFinishMethodRename, onCancelMethodRename, onSelectSection, sections: [{ ...sections[0], enabled: false }] });
+    await user.click(screen.getByRole('textbox', { name: 'Method name' }));
+    await user.keyboard('{Enter}');
+    expect(onFinishMethodRename).toHaveBeenCalledTimes(1);
+    await user.keyboard('{Escape}');
+    expect(onCancelMethodRename).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: 'Goal' }));
+    expect(onSelectSection).toHaveBeenCalledWith('goal');
   });
 });

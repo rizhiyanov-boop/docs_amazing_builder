@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-export type WorkbenchIconName = 'document' | 'search' | 'command' | 'menu' | 'export' | 'chevron' | 'json' | 'html' | 'wiki' | 'confluence' | 'undo' | 'redo' | 'more' | 'check' | 'alert' | 'spinner' | 'plus';
+export type WorkbenchIconName = 'document' | 'search' | 'command' | 'menu' | 'export' | 'chevron' | 'json' | 'html' | 'wiki' | 'confluence' | 'undo' | 'redo' | 'more' | 'check' | 'alert' | 'spinner' | 'plus' | 'edit' | 'trash' | 'diagram';
 
 export function WorkbenchIcon({ name }: { name: WorkbenchIconName }): ReactNode {
   if (name === 'confluence') return <svg className="wb-shell-icon" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor" stroke="none"><path d="M3 17c2-4 4-6 7-6 3 0 5 3 11 6l-3 5c-5-3-7-6-9-6-1 0-2 1-3 3zM21 7c-2 4-4 6-7 6-3 0-5-3-11-6l3-5c5 3 7 6 9 6 1 0 2-1 3-3z" /></svg>;
@@ -20,7 +20,10 @@ export function WorkbenchIcon({ name }: { name: WorkbenchIconName }): ReactNode 
     check: <path d="m5 12 4 4L19 6" />,
     alert: <><circle cx="12" cy="12" r="9" /><path d="M12 7v6M12 17h.01" /></>,
     spinner: <path d="M21 12a9 9 0 1 1-9-9" />,
-    plus: <path d="M12 5v14M5 12h14" />
+    plus: <path d="M12 5v14M5 12h14" />,
+    edit: <path d="m16 3 5 5-12 12-6 1 1-6zM14 5l5 5" />,
+    trash: <path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7" />,
+    diagram: <><rect x="8" y="2" width="8" height="6" rx="1" /><rect x="2" y="16" width="8" height="6" rx="1" /><rect x="14" y="16" width="8" height="6" rx="1" /><path d="M12 8v4M6 16v-4h12v4" /></>
   };
   return <svg className={`wb-shell-icon${name === 'spinner' ? ' wb-shell-spinner' : ''}`} viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{shapes[name]}</svg>;
 }

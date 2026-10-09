@@ -28,7 +28,7 @@ export function SearchPalette({ open, methods, getMethodHttpMethod, onClose, onS
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Поиск"
+      aria-label="Перейти к методу"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -66,7 +66,7 @@ export function SearchPalette({ open, methods, getMethodHttpMethod, onClose, onS
                 onClose();
               }
             }}
-            placeholder="Методы и действия"
+            placeholder="Название метода…"
             style={{ flex: 1, border: 0, outline: 0, background: 'transparent', color: 'var(--wb-text)', fontFamily: 'var(--wb-font-sans)', fontSize: 15 }}
           />
           <kbd style={{ fontFamily: 'var(--wb-font-mono)', fontSize: 11, color: 'var(--wb-text-muted)', background: 'var(--wb-bg-soft)', border: '1px solid var(--wb-border-soft)', borderRadius: 4, padding: '2px 5px' }}>Esc</kbd>

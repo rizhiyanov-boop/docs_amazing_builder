@@ -31,6 +31,8 @@ type WorkbenchTopbarProps = {
   onExportFullProjectWiki: () => void;
   onExportJson: () => void;
   onToggleSidebar: () => void;
+  isSidebarHidden?: boolean;
+  onOpenSearch?: () => void;
   onRenameMethod: () => void;
   onDeleteMethod: () => void;
   canDeleteMethod: boolean;
@@ -63,7 +65,7 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
   canUndo, canRedo, autosaveState, autosaveAt, onOpenProjectImport, onImportProjectJson, onExportHtml,
   onExportWiki, onOpenConfluence, confluenceBound, onExportFullProjectHtml, onExportFullProjectWiki,
   onExportJson, onToggleSidebar, onRenameMethod, onDeleteMethod, canDeleteMethod, onUndo, onRedo,
-  onLogout, onOpenLogin, onOpenRegister
+  onLogout, onOpenLogin, onOpenRegister, onOpenSearch, isSidebarHidden = false
 }: WorkbenchTopbarProps): ReactNode {
   const [openMenu, setOpenMenu] = useState<'export' | 'more' | 'profile' | null>(null);
   const [confluenceConnected, setConfluenceConnected] = useState(false);
@@ -71,6 +73,17 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
   const overflowRef = useRef<HTMLDivElement>(null);
   const exportRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
+
+  useEffect(() => {
+    if (!onOpenSearch || disabled) return;
+    const openMethodSearch = (event: globalThis.KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.code !== 'KeyK') return;
+      event.preventDefault();
+      onOpenSearch();
+    };
+    document.addEventListener('keydown', openMethodSearch);
+    return () => document.removeEventListener('keydown', openMethodSearch);
+  }, [onOpenSearch, disabled]);
 
   useEffect(() => {
     if (!onOpenConfluence) return;
@@ -130,7 +143,7 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
 
   return (
     <header ref={topbarRef} className="wb-topbar" inert={disabled || undefined}>
-      <button type="button" className="wb-mobile-menu-button" aria-label="Открыть навигацию" onClick={onToggleSidebar}><WorkbenchIcon name="menu" /></button>
+      <button type="button" className="wb-mobile-menu-button" aria-label={isSidebarHidden ? 'Открыть навигацию' : 'Скрыть навигацию'} title={isSidebarHidden ? 'Открыть навигацию' : 'Скрыть навигацию'} aria-expanded={!isSidebarHidden} onClick={onToggleSidebar}><WorkbenchIcon name="menu" /></button>
       <div className="wb-topbar-context" aria-label="Текущий метод">
         <strong className="wb-topbar-method-name" title={methodName}>{methodName}</strong>
         <div className="wb-topbar-endpoint" title={`${methodHttpMethod} ${methodPath || '/'}`}>
@@ -140,6 +153,7 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
       </div>
 
       <div className="wb-topbar-actions">
+        {onOpenSearch && <IconButton label="Перейти к методу (Ctrl+K)" icon="search" onClick={onOpenSearch} />}
         <div className={`wb-topbar-autosave ${autosaveState}`} role="status" aria-label={autosaveTitle} title={autosaveTitle}>
           <WorkbenchIcon name={autosaveState === 'error' ? 'alert' : autosaveState === 'saving' || autosaveState === 'idle' ? 'spinner' : 'check'} />
           <span className="wb-autosave-label">{autosaveLabel}</span>

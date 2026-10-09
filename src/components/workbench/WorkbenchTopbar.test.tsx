@@ -43,6 +43,26 @@ function renderTopbar(overrides: Partial<React.ComponentProps<typeof WorkbenchTo
 }
 
 describe('WorkbenchTopbar', () => {
+  it('toggles navigation with the current visibility announced', async () => {
+    const user = userEvent.setup();
+    const { props, rerender } = renderTopbar();
+    await user.click(screen.getByRole('button', { name: 'Скрыть навигацию' }));
+    expect(props.onToggleSidebar).toHaveBeenCalledTimes(1);
+    rerender(<WorkbenchTopbar {...props} isSidebarHidden />);
+    expect(screen.getByRole('button', { name: 'Открыть навигацию' })).toHaveAttribute('aria-expanded', 'false');
+    await user.click(screen.getByRole('button', { name: 'Открыть навигацию' }));
+    expect(props.onToggleSidebar).toHaveBeenCalledTimes(2);
+  });
+
+  it('opens method navigation through the button and keyboard shortcut', async () => {
+    const user = userEvent.setup();
+    const onOpenSearch = vi.fn();
+    renderTopbar({ onOpenSearch });
+    await user.click(screen.getByRole('button', { name: 'Перейти к методу (Ctrl+K)' }));
+    await user.keyboard('{Control>}{k}{/Control}');
+    expect(onOpenSearch).toHaveBeenCalledTimes(2);
+  });
+
   it('renders the action order and autosave status without split, theme, save or search controls', () => {
     renderTopbar();
     const topbar = screen.getByRole('banner');

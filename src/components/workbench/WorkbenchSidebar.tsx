@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState, type KeyboardEvent as Reac
 import type { DocSection, MethodDocument, MethodGroup, RequestMethod } from '../../types';
 import { HttpChip, SidebarItem, WBButton } from '../primitives/WorkbenchPrimitives';
 import { WORKBENCH_FEATURES } from '../../workbenchFeatures';
-import { WorkbenchIcon } from './WorkbenchIcon';
+import { WorkbenchIcon, type WorkbenchIconName } from './WorkbenchIcon';
 
 type ServerProjectPreview = {
   id: string;
@@ -59,6 +59,8 @@ type WorkbenchSidebarProps = {
   onCreateMethod: () => void;
   onCreateProject: () => void;
   onOpenSearch: () => void;
+  onDeleteActiveMethod?: () => void;
+  canDeleteActiveMethod?: boolean;
 };
 
 function groupMethods(methods: MethodDocument[], groups: MethodGroup[]): Array<{ id: string; name: string; methods: MethodDocument[] }> {
@@ -306,7 +308,8 @@ export const WorkbenchSidebar = React.memo(function WorkbenchSidebar({
   onCancelMethodRename,
   onCreateMethod,
   onCreateProject,
-  onOpenSearch
+  onDeleteActiveMethod,
+  canDeleteActiveMethod = false
 }: WorkbenchSidebarProps): ReactNode {
   const [query, setQuery] = useState('');
   const normalizedQuery = query.trim().toLowerCase();
@@ -321,10 +324,18 @@ export const WorkbenchSidebar = React.memo(function WorkbenchSidebar({
       .filter((group) => group.methods.length > 0);
   }, [groups, methods, normalizedQuery]);
 
+  const activeMethod = methods.find((method) => method.id === activeMethodId);
+  const sectionIcon = (section: DocSection): WorkbenchIconName => {
+    if (section.kind === 'diagram') return 'diagram';
+    if (section.kind === 'errors') return 'alert';
+    if (section.kind === 'parsed') return section.sectionType === 'request' ? 'export' : 'json';
+    return section.id === 'functional' ? 'check' : 'document';
+  };
+
   return (
     <aside className="wb-sidebar" style={{ position: 'relative' }} inert={disabled || undefined}>
       <div className="wb-sidebar-header">
-        <span className="wb-sidebar-mark"><WorkbenchIcon name="document" /></span>
+        <span className="wb-sidebar-mark" aria-hidden="true"><svg viewBox="0 0 32 32" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 4C2 4 8 16 2 16c6 0 0 12 6 12M24 4c6 0 0 12 6 12-6 0 0 12-6 12" /><path d="M12 8h4c6 0 6 8 0 8h-4m0 0h5c6 0 6 8 0 8h-5V8" /></svg></span>
         {WORKBENCH_FEATURES.projects ? <ProjectSwitcher
           projectName={projectName}
           editingProjectName={editingProjectName}
@@ -340,143 +351,75 @@ export const WorkbenchSidebar = React.memo(function WorkbenchSidebar({
           onFinishProjectRename={onFinishProjectRename}
           onCancelProjectRename={onCancelProjectRename}
         /> : <span className="wb-sidebar-brand">DocBuilder</span>}
-        <button type="button" className="wb-sidebar-command" onClick={onOpenSearch} aria-label="Поиск по документации (Ctrl+K)" title="Поиск по документации (Ctrl+K)"><WorkbenchIcon name="command" /></button>
       </div>
 
-      <div className="wb-sidebar-search-wrap">
-        <label className="wb-sidebar-search">
-          <WorkbenchIcon name="search" />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Поиск метода..."
-            aria-label="Поиск метода"
-          />
-        </label>
-      </div>
-
-      <div className="wb-sidebar-list-heading"><span>Методы</span><span>{methods.length}</span></div>
-
-      <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
-        {switchingProjectId && (
-          <div style={{
-            position: 'absolute',
-            inset: 0,
-            background: 'var(--wb-bg-sidebar)',
-            opacity: 0.7,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 10,
-            fontSize: 12,
-            color: 'var(--wb-text-muted)'
-          }}
-          >
-            Загрузка...
-          </div>
-        )}
-
-        <div role="tree" aria-label="Сервисы, методы и секции" style={{ padding: '4px 0', height: '100%', overflowY: 'auto' }}>
-          {visibleGroups.length === 0 ? (
-            <div style={{ margin: 12, padding: 12, border: '1px dashed var(--wb-border-strong)', borderRadius: 'var(--wb-radius)', color: 'var(--wb-text-muted)', fontSize: 13 }}>
-              Ничего не найдено
-            </div>
-          ) : (
-            visibleGroups.map((group) => (
-              <div key={group.id} style={{ marginBottom: 8 }}>
-                {(WORKBENCH_FEATURES.projects || group.id !== 'ungrouped') && <div role="treeitem" aria-expanded="true">
-                  <SidebarItem emoji="▣" expandable expanded>{group.name}</SidebarItem>
-                </div>}
-                {group.methods.map((method) => {
-                  const isActiveMethod = method.id === activeMethodId;
-                  const isEditingMethod = editingMethodId === method.id;
-
-                  return (
-                    <div key={method.id}>
-                      <div role="treeitem" aria-selected={isActiveMethod}>
-                        {isEditingMethod ? (
-                          <div
-                            style={{
-                              width: 'calc(100% - 8px)',
-                              padding: '5px 10px 5px 24px',
-                              fontSize: 13,
-                              color: 'var(--wb-text)',
-                              background: isActiveMethod ? 'var(--wb-bg-active)' : 'transparent',
-                              borderRadius: 'var(--wb-radius-sm)',
-                              margin: '0 4px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 6,
-                              fontFamily: 'var(--wb-font-sans)'
-                            }}
-                          >
-                            <HttpChip method={getMethodHttpMethod(method)} size="sm" />
-                            <input
-                              ref={methodNameInputRef}
-                              type="text"
-                              value={editingMethodNameDraft}
-                              onChange={(event) => onMethodNameDraftChange(event.target.value)}
-                              onBlur={onFinishMethodRename}
-                              onMouseDown={(event) => event.stopPropagation()}
-                              onClick={(event) => event.stopPropagation()}
-                              onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
-                                event.stopPropagation();
-                                if (event.key === 'Enter') {
-                                  event.preventDefault();
-                                  onFinishMethodRename();
-                                }
-                                if (event.key === 'Escape') {
-                                  event.preventDefault();
-                                  onCancelMethodRename();
-                                }
-                              }}
-                              aria-label="Method name"
-                              style={{
-                                minWidth: 0,
-                                flex: 1,
-                                border: '1px solid var(--wb-border)',
-                                borderRadius: 'var(--wb-radius-sm)',
-                                background: 'var(--wb-bg-surface)',
-                                color: 'var(--wb-text)',
-                                fontFamily: 'var(--wb-font-sans)',
-                                fontSize: 13,
-                                padding: '3px 6px',
-                                outline: 'none'
-                              }}
-                            />
-                          </div>
-                        ) : (
-                          <SidebarItem
-                            depth={group.id === 'ungrouped' && !WORKBENCH_FEATURES.projects ? 0 : 1}
-                            http={getMethodHttpMethod(method)}
-                            active={isActiveMethod}
-                            onClick={() => onSwitchMethod(method)}
-                            onDoubleClick={() => onStartMethodRename(method)}
-                          >
-                            {method.name}
-                          </SidebarItem>
-                        )}
-                      </div>
-                    {method.id === activeMethodId && sections.map((section) => (
-                      <div key={section.id} role="treeitem" aria-selected={section.id === selectedSectionId}>
-                        <SidebarItem depth={group.id === 'ungrouped' && !WORKBENCH_FEATURES.projects ? 1 : 2} active={section.id === selectedSectionId} dim={!section.enabled} onClick={() => onSelectSection(section.id)}>
-                          {resolveSectionTitle(section)}
-                        </SidebarItem>
-                      </div>
-                    ))}
-                    </div>
-                  );
-                })}
-              </div>
-            ))
-          )}
+      <section className="wb-sidebar-methods" aria-label="Методы">
+        <div className="wb-sidebar-search-wrap">
+          <label className="wb-sidebar-search">
+            <WorkbenchIcon name="search" />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск метода..." aria-label="Поиск метода" />
+          </label>
         </div>
-      </div>
+        <nav className="wb-sidebar-method-list" aria-label="Методы">
+          {switchingProjectId && <div className="wb-sidebar-loading" role="status">Загрузка...</div>}
+          {visibleGroups.length === 0 ? <div className="wb-sidebar-empty">{methods.length ? 'Ничего не найдено' : 'Нет методов. Создайте первый метод.'}</div> : visibleGroups.map((group) => (
+            <div key={group.id} className="wb-sidebar-method-group">
+              {(WORKBENCH_FEATURES.projects || group.id !== 'ungrouped') && <div className="wb-sidebar-group-heading">{group.name}</div>}
+              {group.methods.map((method) => {
+                const isActiveMethod = method.id === activeMethodId;
+                const isEditingMethod = editingMethodId === method.id;
+                return (
+                  <div key={method.id} className={`wb-sidebar-method-row${isActiveMethod ? ' is-active' : ''}`}>
+                    {isEditingMethod ? (
+                      <div className="wb-sidebar-rename">
+                        <HttpChip method={getMethodHttpMethod(method)} size="sm" appearance="soft" />
+                        <input
+                          ref={methodNameInputRef}
+                          type="text"
+                          value={editingMethodNameDraft}
+                          onChange={(event) => onMethodNameDraftChange(event.target.value)}
+                          onBlur={onFinishMethodRename}
+                          onMouseDown={(event) => event.stopPropagation()}
+                          onClick={(event) => event.stopPropagation()}
+                          onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
+                            event.stopPropagation();
+                            if (event.key === 'Enter') { event.preventDefault(); onFinishMethodRename(); }
+                            if (event.key === 'Escape') { event.preventDefault(); onCancelMethodRename(); }
+                          }}
+                          aria-label="Method name"
+                        />
+                      </div>
+                    ) : (
+                      <>
+                        <SidebarItem navigationKind="method" http={getMethodHttpMethod(method)} active={isActiveMethod} aria-current={isActiveMethod ? 'page' : undefined} onClick={() => onSwitchMethod(method)} onDoubleClick={() => onStartMethodRename(method)}>{method.name}</SidebarItem>
+                        <div className="wb-sidebar-method-actions">
+                          <button type="button" onClick={() => onStartMethodRename(method)} aria-label={`Переименовать ${method.name}`} title="Переименовать"><WorkbenchIcon name="edit" /></button>
+                          {isActiveMethod && onDeleteActiveMethod && <button type="button" disabled={!canDeleteActiveMethod} onClick={onDeleteActiveMethod} aria-label={`Удалить ${method.name}`} title={canDeleteActiveMethod ? 'Удалить метод' : 'Нельзя удалить последний метод'}><WorkbenchIcon name="trash" /></button>}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </nav>
+        <div className="wb-sidebar-footer">
+          <WBButton size="sm" variant="secondary" className="wb-sidebar-create" icon={<WorkbenchIcon name="plus" />} onClick={onCreateMethod} fullWidth style={{ color: 'var(--wb-accent)', borderColor: 'var(--wb-accent-soft)' }}>Новый метод</WBButton>
+          {WORKBENCH_FEATURES.projects && <WBButton size="sm" variant="secondary" onClick={onCreateProject} fullWidth>+ Сервис</WBButton>}
+        </div>
+      </section>
 
-      <div className="wb-sidebar-footer">
-        <WBButton size="sm" variant="accent" icon={<WorkbenchIcon name="plus" />} onClick={onCreateMethod} fullWidth>Новый метод</WBButton>
-        {WORKBENCH_FEATURES.projects && <WBButton size="sm" variant="secondary" onClick={onCreateProject} fullWidth>+ Сервис</WBButton>}
-      </div>
+      <section className="wb-sidebar-sections" aria-labelledby="wb-sidebar-sections-heading">
+        <div className="wb-sidebar-sections-header">
+          <div className="wb-sidebar-list-heading"><span id="wb-sidebar-sections-heading">Разделы</span></div>
+        </div>
+        <nav className="wb-sidebar-section-list" aria-label="Разделы метода">
+          {activeMethod ? sections.map((section) => (
+            <SidebarItem key={section.id} navigationKind="section" emoji={<WorkbenchIcon name={sectionIcon(section)} />} active={section.id === selectedSectionId} dim={!section.enabled} aria-current={section.id === selectedSectionId ? 'location' : undefined} onClick={() => onSelectSection(section.id)}>{resolveSectionTitle(section)}</SidebarItem>
+          )) : <div className="wb-sidebar-empty">Выберите метод для навигации по разделам.</div>}
+        </nav>
+      </section>
     </aside>
   );
 });

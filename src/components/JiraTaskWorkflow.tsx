@@ -3,6 +3,7 @@ import { JiraPanel } from './JiraPanel';
 import type { JiraClient } from '../jiraClient';
 import type { JiraDraft, JiraDraftInput } from '../jiraDraft';
 import { WBButton } from './primitives/WorkbenchPrimitives';
+import { CONFLUENCE_BRIDGE_URL } from '../confluenceClient';
 
 type Props = {
   methodId: string; methodName: string; methodContext: string; jiraTicket?: string; confluenceUrl?: string; active: boolean;
@@ -47,7 +48,7 @@ export function JiraTaskWorkflow(props: Props) {
       <WBButton variant={source === 'new-method' ? 'accent' : 'secondary'} disabled={busy} aria-pressed={source === 'new-method'} onClick={() => select('new-method')}>Новая задача по методу</WBButton>
     </div>
     <div hidden={source !== 'method'}><JiraPanel {...props} active={props.active && source === 'method'} onBusyChange={onBusyChange} onConnectionScopeChange={setConnectionScope} /></div>
-    {source !== 'method' && !connectionScope && <p className="cf-notice">Подключите Jira через вкладку текущего метода.</p>}
+    {source !== 'method' && !connectionScope && <p className="cf-notice">Подключите Jira, чтобы подготовить задачу. <a href={`${CONFLUENCE_BRIDGE_URL}/`} target="_blank" rel="noopener noreferrer">Подключить Jira локально</a> · <a href="/docbuilder-confluence-local.zip" download>Скачать локальное приложение 1.3.5</a></p>}
     {source !== 'method' && connectionScope && <>
       {source === 'new-method' && <p className="cf-notice">Создаётся отдельная задача по текущему методу. Существующая связь метода с Jira сохраняется.</p>}
       {identity.error ? <p role="alert" className="cf-notice cf-error">{identity.error}</p> : <JiraPanel key={`${source}:${identity.id}`} methodId={identity.id} methodName={source === 'freeform' ? 'Отдельная задача' : props.methodName} methodContext={source === 'freeform' ? '' : props.methodContext} confluenceUrl={source === 'freeform' ? undefined : props.confluenceUrl} source={source === 'freeform' ? 'freeform' : 'method'} active={props.active} onBusyChange={onBusyChange} onCompletedChange={setCompleted} client={props.client} prepareDraft={props.prepareDraft} />}

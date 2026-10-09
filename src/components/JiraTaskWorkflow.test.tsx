@@ -15,6 +15,14 @@ function fixture(): JiraClient {
 }
 const props = { methodId: 'method-1', methodName: 'Existing method', methodContext: 'Method-only documentation', active: true, onBusyChange: vi.fn() };
 describe('Jira scenario isolation', () => {
+  it('offers a direct connection and download from a standalone scenario without Jira connected', async () => {
+    const client = fixture(); vi.mocked(client.status).mockResolvedValue({ connected: false, remembered: false, baseUrl: '', project: null, expiresAt: null });
+    render(<JiraTaskWorkflow {...props} client={client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Свободное описание' }));
+    expect(await screen.findByRole('link', { name: 'Подключить Jira локально' })).toHaveAttribute('href', 'http://127.0.0.1:18771/');
+    expect(screen.getByRole('link', { name: 'Скачать локальное приложение 1.3.5' })).toHaveAttribute('download');
+    expect(client.create).not.toHaveBeenCalled();
+  });
   it('creates a standalone task without a method link and starts a fresh operation only after confirmed success', async () => {
     const client = fixture(); const onLinked = vi.fn();
     const operation = { state: 'success' as const, issue: { id: '17', key: 'IN-17', url: 'https://jira.example/browse/IN-17' }, linkedUrl: null };

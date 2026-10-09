@@ -8,7 +8,7 @@ function fixture(): JiraClient {
   return {
     status: vi.fn().mockResolvedValue({ connected: true, remembered: true, baseUrl: 'https://jira.example', project: { id: '101', key: 'IN', name: 'Test' } }),
     operation: vi.fn().mockResolvedValue({ state: 'none', issue: null, linkedUrl: null }),
-    metadata: vi.fn().mockResolvedValue({ project: {}, issueKind: 'task', story: { id: '1', name: 'Task' }, epicRequired: false, labelsSupported: true, requiredFields: [], priorities: [], message: '' }),
+    metadata: vi.fn().mockResolvedValue({ project: {}, issueKind: 'story', story: { id: '1', name: 'User Story' }, epicRequired: false, labelsSupported: true, requiredFields: [], priorities: [], message: '' }),
     epics: vi.fn().mockResolvedValue({ items: [], nextStart: null }),
     issue: vi.fn(), create: vi.fn(), update: vi.fn(), link: vi.fn(), confirm: vi.fn(), acceptCurrent: vi.fn()
   };
@@ -27,16 +27,16 @@ describe('Jira scenario isolation', () => {
     const client = fixture(); const onLinked = vi.fn();
     const operation = { state: 'success' as const, issue: { id: '17', key: 'IN-17', url: 'https://jira.example/browse/IN-17' }, linkedUrl: null };
     vi.mocked(client.create).mockResolvedValue(operation);
-    vi.mocked(client.issue).mockResolvedValue({ operation, metadata: { project: {} as never, issueKind: 'task', story: { id: '1', name: 'Task' }, epicRequired: false, labelsSupported: true, requiredFields: [], editableFields: ['summary', 'description', 'labels'], message: '' }, issue: { ...operation.issue, issueType: { id: '1', name: 'Task' }, summary: 'Improve search', description: 'Описание', labels: ['business'], priorityId: '', epic: '', fingerprint: 'f'.repeat(64), updated: '' } });
+    vi.mocked(client.issue).mockResolvedValue({ operation, metadata: { project: {} as never, issueKind: 'story', story: { id: '1', name: 'User Story' }, epicRequired: false, labelsSupported: true, requiredFields: [], editableFields: ['summary', 'description', 'labels'], message: '' }, issue: { ...operation.issue, issueType: { id: '1', name: 'User Story' }, summary: 'Improve search', description: 'Описание', labels: ['business'], priorityId: '', epic: '', fingerprint: 'f'.repeat(64), updated: '' } });
     const prepareDraft = vi.fn().mockResolvedValue({ summary: 'Improve search', descriptionRu: 'Улучшить поиск.', descriptionEn: 'Improve search.', descriptionUz: 'Qidiruvni yaxshilash.', labels: [{ key: 'business', reason: 'Улучшение' }], rankedEpics: [], priorityId: '', priorityReason: '' });
     render(<JiraTaskWorkflow {...props} client={client} onLinked={onLinked} prepareDraft={prepareDraft} confluenceUrl="https://confluence.example/private-page" />);
     fireEvent.click(screen.getByRole('button', { name: 'Свободное описание' }));
     fireEvent.change(await screen.findByLabelText('Что нужно сделать'), { target: { value: 'Улучшить поиск' } });
     await waitFor(() => expect(screen.getByRole('button', { name: 'Подготовить через ИИ' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'Подготовить через ИИ' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Создать задачу' })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Создать User Story' })).toBeEnabled());
     const key = 'docbuilder:jira-standalone:v1:https%3A%2F%2Fjira.example:101'; const id = localStorage.getItem(key);
-    fireEvent.click(screen.getByRole('button', { name: 'Создать задачу' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Создать User Story' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Начать следующую задачу' })).toBeEnabled());
     expect(client.create).toHaveBeenCalledTimes(1);
     expect(vi.mocked(client.create).mock.calls[0][1]).toMatchObject({ methodId: id, summary: 'Improve search' });

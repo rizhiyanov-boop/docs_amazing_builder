@@ -3,12 +3,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JiraPanel } from './JiraPanel';
 import type { JiraClient, JiraEpics } from '../jiraClient';
 import type { JiraDraft } from '../jiraDraft';
+import { jiraFormCacheKey, writeJiraFormCache } from '../jiraFormCache';
 afterEach(() => { cleanup(); localStorage.clear(); });
 
 function fixture(ready = true): JiraClient {
   return {
     status: vi.fn().mockResolvedValue({ connected: true, remembered: true, baseUrl: 'https://jira.example', project: { id: '101', key: 'IN', name: 'Interns', url: 'https://jira.example/projects/IN' } }),
-    metadata: vi.fn().mockResolvedValue({ project: {}, issueKind: 'task', story: ready ? { id: '1', name: 'Задача' } : null, epicField: 'customfield_10203', epicRequired: false, priorities: [{ id: '3', name: 'Medium' }], labelsSupported: true, requiredFields: [], message: ready ? '' : 'В этом проекте нет типа Задача.' }),
+    metadata: vi.fn().mockResolvedValue({ project: {}, issueKind: 'story', story: ready ? { id: '1', name: 'Задача' } : null, epicField: 'customfield_10203', epicRequired: false, priorities: [{ id: '3', name: 'Medium' }], labelsSupported: true, requiredFields: [], message: ready ? '' : 'В этом проекте нет типа User Story.' }),
     operation: vi.fn().mockResolvedValue({ state: 'none', issue: null, linkedUrl: null }),
     epics: vi.fn().mockResolvedValue({ items: [{ key: 'IN-5', name: 'Integration' }], nextStart: null }),
     create: vi.fn().mockResolvedValue({ state: 'success', issue: { id: '17', key: 'IN-17', url: 'https://jira.example/browse/IN-17' }, linkedUrl: 'https://confluence.example/pages/viewpage.action?pageId=123' }),
@@ -17,6 +18,20 @@ function fixture(ready = true): JiraClient {
   };
 }
 describe('Jira integration panel', () => {
+  it.each([false, true])('migrates automatic Task drafts but preserves explicit Task choice (%s)', async explicit => {
+    const client = fixture();
+    if (explicit) vi.mocked(client.metadata).mockResolvedValue({ project: {}, issueKind: 'task', story: { id: '1', name: 'Task' }, epicRequired: false, priorities: [], labelsSupported: true, requiredFields: [], message: '' });
+    writeJiraFormCache(jiraFormCacheKey({ baseUrl: 'https://jira.example', projectId: '101' }, 'cached-type'), {
+      issueKind: 'task', ...(explicit ? { issueKindExplicit: true } : {}), summary: 'Preserved draft',
+      descriptionRu: 'Saved text', descriptionEn: '', descriptionUz: '', description: '', epic: '', labels: [], priorityId: '', search: '', epicQuery: ''
+    });
+    render(<JiraPanel client={client} methodId="cached-type" methodName="Method" onBusyChange={vi.fn()} />);
+    await waitFor(() => expect(screen.getByLabelText('Название · английский, глагол действия')).toHaveValue('Preserved draft'));
+    expect(screen.getByLabelText('Тип задачи')).toHaveValue(explicit ? 'task' : 'story');
+    expect(screen.getByLabelText('Описание · русский')).toHaveValue('Saved text');
+    expect(client.metadata).toHaveBeenLastCalledWith({ baseUrl: 'https://jira.example', projectId: '101' }, explicit ? 'task' : 'story');
+    expect(client.create).not.toHaveBeenCalled();
+  });
   it('shows preparation stages until the AI request settles and allows retry after failure', async () => {
     const client = fixture();
     let resolveEpics!: (value: JiraEpics) => void;
@@ -40,7 +55,7 @@ describe('Jira integration panel', () => {
     expect(screen.getByRole('button', { name: 'Подготовить через ИИ' })).toBeEnabled();
     expect(onBusyChange).toHaveBeenLastCalledWith(false);
   });
-  it('loads all epic pages for AI ranking without selecting an epic automatically and creates one Task with the chosen epic', async () => {
+  it('loads all epic pages for AI ranking without selecting an epic automatically and creates one User Story with the chosen epic', async () => {
     const client = fixture();
     vi.mocked(client.epics).mockResolvedValueOnce({ items: [{ key: 'IN-5', name: 'Integration' }], nextStart: 50 }).mockResolvedValue({ items: [{ key: 'IN-9', name: 'Credit' }], nextStart: null });
     const prepareDraft = vi.fn().mockResolvedValue({ summary: 'Implement CRIF API', descriptionRu: 'Разработать метод CRIF через адаптер для кредитного процесса.', descriptionEn: 'Implement the CRIF API through the adapter for the credit process.', descriptionUz: 'Kredit jarayoni uchun adapter orqali CRIF usulini ishlab chiqish.', rankedEpics: [{ key: 'IN-9', reason: 'Кредитный процесс' }, { key: 'IN-5', reason: 'Интеграция' }], labels: [{ key: 'business', reason: 'Бизнес' }], priorityId: '3', priorityReason: 'Обычная задача' });
@@ -60,25 +75,25 @@ describe('Jira integration panel', () => {
     fireEvent.change(screen.getByLabelText(/Привязать к эпику/), { target: { value: 'IN-9' } });
     expect(screen.getByLabelText('Описание · узбекский перевод (латиница)')).toHaveValue('Kredit jarayoni uchun adapter orqali CRIF usulini ishlab chiqish.');
     fireEvent.change(screen.getByLabelText('Описание · узбекский перевод (латиница)'), { target: { value: '' } });
-    expect(screen.getByRole('button', { name: 'Создать задачу' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Создать User Story' })).toBeDisabled();
     fireEvent.change(screen.getByLabelText('Описание · узбекский перевод (латиница)'), { target: { value: 'Kredit jarayoni uchun adapter orqali CRIF usulini ishlab chiqish.' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Создать задачу' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Создать User Story' }));
     await screen.findByRole('link', { name: 'IN-17' });
     expect(client.create).toHaveBeenCalledTimes(1);
-    expect(client.create).toHaveBeenCalledWith({ baseUrl: 'https://jira.example', projectId: '101' }, { methodId: 'method-1', issueKind: 'task', summary: 'Implement CRIF API', description: 'Разработать метод CRIF через адаптер для кредитного процесса.\n\nImplement the CRIF API through the adapter for the credit process.\n\nKredit jarayoni uchun adapter orqali CRIF usulini ishlab chiqish.', epic: 'IN-9', labels: ['business', 'qaa'], priorityId: '3', confluenceUrl: 'https://confluence.example/pages/viewpage.action?pageId=123' });
+    expect(client.create).toHaveBeenCalledWith({ baseUrl: 'https://jira.example', projectId: '101' }, { methodId: 'method-1', issueKind: 'story', summary: 'Implement CRIF API', description: 'Разработать метод CRIF через адаптер для кредитного процесса.\n\nImplement the CRIF API through the adapter for the credit process.\n\nKredit jarayoni uchun adapter orqali CRIF usulini ishlab chiqish.', epic: 'IN-9', labels: ['business', 'qaa'], priorityId: '3', confluenceUrl: 'https://confluence.example/pages/viewpage.action?pageId=123' });
     expect(onLinked).toHaveBeenCalledWith('method-1', 'https://jira.example/browse/IN-17');
-    expect(screen.queryByRole('button', { name: 'Создать задачу' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Создать User Story' })).toBeNull();
   });
   it('does not substitute another type when the selected Task type is missing', async () => {
     render(<JiraPanel client={fixture(false)} methodId="method-1" methodName="Method" onBusyChange={vi.fn()} />);
-    await screen.findByText('В этом проекте нет типа Задача.');
-    expect(screen.getByRole('button', { name: 'Создать задачу' })).toBeDisabled();
+    await screen.findByText('В этом проекте нет типа User Story.');
+    expect(screen.getByRole('button', { name: 'Создать User Story' })).toBeDisabled();
   });
   it('restores an uncertain write and offers confirmation without another create button', async () => {
     const client = fixture(); vi.mocked(client.operation).mockResolvedValue({ state: 'unknown', issue: null, linkedUrl: null });
     render(<JiraPanel client={client} methodId="method-1" methodName="Method" onBusyChange={vi.fn()} />);
     await screen.findByText('Результат создания не подтверждён');
-    expect(screen.queryByRole('button', { name: 'Создать задачу' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Создать User Story' })).toBeNull();
     expect(client.create).not.toHaveBeenCalled();
   });
   it('preserves a method binding when the local journal or selected Jira project changes', async () => {
@@ -86,7 +101,7 @@ describe('Jira integration panel', () => {
     vi.mocked(client.issue).mockRejectedValue(new Error('Задача относится к другому проекту.'));
     render(<JiraPanel client={client} methodId="method-1" methodName="Method" jiraTicket="https://jira.example/browse/DI-17" onBusyChange={vi.fn()} />);
     await screen.findByText('Метод уже связан с задачей Jira');
-    expect(screen.queryByRole('button', { name: 'Создать задачу' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Создать User Story' })).toBeNull();
     expect(client.create).not.toHaveBeenCalled();
   });
   it('restores local input after leaving the screen without leaking drafts across methods', async () => {
@@ -145,17 +160,17 @@ describe('Jira integration panel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Подготовить через ИИ' }));
     await screen.findByText('В документации не указан источник задачи.');
     expect(prepareDraft.mock.calls[0][0].epics).toEqual([]);
-    expect(screen.getByRole('button', { name: 'Создать задачу' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Создать User Story' })).toBeDisabled();
     fireEvent.click(screen.getByText('Все теги · 14'));
     const catalog = within(screen.getByRole('group', { name: 'Все теги' }));
     fireEvent.click(catalog.getByRole('checkbox', { name: /qaa/ }));
-    expect(screen.getByRole('button', { name: 'Создать задачу' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Создать User Story' })).toBeDisabled();
     fireEvent.click(catalog.getByRole('checkbox', { name: /platform/ }));
-    expect(screen.getByRole('button', { name: 'Создать задачу' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Создать User Story' })).toBeEnabled();
     fireEvent.click(catalog.getByRole('checkbox', { name: /platform/ }));
-    expect(screen.getByRole('button', { name: 'Создать задачу' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Создать User Story' })).toBeDisabled();
     fireEvent.click(catalog.getByRole('checkbox', { name: /platform/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Создать задачу' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Создать User Story' }));
     await screen.findByRole('link', { name: 'IN-17' });
     expect(client.create).toHaveBeenCalledTimes(1);
     expect(vi.mocked(client.create).mock.calls[0][1]).not.toHaveProperty('epic');
@@ -168,8 +183,8 @@ describe('Jira integration panel', () => {
     await screen.findByRole('option', { name: 'IN-5 · Integration' });
     fireEvent.click(screen.getByRole('button', { name: 'Подготовить через ИИ' }));
     await screen.findByText(/ИИ не нашёл подходящего эпика/);
-    expect(screen.getByRole('button', { name: 'Создать задачу' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Создать User Story' })).toBeDisabled();
     fireEvent.change(screen.getByLabelText(/Привязать к эпику/), { target: { value: 'IN-5' } });
-    expect(screen.getByRole('button', { name: 'Создать задачу' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Создать User Story' })).toBeEnabled();
   });
 });

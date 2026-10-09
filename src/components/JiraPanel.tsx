@@ -27,7 +27,8 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
   const [sourceDescription, setSourceDescription] = useState('');
   const [status, setStatus] = useState<JiraStatus>();
   const [metadata, setMetadata] = useState<JiraMetadata>();
-  const [issueKind, setIssueKind] = useState<JiraIssueKind>('task');
+  const [issueKind, setIssueKind] = useState<JiraIssueKind>('story');
+  const [issueKindExplicit, setIssueKindExplicit] = useState(false);
   const [epics, setEpics] = useState<JiraEpics>({ items: [], nextStart: null });
   const [epic, setEpic] = useState(''); const [search, setSearch] = useState('');
   const [epicQuery, setEpicQuery] = useState('');
@@ -48,15 +49,16 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
   const bindingRef = useRef(jiraTicket);
   useEffect(() => { bindingRef.current = jiraTicket; }, [jiraTicket]);
   const changed = Boolean(issue && (summary.trim() !== issue.summary || description !== issue.description || epic !== issue.epic || priorityId !== issue.priorityId || JSON.stringify([...labels].sort()) !== JSON.stringify([...issue.labels].sort())));
-  const form = { issueKind, summary, descriptionRu, descriptionEn, descriptionUz, description, epic, labels, priorityId, search, epicQuery, draft, sourceDescription, ...(issue ? { issueKey: issue.key, fingerprint, dirty: changed } : {}) };
+  const form = { issueKind, issueKindExplicit, summary, descriptionRu, descriptionEn, descriptionUz, description, epic, labels, priorityId, search, epicQuery, draft, sourceDescription, ...(issue ? { issueKey: issue.key, fingerprint, dirty: changed } : {}) };
   useEffect(() => {
     const saved = !cacheKey || writeJiraFormCache(cacheKey, form); let cancelled = false;
     void Promise.resolve().then(() => { if (!cancelled) setCacheWarning(!saved); });
     return () => { cancelled = true; };
   // Only form values belong to the local draft; connection status polling must not reset it.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cacheKey, issueKind, summary, descriptionRu, descriptionEn, descriptionUz, description, epic, labels, priorityId, search, epicQuery, draft, sourceDescription, issue?.key, fingerprint, changed]);
+  }, [cacheKey, issueKind, issueKindExplicit, summary, descriptionRu, descriptionEn, descriptionUz, description, epic, labels, priorityId, search, epicQuery, draft, sourceDescription, issue?.key, fingerprint, changed]);
   const applyForm = (value: JiraFormCache) => {
+    setIssueKindExplicit(value.issueKindExplicit ?? false);
     setSourceDescription(value.sourceDescription ?? '');
     setSummary(value.summary); setDescriptionRu(value.descriptionRu); setDescriptionEn(value.descriptionEn); setDescriptionUz(value.descriptionUz); setDescription(value.description);
     setEpic(value.epic); setLabels(value.labels); setPriorityId(value.priorityId); setSearch(value.search); setEpicQuery(value.epicQuery); setDraft(value.draft); setFingerprint(value.fingerprint ?? '');
@@ -100,7 +102,9 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
           if (generation.value !== current) return;
           const restored = acceptIssue(loaded, cached); meta = loaded.metadata; query = restored ? cached?.epicQuery ?? '' : '';
         } else {
-          if (cached && cached.issueKind !== issueKind) { setIssueKind(cached.issueKind); return; }
+          const restoredKind = cached?.issueKindExplicit ? cached.issueKind : 'story';
+          if (restoredKind !== issueKind) { setIssueKind(restoredKind); return; }
+          if (!cached) setIssueKindExplicit(false);
           meta = await client.metadata(scope, issueKind);
           if (generation.value !== current) return;
           setMetadata(meta);
@@ -233,7 +237,7 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
         {!editing && metadata?.story && metadata.labelsSupported === false && <p role="alert" className="cf-notice cf-error">В Jira недоступно поле тегов для выбранного типа задачи. Добавьте его на экран создания в Jira: основной тег обязателен.</p>}
         {!editing && metadata && (metadata.issueKind !== issueKind || typeof metadata.epicRequired !== 'boolean') && <p role="alert" className="cf-notice cf-error">Обновите локальный сервис до версии 1.3.4. <a href="/docbuilder-confluence-local.zip" download>Скачать</a></p>}
         {source === 'freeform' && !editing && <label className="cf-field">Что нужно сделать<textarea aria-label="Что нужно сделать" rows={6} maxLength={20000} disabled={disabled} value={sourceDescription} placeholder="Опишите задачу своими словами…" onChange={event => setSourceDescription(event.target.value)} /><span className="cf-muted">ИИ получит только это описание и справочники Jira. Текущий метод не используется.</span></label>}
-        <div className="cf-jira-toolbar">{editing ? <span className="cf-muted">Тип задачи: {issue?.issueType.name}</span> : <label className="cf-field">Тип задачи<select value={issueKind} disabled={disabled} onChange={event => { const next = event.target.value as JiraIssueKind; if (cacheKey) writeJiraFormCache(cacheKey, { ...form, issueKind: next }); setIssueKind(next); }}><option value="task">Задача · тестирование</option><option value="story">User Story</option></select></label>}<WBButton disabled={disabled || !ready || updateUnknown || localConflict || source === 'freeform' && !sourceDescription.trim() || editing && (!metadata?.editableFields?.includes('summary') || !metadata?.editableFields?.includes('description'))} onClick={() => void prepare()}>{generating ? 'Подготовка через ИИ…' : draft ? 'Подготовить заново' : 'Подготовить через ИИ'}</WBButton></div>
+        <div className="cf-jira-toolbar">{editing ? <span className="cf-muted">Тип задачи: {issue?.issueType.name}</span> : <label className="cf-field">Тип задачи<select value={issueKind} disabled={disabled} onChange={event => { const next = event.target.value as JiraIssueKind; if (cacheKey) writeJiraFormCache(cacheKey, { ...form, issueKind: next, issueKindExplicit: true }); setIssueKindExplicit(true); setIssueKind(next); }}><option value="task">Задача · тестирование</option><option value="story">User Story</option></select></label>}<WBButton disabled={disabled || !ready || updateUnknown || localConflict || source === 'freeform' && !sourceDescription.trim() || editing && (!metadata?.editableFields?.includes('summary') || !metadata?.editableFields?.includes('description'))} onClick={() => void prepare()}>{generating ? 'Подготовка через ИИ…' : draft ? 'Подготовить заново' : 'Подготовить через ИИ'}</WBButton></div>
         <p className="cf-muted">{methodName}. {editing ? 'Изменения сохраняются в эту задачу по кнопке «Обновить задачу».' : 'Проверьте эпик, теги и текст перед созданием.'} Черновик сохраняется только в этом браузере.</p>
         {metadata?.epicRequired && <p className="cf-notice">В выбранном проекте Jira эпик обязателен. Выберите его вручную, если рекомендации не подходят.</p>}
         {!loading && ready && !epics.items.length && <p className="cf-notice">{epicQuery ? 'По этому запросу эпики не найдены. Можно изменить поиск.' : 'В выбранном проекте нет доступных эпиков.'}{!metadata.epicRequired && ' Текст, теги и приоритет можно подготовить, а задачу — создать без эпика.'}</p>}

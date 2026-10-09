@@ -27,7 +27,7 @@ async function request<T>(path: string, scope?: JiraScope, body?: unknown): Prom
 }
 export const jiraClient = {
   status: () => request<JiraStatus>('status'),
-  metadata: (scope: JiraScope, issueKind: JiraIssueKind = 'task') => request<JiraMetadata>(`metadata?issueKind=${issueKind}`, scope),
+  metadata: (scope: JiraScope, issueKind: JiraIssueKind = 'story') => request<JiraMetadata>(`metadata?issueKind=${issueKind}`, scope),
   epics: (scope: JiraScope, q = '', start = 0) => request<JiraEpics>(`epics?q=${encodeURIComponent(q)}&start=${start}`, scope),
   operation: (scope: JiraScope, methodId: string) => request<JiraOperation>(`operation?methodId=${encodeURIComponent(methodId)}`, scope),
   issue: (scope: JiraScope, methodId: string, link?: string) => request<JiraIssueResult>(`issue?methodId=${encodeURIComponent(methodId)}${link ? `&link=${encodeURIComponent(link)}` : ''}`, scope),

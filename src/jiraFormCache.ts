@@ -4,6 +4,7 @@ import type { JiraIssueKind, JiraScope } from './jiraClient';
 /** Local form data only: never part of the workspace/server snapshot or credential store. */
 export type JiraFormCache = {
   issueKind: JiraIssueKind;
+  issueKindExplicit?: boolean;
   summary: string; descriptionRu: string; descriptionEn: string; descriptionUz: string;
   description: string; epic: string; labels: string[]; priorityId: string;
   search: string; epicQuery: string; draft?: JiraDraft;
@@ -22,6 +23,7 @@ export function readJiraFormCache(key: string): JiraFormCache | undefined {
     if (!value || !['task', 'story'].includes(value.issueKind) || !['summary', 'descriptionRu', 'descriptionEn', 'descriptionUz', 'description', 'epic', 'priorityId', 'search', 'epicQuery'].every(field => typeof value[field] === 'string') || !Array.isArray(value.labels) || value.labels.some((label: unknown) => typeof label !== 'string')) return;
     if (value.issueKey !== undefined && typeof value.issueKey !== 'string' || value.fingerprint !== undefined && typeof value.fingerprint !== 'string') return;
     if (value.dirty !== undefined && typeof value.dirty !== 'boolean') return;
+    if (value.issueKindExplicit !== undefined && typeof value.issueKindExplicit !== 'boolean') return;
     if (value.sourceDescription !== undefined && (typeof value.sourceDescription !== 'string' || value.sourceDescription.length > 20000)) return;
     if (value.draft && (!Array.isArray(value.draft.labels) || !Array.isArray(value.draft.rankedEpics) || [...value.draft.labels, ...value.draft.rankedEpics].some(item => !item || typeof item.key !== 'string' || typeof item.reason !== 'string'))) delete value.draft;
     return value;

@@ -1,6 +1,5 @@
 import { useEffect, useRef } from 'react';
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react';
-import { BubbleMenu } from '@tiptap/react/menus';
 import Highlight from '@tiptap/extension-highlight';
 import StarterKit from '@tiptap/starter-kit';
 import { editorHtmlToWikiText, richTextToHtml } from '../richText';
@@ -85,20 +84,8 @@ export function InlineTextSectionEditor({ sectionId, value, onChange, onFocus }:
 
   return (
     <div className="inline-text-editor-shell" data-section-id={sectionId}>
-      <BubbleMenu
-        editor={editor}
-        pluginKey={`text-section-bubble-${sectionId}`}
-        shouldShow={({ editor: currentEditor, from, to }) => currentEditor.isFocused && from !== to}
-        appendTo={() => document.body}
-        options={{
-          strategy: 'fixed',
-          placement: 'top',
-          offset: 10,
-          flip: true,
-          shift: { padding: 10 },
-          inline: true
-        }}
-        className="inline-format-bubble"
+      <div
+        className="inline-format-bubble text-section-format-bubble text-section-format-toolbar"
         role="toolbar"
         aria-label="Форматирование"
       >
@@ -174,8 +161,9 @@ export function InlineTextSectionEditor({ sectionId, value, onChange, onFocus }:
         >
           1.
         </button>
-      </BubbleMenu>
+      </div>
 
+      <div className="inline-text-editor-body">
       {editorState?.isEmpty && <span className="inline-text-placeholder">Введите содержимое…</span>}
       <EditorContent
         editor={editor}
@@ -201,6 +189,7 @@ export function InlineTextSectionEditor({ sectionId, value, onChange, onFocus }:
           }
         }}
       />
+      </div>
     </div>
   );
 }

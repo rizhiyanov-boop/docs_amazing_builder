@@ -9,14 +9,16 @@ describe('InlineSectionTitle', () => {
     const onCommit = vi.fn();
     render(<InlineSectionTitle value="Initial title" onCommit={onCommit} />);
 
+    await user.click(screen.getByText('Initial title'));
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    await user.dblClick(screen.getByText('Initial title'));
     const title = screen.getByRole('textbox', { name: 'Название секции' });
-    await user.click(title);
     title.textContent = 'Updated title';
     fireEvent.input(title);
     await user.keyboard('{Enter}');
     expect(onCommit).toHaveBeenLastCalledWith('Updated title');
 
-    await user.click(title);
+    await user.click(screen.getByRole('button', { name: 'Редактировать название секции' }));
     title.textContent = 'Cancelled title';
     fireEvent.input(title);
     await user.keyboard('{Escape}');

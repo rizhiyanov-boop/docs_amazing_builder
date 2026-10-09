@@ -8653,7 +8653,7 @@ export default function App() {
                         key={section.id}
                         id={`section-${section.id}`}
                         data-section-id={section.id}
-                        className={`panel editor-section ${isActiveSection ? 'editor-section-active' : ''} ${isJumpHighlighted ? 'editor-section-jump' : ''}`}
+                        className={`panel editor-section ${section.kind === 'text' ? 'editor-section-text' : ''} ${isActiveSection ? 'editor-section-active' : ''} ${isJumpHighlighted ? 'editor-section-jump' : ''}`}
                         onMouseDown={() => {
                           if (selectedId !== section.id) {
                             setSelectedId(section.id);
@@ -8698,7 +8698,6 @@ export default function App() {
 
                         {section.kind === 'text' && (
                           <div className="stack">
-                            <div className="label">Содержимое</div>
                             <InlineTextSectionEditor
                               sectionId={section.id}
                               value={section.value}

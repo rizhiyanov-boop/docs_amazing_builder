@@ -250,6 +250,64 @@
 .wb-app-root .editor-stream .icon-button:hover { background: var(--wb-bg-hover); box-shadow: none; transform: none; }
 .wb-app-root .editor-stream .rich-text-editor { background: var(--wb-bg-soft); border-color: var(--wb-border); font-size: var(--font-size-md); }
 .wb-app-root .editor-stream .rich-text-editor:focus-within { border-color: var(--wb-accent); }
+
+/* Text-card pattern: leave parsed, diagram and errors editors untouched. */
+.wb-app-root .editor-stream > .editor-section-text {
+  padding: var(--space-4);
+  gap: var(--space-4);
+  border-left-width: 3px;
+  font-family: var(--font-sans);
+}
+.wb-app-root .editor-stream > .editor-section-text.editor-section-active {
+  border-color: var(--wb-border);
+  border-left-color: var(--wb-accent);
+}
+.editor-section-text .panel-head { align-items: flex-start; flex-wrap: wrap; }
+.wb-app-root .editor-section-text .panel-title,
+.editor-section-text .inline-section-title { font-size: var(--font-size-lg); font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
+.editor-section-text .panel-head > .row { margin-left: auto; flex-wrap: wrap; }
+.wb-app-root .editor-section-text .inline-text-editor {
+  min-height: calc(var(--space-4) * 2);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: var(--font-sans);
+  font-size: var(--font-size-md);
+  line-height: 1.5;
+  box-shadow: none;
+}
+.wb-app-root .editor-section-text .inline-text-editor:focus {
+  outline: 2px solid color-mix(in srgb, var(--wb-accent) 50%, transparent);
+  outline-offset: var(--space-2);
+  background: transparent;
+  box-shadow: none;
+}
+.editor-section-text .inline-text-placeholder { top: 0; left: 0; font-size: var(--font-size-md); line-height: 1.5; }
+.editor-section-text .inline-text-editor h3 { font-size: var(--font-size-lg); line-height: 1.5; margin-top: var(--space-8); margin-bottom: var(--space-3); }
+.editor-section-text .inline-text-editor h3:first-child { margin-top: 0; }
+.editor-section-text .inline-text-editor li > p { margin-bottom: var(--space-1); }
+.editor-section-text .inline-text-editor li > :is(ul, ol) { margin-top: var(--space-2); margin-bottom: var(--space-2); }
+.editor-section-text .inline-text-editor blockquote { padding: var(--space-3) var(--space-4); background: var(--wb-bg-soft); color: var(--wb-text-soft); border-left-color: color-mix(in srgb, var(--wb-accent) 60%, var(--wb-border)); }
+.editor-section-text .inline-text-editor code { background: var(--wb-bg-hover); }
+.editor-section-text .inline-text-editor a { color: var(--wb-accent); text-decoration: underline; text-underline-offset: 3px; }
+/* Formatting controls inherit the text card palette. */
+.text-section-format-bubble { background: var(--wb-bg-surface); border: 1px solid var(--wb-border); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-pop); padding: var(--space-1); gap: var(--space-1); font-family: var(--font-sans); }
+.text-section-format-bubble button { min-width: 32px; height: 32px; padding: 0 var(--space-2); font-size: var(--font-size-md); font-weight: 500; color: var(--wb-text-soft); border-radius: var(--wb-radius-sm); }
+.text-section-format-bubble button:hover,
+.text-section-format-bubble button:focus-visible { background: var(--wb-bg-hover); color: var(--wb-text); }
+.text-section-format-bubble button:focus-visible { outline: 2px solid var(--wb-accent); outline-offset: 1px; }
+.text-section-format-bubble button.active { background: var(--wb-bg-active); color: var(--wb-accent); }
+.text-section-format-bubble .inline-format-separator { background: var(--wb-border); }
+.inline-text-editor-body { position: relative; }
+.text-section-format-toolbar { position: static; width: fit-content; max-width: 100%; flex-wrap: wrap; box-shadow: none; margin-bottom: var(--space-2); padding: 0; border: 0; background: transparent; }
+.inline-section-title-wrap { display: inline-flex; align-items: center; gap: var(--space-1); max-width: 100%; }
+.inline-section-title-wrap .inline-section-title { cursor: default; min-width: 0; }
+.inline-section-title-wrap .inline-section-title[contenteditable="true"] { cursor: text; }
+.inline-section-title-edit { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 28px; height: 28px; padding: 0; border: 0; background: transparent; color: var(--wb-text-soft); }
+@media (max-width: 620px) {
+  .wb-app-root .editor-stream > .editor-section-text { padding: var(--space-4); gap: var(--space-4); }
+  .wb-app-root .editor-stream > .editor-section-text .panel-head > div:first-child { flex: 1 1 100%; }
+}
 .wb-app-root .wb-button, .wb-app-root .wb-button:hover { box-shadow: none; transform: none; }
 .wb-app-root .wb-footer { border-top-color: var(--wb-border-soft); }
 .wb-topbar button:focus-visible, .wb-topbar a:focus-visible, .wb-sidebar button:focus-visible {

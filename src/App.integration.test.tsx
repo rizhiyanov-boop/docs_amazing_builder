@@ -684,15 +684,15 @@ describe('App integration', () => {
     const main = screen.getByRole('main');
     expect(screen.queryByRole('button', { name: 'Редактировать название блока' })).not.toBeInTheDocument();
 
+    await user.dblClick(within(main).getByText('Editable Title'));
     const titleInput = within(main).getByRole('textbox', { name: 'Название секции' });
-    await user.click(titleInput);
     titleInput.textContent = 'Renamed Title';
     fireEvent.input(titleInput);
     await user.keyboard('{Enter}');
 
     expect(within(main).getByText('Renamed Title')).toBeInTheDocument();
 
-    await user.click(titleInput);
+    await user.dblClick(within(main).getByText('Renamed Title'));
     titleInput.textContent = 'Cancelled Title';
     fireEvent.input(titleInput);
     await user.keyboard('{Escape}');

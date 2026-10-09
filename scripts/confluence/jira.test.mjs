@@ -2,8 +2,42 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createJira, parseJiraLink } from './jira.mjs';
 import { createBridge } from './bridge.mjs';
+import { jiraForm, jiraProjectLink } from './jira-form.mjs';
+import { JSDOM } from 'jsdom';
 
 const baseUrl = 'https://jira.example';
+test('connection field trims issue, project and board links to the project', () => {
+  assert.equal(jiraProjectLink(`${baseUrl}/browse/IN-123?x=1#comment`), `${baseUrl}/projects/IN`);
+  assert.equal(jiraProjectLink(`${baseUrl}/projects/IN/issues/IN-3?selectedIssue=IN-3`), `${baseUrl}/projects/IN`);
+  assert.equal(jiraProjectLink(`${baseUrl}/secure/RapidBoard.jspa?rapidView=530&projectKey=IN`), `${baseUrl}/projects/IN`);
+  for (const url of ['http://jira.example/browse/IN-3', 'https://user:password@jira.example/browse/IN-3', 'invalid']) assert.equal(jiraProjectLink(url), url);
+});
+test('connection form verifies the original issue link even after a failed attempt', async () => {
+  const requests = [];
+  const dom = new JSDOM(`<script>const nonce='synthetic';</script>${jiraForm('synthetic', { available: true })}`, {
+    url: 'http://localhost:18771/', runScripts: 'dangerously',
+    beforeParse(window) { window.fetch = async (_path, init) => {
+      requests.push(JSON.parse(init.body));
+      return { ok: requests.length > 1, json: async () => requests.length > 1 ? { remembered: true, connected: true, project: { key: 'NEW', name: 'Moved issue project', url: `${baseUrl}/projects/NEW` } } : { message: 'Synthetic failure' } };
+    }; }
+  });
+  try {
+    const { document, Event } = dom.window;
+    const link = document.getElementById('jira-link');
+    link.value = `${baseUrl}/browse/OLD-3?x=1#comment`;
+    link.dispatchEvent(new Event('input')); link.dispatchEvent(new Event('blur'));
+    assert.equal(link.value, `${baseUrl}/projects/OLD`);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      document.getElementById('jira-pat').value = 'synthetic-token';
+      document.getElementById('jira-form').dispatchEvent(new Event('submit', { cancelable: true }));
+      await new Promise(resolve => setImmediate(resolve));
+    }
+    assert.equal(requests[0].link, `${baseUrl}/browse/OLD-3?x=1#comment`);
+    assert.equal(requests[1].link, requests[0].link);
+    assert.equal(link.value, `${baseUrl}/projects/NEW`);
+    assert.equal(document.getElementById('jira-pat').value, '');
+  } finally { dom.window.close(); }
+});
 const project = { id: '101', key: 'IN', name: 'Interns', issueTypes: [{ id: '7', name: 'User Story' }, { id: '8', name: 'Epic' }] };
 function fixture(options = {}) {
   let saved = null; const calls = []; let postCount = 0;

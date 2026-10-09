@@ -9,6 +9,7 @@ export type JiraFormCache = {
   search: string; epicQuery: string; draft?: JiraDraft;
   issueKey?: string; fingerprint?: string;
   dirty?: boolean;
+  sourceDescription?: string;
 };
 export function jiraFormCacheKey(scope: JiraScope, methodId: string): string {
   return `docbuilder:jira-form:v1:${encodeURIComponent(scope.baseUrl)}:${encodeURIComponent(scope.projectId)}:${encodeURIComponent(methodId)}`;
@@ -21,6 +22,7 @@ export function readJiraFormCache(key: string): JiraFormCache | undefined {
     if (!value || !['task', 'story'].includes(value.issueKind) || !['summary', 'descriptionRu', 'descriptionEn', 'descriptionUz', 'description', 'epic', 'priorityId', 'search', 'epicQuery'].every(field => typeof value[field] === 'string') || !Array.isArray(value.labels) || value.labels.some((label: unknown) => typeof label !== 'string')) return;
     if (value.issueKey !== undefined && typeof value.issueKey !== 'string' || value.fingerprint !== undefined && typeof value.fingerprint !== 'string') return;
     if (value.dirty !== undefined && typeof value.dirty !== 'boolean') return;
+    if (value.sourceDescription !== undefined && (typeof value.sourceDescription !== 'string' || value.sourceDescription.length > 20000)) return;
     if (value.draft && (!Array.isArray(value.draft.labels) || !Array.isArray(value.draft.rankedEpics) || [...value.draft.labels, ...value.draft.rankedEpics].some(item => !item || typeof item.key !== 'string' || typeof item.reason !== 'string'))) delete value.draft;
     return value;
   } catch { return; }

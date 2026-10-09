@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeJiraDraft, normalizeJiraDraftInput } from './jiraDraft';
+import { buildJiraDraftPrompt, normalizeJiraDraft, normalizeJiraDraftInput } from './jiraDraft';
 import { jiraMethodContext } from './jiraMethodContext';
 import { renderWikiDocument } from './renderWiki';
 import type { MethodDocument } from './types';
@@ -7,6 +7,13 @@ import { renderWikiPreviewInline, splitWikiPreviewRow } from './wikiPreviewLinks
 
 const input = { method: { name: 'CRIF', context: 'Получить сведения CRIF' }, project: { key: 'IN', name: 'Test' }, issueType: 'Task', epics: [{ key: 'IN-5', name: 'Integration' }], priorities: [{ id: '3', name: 'Medium' }] };
 describe('Jira AI and export boundary', () => {
+  it('uses only the freeform description rather than the current method', () => {
+    const result = normalizeJiraDraftInput({ ...input, source: { kind: 'freeform', description: 'Исправить поиск на странице' } });
+    expect(result.method).toEqual({ name: 'Свободное описание', context: '' });
+    expect(buildJiraDraftPrompt(result)).toContain('из свободного описания');
+    expect(buildJiraDraftPrompt(result)).not.toContain('Получить сведения CRIF');
+    expect(() => normalizeJiraDraftInput({ ...input, source: { kind: 'freeform', description: ' ' } })).toThrow();
+  });
   it('whitelists input and rejects epics from another project', () => {
     expect(normalizeJiraDraftInput({ ...input, token: 'secret', baseUrl: 'https://secret.example', project: { ...input.project, token: 'secret' } })).toEqual(input);
     expect(() => normalizeJiraDraftInput({ ...input, epics: [{ key: 'DI-5', name: 'Other' }] })).toThrow('выбранному проекту');

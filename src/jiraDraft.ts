@@ -1,6 +1,7 @@
 import { JIRA_LABELS, JIRA_PRIORITY_RULES } from './jiraLabels.js';
 
 export type JiraDraftInput = {
+  source?: { kind: 'freeform'; description: string };
   method: { name: string; context: string };
   project: { key: string; name: string }; issueType: string;
   epics: { key: string; name: string }[];
@@ -26,11 +27,14 @@ const text = (value: unknown, limit: number, empty = false) => {
 /** Only the explicitly authorized documentation and Jira metadata enter the AI request. */
 export function normalizeJiraDraftInput(value: unknown): JiraDraftInput {
   const input = record(value); const method = record(input.method); const project = record(input.project);
+  const source = input.source === undefined ? undefined : record(input.source);
+  if (source && source.kind !== 'freeform') throw new Error('Некорректный источник задачи Jira.');
   if (!Array.isArray(input.epics) || input.epics.length > 500 || !Array.isArray(input.priorities) || input.priorities.length > 100) throw new Error('Передайте не более 500 эпиков текущего проекта.');
   const key = text(project.key, 64); if (!/^[A-Z][A-Z0-9_]{0,63}$/.test(key)) throw new Error('Некорректный проект Jira.');
   const seen = new Set<string>();
   return {
-    method: { name: text(method.name, 255), context: text(method.context, 20000, true) },
+    ...(source ? { source: { kind: 'freeform' as const, description: text(source.description, 20000) } } : {}),
+    method: source ? { name: 'Свободное описание', context: '' } : { name: text(method.name, 255), context: text(method.context, 20000, true) },
     project: { key, name: text(project.name, 255) }, issueType: text(input.issueType, 255),
     epics: input.epics.map(value => {
       const epic = record(value); const epicKey = text(epic.key, 90);
@@ -43,7 +47,7 @@ export function normalizeJiraDraftInput(value: unknown): JiraDraftInput {
 
 export function buildJiraDraftPrompt(input: JiraDraftInput): string {
   return [
-    'Подготовь одну задачу Jira для реализации документированного метода. Запись выполняет пользователь после проверки.',
+    input.source ? 'Подготовь одну задачу Jira из свободного описания source.description. Не связывай её с API-методом и не добавляй требования из документации. Запись выполняет пользователь после проверки.' : 'Подготовь одну задачу Jira для реализации документированного метода. Запись выполняет пользователь после проверки.',
     'Название: английский язык, начни с глагола действия Create, Implement, Develop, Integrate, Update или другой подходящей английской формы действия. Максимум 120 символов.',
     'Описание: 2–3 коротких предложения, что делаем, как делаем и для чего. Подготовь русский оригинал, затем точный английский и узбекский переводы с тем же смыслом. Узбекский перевод — на латинице. Значения descriptionRu, descriptionEn и descriptionUz содержат только текст, без подписей языков и заголовков. Без лишних деталей и выдуманных бизнес-правил, сроков, требований или исполнителей.',
     'Упорядочи до 20 наиболее подходящих эпиков от наиболее вероятного к менее вероятному. Используй только ключи из переданного списка. Не выдумывай эпики. Для каждого кратко объясни соответствие по-русски. Если подходящих нет или список пуст, верни пустой список. Эпик необязателен: отсутствие подходящего эпика не должно мешать подготовке текста, тегов и приоритета.',

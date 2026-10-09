@@ -7,6 +7,17 @@ import { renderWikiPreviewInline, splitWikiPreviewRow } from './wikiPreviewLinks
 
 const input = { method: { name: 'CRIF', context: 'Получить сведения CRIF' }, project: { key: 'IN', name: 'Test' }, issueType: 'Task', epics: [{ key: 'IN-5', name: 'Integration' }], priorities: [{ id: '3', name: 'Medium' }] };
 describe('Jira AI and export boundary', () => {
+  const summaryDraft = { descriptionRu: 'Реализовать изменение.', descriptionEn: 'Implement the change.', descriptionUz: 'Ozgarishni amalga oshirish.', rankedEpics: [], labels: [], priorityId: '', priorityReason: '' };
+  it.each(['[OpenAPI] Implement gradual rollout', '[Payroll Domain] Implement salary calculation', '[Платежи] Update payment processing', 'Implement payment processing'])('accepts service-prefixed and compatible summaries: %s', summary => {
+    expect(normalizeJiraDraft({ ...summaryDraft, summary }, input).summary).toBe(summary);
+  });
+  it('requests a service grounded in the authorized source and does not invent missing services', () => {
+    const prompt = buildJiraDraftPrompt(input);
+    expect(prompt).toContain('[Название сервиса]');
+    expect(prompt).toContain('Максимум 120 символов вместе с префиксом');
+    expect(prompt).toContain('Если сервис явно не указан или неоднозначен');
+    expect(prompt).toContain('Не используй название проекта Jira');
+  });
   it('uses only the freeform description rather than the current method', () => {
     const result = normalizeJiraDraftInput({ ...input, source: { kind: 'freeform', description: 'Исправить поиск на странице' } });
     expect(result.method).toEqual({ name: 'Свободное описание', context: '' });

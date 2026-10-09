@@ -102,7 +102,7 @@ describe('ai endpoint auth', () => {
   it('prepares Jira text and ranking without forwarding extra secrets', async () => {
     process.env.OPENAI_API_KEY = 'test-key';
     dbMock.getUserBySessionToken.mockResolvedValue({ id: 'jira-ai-user', login: 'tester' });
-    const output = { summary: 'Implement CRIF integration', descriptionRu: 'Разработать метод CRIF через интеграционный адаптер.', descriptionEn: 'Implement the CRIF method through the integration adapter.', descriptionUz: 'Integratsiya adapteri orqali CRIF usulini ishlab chiqish.', rankedEpics: [{ key: 'IN-5', reason: 'Интеграция' }, { key: 'DI-5', reason: 'Другой проект' }], labels: [{ key: 'business', reason: 'Бизнес' }], priorityId: '3', priorityReason: 'Обычный приоритет' };
+    const output = { summary: '[OpenAPI] Implement CRIF integration', descriptionRu: 'Разработать метод CRIF через интеграционный адаптер.', descriptionEn: 'Implement the CRIF method through the integration adapter.', descriptionUz: 'Integratsiya adapteri orqali CRIF usulini ishlab chiqish.', rankedEpics: [{ key: 'IN-5', reason: 'Интеграция' }, { key: 'DI-5', reason: 'Другой проект' }], labels: [{ key: 'business', reason: 'Бизнес' }], priorityId: '3', priorityReason: 'Обычный приоритет' };
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify(output) } }] }) });
     vi.stubGlobal('fetch', fetchMock);
     const { default: aiHandler } = await import('../api/ai');

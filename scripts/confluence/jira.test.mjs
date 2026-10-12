@@ -66,6 +66,22 @@ function fixture(options = {}) {
   return { jira, store, fetchImpl, calls, connect, create, handle, saved: () => saved, postCount: () => postCount };
 }
 
+test('unlink clears only the scoped journal and never calls Jira, including after restart', async () => {
+  const f = fixture(); await f.connect();
+  await f.handle(f.jira, 'create', 'POST', { methodId: 'method-1', summary: 'Story', description: 'Description', labels: ['business'] });
+  const before = f.calls.length;
+  assert.deepEqual(await f.handle(f.jira, 'unlink', 'POST', { methodId: 'method-1' }), { state: 'none', issue: null, linkedUrl: null });
+  assert.equal(f.calls.length, before);
+  assert.equal((await f.handle(f.jira, 'operation', 'GET', null, new URLSearchParams({ methodId: 'method-1' }))).state, 'none');
+  const restarted = createJira({ store: f.store, fetchImpl: f.fetchImpl }); await restarted.restore();
+  assert.equal((await f.handle(restarted, 'operation', 'GET', null, new URLSearchParams({ methodId: 'method-1' }))).state, 'none');
+});
+test('unlink cannot erase an uncertain creation journal', async () => {
+  const f = fixture({ unknown: true }); await f.connect();
+  await assert.rejects(f.handle(f.jira, 'create', 'POST', { methodId: 'pending', summary: 'Story', description: 'Description', labels: ['business'] }));
+  await assert.rejects(f.handle(f.jira, 'unlink', 'POST', { methodId: 'pending' }), error => error.code === 'OUTCOME_UNKNOWN');
+  assert.equal((await f.handle(f.jira, 'operation', 'GET', null, new URLSearchParams({ methodId: 'pending' }))).state, 'unknown');
+});
 function editableFixture(options = {}) {
   const fields = { project: { id: '101' }, issuetype: { id: '7', name: 'User Story' }, summary: 'Original story', description: 'Original description', labels: ['business', 'existing-custom-tag'], priority: { id: '3' }, customfield_10203: null, updated: '2026-10-07T10:00:00.000+0500' };
   const f = fixture({ respond: async (url, init) => {

@@ -7400,7 +7400,7 @@ export default function App() {
 
   const handleJiraLinked = useCallback((methodId: string, issueUrl: string) => {
     setMethodsState((current) => current.map((method) => method.id === methodId && method.jiraTicket !== issueUrl
-      ? { ...method, jiraTicket: issueUrl, updatedAt: new Date().toISOString() }
+      ? { ...method, jiraTicket: issueUrl || undefined, updatedAt: new Date().toISOString() }
       : method));
     // Metadata changes do not replace sections, so invalidate the cached Wiki explicitly.
     wikiPreviewCacheRef.current = null;

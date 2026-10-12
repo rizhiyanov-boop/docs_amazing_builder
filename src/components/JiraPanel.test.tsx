@@ -14,10 +14,28 @@ function fixture(ready = true): JiraClient {
     epics: vi.fn().mockResolvedValue({ items: [{ key: 'IN-5', name: 'Integration' }], nextStart: null }),
     create: vi.fn().mockResolvedValue({ state: 'success', issue: { id: '17', key: 'IN-17', url: 'https://jira.example/browse/IN-17' }, linkedUrl: 'https://confluence.example/pages/viewpage.action?pageId=123' }),
     issue: vi.fn().mockResolvedValue({ issue: { id: '17', key: 'IN-17', url: 'https://jira.example/browse/IN-17', issueType: { id: '1', name: 'Задача' }, summary: 'Implement CRIF API', description: 'Description from Jira', epic: '', labels: ['business'], priorityId: '3', updated: '', fingerprint: 'a'.repeat(64) }, metadata: { project: {}, issueKind: 'task', story: { id: '1', name: 'Задача' }, epicField: 'customfield_10203', epicRequired: false, requiredFields: [], priorities: [{ id: '3', name: 'Medium' }], labelsSupported: true, editableFields: ['summary', 'description', 'labels', 'priority', 'customfield_10203'], message: '' }, operation: { state: 'success', issue: { id: '17', key: 'IN-17', url: 'https://jira.example/browse/IN-17' }, linkedUrl: null } }),
-    update: vi.fn(), acceptCurrent: vi.fn(), link: vi.fn(), confirm: vi.fn()
+    update: vi.fn(), acceptCurrent: vi.fn(), link: vi.fn(), confirm: vi.fn(), unlink: vi.fn().mockResolvedValue({ state: 'none', issue: null, linkedUrl: null })
   };
 }
 describe('Jira integration panel', () => {
+  it('does not silently attach a journal issue to an unbound method', async () => {
+    const client = fixture(); const onLinked = vi.fn();
+    vi.mocked(client.operation).mockResolvedValue({ state: 'success', issue: { id: '17', key: 'IN-17', url: 'https://jira.example/browse/IN-17' }, linkedUrl: null });
+    render(<JiraPanel client={client} methodId="new-method" methodName="New method" onBusyChange={vi.fn()} onLinked={onLinked} />);
+    await screen.findByText('В локальном журнале найдена ранее созданная задача');
+    expect(onLinked).not.toHaveBeenCalled(); expect(client.issue).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Привязать к текущему методу' }));
+    await waitFor(() => expect(onLinked).toHaveBeenCalledWith('new-method', 'https://jira.example/browse/IN-17'));
+  });
+  it('unlinks locally, clears the binding, and does not update or create a Jira issue', async () => {
+    const client = fixture(); const onLinked = vi.fn();
+    render(<JiraPanel client={client} methodId="bound-method" methodName="Method" jiraTicket="https://jira.example/browse/IN-17" onBusyChange={vi.fn()} onLinked={onLinked} />);
+    await screen.findByLabelText('Описание Jira');
+    fireEvent.click(screen.getByRole('button', { name: 'Отвязать задачу' }));
+    await waitFor(() => expect(onLinked).toHaveBeenCalledWith('bound-method', ''));
+    expect(client.unlink).toHaveBeenCalledWith({ baseUrl: 'https://jira.example', projectId: '101' }, 'bound-method');
+    expect(client.update).not.toHaveBeenCalled(); expect(client.create).not.toHaveBeenCalled();
+  });
   it.each([false, true])('migrates automatic Task drafts but preserves explicit Task choice (%s)', async explicit => {
     const client = fixture();
     if (explicit) vi.mocked(client.metadata).mockResolvedValue({ project: {}, issueKind: 'task', story: { id: '1', name: 'Task' }, epicRequired: false, priorities: [], labelsSupported: true, requiredFields: [], message: '' });

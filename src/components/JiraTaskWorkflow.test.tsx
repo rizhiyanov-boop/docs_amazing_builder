@@ -10,7 +10,7 @@ function fixture(): JiraClient {
     operation: vi.fn().mockResolvedValue({ state: 'none', issue: null, linkedUrl: null }),
     metadata: vi.fn().mockResolvedValue({ project: {}, issueKind: 'story', story: { id: '1', name: 'User Story' }, epicRequired: false, labelsSupported: true, requiredFields: [], priorities: [], message: '' }),
     epics: vi.fn().mockResolvedValue({ items: [], nextStart: null }),
-    issue: vi.fn(), create: vi.fn(), update: vi.fn(), link: vi.fn(), confirm: vi.fn(), acceptCurrent: vi.fn()
+    issue: vi.fn(), create: vi.fn(), update: vi.fn(), link: vi.fn(), confirm: vi.fn(), acceptCurrent: vi.fn(), unlink: vi.fn()
   };
 }
 const props = { methodId: 'method-1', methodName: 'Existing method', methodContext: 'Method-only documentation', active: true, onBusyChange: vi.fn() };

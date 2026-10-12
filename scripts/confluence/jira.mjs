@@ -290,6 +290,16 @@ export function createJira({ store = null, fetchImpl = globalThis.fetch, now = D
     if (busy) throw new JiraError(409, 'OPERATION_PENDING', 'Дождитесь текущей операции Jira.');
     busy = true;
     try {
+      if (method === 'POST' && path === '/api/jira/unlink') {
+        const item = operation(connection, body.methodId);
+        if (item?.state === 'unknown' || item?.update?.state === 'unknown') throw new JiraError(409, 'OUTCOME_UNKNOWN', 'Сначала подтвердите результат операции Jira.');
+        if (item) {
+          const index = connection.operations.indexOf(item);
+          connection.operations.splice(index, 1);
+          try { await persist(connection); } catch (error) { connection.operations.splice(index, 0, item); throw error; }
+        }
+        return { state: 'none', issue: null, linkedUrl: null };
+      }
       if (method === 'GET' && path === '/api/jira/issue') return await loadIssue(connection, query.get('methodId'), query.get('link'));
       if (method === 'POST' && path === '/api/jira/update') return await updateIssue(connection, body);
       if (method === 'POST' && path === '/api/jira/accept-current') {

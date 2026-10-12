@@ -25,6 +25,8 @@ const tagGroups = [
 
 export function JiraPanel({ methodId, methodName, methodContext = '', confluenceUrl, jiraTicket, source = 'method', active = true, onBusyChange, onLinked, onCompletedChange, onConnectionScopeChange, client = jiraClient, prepareDraft = prepareJiraTaskWithAi }: Props) {
   const [sourceDescription, setSourceDescription] = useState('');
+  const [unlinkRevision, setUnlinkRevision] = useState(0);
+  const standalone = methodId.startsWith('task-') && !onLinked;
   const [status, setStatus] = useState<JiraStatus>();
   const [metadata, setMetadata] = useState<JiraMetadata>();
   const [issueKind, setIssueKind] = useState<JiraIssueKind>('story');
@@ -97,7 +99,7 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
         if (generation.value !== current) return;
         setOperation(op);
         let meta: JiraMetadata; let query = '';
-        if (op.state === 'success' && op.issue || op.state === 'none' && bindingRef.current?.trim()) {
+        if (op.state === 'success' && op.issue && (bindingRef.current?.trim() || !linkedCallback.current) || op.state === 'none' && bindingRef.current?.trim()) {
           const loaded = await client.issue(scope, methodId, bindingRef.current);
           if (generation.value !== current) return;
           const restored = acceptIssue(loaded, cached); meta = loaded.metadata; query = restored ? cached?.epicQuery ?? '' : '';
@@ -122,7 +124,7 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
     void refresh(); return () => { generation.value++; };
   // Loading is scoped to the method/connection; callbacks read the current binding without refetching after onLinked.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, origin, projectId, status?.connected, methodId, issueKind, active]);
+  }, [client, origin, projectId, status?.connected, methodId, issueKind, active, unlinkRevision]);
   const scope = { baseUrl: origin, projectId: projectId ?? '' };
   const readCurrent = async (keepLocal = true, acceptUnknown = false) => {
     if (lock.current) return; lock.current = true; setLoading(true); setError(''); const current = epoch.current.value;
@@ -131,6 +133,21 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
       if (current === epoch.current.value) acceptIssue(loaded, keepLocal ? readJiraFormCache(cacheKey) : undefined);
     } catch (failure) { if (current === epoch.current.value) setError(failure instanceof Error ? failure.message : 'Не удалось прочитать задачу.'); }
     finally { lock.current = false; if (current === epoch.current.value) setLoading(false); }
+  };
+  const unlink = async () => {
+    if (lock.current) return;
+    lock.current = true; setBusy(true); onBusyChange(true); setError('');
+    const current = epoch.current.value;
+    try {
+      const result = await client.unlink(scope, methodId);
+      if (epoch.current.value !== current) return;
+      if (result.state !== 'none') throw new Error('Связь не удалена. Проверьте локальное приложение Jira.');
+      if (cacheKey) { try { localStorage.removeItem(cacheKey); } catch { setCacheWarning(true); } }
+      bindingRef.current = undefined;
+      linkedCallback.current?.(methodId, '');
+      setCacheKey(''); setIssue(undefined); setOperation(result); setUnlinkRevision(value => value + 1);
+    } catch (failure) { if (epoch.current.value === current) setError(failure instanceof Error ? failure.message : 'Не удалось отвязать задачу. Обновите локальное приложение до 1.3.6.'); }
+    finally { lock.current = false; if (epoch.current.value === current) { setBusy(false); onBusyChange(false); } }
   };
   const act = async (action: () => Promise<JiraOperation>) => {
     if (lock.current) return; lock.current = true; setBusy(true); onBusyChange(true); setError(''); const current = epoch.current.value;
@@ -222,11 +239,13 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
     {generating && <div className="cf-notice"><AiRequestProgress message={preparationPhase === 'epics' ? 'Подготовка ИИ: загружаем эпики проекта…' : 'ИИ: готовим название, описание и рекомендации…'} /></div>}
     {status?.connected && <>
       {loading && <p role="status">Чтение Jira…</p>}
-      {(operation?.state === 'none' && jiraTicket?.trim() || operation?.state === 'success') && <div className="cf-notice"><h3>Метод уже связан с задачей Jira</h3>{operation?.issue ? <a href={operation.issue.url} target="_blank" rel="noopener noreferrer">{operation.issue.key}</a> : <p>{jiraTicket}</p>}
+      {(operation?.state === 'none' && jiraTicket?.trim() || operation?.state === 'success') && <div className="cf-notice"><h3>{standalone ? 'Созданная задача этого сценария' : onLinked && !jiraTicket && !issue ? 'В локальном журнале найдена ранее созданная задача' : 'Метод уже связан с задачей Jira'}</h3>{operation?.issue ? <a href={operation.issue.url} target="_blank" rel="noopener noreferrer">{operation.issue.key}</a> : <p>{jiraTicket}</p>}
+        {onLinked && !jiraTicket && !issue && <p><WBButton disabled={disabled} onClick={() => void readCurrent()}>Привязать к текущему методу</WBButton></p>}
+        {onLinked && <p><WBButton disabled={disabled || operation?.updateState === 'unknown'} onClick={() => void unlink()}>Отвязать задачу</WBButton><span className="cf-muted"> Удаляется только связь в DocBuilder. Задача в Jira остаётся.</span></p>}
         {operation?.message && <p>{operation.message}</p>}
         {operation?.linkedUrl && <p>Документация: <a href={operation.linkedUrl} target="_blank" rel="noopener noreferrer">Confluence</a></p>}
         {confluenceUrl && operation?.issue && operation.linkedUrl !== confluenceUrl && <p><WBButton disabled={disabled} onClick={() => void act(() => client.link(scope, methodId, confluenceUrl))}>Добавить ссылку Confluence</WBButton></p>}
-        <p>Ссылка на задачу сохранена в поле Jira метода и включена в Wiki-разметку. В Confluence она появится при следующей публикации страницы.</p>
+        <p>{standalone ? 'Эта задача относится к отдельному сценарию и не привязана к текущему методу.' : jiraTicket || issue ? 'Ссылка на задачу сохранена в поле Jira метода и включена в Wiki-разметку. В Confluence она появится при следующей публикации страницы.' : 'Связь с методом пока не сохранена. Привяжите задачу явно или удалите запись журнала кнопкой «Отвязать задачу».'}</p>
         {!confluenceUrl && <p className="cf-muted">После публикации страницы здесь можно добавить ссылку Confluence в задачу.</p>}
         <WBButton disabled={disabled} onClick={() => void readCurrent()}>Загрузить из Jira</WBButton>
       </div>}

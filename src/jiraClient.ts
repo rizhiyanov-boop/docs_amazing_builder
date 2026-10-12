@@ -26,6 +26,7 @@ async function request<T>(path: string, scope?: JiraScope, body?: unknown): Prom
   return result as T;
 }
 export const jiraClient = {
+  unlink: (scope: JiraScope, methodId: string) => request<JiraOperation>('unlink', scope, { methodId }),
   status: () => request<JiraStatus>('status'),
   metadata: (scope: JiraScope, issueKind: JiraIssueKind = 'story') => request<JiraMetadata>(`metadata?issueKind=${issueKind}`, scope),
   epics: (scope: JiraScope, q = '', start = 0) => request<JiraEpics>(`epics?q=${encodeURIComponent(q)}&start=${start}`, scope),

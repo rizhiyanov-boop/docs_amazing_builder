@@ -5,18 +5,12 @@ import { INLINE_TEXT_FORMAT_LABELS, InlineTextSectionEditor } from './InlineText
 afterEach(cleanup);
 
 describe('InlineTextSectionEditor', () => {
-  it('keeps the inline toolbar visible before, during and after editing', () => {
+  it('keeps formatting tools hidden when text is not selected', () => {
     render(<InlineTextSectionEditor sectionId="focus-section" value="Text" onChange={vi.fn()} onFocus={vi.fn()} />);
     const textbox = screen.getByRole('textbox', { name: 'Содержимое текстовой секции' });
-    expect(screen.getByRole('toolbar', { name: 'Форматирование' })).toBeVisible();
+    expect(screen.queryByRole('toolbar')).not.toBeInTheDocument();
     fireEvent.focus(textbox);
-    const toolbar = screen.getByRole('toolbar', { name: 'Форматирование' });
-    const bold = screen.getByRole('button', { name: 'Жирный (Ctrl+B)' });
-    fireEvent.blur(textbox, { relatedTarget: bold });
-    expect(toolbar).toBeVisible();
-    fireEvent.focus(bold);
-    fireEvent.blur(bold, { relatedTarget: document.body });
-    expect(toolbar).toBeVisible();
+    expect(screen.queryByRole('toolbar')).not.toBeInTheDocument();
   });
 
   it('renders always-editable content and the exact formatting command set', () => {
@@ -33,11 +27,7 @@ describe('InlineTextSectionEditor', () => {
     expect(INLINE_TEXT_FORMAT_LABELS).toEqual([
       'Жирный (Ctrl+B)',
       'Курсив (Ctrl+I)',
-      'Встроенный код',
-      'Подзаголовок',
-      'Цитата',
-      'Маркированный список',
-      'Нумерованный список'
+      'Встроенный код'
     ]);
     expect(screen.queryByRole('button', { name: 'Выделение цветом', hidden: true })).not.toBeInTheDocument();
   });

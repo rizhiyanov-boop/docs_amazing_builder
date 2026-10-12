@@ -533,7 +533,7 @@ export function editorElementToWikiText(root: HTMLElement): string {
     return serialized ? [serialized] : [];
   });
 
-  return blocks.join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
+  return blocks.join('\n\n').trim();
 }
 
 export function editorHtmlToWikiText(html: string): string {

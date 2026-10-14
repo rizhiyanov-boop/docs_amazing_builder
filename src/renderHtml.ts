@@ -36,7 +36,6 @@ function isDualModelSection(section: ParsedSection): boolean {
 }
 
 function shouldRenderTextSection(section: TextSection): boolean {
-  if (!section.enabled) return true;
   return Boolean(section.value.trim());
 }
 
@@ -49,7 +48,6 @@ function hasParsedSourceExample(section: ParsedSection): boolean {
 }
 
 function shouldRenderParsedSection(section: ParsedSection): boolean {
-  if (!section.enabled) return true;
   if (isDualModelSection(section)) {
     return Boolean(section.error) || Boolean(section.clientError) || requestHasRows(section) || hasParsedSourceExample(section);
   }
@@ -57,12 +55,10 @@ function shouldRenderParsedSection(section: ParsedSection): boolean {
 }
 
 function shouldRenderDiagramSection(section: DiagramSection): boolean {
-  if (!section.enabled) return true;
   return section.diagrams.some((diagram) => diagram.code.trim());
 }
 
 function shouldRenderErrorsSection(section: ErrorsSection): boolean {
-  if (!section.enabled) return true;
   return section.rows.length > 0 || section.validationRules.length > 0;
 }
 
@@ -260,9 +256,6 @@ function wrapCard(id: string, title: string, meta: string, body: string, path = 
 
 function renderTextSection(section: TextSection): string {
   const title = resolveSectionTitle(section.title);
-  if (!section.enabled) {
-    return wrapCard(section.id, title, '', '<span class="muted">Не используется</span>');
-  }
   return wrapCard(section.id, title, '', `<div class="section-text">${renderProseValue(section.value)}</div>`);
 }
 
@@ -273,9 +266,6 @@ function renderInfoNote(label: string, value: string): string {
 
 function renderRequestSection(section: ParsedSection, interactive = true): string {
   const title = resolveSectionTitle(section.title);
-  if (!section.enabled) {
-    return wrapCard(section.id, title, [renderTag('REQUEST'), renderTag(section.format.toUpperCase())].join(' '), '<span class="muted">Не используется</span>');
-  }
 
   const requestRows = getRequestRows(section);
   const { headers, otherRows, urlRow } = splitRequestRows(requestRows);
@@ -356,9 +346,6 @@ function renderRequestSection(section: ParsedSection, interactive = true): strin
 
 function renderResponseSection(section: ParsedSection, interactive = true): string {
   const title = resolveSectionTitle(section.title);
-  if (!section.enabled) {
-    return wrapCard(section.id, title, [renderTag('RESPONSE'), renderTag(section.format.toUpperCase())].join(' '), '<span class="muted">Не используется</span>');
-  }
 
   const rows = getRequestRows(section);
   const responseError = section.error || section.clientError;
@@ -387,9 +374,6 @@ function renderResponseSection(section: ParsedSection, interactive = true): stri
 
 function renderGenericParsedSection(section: ParsedSection, interactive = true): string {
   const title = resolveSectionTitle(section.title);
-  if (!section.enabled) {
-    return wrapCard(section.id, title, renderTag(section.format.toUpperCase()), '<span class="muted">Не используется</span>');
-  }
 
   const meta = renderTag(section.format.toUpperCase());
   const body = [
@@ -418,9 +402,6 @@ function renderDiagramSection(
   interactive = true
 ): string {
   const title = resolveSectionTitle(section.title);
-  if (!section.enabled) {
-    return wrapCard(section.id, title, renderTag('DIAGRAM'), '<span class="muted">Не используется</span>');
-  }
 
   const body = section.diagrams
     .filter((diagram) => diagram.code.trim())
@@ -467,9 +448,6 @@ function renderDiagramSection(
 
 function renderErrorsSection(section: ErrorsSection): string {
   const title = resolveSectionTitle(section.title);
-  if (!section.enabled) {
-    return wrapCard(section.id, title, renderTag('ERRORS'), '<span class="muted">Не используется</span>');
-  }
 
   const bodyRows = section.rows
     .map(

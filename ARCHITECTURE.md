@@ -70,7 +70,7 @@ The UI uses Kraft Workbench tokens:
 - `src/tokens-workbench.css` defines `--wb-*` tokens for `blue`, `warm`, and `violet` accents.
 - `warm` is the default Kraft accent.
 - `src/theme.ts` keeps the legacy `--bg`, `--card`, `--panel`, and related variables aligned with Kraft colors for older editor surfaces.
-- Fonts: `Inter Tight` for UI and `JetBrains Mono` for code, methods, endpoints, and table field names.
+- Fonts: Inter for the sidebar and method editor UI; JetBrains Mono for code, methods, endpoints, and table field names. Legacy Workbench consumers retain Inter Tight until migrated. editor-standard.css owns the method editor scope and semantic overrides.
 
 New UI should prefer `var(--wb-*)` tokens. Legacy variables should only be used where old editor code still depends on them.
 

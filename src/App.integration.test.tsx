@@ -176,7 +176,7 @@ describe('App integration', () => {
     expect(getMethodNavigation()).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Workbench' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Editor' })).not.toBeInTheDocument();
-    expect(screen.getByText('REQUEST')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Request/ })).toBeInTheDocument();
     expect(screen.getAllByRole('textbox', { name: 'Содержимое текстовой секции' }).length).toBeGreaterThan(1);
     expect(screen.queryByRole('toolbar', { name: 'Форматирование текста' })).not.toBeInTheDocument();
     expect(findTopbarButton(/^Экспорт$/)).toBeInTheDocument();
@@ -247,15 +247,71 @@ describe('App integration', () => {
     seedSingleMethodWorkspace({ id: 's_goal', title: 'Goal', enabled: true, kind: 'text', value: 'A' });
     renderApp();
 
+    expect(screen.queryByRole('button', { name: 'Удалить раздел', exact: true })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Дополнительные действия секции' }));
     const deleteItem = screen.getByRole('menuitem', { name: 'Удалить раздел' });
 
-    expect(deleteItem).toHaveStyle({ color: 'var(--wb-required)' });
+    expect(deleteItem).toHaveStyle({ color: 'var(--wb-danger)' });
     await user.click(deleteItem);
 
     const dialog = screen.getByRole('dialog', { name: 'Подтверждение удаления раздела' });
     expect(within(dialog).getByRole('heading', { name: 'Удалить раздел?' })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Удалить раздел' })).toBeInTheDocument();
+  });
+
+  it('navigates section actions with the keyboard and restores focus on Escape', async () => {
+    const user = userEvent.setup();
+    seedSingleMethodWorkspace({ id: 's_goal', title: 'Goal', enabled: true, kind: 'text', value: 'A' });
+    renderApp();
+    const trigger = screen.getByRole('button', { name: 'Дополнительные действия секции' });
+    trigger.focus();
+    await user.keyboard('{Enter}');
+    const add = screen.getByRole('menuitem', { name: 'Добавить раздел ниже…' });
+    await waitFor(() => expect(add).toHaveFocus());
+    await user.keyboard('{End}');
+    expect(screen.getByRole('menuitem', { name: 'Удалить раздел' })).toHaveFocus();
+    await user.keyboard('{Home}{ArrowDown}{ArrowUp}');
+    expect(add).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    await user.keyboard('{ArrowUp}');
+    await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Удалить раздел' })).toHaveFocus());
+    await user.tab();
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: 'В документе' })).not.toBeInTheDocument();
+    expect(trigger).not.toHaveFocus();
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it('loads previously disabled sections as included and offers no section exclusion control', async () => {
+    seedSingleMethodWorkspace({ id: 's_goal', title: 'Goal', enabled: false, kind: 'text', value: 'Retained content' });
+    renderApp();
+    expect(screen.getByRole('textbox', { name: 'Содержимое текстовой секции' })).toHaveTextContent('Retained content');
+    expect(screen.queryByRole('checkbox', { name: /В документе|Активна/ })).not.toBeInTheDocument();
+    await waitFor(() => {
+      const methods = getStoredProject()?.methods as Array<{ sections: Array<{ enabled: boolean; value: string }> }>;
+      expect(methods[0].sections[0]).toMatchObject({ enabled: true, value: 'Retained content' });
+    });
+  });
+
+  it('offers shared section types for insertion below and inserts without replacing the current section', async () => {
+    const user = userEvent.setup();
+    seedSingleMethodWorkspace({ id: 's_goal', title: 'Goal', enabled: true, kind: 'text', value: 'A' });
+    renderApp();
+    await user.click(screen.getByRole('button', { name: 'Дополнительные действия секции' }));
+    expect(screen.getAllByRole('menuitem')).toHaveLength(2);
+    await user.click(screen.getByRole('menuitem', { name: 'Добавить раздел ниже…' }));
+    const menu = screen.getByRole('menu', { name: 'Добавить раздел ниже' });
+    ['Text', 'Request', 'Response', 'Errors', 'Diagram'].forEach(name => expect(within(menu).getByRole('menuitem', { name, exact: true })).toBeInTheDocument());
+    await user.click(within(menu).getByRole('menuitem', { name: 'Text', exact: true }));
+    await waitFor(() => {
+      const project = getStoredProject();
+      const methods = project?.methods as Array<{ sections: Array<{ id: string; value?: string }> }>;
+      expect(methods[0].sections).toHaveLength(2);
+      expect(methods[0].sections[0]).toMatchObject({ id: 's_goal', value: 'A' });
+      expect(methods[0].sections[1].id).not.toBe('s_goal');
+    });
   });
 
   it('separates server and client request contexts into independent collapsed zones', async () => {
@@ -888,7 +944,7 @@ describe('App integration', () => {
     await user.click(within(screen.getByRole('navigation', { name: 'Разделы метода' })).getByRole('button', { name: 'Request', exact: true }));
 
     const parseButton = document.querySelector(
-      'button[title*="парсер"], button[title*="Parser"], button[title*="parse"]'
+      'button[aria-label="Построить таблицу"]'
     ) as HTMLButtonElement | null;
     expect(parseButton).not.toBeNull();
     await user.click(parseButton as HTMLButtonElement);
@@ -1192,7 +1248,7 @@ describe('App integration', () => {
     const textarea = within(importDialog).getByPlaceholderText('Вставьте JSON, XML или cURL');
     fireEvent.change(textarea, { target: { value: '{"orderId":"123"}' } });
     await user.click(within(importDialog).getByRole('button', { name: 'Импортировать текст' }));
-    await user.click(screen.getByRole('button', { name: 'Парсить' }));
+    await user.click(screen.getByRole('button', { name: 'Построить таблицу' }));
 
     await waitFor(() => {
       const project = getStoredProject();

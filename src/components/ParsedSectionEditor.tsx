@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 import type { ParsedSection } from '../types';
+import { WBButton } from './primitives/WorkbenchPrimitives';
+import { WorkbenchIcon } from './workbench/WorkbenchIcon';
 
 type ParsedSectionEditorProps = {
   section: ParsedSection;
@@ -21,9 +23,6 @@ export function ParsedSectionEditor({
   if (isDualModelSection(section)) {
     return (
       <section className="ds-section-card dual-model-section-card">
-        <header className="ds-section-card-head">
-          <div className="ds-section-card-eyebrow">{section.sectionType === 'request' ? 'REQUEST' : 'RESPONSE'}</div>
-        </header>
         <div className="ds-section-card-body">{renderRequestEditor(section)}</div>
       </section>
     );
@@ -33,14 +32,11 @@ export function ParsedSectionEditor({
     <section className="ds-section-card">
       <header className="ds-section-card-head">
         <div className="ds-section-card-eyebrow">{section.format.toUpperCase()}</div>
-        <h3 className="ds-section-card-title">{section.title}</h3>
       </header>
       <div className="ds-section-card-body stack">
         {renderSourceEditor(section, 'server')}
         <div className="row gap">
-          <button className="ghost small" type="button" onClick={() => onAddManualRow(section)}>
-            + Параметр
-          </button>
+          <WBButton variant="ghost" size="sm" aria-label="+ Параметр" icon={<WorkbenchIcon name="plus" />} onClick={() => onAddManualRow(section)}>Параметр</WBButton>
         </div>
         {section.error && <div className="alert error">{section.error}</div>}
         {renderParsedTable(section)}

@@ -1,0 +1,177 @@
+/* Editor-only standard. Export and integration screens keep their own layout. */
+.wb-app-root .editor-stream {
+  --wb-font-sans: var(--font-sans);
+  --wb-editor-control-font: 13px;
+  --wb-editor-input-font: 14px;
+  --wb-editor-table-font: 13px;
+  --wb-editor-label-font: 12px;
+  --wb-editor-input-padding: 6px 12px;
+  --wb-editor-inset: 16px;
+  --wb-editor-gap: 12px;
+  --wb-editor-icon-size: 16px;
+  --wb-editor-icon-stroke: 1.7;
+  --wb-editor-line-controls-width: calc(var(--wb-editor-icon-size) * 2 + var(--space-2));
+  --danger: var(--wb-danger);
+  --danger-text: var(--wb-danger);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-md);
+  line-height: 1.5;
+  gap: var(--space-6);
+}
+.wb-app-root .editor-stream > .editor-section {
+  padding: var(--wb-editor-inset);
+  gap: var(--wb-editor-gap);
+  border-radius: var(--wb-radius);
+  border: 1px solid var(--wb-border);
+  box-shadow: none;
+}
+.wb-app-root .editor-stream > .editor-section-active,
+.wb-app-root .editor-stream > .editor-section-text.editor-section-active {
+  border-color: color-mix(in srgb, var(--wb-accent) 28%, var(--wb-border));
+  background: linear-gradient(var(--wb-accent), var(--wb-accent)) left center / 3px 100% no-repeat var(--wb-bg-surface);
+}
+.wb-app-root .editor-stream .editor-section-heading { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.wb-app-root .editor-stream :is(.wb-shell-icon,.contract-mode-icon) { color: var(--wb-text-soft); }
+.wb-app-root .editor-stream button:hover:not(:disabled) .wb-shell-icon { color: var(--wb-text); }
+.wb-app-root .editor-stream :is(.danger,.section-delete-btn,.wb-button-danger) .wb-shell-icon { color: var(--wb-danger); }
+.wb-app-root .editor-stream .wb-button-danger:hover:not(:disabled) .wb-shell-icon { color: var(--wb-accent-fg); }
+.wb-app-root .editor-stream :is(button[aria-pressed=true],.contract-mode-segment.active) :is(.wb-shell-icon,.contract-mode-icon) { color: var(--wb-accent); }
+.wb-app-root .editor-stream :is(.ui-icon,.wb-shell-icon),
+.wb-app-root .editor-stream .ui-icon > svg {
+  width: var(--wb-editor-icon-size);
+  height: var(--wb-editor-icon-size);
+  min-width: var(--wb-editor-icon-size);
+  flex: 0 0 var(--wb-editor-icon-size);
+  vertical-align: middle;
+}
+.wb-app-root .editor-stream :is(.ui-icon > svg,.wb-shell-icon,.contract-mode-icon) { stroke-width: var(--wb-editor-icon-stroke); }
+.wb-app-root .editor-stream .wb-shell-icon { display: block; }
+.wb-app-root .editor-stream .wb-button > span[aria-hidden=true] { display: inline-flex; align-items: center; }
+.wb-app-root .editor-stream input[type=checkbox] {
+  appearance: none;
+  width: var(--wb-editor-icon-size);
+  height: var(--wb-editor-icon-size);
+  min-width: var(--wb-editor-icon-size);
+  flex: 0 0 var(--wb-editor-icon-size);
+  margin: var(--space-0);
+  padding: var(--space-0);
+  border: 1px solid var(--wb-text-muted);
+  border-radius: var(--wb-radius-sm);
+  background: var(--wb-bg-surface);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 14px 14px;
+  vertical-align: middle;
+  cursor: pointer;
+}
+.wb-app-root .editor-stream input[type=checkbox]:checked {
+  background-color: var(--wb-accent);
+  border-color: var(--wb-accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m3 8 3 3 7-7' fill='none' stroke='white' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+.wb-app-root .editor-stream input[type=checkbox]:indeterminate {
+  background-color: var(--wb-accent);
+  border-color: var(--wb-accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8h8' stroke='white' stroke-width='1.7' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+.wb-app-root .editor-stream input[type=checkbox]:disabled { opacity: .5; cursor: not-allowed; }
+.wb-app-root .editor-stream .switch { min-height: 30px; gap: var(--space-2); }
+@media (forced-colors: active) {
+  .wb-app-root .editor-stream input[type=checkbox] { appearance: auto; background-image: none; }
+}
+.wb-app-root .editor-stream :is(.panel-title,.inline-section-title) { font-family: var(--font-sans); font-size: var(--font-size-lg); font-weight: 600; line-height: 1.5; }
+.wb-app-root .editor-stream .panel-head { gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+.wb-app-root .editor-stream .panel-head > .row { gap: var(--space-1); margin-left: auto; }
+.wb-app-root .editor-stream :is(.row.gap,.text-toolbar,.section-head-actions) { gap: var(--space-2); }
+.wb-app-root .editor-stream .stack { gap: var(--space-2); }
+.wb-app-root .editor-stream :is(.label,.panel-sub,.switch,.muted,.ds-section-card-eyebrow) { font-family: var(--font-sans); font-size: var(--font-size-xs); line-height: 1.5; }
+.wb-app-root .editor-stream :is(button,input,textarea,select) { font-family: var(--font-sans); box-shadow: none; }
+.wb-app-root .editor-stream button { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1); border-radius: var(--wb-radius); font-size: var(--wb-editor-control-font); }
+.wb-app-root .editor-stream :is(button.ghost,button.small,.wb-button,.toolbar-button) { min-height: 34px; padding: var(--space-1) var(--wb-editor-gap); transform: none; }
+.wb-app-root .editor-stream :is(.icon-button,.section-delete-btn,.inline-section-title-edit) { width: 30px; height: 30px; min-height: 30px; padding: var(--space-1); flex-shrink: 0; border-radius: var(--wb-radius-sm); }
+.wb-app-root .editor-stream :is(button,input,textarea,select):focus-visible { outline: 2px solid var(--wb-accent); outline-offset: 2px; }
+.wb-app-root .editor-stream :is(input[type=text],select) { min-height: 34px; padding: var(--wb-editor-input-padding); border-radius: var(--wb-radius); font-size: var(--wb-editor-input-font); }
+.wb-app-root .editor-stream textarea { padding: var(--space-2) var(--wb-editor-gap); border-radius: var(--wb-radius); font-size: var(--wb-editor-input-font); line-height: 1.5; }
+.wb-app-root .editor-stream :is(.source-edit,.field-name-cell,.mono) { font-family: var(--wb-font-mono); font-size: var(--wb-editor-table-font); }
+.wb-app-root .editor-stream > .editor-section > .ds-section-card { border: 0; border-radius: 0; background: transparent; overflow: visible; }
+.wb-app-root .editor-stream > .editor-section > .ds-section-card > .ds-section-card-head { padding: var(--space-0); background: transparent; border: 0; margin-bottom: var(--space-2); }
+.wb-app-root .editor-stream > .editor-section > .ds-section-card > .ds-section-card-body { padding: var(--space-0); }
+.wb-app-root .editor-stream :is(.expander,.source-editor-shell) { border-radius: var(--wb-radius); box-shadow: none; }
+.wb-app-root .editor-stream .expander-summary { padding: var(--space-2) var(--wb-editor-gap); font-size: var(--wb-editor-control-font); }
+.wb-app-root .editor-stream .expander-body { padding: var(--wb-editor-gap); gap: var(--space-2); }
+.wb-app-root .editor-stream :is(.editor-toolbar-shell,.toolbar-group) { padding: var(--space-2); gap: var(--space-2); border-radius: var(--wb-radius); box-shadow: none; }
+.wb-app-root .editor-stream :is(th,td) { padding: var(--space-2) var(--wb-editor-gap); font-size: var(--wb-editor-table-font); line-height: 1.5; }
+.wb-app-root .editor-stream th { background: var(--wb-bg-soft); color: var(--wb-text-soft); }
+.wb-app-root .editor-stream :is(tr:nth-child(odd),tr:nth-child(even)) td { background: var(--wb-bg-surface); }
+.wb-app-root .editor-stream .table-actions { background: var(--wb-bg-soft); }
+.wb-app-root .editor-stream .contract-side {
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius);
+  background: var(--wb-bg-surface);
+}
+.wb-app-root .editor-stream .contract-side-summary {
+  min-height: 52px;
+  padding: var(--space-2) var(--space-10) var(--space-2) var(--wb-editor-gap);
+  background: var(--wb-bg-soft);
+}
+.wb-app-root .editor-stream .contract-side[open] > .contract-side-summary { box-shadow: none; }
+.wb-app-root .editor-stream .contract-side-summary:hover { background: var(--wb-bg-hover); }
+.wb-app-root .editor-stream .contract-side-summary:focus-visible { outline: 2px solid var(--wb-accent); outline-offset: 2px; }
+.wb-app-root .editor-stream .contract-side-summary::after { border-color: var(--wb-text-soft); }
+.wb-app-root .editor-stream .contract-side-body { padding: var(--wb-editor-gap); gap: var(--wb-editor-gap); border-top-color: var(--wb-border); }
+.wb-app-root .editor-stream .contract-side-badge { font-weight: 600; letter-spacing: 0; }
+.wb-app-root .editor-stream .contract-side-title { font-weight: 600; }
+.wb-app-root .editor-stream :is(.contract-side-subsection-title,.contract-mode-label,.contract-mapping-eyebrow) { font-size: var(--wb-editor-label-font); font-weight: 600; letter-spacing: 0; text-transform: none; }
+.wb-app-root .editor-stream .contract-mode-segment { padding: var(--space-1) var(--wb-editor-gap); min-height: 34px; }
+.wb-app-root .editor-stream .notion-text-editor .format-bubble button { height: 30px; min-height: 30px; padding: var(--space-1) var(--space-2); }
+.wb-app-root .editor-stream .wb-table-classic-row { font-size: var(--wb-editor-table-font); }
+.wb-app-root .editor-stream .wb-table-copy-btn { width: 30px; min-height: 30px; padding: var(--space-1); }
+.wb-app-root .editor-stream .section-action-separator { border-top: 1px solid var(--wb-border-soft); margin: var(--space-1) var(--space-0); }
+.wb-app-root .editor-stream .section-action-popover .add-block-option { justify-content: flex-start; text-align: left; }
+.wb-app-root .editor-stream .section-action-popover [role=menuitem]:focus-visible { background: var(--wb-bg-hover); outline-offset: -2px; }
+.wb-app-root .editor-stream .table-actions .table-action-icon { width: auto; }
+.wb-app-root .editor-stream .inline-text-editor-body { padding-left: var(--space-0); }
+.wb-app-root .editor-stream .notion-text-editor .editor-shell { padding-left: var(--wb-editor-line-controls-width); }
+.wb-app-root .editor-stream .notion-text-editor .editor-shell:before { left: 0; width: var(--wb-editor-line-controls-width); }
+.wb-app-root .editor-stream .notion-text-editor .line-handles { left: 0; opacity: .75; }
+.wb-app-root .editor-stream .notion-text-editor .line-handles:hover { opacity: 1; }
+.wb-app-root .editor-stream .notion-text-editor .line-handles .line-plus { width: 20px; height: 24px; min-height: 24px; padding: var(--space-0); }
+.wb-app-root .editor-stream .notion-text-editor .line-handles .line-grip { width: 20px; height: 24px; min-height: 24px; padding: var(--space-0); }
+.wb-app-root .editor-stream .notion-text-editor .inline-text-editor {
+  position: relative;
+  min-height: 40px;
+  padding: var(--space-2) var(--wb-editor-gap);
+  border: 1px solid var(--wb-border-strong);
+  border-radius: var(--wb-radius);
+  background: var(--wb-bg-surface);
+}
+.wb-app-root .editor-stream .notion-text-editor .inline-text-editor:focus { outline: none; box-shadow: none; border-color: var(--wb-accent); }
+.wb-app-root .editor-stream .notion-text-editor[data-empty=true] .inline-text-editor::before {
+  content: 'Введите текст или / для добавления блока…';
+  position: absolute;
+  top: var(--space-2);
+  left: var(--wb-editor-gap);
+  right: var(--wb-editor-gap);
+  color: var(--wb-text-muted);
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wb-app-root .editor-stream .inline-text-editor p { margin: var(--space-0) var(--space-0) var(--space-2); }
+.wb-app-root .editor-stream .inline-text-editor p:last-child { margin-bottom: var(--space-0); }
+.wb-app-root .editor-stream .inline-text-editor h3 { font-family: var(--font-sans); font-size: var(--font-size-lg); line-height: 1.5; margin: var(--space-6) var(--space-0) var(--space-2); }
+.wb-app-root .editor-stream .inline-text-editor h3:first-child { margin-top: var(--space-0); }
+.wb-app-root .editor-stream .inline-text-editor :is(ul,ol) { margin: var(--space-2) var(--space-0); padding-left: var(--space-8); }
+.wb-app-root .editor-stream .inline-text-editor blockquote { margin: var(--space-2) var(--space-0); padding: var(--space-2) var(--wb-editor-gap); border-left-width: 2px; }
+.wb-app-root .editor-stream .text-code-node { margin: var(--space-2) var(--space-0); }
+.wb-app-root .editor-stream .text-code-node pre { padding: var(--space-10) var(--wb-editor-gap) var(--wb-editor-gap); }
+.wb-app-root .editor-stream .text-code-node code { font-family: var(--wb-font-mono); font-size: var(--wb-editor-table-font); line-height: 1.5; background: transparent; }
+.wb-app-root .editor-stream .code-node-tools { height: 24px; top: 4px; }
+.wb-app-root .editor-stream .code-node-tools :is(select,button) { min-height: 24px; padding: var(--space-1); font-size: var(--wb-editor-label-font); }
+.wb-app-root .editor-stream .line-menu :is(input,button) { font-size: var(--wb-editor-control-font); }
+@media(max-width: 620px) {
+  .wb-app-root .editor-stream { --wb-editor-inset: 12px; }
+  .wb-app-root .editor-stream .panel-head > .row { margin-left: 0; }
+}
+@media(hover: none) { .wb-app-root .editor-stream :is(.icon-button,.inline-section-title-edit) { width: 44px; height: 44px; } }

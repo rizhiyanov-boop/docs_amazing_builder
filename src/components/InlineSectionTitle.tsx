@@ -1,3 +1,4 @@
+import { WorkbenchIcon } from './workbench/WorkbenchIcon';
 import { useEffect, useRef, useState } from 'react';
 
 type InlineSectionTitleProps = {
@@ -61,7 +62,7 @@ export function InlineSectionTitle({ value, onCommit }: InlineSectionTitleProps)
       {value}
     </span>
     <button type="button" className="inline-section-title-edit" aria-label="Редактировать название секции" onClick={startEditing}>
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6Z"/><path d="m14 5 5 5"/></svg>
+      <WorkbenchIcon name="edit" />
     </button>
     </span>
   );

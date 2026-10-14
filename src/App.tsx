@@ -4,6 +4,8 @@ import './tokens.css';
 import './tokens-workbench.css';
 import './App.css';
 import './components/workbench/workbench-shell.css';
+import './components/workbench/editor-standard.css';
+import { WorkbenchIcon, type WorkbenchIconName } from './components/workbench/WorkbenchIcon';
 import { parseCurlMeta, parseJsonSchemaToRows, parseToRows, wrapNonDomainResponseJson } from './parsers';
 import { getDiagramExportFileName, getDiagramImageUrl, resolveDiagramEngine } from './diagramUtils';
 import { ERROR_CATALOG_BY_CODE } from './errorCatalog';
@@ -685,6 +687,7 @@ export default function App() {
   const sectionClipboardRef = useRef<SectionClipboardState | null>(null);
   const [hasSectionClipboard, setHasSectionClipboard] = useState(false);
   const [openSectionActionsMenuId, setOpenSectionActionsMenuId] = useState<string | null>(null);
+  const [sectionActionsShowTypes, setSectionActionsShowTypes] = useState(false);
   const [expandedProjectIds, setExpandedProjectIds] = useState<Record<string, true>>({});
   const [expandedMethodId, setExpandedMethodId] = useState<string | null>(() => initialWorkspace.activeMethodId ?? initialWorkspace.methods[0]?.id ?? null);
   const [isSectionPanelPulse, setIsSectionPanelPulse] = useState(false);
@@ -2189,7 +2192,7 @@ export default function App() {
       updatedAt: new Date().toISOString(),
       projectSections: projectSections.filter((section) => section.enabled),
       flows,
-      methods: methods.map((method) => ({ ...method, sections: method.sections.filter((section) => section.enabled) })),
+      methods: methods.map((method) => ({ ...method, sections: method.sections })),
       groups: methodGroups,
       theme,
       detailMode: projectExportDetailMode
@@ -2224,7 +2227,7 @@ export default function App() {
       updatedAt: new Date().toISOString(),
       projectSections: projectSections.filter((section) => section.enabled),
       flows,
-      methods: methods.map((method) => ({ ...method, sections: method.sections.filter((section) => section.enabled) })),
+      methods: methods.map((method) => ({ ...method, sections: method.sections })),
       detailMode: projectExportDetailMode
     });
     projectWikiPreviewCacheRef.current = {
@@ -2483,36 +2486,13 @@ export default function App() {
   }
 
   function renderUiIcon(name: string): ReactNode {
-    if (name === 'import') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 4v10" /><path d="M8 8l4-4 4 4" /><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" /></svg>;
-    if (name === 'download') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 4v10" /><path d="m9 11 3 3 3-3" /></svg>;
-    if (name === 'export') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 20V10" /><path d="M8 16l4 4 4-4" /><path d="M4 9V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v4" /></svg>;
-    if (name === 'undo') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 7 5 11l4 4" /><path d="M6 11h8a5 5 0 0 1 0 10h-2" /></svg>;
-    if (name === 'redo') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15 7l4 4-4 4" /><path d="M18 11h-8a5 5 0 0 0 0 10h2" /></svg>;
-    if (name === 'save') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 4h10l4 4v12H5z" /><path d="M8 4v4h6V4" /><path d="M8 20v-5h8v5" /></svg>;
+    const aliases: Record<string, WorkbenchIconName> = { import: 'import', download: 'export', export: 'export', undo: 'undo', redo: 'redo', save: 'save', add_row: 'plus', format_json: 'json', copy: 'copy', paste_above: 'paste-above', paste_below: 'paste-below', ai_describe: 'ai-describe', ai_map: 'mapping', ai_mask: 'mask', add_method: 'plus', delete_method: 'trash', delete_section: 'trash', add_section: 'plus', search: 'search', settings: 'settings', more: 'more', edit: 'edit', folder: 'folder', sidebar_panel: 'source-panel', chevron_down: 'chevron' };
+    if (aliases[name]) return <WorkbenchIcon name={aliases[name]} />;
     if (name === 'onboarding_nav') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5" cy="12" r="3" /><circle cx="12" cy="12" r="3" /><circle cx="19" cy="12" r="3" /><path d="M4.4 12h1.2" /><path d="M12 11v2" /><path d="M11.2 11h1.6" /><path d="M18.2 11h1.6" /><path d="M18.2 13h1.6" /><path d="M8 12h1" /><path d="M15 12h1" /></svg>;
     if (name === 'theme_moon') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 1 0 9.8 9.8Z" /></svg>;
     if (name === 'theme_sun') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4" /><path d="M12 2v3" /><path d="M12 19v3" /><path d="M2 12h3" /><path d="M19 12h3" /><path d="m4.9 4.9 2.1 2.1" /><path d="m17 17 2.1 2.1" /><path d="m19.1 4.9-2.1 2.1" /><path d="m7 17-2.1 2.1" /></svg>;
-    if (name === 'add_row') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 7v10M7 12h10" /></svg>;
-    if (name === 'format_json') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 5c-2 0-3 1.4-3 3.2V10c0 1.2-.6 2-2 2 1.4 0 2 .8 2 2v1.8C5 17.6 6 19 8 19" /><path d="M16 5c2 0 3 1.4 3 3.2V10c0 1.2.6 2 2 2-1.4 0-2 .8-2 2v1.8c0 1.8-1 3.2-3 3.2" /></svg>;
-    if (name === 'copy') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="9" width="10" height="10" rx="2" /><path d="M7 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1" /></svg>;
-    if (name === 'paste_above') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 17V7" /><path d="m8 11 4-4 4 4" /><path d="M5 20h14" /></svg>;
-    if (name === 'paste_below') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 7v10" /><path d="m8 13 4 4 4-4" /><path d="M5 4h14" /></svg>;
-    if (name === 'ai_describe') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="4" y="4" width="16" height="12" rx="3" /><path d="M8 9h8" /><path d="M12 16v4" /><path d="M8 20h8" /></svg>;
-    if (name === 'ai_map') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="6" cy="12" r="2" /><circle cx="18" cy="7" r="2" /><circle cx="18" cy="17" r="2" /><path d="M8 12h4" /><path d="M12 12l4-5" /><path d="M12 12l4 5" /></svg>;
-    if (name === 'ai_mask') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3 5 6v5c0 4.2 2.6 8.2 7 10 4.4-1.8 7-5.8 7-10V6l-7-3Z" /><path d="M9 12h6" /><path d="M10 9h4" /></svg>;
-    if (name === 'add_method') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 6v12M6 12h12" /></svg>;
-    if (name === 'delete_method') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12h14" /></svg>;
-    if (name === 'delete_section') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 7h14" /><path d="M9 7V5h6v2" /><path d="M8 7l1 12h6l1-12" /></svg>;
-    if (name === 'add_section') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="4" y="4" width="16" height="16" rx="3" /><path d="M12 8v8M8 12h8" /></svg>;
     if (name === 'skip') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 6l8 6-8 6V6Z" /><path d="M14 6l8 6-8 6V6Z" /></svg>;
-    if (name === 'search') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="6" /><path d="M20 20l-4.2-4.2" /></svg>;
-    if (name === 'settings') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3" /><path d="M19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a7 7 0 0 0-1.7-1L14.5 3h-5l-.4 2a7 7 0 0 0-1.7 1L5 5l-2 3.4 2 1.6a7 7 0 0 0 0 2L3 13.6 5 17l2.4-1a7 7 0 0 0 1.7 1l.4 2h5l.4-2a7 7 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6c.1-.3.1-.7.1-1Z" /></svg>;
     if (name === 'user') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="8" r="4" /><path d="M4 20a8 8 0 0 1 16 0" /></svg>;
-    if (name === 'more') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>;
-    if (name === 'edit') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 20h4l10-10-4-4L4 16v4Z" /><path d="m13 7 4 4" /></svg>;
-    if (name === 'folder') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" /></svg>;
-    if (name === 'sidebar_panel') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /></svg>;
-    if (name === 'chevron_down') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6" /></svg>;
     if (name === 'chevron_right') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m9 6 6 6-6 6" /></svg>;
 
     return null;
@@ -2520,129 +2500,68 @@ export default function App() {
 
   function renderSectionActionCluster(section: DocSection, layout: 'sidebar' | 'header' = 'header'): ReactNode {
     const hasClipboardSection = hasSectionClipboard && sectionClipboardRef.current?.type === 'section';
-    const className = layout === 'sidebar' ? 'section-item-actions' : 'section-head-actions';
     const isMenuOpen = openSectionActionsMenuId === section.id;
-
+    const focusItem = (container: HTMLElement, last = false): void => {
+      window.requestAnimationFrame(() => {
+        const items = container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)');
+        items[last ? items.length - 1 : 0]?.focus();
+      });
+    };
+    const closeMenu = (container: HTMLElement, restoreFocus = true): void => {
+      setOpenSectionActionsMenuId(null);
+      setSectionActionsShowTypes(false);
+      if (restoreFocus) container.querySelector<HTMLButtonElement>('.section-action-more-btn')?.focus();
+    };
     return (
-      <div className={className}>
-        <button
-          className="icon-button"
-          type="button"
-          aria-label="Копировать секцию"
-          title="Копировать секцию"
-          onClick={(event) => {
-            event.stopPropagation();
-            copySection(section.id);
-          }}
-        >
+      <div className={layout === 'sidebar' ? 'section-item-actions' : 'section-head-actions'}>
+        <button className="icon-button" type="button" aria-label="Копировать секцию" title="Копировать секцию" onClick={(event) => { event.stopPropagation(); copySection(section.id); }}>
           <span className="ui-icon" aria-hidden>{renderUiIcon('copy')}</span>
         </button>
-        <div className="section-action-menu">
-          <button
-            className="icon-button section-action-more-btn"
-            type="button"
-            aria-label="Дополнительные действия секции"
-            title="Дополнительные действия"
-            aria-expanded={isMenuOpen}
-            onClick={(event) => {
-              event.stopPropagation();
-              setOpenSectionActionsMenuId((current) => (current === section.id ? null : section.id));
+        <div className="section-action-menu" onKeyDown={(event) => {
+          if (!isMenuOpen) return;
+          if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeMenu(event.currentTarget); return; }
+          if (event.key === 'Tab') {
+            const container = event.currentTarget;
+            const trigger = container.querySelector<HTMLButtonElement>('.section-action-more-btn');
+            const controls = Array.from(document.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled):not([type=hidden]),select:not(:disabled),textarea:not(:disabled),a[href],[tabindex="0"]')).filter(node => !node.closest('[hidden],[aria-hidden="true"]') && (!container.contains(node) || node === trigger));
+            const next = controls[controls.indexOf(trigger!) + (event.shiftKey ? -1 : 1)];
+            if (next) { event.preventDefault(); closeMenu(container, false); next.focus(); }
+            else closeMenu(container);
+            return;
+          }
+          if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+          event.preventDefault();
+          const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)'));
+          if (!items.length) return;
+          const current = items.indexOf(document.activeElement as HTMLButtonElement);
+          const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : current < 0 ? (event.key === 'ArrowUp' ? items.length - 1 : 0) : (current + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+          items[next].focus();
+        }}>
+          <button className="icon-button section-action-more-btn" type="button" aria-label="Дополнительные действия секции" title="Дополнительные действия" aria-haspopup="menu" aria-expanded={isMenuOpen}
+            onKeyDown={(event) => {
+              if (isMenuOpen || !['ArrowDown', 'ArrowUp'].includes(event.key)) return;
+              event.preventDefault(); event.stopPropagation();
+              setSectionActionsShowTypes(false); setOpenSectionActionsMenuId(section.id);
+              focusItem(event.currentTarget.parentElement!, event.key === 'ArrowUp');
             }}
-          >
+            onClick={(event) => {
+              event.stopPropagation(); setSectionActionsShowTypes(false);
+              setOpenSectionActionsMenuId((current) => current === section.id ? null : section.id);
+              if (!isMenuOpen && event.detail === 0) focusItem(event.currentTarget.parentElement!);
+            }}>
             <span className="ui-icon" aria-hidden>{renderUiIcon('more')}</span>
           </button>
-          {isMenuOpen && (
-            <div className="add-block-popover section-action-popover" role="menu" aria-label="Действия секции">
-              {hasClipboardSection && (
-                <button
-                  className="add-block-option"
-                  type="button"
-                  role="menuitem"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    pasteSectionRelative(section.id, 'below');
-                    setOpenSectionActionsMenuId(null);
-                  }}
-                >
-                  <span className="add-block-option-title">Вставить копию ниже</span>
-                </button>
-              )}
-              <button
-                className="add-block-option"
-                type="button"
-                role="menuitem"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  addSectionRelative(section.id, 'text', 'below');
-                  setOpenSectionActionsMenuId(null);
-                }}
-              >
-                <span className="add-block-option-title">Добавить текстовый раздел</span>
-              </button>
-              <button
-                className="add-block-option"
-                type="button"
-                role="menuitem"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  addSectionRelative(section.id, 'request', 'below');
-                  setOpenSectionActionsMenuId(null);
-                }}
-              >
-                <span className="add-block-option-title">Добавить Request</span>
-              </button>
-              <button
-                className="add-block-option"
-                type="button"
-                role="menuitem"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  addSectionRelative(section.id, 'response', 'below');
-                  setOpenSectionActionsMenuId(null);
-                }}
-              >
-                <span className="add-block-option-title">Добавить Response</span>
-              </button>
-              <button
-                className="add-block-option"
-                type="button"
-                role="menuitem"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  addSectionRelative(section.id, 'diagram', 'below');
-                  setOpenSectionActionsMenuId(null);
-                }}
-              >
-                <span className="add-block-option-title">Добавить диаграмму</span>
-              </button>
-              <button
-                className="add-block-option"
-                type="button"
-                role="menuitem"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  addSectionRelative(section.id, 'error-logic', 'below');
-                  setOpenSectionActionsMenuId(null);
-                }}
-              >
-                <span className="add-block-option-title">Добавить ошибки</span>
-              </button>
-              <div style={{ borderTop: '1px solid var(--wb-border-soft)', margin: '4px 0' }} />
-              <button
-                className="add-block-option"
-                type="button"
-                role="menuitem"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  requestDeleteSection(section.id);
-                  setOpenSectionActionsMenuId(null);
-                }}
-                style={{ color: 'var(--wb-required)' }}
-              >
-                <span className="add-block-option-title">Удалить раздел</span>
-              </button>
-            </div>
-          )}
+          {isMenuOpen && <div className="add-block-popover section-action-popover" role="menu" aria-label={sectionActionsShowTypes ? 'Добавить раздел ниже' : 'Действия секции'}>
+            {sectionActionsShowTypes ? <>
+              <button className="add-block-option" type="button" role="menuitem" onClick={(event) => { event.stopPropagation(); setSectionActionsShowTypes(false); focusItem(event.currentTarget.closest<HTMLElement>('.section-action-menu')!); }}>Назад к действиям</button>
+              {WORKBENCH_SECTION_OPTIONS.map(option => <button key={option.type} className="add-block-option" type="button" role="menuitem" onClick={(event) => { event.stopPropagation(); addSectionRelative(section.id, option.type, 'below'); closeMenu(event.currentTarget.closest<HTMLElement>('.section-action-menu')!); }}>{option.label}</button>)}
+            </> : <>
+              {hasClipboardSection && <button className="add-block-option" type="button" role="menuitem" onClick={(event) => { event.stopPropagation(); pasteSectionRelative(section.id, 'below'); closeMenu(event.currentTarget.closest<HTMLElement>('.section-action-menu')!); }}>Вставить копию ниже</button>}
+              <button className="add-block-option" type="button" role="menuitem" onClick={(event) => { event.stopPropagation(); setSectionActionsShowTypes(true); focusItem(event.currentTarget.closest<HTMLElement>('.section-action-menu')!); }}>Добавить раздел ниже…</button>
+              <div role="separator" className="section-action-separator" />
+              <button className="add-block-option" type="button" role="menuitem" onClick={(event) => { event.stopPropagation(); requestDeleteSection(section.id); closeMenu(event.currentTarget.closest<HTMLElement>('.section-action-menu')!, false); }} style={{ color: 'var(--wb-danger)' }}>Удалить раздел</button>
+            </>}
+          </div>}
         </div>
       </div>
     );
@@ -3951,7 +3870,7 @@ export default function App() {
     const methodDiagramImageMap: Record<string, string> = {};
     if (detailMode === 'full') {
       for (const method of methods) {
-        const diagramSections = method.sections.filter((section): section is DiagramSection => section.kind === 'diagram' && section.enabled);
+        const diagramSections = method.sections.filter((section): section is DiagramSection => section.kind === 'diagram');
         for (const section of diagramSections) {
           const diagrams = section.diagrams.filter((diagram) => diagram.code.trim());
           for (let index = 0; index < diagrams.length; index += 1) {
@@ -3977,7 +3896,7 @@ export default function App() {
       updatedAt: new Date().toISOString(),
       projectSections: projectSections.filter((section) => section.enabled),
       flows,
-      methods: methods.map((method) => ({ ...method, sections: method.sections.filter((section) => section.enabled) })),
+      methods: methods.map((method) => ({ ...method, sections: method.sections })),
       groups: methodGroups,
       theme,
       detailMode,
@@ -3996,7 +3915,7 @@ export default function App() {
       updatedAt: new Date().toISOString(),
       projectSections: projectSections.filter((section) => section.enabled),
       flows,
-      methods: methods.map((method) => ({ ...method, sections: method.sections.filter((section) => section.enabled) })),
+      methods: methods.map((method) => ({ ...method, sections: method.sections })),
       detailMode: projectExportDetailMode
     });
     downloadText(`${projectSlug}.project${detailSuffix}.documentation.wiki.txt`, wiki);
@@ -5464,7 +5383,7 @@ export default function App() {
               }}
               aria-label="Редактировать поле"
             >
-              ✎
+              <WorkbenchIcon name="edit" />
             </button>
           )}
           {options.onDelete && (
@@ -5482,7 +5401,7 @@ export default function App() {
               }}
               aria-label="Удалить поле"
             >
-              ×
+              <WorkbenchIcon name="trash" />
             </button>
           )}
         </span>
@@ -5558,7 +5477,7 @@ export default function App() {
             }}
             aria-label="Редактировать client поле"
           >
-            ✎
+            <WorkbenchIcon name="edit" />
           </button>
           <button
             className="icon-button danger"
@@ -5574,7 +5493,7 @@ export default function App() {
             }}
             aria-label="Удалить client поле"
           >
-            ×
+            <WorkbenchIcon name="trash" />
           </button>
         </span>
       </div>
@@ -5735,7 +5654,7 @@ export default function App() {
             }}
             aria-label="Редактировать ячейку"
           >
-            ✎
+            <WorkbenchIcon name="edit" />
           </button>
         </span>
       </div>
@@ -5836,7 +5755,7 @@ export default function App() {
                   }}
                   aria-label="Редактировать client поле"
                 >
-                  ✎
+                  <WorkbenchIcon name="edit" />
                 </button>
               )}
               {mappedValue && (
@@ -5859,7 +5778,7 @@ export default function App() {
                     });
                   }}
                 >
-                  ×
+                  <WorkbenchIcon name="close" />
                 </button>
               )}
             </span>
@@ -5917,7 +5836,7 @@ export default function App() {
                 })
               }
             >
-              ×
+              <WorkbenchIcon name="close" />
             </button>
           )}
           <button
@@ -5926,7 +5845,7 @@ export default function App() {
             aria-label="Завершить редактирование маппинга"
             onClick={() => setEditingMappingCell(null)}
           >
-            ✓
+            <WorkbenchIcon name="check" />
           </button>
         </div>
       );
@@ -6370,7 +6289,7 @@ export default function App() {
                                 onClick={() => startHeaderCellEditing(section, row, target, 'description', value)}
                                 aria-label="Редактировать описание"
                               >
-                                ✎
+                                <WorkbenchIcon name="edit" />
                               </button>
                             </span>
                           </div>
@@ -6477,7 +6396,7 @@ export default function App() {
                                 onClick={() => startHeaderCellEditing(section, row, target, 'example', value)}
                                 aria-label="Редактировать пример"
                               >
-                                ✎
+                                <WorkbenchIcon name="edit" />
                               </button>
                             </span>
                           </div>
@@ -6835,14 +6754,14 @@ export default function App() {
             {!isEditing && (
               <>
                 <button className="icon-button" type="button" title="Копировать" aria-label="Копировать" onClick={() => copyToClipboard(value)}>
-                  ⧉
+                  <WorkbenchIcon name="copy" />
                 </button>
                 {format === 'json' && (
                   <button
                     className="icon-button"
                     type="button"
-                    title="Beautify"
-                    aria-label="Beautify"
+                    title="Форматировать JSON"
+                    aria-label="Форматировать JSON"
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() =>
                       updateSection(section.id, (current) => {
@@ -6857,7 +6776,7 @@ export default function App() {
                       })
                     }
                   >
-                    ✨
+                    <WorkbenchIcon name="json" />
                   </button>
                 )}
                 {format === 'json' && (
@@ -6871,7 +6790,7 @@ export default function App() {
                     onClick={() => void fixJsonSyntaxWithAi(section, target)}
                     disabled={!currentValue.trim() || Boolean(aiBusyKey)}
                   >
-                    {fixJsonBusy ? <span className="ai-loader ai-loader-inline" aria-hidden="true" /> : 'AI'}
+                    {fixJsonBusy ? <span className="ai-loader ai-loader-inline" aria-hidden="true" /> : <WorkbenchIcon name="ai-describe" />}
                   </button>
                 )}
                 <button
@@ -6882,7 +6801,7 @@ export default function App() {
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => openSourceTextImport(section, target)}
                 >
-                  ⇣
+                  <WorkbenchIcon name="import" />
                 </button>
                 <button
                   className="icon-button"
@@ -6892,7 +6811,7 @@ export default function App() {
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => startSourceEditing(section, target)}
                 >
-                  ✎
+                  <WorkbenchIcon name="edit" />
                 </button>
               </>
             )}
@@ -6902,12 +6821,12 @@ export default function App() {
                   <button
                     className="icon-button"
                     type="button"
-                    title="Beautify"
-                    aria-label="Beautify"
+                    title="Форматировать JSON"
+                    aria-label="Форматировать JSON"
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={beautifySourceEditing}
                   >
-                    ✨
+                    <WorkbenchIcon name="json" />
                   </button>
                 )}
                 {format === 'json' && (
@@ -6921,28 +6840,28 @@ export default function App() {
                     onClick={() => void fixJsonSyntaxWithAi(section, target)}
                     disabled={!currentValue.trim() || Boolean(aiBusyKey)}
                   >
-                    {fixJsonBusy ? <span className="ai-loader ai-loader-inline" aria-hidden="true" /> : 'AI'}
+                    {fixJsonBusy ? <span className="ai-loader ai-loader-inline" aria-hidden="true" /> : <WorkbenchIcon name="ai-describe" />}
                   </button>
                 )}
                 <button
                   className="icon-button"
                   type="button"
-                  title="Сохранить"
-                  aria-label="Сохранить"
+                  title="Сохранить исходник"
+                  aria-label="Сохранить исходник"
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={saveSourceEditing}
                 >
-                  ✓
+                  <WorkbenchIcon name="save" />
                 </button>
                 <button
-                  className="icon-button danger"
+                  className="icon-button"
                   type="button"
                   title="Отменить"
                   aria-label="Отменить"
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={cancelSourceEditing}
                 >
-                  ✕
+                  <WorkbenchIcon name="close" />
                 </button>
               </>
             )}
@@ -7024,7 +6943,7 @@ export default function App() {
                     setSourceEditorError('');
                   }}
                 >
-                  ✎
+                  <WorkbenchIcon name="edit" />
                 </button>
               )}
               {isSchemaEditing && (
@@ -7045,7 +6964,7 @@ export default function App() {
                       }
                     }}
                   >
-                    ✨
+                    <WorkbenchIcon name="json" />
                   </button>
                   <button
                     className="icon-button"
@@ -7080,10 +6999,10 @@ export default function App() {
                       setToastMessage(persisted ? 'JSON Schema сохранена без парсинга' : 'Не удалось сохранить JSON Schema');
                     }}
                   >
-                    ✓
+                    <WorkbenchIcon name="save" />
                   </button>
                   <button
-                    className="icon-button danger"
+                    className="icon-button"
                     type="button"
                     title="Отменить"
                     aria-label="Отменить"
@@ -7093,7 +7012,7 @@ export default function App() {
                       setSourceEditorError('');
                     }}
                   >
-                    ✕
+                    <WorkbenchIcon name="close" />
                   </button>
                 </>
               )}
@@ -7148,9 +7067,9 @@ export default function App() {
             data-onboarding-anchor={target === 'server' ? 'run-parse' : undefined}
             onClick={() => runParser(section, target)}
             disabled={!currentValue.trim() && !schemaValue.trim()}
-            title="Запустить парсер"
+            title="Построить таблицу из исходника или JSON Schema" aria-label="Построить таблицу"
           >
-            Парсить
+            Построить таблицу
           </button>
         </div>
       </div>
@@ -7210,8 +7129,8 @@ export default function App() {
     return (
       <div className="stack">
         <div className="contract-mode-control">
-          <div className="contract-mode-label">Режим метода</div>
-          <div className="contract-mode-segments" role="group" aria-label="Режим метода">
+          <div className="contract-mode-label">{isRequestSection(section) ? 'Модель запроса' : 'Модель ответа'}</div>
+          <div className="contract-mode-segments" role="group" aria-label={isRequestSection(section) ? 'Модель запроса' : 'Модель ответа'}>
             <button
               className={`contract-mode-segment ${!section.domainModelEnabled ? 'active' : ''}`}
               type="button"
@@ -7343,7 +7262,7 @@ export default function App() {
           <section className="contract-mapping-section">
             <div className="contract-mapping-head">
               <div>
-                <div className="contract-mapping-eyebrow">DOMAIN MODEL</div>
+                <div className="contract-mapping-eyebrow">Domain model</div>
                 <h4 className="contract-mapping-title">Маппинг Client ↔ Server</h4>
               </div>
               <div className="contract-mapping-count">
@@ -8670,29 +8589,10 @@ export default function App() {
                       >
                         <div className="panel-head">
                           <div>
-                            <div className="panel-title">{renderEditableSectionTitle(section)}</div>
+                            <div className="editor-section-heading"><WorkbenchIcon name={section.kind === 'parsed' ? section.sectionType === 'request' ? 'request' : 'response' : section.kind === 'diagram' ? 'diagram' : section.kind === 'errors' ? 'alert' : section.id === 'functional' ? 'check' : 'document'} /><div className="panel-title" role="heading" aria-level={2}>{renderEditableSectionTitle(section)}</div></div>
                           </div>
                           <div className="row gap">
                             {renderSectionActionCluster(section, 'header')}
-                            {isSelectedSection && (
-                              <button
-                                className="icon-button danger section-delete-btn"
-                                type="button"
-                                onClick={() => requestDeleteSection(section.id)}
-                                aria-label="Удалить раздел"
-                                title="Удалить раздел"
-                              >
-                                <span className="ui-icon" aria-hidden>{renderUiIcon('delete_section')}</span>
-                              </button>
-                            )}
-                            <label className="switch">
-                              <input
-                                type="checkbox"
-                                checked={section.enabled}
-                                onChange={(e) => updateSection(section.id, (current) => ({ ...current, enabled: e.target.checked }))}
-                              />
-                              <span>Активна</span>
-                            </label>
                           </div>
                         </div>
 
@@ -8783,8 +8683,8 @@ export default function App() {
                       style={{
                         border: '1px dashed var(--wb-border-strong)',
                         borderRadius: 'var(--wb-radius-lg)',
-                        padding: 18,
-                        minHeight: 100,
+                        padding: 'var(--space-2) var(--wb-editor-gap)',
+                        minHeight: 34,
                         width: '100%',
                         display: 'flex',
                         alignItems: 'center',

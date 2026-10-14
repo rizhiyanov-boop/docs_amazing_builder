@@ -20,7 +20,7 @@ describe('Jira scenario isolation', () => {
     render(<JiraTaskWorkflow {...props} client={client} />);
     fireEvent.click(screen.getByRole('button', { name: 'Свободное описание' }));
     expect(await screen.findByRole('link', { name: 'Подключить Jira локально' })).toHaveAttribute('href', 'http://127.0.0.1:18771/');
-    expect(screen.getByRole('link', { name: 'Скачать локальное приложение 1.3.5' })).toHaveAttribute('download');
+    expect(screen.getByRole('link', { name: 'Скачать локальное приложение 1.3.6' })).toHaveAttribute('download');
     expect(client.create).not.toHaveBeenCalled();
   });
   it('creates a standalone task without a method link and starts a fresh operation only after confirmed success', async () => {

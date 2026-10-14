@@ -49,7 +49,6 @@ function ReadOnlySection({ section }: { section: DocSection }): ReactNode {
     <section className="linked-preview-section">
       <div className="linked-preview-section-head">
         <strong>{title}</strong>
-        <span className={section.enabled ? 'enabled' : ''}>{section.enabled ? 'Активна' : 'Отключена'}</span>
       </div>
       <div className="linked-preview-section-body">
         {section.kind === 'text' && (

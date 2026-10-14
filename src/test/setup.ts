@@ -1,5 +1,17 @@
 import '@testing-library/jest-dom/vitest';
 
+// jsdom lacks Range geometry; ProseMirror reads it when keyboard focus enters text.
+if (!Range.prototype.getBoundingClientRect) {
+  Object.defineProperty(Range.prototype, 'getBoundingClientRect', { value: () => new DOMRect(), configurable: true, writable: true });
+}
+if (!Range.prototype.getClientRects) {
+  Object.defineProperty(Range.prototype, 'getClientRects', {
+    value: () => Object.assign([new DOMRect()], { item: (index: number) => index === 0 ? new DOMRect() : null }),
+    configurable: true,
+    writable: true
+  });
+}
+
 if (!window.matchMedia) {
   Object.defineProperty(window, 'matchMedia', {
     writable: true,

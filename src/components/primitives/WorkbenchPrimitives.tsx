@@ -56,7 +56,7 @@ export function TypeChip({ type }: { type: string }): ReactNode {
       className={`wb-type-chip wb-type-chip-${typeKind}`}
       style={{
         fontFamily: 'var(--wb-font-mono)',
-        fontSize: 11,
+        fontSize: 'var(--wb-editor-label-font, 11px)',
         color: 'var(--wb-text-soft)',
         background: 'var(--wb-bg-soft)',
         border: '1px solid var(--wb-border-soft)',
@@ -73,7 +73,7 @@ export function TypeChip({ type }: { type: string }): ReactNode {
 
 export function ReqDot({ required }: { required: boolean }): ReactNode {
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: required ? 'var(--wb-required)' : 'var(--wb-optional)' }}>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 'var(--wb-editor-label-font, 11px)', color: required ? 'var(--wb-required)' : 'var(--wb-optional)' }}>
       <span style={{ width: 6, height: 6, borderRadius: '50%', background: required ? 'var(--wb-required)' : 'var(--wb-text-muted)' }} />
       {required ? 'обязательное' : 'опциональное'}
     </span>
@@ -105,13 +105,13 @@ export function WBButton({ variant = 'secondary', size = 'md', icon, children, f
     <button
       type="button"
       {...props}
-      className={['wb-button', `wb-button-${variant}`, className].filter(Boolean).join(' ')}
+      className={['wb-button', `wb-button-${variant}`, `wb-button-size-${size}`, className].filter(Boolean).join(' ')}
       style={{
         background: palette.bg,
         color: palette.fg,
         border: `1px solid ${palette.border}`,
         padding: sizing.padding,
-        fontSize: sizing.fontSize,
+        fontSize: `var(--wb-editor-control-font, ${sizing.fontSize}px)`,
         fontWeight: 600,
         borderRadius: 'var(--wb-button-radius)',
         cursor: props.disabled ? 'not-allowed' : 'pointer',
@@ -147,8 +147,8 @@ export function WBInput({ label, error, style, ...props }: WBInputProps): ReactN
           background: 'var(--wb-bg-soft)',
           border: `1px solid ${error ? 'var(--wb-required)' : 'var(--wb-border)'}`,
           borderRadius: 'var(--wb-radius)',
-          padding: '8px 12px',
-          fontSize: 14,
+          padding: 'var(--wb-editor-input-padding, 8px 12px)',
+          fontSize: 'var(--wb-editor-input-font, 14px)',
           color: 'var(--wb-text)',
           fontFamily: 'var(--wb-font-sans)',
           outline: 'none',

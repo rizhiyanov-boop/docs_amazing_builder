@@ -7,6 +7,13 @@ import { makeParsedRow, makeRequestSection, makeResponseSection, makeSectionsFor
 import type { DocSection, MethodDocument, MethodGroup, ProjectSection } from './types';
 
 describe('renderers', () => {
+  it('exports method section contents even when legacy enabled flags are false', () => {
+    const sections = makeSectionsForRender();
+    const legacy = sections.map(section => ({ ...section, enabled: false }));
+    expect(renderHtmlDocument(legacy, 'light', { interactive: false })).toBe(renderHtmlDocument(sections, 'light', { interactive: false }));
+    expect(renderWikiDocument(legacy)).toBe(renderWikiDocument(sections));
+    expect(renderWikiDocument(legacy)).not.toContain('_Не используется_');
+  });
   it('renders html document shell and section data', () => {
     const html = renderHtmlDocument(makeSectionsForRender(), 'light', { interactive: false });
 
@@ -560,7 +567,7 @@ describe('renderers', () => {
     expect(html).toContain('href="#method-group-ungrouped"');
     expect(html).toContain('href="#method-method-c"');
     expect(html.indexOf('href="#method-method-b"')).toBeLessThan(html.indexOf('href="#method-method-a"'));
-    expect(html).not.toContain('Hidden A');
+    expect(html).toContain('Hidden A');
     expect(html).not.toContain('Duplicate Group');
   });
 

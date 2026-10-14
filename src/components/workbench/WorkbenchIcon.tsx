@@ -1,10 +1,14 @@
 import type { ReactNode } from 'react';
+import { EDITOR_ICON_SHAPES, type EditorIconName } from './EditorIconShapes';
 
-export type WorkbenchIconName = 'document' | 'search' | 'command' | 'menu' | 'export' | 'chevron' | 'json' | 'html' | 'wiki' | 'confluence' | 'undo' | 'redo' | 'more' | 'check' | 'alert' | 'spinner' | 'plus' | 'edit' | 'trash' | 'diagram';
+export type WorkbenchIconName = 'document' | 'search' | 'command' | 'menu' | 'export' | 'chevron' | 'json' | 'html' | 'wiki' | 'confluence' | 'undo' | 'redo' | 'more' | 'check' | 'alert' | 'spinner' | 'plus' | 'edit' | 'trash' | 'diagram' | 'close' | 'highlight' | EditorIconName;
 
 export function WorkbenchIcon({ name }: { name: WorkbenchIconName }): ReactNode {
   if (name === 'confluence') return <svg className="wb-shell-icon" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor" stroke="none"><path d="M3 17c2-4 4-6 7-6 3 0 5 3 11 6l-3 5c-5-3-7-6-9-6-1 0-2 1-3 3zM21 7c-2 4-4 6-7 6-3 0-5-3-11-6l3-5c5 3 7 6 9 6 1 0 2-1 3-3z" /></svg>;
   const shapes: Record<Exclude<WorkbenchIconName, 'confluence'>, ReactNode> = {
+    ...EDITOR_ICON_SHAPES,
+    close: <path d="m6 6 12 12M18 6 6 18" />,
+    highlight: <><path d="m14 3 7 7-9 9H5v-7l9-9ZM11 6l7 7M3 21h12" /></>,
     document: <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6M8 13h8M8 17h5" />,
     search: <><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4.5 4.5" /></>,
     command: <path d="M9 7V4.5A2.5 2.5 0 1 0 6.5 7H17.5A2.5 2.5 0 1 0 15 4.5V19.5A2.5 2.5 0 1 0 17.5 17H6.5A2.5 2.5 0 1 0 9 19.5Z" />,

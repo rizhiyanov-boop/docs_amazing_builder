@@ -20,41 +20,41 @@ Do not hardcode spacing, font-size, or radii in component rules when an existing
 ## Typography
 
 - `--font-sans`: base UI font stack
-- `--font-size-2xs`: 9px
+- `--font-size-2xs`: 12px
 - `--font-size-xs`: 12px
-- `--font-size-sm`: 13px
+- `--font-size-sm`: 12px
 - `--font-size-md`: 14px
-- `--font-size-lg`: 15px
+- `--font-size-lg`: 16px
 - `--font-size-xl`: 16px
-- `--font-size-2xl`: 17px
-- `--font-size-3xl`: 20px
+- `--font-size-2xl`: 20px
+- `--font-size-3xl`: 24px
 - `--line-height-base`: base text line height
 
 ## Spacing
 
 - `--space-0`: 0
-- `--space-0-5`: 2px
+- `--space-0-5`: 4px
 - `--space-1`: 4px
-- `--space-1-5`: 6px
+- `--space-1-5`: 8px
 - `--space-2`: 8px
-- `--space-2-25`: 9px
-- `--space-3`: 10px
-- `--space-4`: 12px
-- `--space-5`: 14px
-- `--space-5-5`: 22px
+- `--space-2-25`: 8px
+- `--space-3`: 8px
+- `--space-4`: 16px
+- `--space-5`: 16px
+- `--space-5-5`: 24px
 - `--space-6`: 16px
-- `--space-7`: 20px
+- `--space-7`: 24px
 - `--space-8`: 24px
-- `--space-10`: 40px
-- `--space-neg-0-5`: -2px
+- `--space-10`: 32px
+- `--space-neg-0-5`: -4px
 
 ## Radius
 
-- `--radius-2xs`: 6px
+- `--radius-2xs`: 4px
 - `--radius-xs`: 8px
-- `--radius-sm`: 10px
-- `--radius-md`: 12px
-- `--radius-lg`: 14px
+- `--radius-sm`: 8px
+- `--radius-md`: 8px
+- `--radius-lg`: 12px
 - `--radius-pill`: 999px
 
 ## Semantic Colors
@@ -73,3 +73,5 @@ Do not hardcode spacing, font-size, or radii in component rules when an existing
 - If a one-off value appears multiple times, add a new token.
 - Keep token names semantic and stable to avoid large refactors.
 - Theme toggling should only override token values (or color-scheme), not component structure.
+
+The method editor consumes editor-standard.css after workbench-shell.css. Its UI font is Inter, matching the sidebar; technical content uses JetBrains Mono. Editor controls/table text use 13px and labels use 12px. Section inset is 16px, nested group inset is 12px. Ordinary icons use wb-text-soft, selected states use wb-accent, and destructive actions use wb-danger. Tables and contract panels use neutral Workbench surfaces; Client/Server color is limited to badges.

@@ -4,6 +4,7 @@ import StarterKit from '@tiptap/starter-kit';
 import Highlight from '@tiptap/extension-highlight';
 import { editorHtmlToWikiText, richTextToHtml } from '../richText';
 import './InlineTextSectionEditor.css';
+import { WorkbenchIcon, type WorkbenchIconName } from './workbench/WorkbenchIcon';
 
 const items = [
   { label: 'Текст', hint: 'Обычный абзац', type: 'paragraph' },
@@ -19,12 +20,12 @@ function CodeView({ node, updateAttributes }: NodeViewProps) {
   return <NodeViewWrapper className={`text-code-node ${node.attrs.wrap ? 'wrapped' : ''}`}>
     <div className="code-node-tools" contentEditable={false}>
       <select aria-label="Язык блока кода" value={node.attrs.language || 'text'} onChange={event => updateAttributes({ language: event.target.value })}>{['auto', 'text', 'json', 'xml', 'sql', 'javascript'].map(language => <option key={language}>{language}</option>)}</select>
-      <div className="code-node-actions"><button aria-label="Перенос строк кода" aria-pressed={Boolean(node.attrs.wrap)} onClick={() => updateAttributes({ wrap: !node.attrs.wrap })}>Перенос</button><button onClick={async () => { try { await navigator.clipboard.writeText(node.textContent); setCopied(true); } catch { setCopied(false); } }}>{copied ? 'Скопировано' : 'Копировать'}</button></div>
+      <div className="code-node-actions"><button aria-label="Перенос строк кода" aria-pressed={Boolean(node.attrs.wrap)} onClick={() => updateAttributes({ wrap: !node.attrs.wrap })}><WorkbenchIcon name="wrap-code" /> Перенос</button><button onClick={async () => { try { await navigator.clipboard.writeText(node.textContent); setCopied(true); } catch { setCopied(false); } }}>{copied ? 'Скопировано' : 'Копировать'}</button></div>
     </div>
     <pre><code><NodeViewContent /></code></pre>
   </NodeViewWrapper>;
 }
-const DemoStarterKit = StarterKit.extend({
+const TextSectionStarterKit = StarterKit.extend({
   addExtensions() {
     return (this.parent?.() || []).map(extension => extension.name === 'codeBlock' ? extension.extend({
       addAttributes() { return { language: { default: 'auto', parseHTML: (element: HTMLElement) => element.getAttribute('data-code-language') || element.querySelector('code')?.className.match(/language-([\w-]+)/)?.[1] || 'auto', renderHTML: (attributes: Record<string, unknown>) => ({ 'data-code-language': String(attributes.language) }) }, wrap: { default: false, parseHTML: (element: HTMLElement) => element.getAttribute('data-wrap') === 'true', renderHTML: (attributes: Record<string, unknown>) => ({ 'data-wrap': String(attributes.wrap) }) } }; },
@@ -54,7 +55,7 @@ export function InlineTextSectionEditor({ sectionId, value, onChange, onFocus }:
   const slashFrom = useRef<number | undefined>(undefined);
   const keyboard = useRef<(event: KeyboardEvent) => boolean>(() => false);
   const editor = useEditor({
-    extensions: [DemoStarterKit.configure({ heading: { levels: [3] }, codeBlock: { HTMLAttributes: { 'data-rich-code-block': '1' } } }), Highlight.configure({ multicolor: true })],
+    extensions: [TextSectionStarterKit.configure({ heading: { levels: [3] }, codeBlock: { HTMLAttributes: { 'data-rich-code-block': '1' } } }), Highlight.configure({ multicolor: true })],
     content: value.trim() ? richTextToHtml(value, { editable: true }) : '<p></p>',
     onFocus,
     onBlur: () => setBubble(undefined),
@@ -87,6 +88,7 @@ export function InlineTextSectionEditor({ sectionId, value, onChange, onFocus }:
     lastValue.current = value;
   }, [editor, value]);
   const state = useEditorState({ editor, selector: ({ editor: current }) => ({ bold: current?.isActive('bold'), italic: current?.isActive('italic'), code: current?.isActive('code'), codeBlock: current?.isActive('codeBlock'), language: current?.getAttributes('codeBlock').language || 'text' }) });
+  const typeIcons: Record<string, WorkbenchIconName> = { paragraph: 'text', heading: 'heading', bulletList: 'list-bullet', orderedList: 'list-number', blockquote: 'quote', codeBlock: 'html' };
   const filtered = items.filter(item => `${item.label} ${item.hint}`.toLowerCase().includes(query.toLowerCase()));
   function closeMenu() { setMenu(false); slashFrom.current = undefined; insertion.current = undefined; targetBlock.current = undefined; setQuery(''); }
   useEffect(() => {
@@ -175,7 +177,8 @@ export function InlineTextSectionEditor({ sectionId, value, onChange, onFocus }:
     const shellTop = shell.current?.getBoundingClientRect().top ?? 0;
     setMenuTop(window.innerHeight - shellTop - row.top - 28 < 360 ? Math.max(12 - shellTop, row.top - 388) : row.top); setMenu(true);
   }
-  return <div className="notion-text-editor inline-text-editor-shell" data-section-id={sectionId}>
+  const emptyParagraph = editor?.state.doc.childCount === 1 && editor.state.doc.firstChild?.type.name === 'paragraph' && editor.state.doc.firstChild.content.size === 0;
+  return <div className="notion-text-editor inline-text-editor-shell" data-section-id={sectionId} data-empty={emptyParagraph}>
     <div className="editor-shell inline-text-editor-body" ref={shell} onMouseLeave={() => { if (!menu) setRow(undefined); }} onMouseMove={event => {
       if (!editor || menu || !shell.current) return;
       const blocks = Array.from(editor.view.dom.children) as HTMLElement[];
@@ -187,11 +190,11 @@ export function InlineTextSectionEditor({ sectionId, value, onChange, onFocus }:
       const node = editor.state.doc.nodeAt(before);
       if (node) setRow({ top: block.getBoundingClientRect().top - shell.current.getBoundingClientRect().top, start: before, end: before + node.nodeSize, empty: node.type.name === 'paragraph' && node.content.size === 0 });
     }} onKeyDown={event => { if (event.key === 'Escape') { setBubble(undefined); closeMenu(); } }}>
-    {row && <div className="line-handles" style={{ top: row.top }}><button className="line-plus" aria-label="Добавить блок у строки" aria-expanded={menu && menuMode === 'add'} onMouseDown={event => event.preventDefault()} onClick={() => openRowMenu('add')}>＋</button><button className="line-grip" aria-label="Сменить тип блока" aria-expanded={menu && menuMode === 'convert'} onMouseDown={event => event.preventDefault()} onClick={() => openRowMenu('convert')}>⋮⋮</button></div>}
+    {row && <div className="line-handles" style={{ top: row.top }}><button className="line-plus" aria-label="Добавить блок у строки" aria-expanded={menu && menuMode === 'add'} onMouseDown={event => event.preventDefault()} onClick={() => openRowMenu('add')}><WorkbenchIcon name="plus" /></button><button className="line-grip" aria-label="Сменить тип блока" aria-expanded={menu && menuMode === 'convert'} onMouseDown={event => event.preventDefault()} onClick={() => openRowMenu('convert')}><WorkbenchIcon name="block-type" /></button></div>}
     {menu && <div ref={menuRef} className="block-menu line-menu" style={{ top: menuTop + 28 }} role="dialog" aria-label={menuMode === 'add' ? 'Добавить блок' : 'Действия блока'}>
-      <input autoFocus aria-label="Поиск типа блока" placeholder="Найти блок…" value={query} onChange={event => { setQuery(event.target.value); setSelected(0); }} onKeyDown={event => { if (keyboard.current(event.nativeEvent)) event.preventDefault(); }} /><div className="menu-caption">{menuMode === 'convert' ? `СМЕНИТЬ ТИП · БЛОКОВ: ${targetCount}` : 'ДОБАВИТЬ БЛОК'}</div><div role="menu">{filtered.map((item, index) => <button key={item.type} role="menuitem" className={selected === index ? 'chosen' : ''} onMouseDown={event => event.preventDefault()} onClick={() => choose(item.type)}><span className="block-glyph">{['paragraph','heading'].includes(item.type) ? 'T' : item.type === 'codeBlock' ? '</>' : item.type === 'blockquote' ? '❝' : '☷'}</span><span><strong>{item.label}</strong><small>{item.hint}</small></span></button>)}{!filtered.length && <p>Нет подходящих блоков</p>}</div>
+      <input autoFocus aria-label="Поиск типа блока" placeholder="Найти блок…" value={query} onChange={event => { setQuery(event.target.value); setSelected(0); }} onKeyDown={event => { if (keyboard.current(event.nativeEvent)) event.preventDefault(); }} /><div className="menu-caption">{menuMode === 'convert' ? `СМЕНИТЬ ТИП · БЛОКОВ: ${targetCount}` : 'ДОБАВИТЬ БЛОК'}</div><div role="menu">{filtered.map((item, index) => <button key={item.type} role="menuitem" className={selected === index ? 'chosen' : ''} onMouseDown={event => event.preventDefault()} onClick={() => choose(item.type)}><span className="block-glyph"><WorkbenchIcon name={typeIcons[item.type]} /></span><span><strong>{item.label}</strong><small>{item.hint}</small></span></button>)}{!filtered.length && <p>Нет подходящих блоков</p>}</div>
     </div>}
-    {bubble && <div className="format-bubble" role="toolbar" aria-label="Форматирование" style={{ left: bubble.x, top: bubble.y }}><button aria-label={INLINE_TEXT_FORMAT_LABELS[0]} aria-pressed={Boolean(state?.bold)} onMouseDown={event => event.preventDefault()} onClick={() => editor?.chain().focus().toggleBold().run()}><b>B</b></button><button aria-label={INLINE_TEXT_FORMAT_LABELS[1]} aria-pressed={Boolean(state?.italic)} onMouseDown={event => event.preventDefault()} onClick={() => editor?.chain().focus().toggleItalic().run()}><i>I</i></button><button aria-label={INLINE_TEXT_FORMAT_LABELS[2]} aria-pressed={Boolean(state?.code)} onMouseDown={event => event.preventDefault()} onClick={() => editor?.chain().focus().toggleCode().run()}>&lt;/&gt;</button></div>}<EditorContent editor={editor} /></div>
+    {bubble && <div className="format-bubble" role="toolbar" aria-label="Форматирование" style={{ left: bubble.x, top: bubble.y }}><button aria-label={INLINE_TEXT_FORMAT_LABELS[0]} aria-pressed={Boolean(state?.bold)} onMouseDown={event => event.preventDefault()} onClick={() => editor?.chain().focus().toggleBold().run()}><WorkbenchIcon name="bold" /></button><button aria-label={INLINE_TEXT_FORMAT_LABELS[1]} aria-pressed={Boolean(state?.italic)} onMouseDown={event => event.preventDefault()} onClick={() => editor?.chain().focus().toggleItalic().run()}><WorkbenchIcon name="italic" /></button><button aria-label={INLINE_TEXT_FORMAT_LABELS[2]} aria-pressed={Boolean(state?.code)} onMouseDown={event => event.preventDefault()} onClick={() => editor?.chain().focus().toggleCode().run()}><WorkbenchIcon name="html" /></button></div>}<EditorContent editor={editor} /></div>
 
   </div>;
 }

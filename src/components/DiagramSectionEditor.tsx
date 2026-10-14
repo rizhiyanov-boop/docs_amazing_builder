@@ -1,4 +1,6 @@
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
+import { WBButton } from './primitives/WorkbenchPrimitives';
+import { WorkbenchIcon } from './workbench/WorkbenchIcon';
 import { getPlantUmlImageUrl, resolveDiagramEngine } from '../diagramUtils';
 import type { DiagramItem, DiagramSection } from '../types';
 import { MermaidLivePreview } from './MermaidLivePreview';
@@ -43,9 +45,7 @@ export function DiagramSectionEditor({
   return (
     <div className="stack">
       <div className="row gap">
-        <button className="ghost small" type="button" onClick={() => onAddDiagram(section.id)}>
-          + Диаграмма
-        </button>
+        <WBButton variant="ghost" size="sm" aria-label="+ Диаграмма" icon={<WorkbenchIcon name="plus" />} onClick={() => onAddDiagram(section.id)}>Диаграмма</WBButton>
       </div>
 
       {section.diagrams.map((diagram, index) => {
@@ -127,7 +127,7 @@ export function DiagramSectionEditor({
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'bold')}
                     >
-                      <span className="toolbar-icon toolbar-icon-bold">B</span>
+                      <WorkbenchIcon name="bold" />
                     </button>
                     <button
                       className="ghost small toolbar-button"
@@ -137,7 +137,7 @@ export function DiagramSectionEditor({
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'code')}
                     >
-                      <span className="toolbar-icon">&lt;/&gt;</span>
+                      <WorkbenchIcon name="html" />
                     </button>
                     <button
                       className="ghost small toolbar-button"
@@ -151,7 +151,7 @@ export function DiagramSectionEditor({
                       }}
                       onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'highlight', { color: defaultRichTextHighlight })}
                     >
-                      <span className="toolbar-icon">🖍</span>
+                      <WorkbenchIcon name="highlight" />
                     </button>
                   </div>
                   <div className="toolbar-group" aria-label="Структура текста">
@@ -163,10 +163,7 @@ export function DiagramSectionEditor({
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'h3')}
                     >
-                      <span className="toolbar-heading-glyph" aria-hidden="true">
-                        <span className="toolbar-heading-main">T</span>
-                        <span className="toolbar-heading-level">3</span>
-                      </span>
+                      <WorkbenchIcon name="heading" />
                     </button>
                     <button
                       className="ghost small toolbar-button"
@@ -176,7 +173,7 @@ export function DiagramSectionEditor({
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'quote')}
                     >
-                      <span className="toolbar-icon">❝</span>
+                      <WorkbenchIcon name="quote" />
                     </button>
                   </div>
                   <div className="toolbar-group" aria-label="Списки">
@@ -188,7 +185,7 @@ export function DiagramSectionEditor({
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'ul')}
                     >
-                      <span className="toolbar-icon">•</span>
+                      <WorkbenchIcon name="list-bullet" />
                     </button>
                     <button
                       className="ghost small toolbar-button"
@@ -198,7 +195,7 @@ export function DiagramSectionEditor({
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={() => applyDiagramTextCommand(section.id, diagram.id, 'ol')}
                     >
-                      <span className="toolbar-icon">1.</span>
+                      <WorkbenchIcon name="list-number" />
                     </button>
                   </div>
                 </div>
@@ -228,9 +225,7 @@ export function DiagramSectionEditor({
               </div>
 
               <div className="row gap">
-                <button className="ghost small" type="button" onClick={() => onDeleteDiagram(section.id, diagram.id)}>
-                  Удалить диаграмму
-                </button>
+                <WBButton variant="danger" size="sm" icon={<WorkbenchIcon name="trash" />} onClick={() => onDeleteDiagram(section.id, diagram.id)}>Удалить диаграмму</WBButton>
               </div>
             </div>
           </details>

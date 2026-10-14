@@ -71,7 +71,7 @@ export function sanitizeSections(sections: DocSection[]): DocSection[] {
   return sections
     .filter((section) => section.id !== 'external-url')
     .map((rawSection) => {
-    const section = { ...rawSection, enabled: rawSection.enabled ?? true };
+    const section = { ...rawSection, enabled: true };
     if (section.kind === 'errors') {
       return {
         ...section,

@@ -25,6 +25,19 @@ function workspace(): WorkspaceProjectData {
 }
 
 describe('project import preparation', () => {
+  it('normalizes legacy disabled method sections without changing row or project controls', () => {
+    const original = workspace();
+    const section = original.methods[0].sections[0];
+    section.enabled = false;
+    if (section.kind === 'parsed') section.rows[0].enabled = false;
+    original.projectSections![0].enabled = false;
+    const result = parseProjectImportText(JSON.stringify(original), 'legacy.json');
+    expect(result.kind).toBe('workspace');
+    if (result.kind !== 'workspace') return;
+    expect(result.workspace.methods[0].sections[0].enabled).toBe(true);
+    expect(result.workspace.methods[0].sections[0]).toMatchObject({ rows: [{ enabled: false }], clientMappings: { id: 'externalId' } });
+    expect(result.workspace.projectSections![0].enabled).toBe(false);
+  });
   it('keeps canonical rows, mappings and project content without reparsing source', () => {
     const original = workspace();
     const result = parseProjectImportText(JSON.stringify(original), 'project.json');

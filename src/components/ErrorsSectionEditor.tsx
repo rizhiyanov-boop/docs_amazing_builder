@@ -179,8 +179,8 @@ export function ErrorsSectionEditor({
                         onChange={(e) => updateErrorRow(section.id, index, (current) => ({ ...current, clientResponseCode: e.target.value }))}
                         placeholder="Код client response для WIKI (JSON)"
                       />
-                      <button className="ghost small" type="button" onClick={() => formatClientResponseCode(section.id, index)}>
-                        Форматировать JSON
+                      <button className="ghost small table-action-icon" type="button" onClick={() => formatClientResponseCode(section.id, index)} aria-label="Форматировать JSON" title="Форматировать JSON">
+                        <span className="ui-icon" aria-hidden>{renderUiIcon('format_json')}</span>
                       </button>
                       {clientResponseError && <div className="inline-error">{clientResponseError}</div>}
                     </div>
@@ -291,7 +291,7 @@ export function ErrorsSectionEditor({
                             setHighlightedInternalCodeIndex(0);
                           }}
                         >
-                          ▾
+                          {renderUiIcon('chevron_down')}
                         </button>
                       </div>
                       {isInternalCodeOpen && internalCodePopoverState && createPortal(
@@ -347,7 +347,7 @@ export function ErrorsSectionEditor({
                   </td>
                   <td>
                     <button className="icon-button danger" type="button" onClick={() => deleteErrorRow(section.id, index)} aria-label="Удалить строку">
-                      ×
+                      {renderUiIcon('delete_section')}
                     </button>
                   </td>
                 </tr>
@@ -358,6 +358,7 @@ export function ErrorsSectionEditor({
         <div className="table-actions">
           <button className="ghost small table-action-icon" type="button" onClick={() => addErrorRow(section.id)} aria-label="Добавить строку ошибки" title="Добавить строку ошибки">
             <span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>
+            Ошибка
           </button>
         </div>
       </div>
@@ -420,7 +421,7 @@ export function ErrorsSectionEditor({
                     onClick={() => deleteValidationRuleRow(section.id, index)}
                     aria-label="Удалить правило валидации"
                   >
-                    ×
+                    {renderUiIcon('delete_section')}
                   </button>
                 </td>
               </tr>
@@ -438,6 +439,7 @@ export function ErrorsSectionEditor({
           </button>
           <button className="ghost small table-action-icon" type="button" onClick={() => addValidationRuleRow(section.id)} aria-label="Добавить правило валидации" title="Добавить правило валидации">
             <span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>
+            Правило
           </button>
         </div>
       </div>

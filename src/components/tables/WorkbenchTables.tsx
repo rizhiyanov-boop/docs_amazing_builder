@@ -1,6 +1,7 @@
 import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { ParsedRow } from '../../types';
 import { ReqDot, TypeChip } from '../primitives/WorkbenchPrimitives';
+import { WorkbenchIcon } from '../workbench/WorkbenchIcon';
 import { isRequired } from './WorkbenchTables.utils';
 
 const ROW_TYPES = [
@@ -130,7 +131,7 @@ function FieldInput({ row, onUpdateRow }: { row: ParsedRow; onUpdateRow?: (row: 
         borderRadius: 5,
         padding: '4px 6px',
         fontFamily: 'var(--wb-font-mono)',
-        fontSize: 12.5,
+        fontSize: 'var(--wb-editor-table-font, 13px)',
         fontWeight: 600
       }}
     />
@@ -171,7 +172,7 @@ function DescriptionInput({
         borderRadius: 5,
         padding: '4px 6px',
         fontFamily: 'var(--wb-font-sans)',
-        fontSize: 12.5,
+        fontSize: 'var(--wb-editor-table-font, 13px)',
         lineHeight: 1.45
       }}
     />
@@ -192,7 +193,7 @@ function TypeSelect({ row, onUpdateRow }: { row: ParsedRow; onUpdateRow?: (row: 
       data-table-row-key={row.id ?? row.sourceField ?? row.field}
       style={{
         fontFamily: 'var(--wb-font-mono)',
-        fontSize: 11,
+        fontSize: 'var(--wb-editor-label-font, 11px)',
         color: 'var(--wb-text-soft)',
         background: 'var(--wb-bg-soft)',
         border: '1px solid var(--wb-border-soft)',
@@ -254,7 +255,7 @@ function AddRowInline({ onAdd }: { onAdd?: (fieldName?: string, fieldType?: stri
         data-table-focusable="true"
         style={{
           fontFamily: 'var(--wb-font-mono)',
-          fontSize: 12.5,
+          fontSize: 'var(--wb-editor-table-font, 13px)',
           border: '1px solid var(--wb-border)',
           background: 'var(--wb-bg-surface)',
           color: 'var(--wb-text)',
@@ -273,7 +274,7 @@ function AddRowInline({ onAdd }: { onAdd?: (fieldName?: string, fieldType?: stri
         data-table-focusable="true"
         style={{
           fontFamily: 'var(--wb-font-mono)',
-          fontSize: 11,
+          fontSize: 'var(--wb-editor-label-font, 11px)',
           border: '1px solid var(--wb-border-soft)',
           background: 'var(--wb-bg-soft)',
           color: 'var(--wb-text-soft)',
@@ -300,7 +301,7 @@ function AddRowInline({ onAdd }: { onAdd?: (fieldName?: string, fieldType?: stri
           border: 0,
           borderRadius: 4,
           padding: '3px 10px',
-          fontSize: 12,
+          fontSize: 'var(--wb-editor-label-font, 12px)',
           cursor: 'pointer',
           opacity: field.trim() ? 1 : 0.4
         }}
@@ -316,7 +317,7 @@ function GroupHeader({ prefix, withTopGap }: { prefix: string; withTopGap?: bool
     <div
       style={{
         padding: '4px 10px',
-        fontSize: 10,
+        fontSize: 'var(--wb-editor-label-font, 10px)',
         fontWeight: 600,
         color: 'var(--wb-text-muted)',
         letterSpacing: '0.08em',
@@ -357,7 +358,7 @@ export function TableClassic({ rows, onUpdateRow, onAddRow, onRowMenu, editable 
                 {editable ? (
                   <FieldInput row={row} onUpdateRow={onUpdateRow} />
                 ) : (
-                  <code style={{ fontFamily: 'var(--wb-font-mono)', fontSize: 12.5, fontWeight: 500, color: 'var(--wb-text)', overflowWrap: 'anywhere' }}>
+                  <code style={{ fontFamily: 'var(--wb-font-mono)', fontSize: 'var(--wb-editor-table-font, 13px)', fontWeight: 500, color: 'var(--wb-text)', overflowWrap: 'anywhere' }}>
                     {row.field || row.sourceField || 'field'}
                   </code>
                 )}
@@ -367,10 +368,10 @@ export function TableClassic({ rows, onUpdateRow, onAddRow, onRowMenu, editable 
               {editable ? (
                 <DescriptionInput row={row} onUpdateRow={onUpdateRow} />
               ) : (
-                <div style={{ fontSize: 12.5, lineHeight: 1.45, color: row.description ? 'var(--wb-text-soft)' : 'var(--wb-text-muted)' }}>
+                <div style={{ fontSize: 'var(--wb-editor-table-font, 13px)', lineHeight: 1.45, color: row.description ? 'var(--wb-text-soft)' : 'var(--wb-text-muted)' }}>
                   {row.description || 'Описание не заполнено'}
                   {row.example && (
-                    <code style={{ display: 'block', marginTop: 6, fontFamily: 'var(--wb-font-mono)', fontSize: 11.5, color: 'var(--wb-text)', overflowWrap: 'anywhere' }}>
+                    <code style={{ display: 'block', marginTop: 6, fontFamily: 'var(--wb-font-mono)', fontSize: 'var(--wb-editor-label-font, 12px)', color: 'var(--wb-text)', overflowWrap: 'anywhere' }}>
                       {row.example}
                     </code>
                   )}
@@ -383,7 +384,7 @@ export function TableClassic({ rows, onUpdateRow, onAddRow, onRowMenu, editable 
                 title={row.example ? 'Скопировать пример' : 'Скопировать строку'}
                 aria-label={row.example ? 'Скопировать пример' : 'Скопировать строку'}
               >
-                ⧉
+                <WorkbenchIcon name="copy" />
               </button>
               {onRowMenu && (
                 <button
@@ -393,7 +394,7 @@ export function TableClassic({ rows, onUpdateRow, onAddRow, onRowMenu, editable 
                   aria-label="Меню строки"
                   style={{ border: 0, background: 'transparent', color: 'var(--wb-text-muted)', cursor: 'pointer', fontSize: 16 }}
                 >
-                  ⋯
+                  <WorkbenchIcon name="more" />
                 </button>
               )}
             </div>
@@ -443,7 +444,7 @@ export function TableGallery({ rows, onUpdateRow, onAddRow, editable = false }: 
                   title={row.example ? 'Скопировать пример' : 'Скопировать строку'}
                   aria-label={row.example ? 'Скопировать пример' : 'Скопировать строку'}
                 >
-                  ⧉
+                  <WorkbenchIcon name="copy" />
                 </button>
               </div>
               {editable ? (
@@ -454,7 +455,7 @@ export function TableGallery({ rows, onUpdateRow, onAddRow, editable = false }: 
                 <div style={{ marginTop: 6, fontSize: 13, lineHeight: 1.5, color: 'var(--wb-text-soft)' }}>
                   {row.description || 'Описание не заполнено'}
                   {row.example && (
-                    <code style={{ display: 'block', marginTop: 6, fontFamily: 'var(--wb-font-mono)', fontSize: 11.5, color: 'var(--wb-text)', overflowWrap: 'anywhere' }}>
+                    <code style={{ display: 'block', marginTop: 6, fontFamily: 'var(--wb-font-mono)', fontSize: 'var(--wb-editor-label-font, 12px)', color: 'var(--wb-text)', overflowWrap: 'anywhere' }}>
                       {row.example}
                     </code>
                   )}
@@ -486,7 +487,7 @@ export function TableMiniCards({ rows, onUpdateRow, onAddRow, editable = false }
           {editable ? (
             <FieldInput row={row} onUpdateRow={onUpdateRow} />
           ) : (
-            <code style={{ display: 'block', fontFamily: 'var(--wb-font-mono)', fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>{row.field || row.sourceField || 'field'}</code>
+            <code style={{ display: 'block', fontFamily: 'var(--wb-font-mono)', fontSize: 'var(--wb-editor-table-font, 13px)', fontWeight: 600, marginBottom: 6 }}>{row.field || row.sourceField || 'field'}</code>
           )}
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '6px 0' }}>
             <TypeSelect row={row} onUpdateRow={onUpdateRow} />
@@ -498,16 +499,16 @@ export function TableMiniCards({ rows, onUpdateRow, onAddRow, editable = false }
               title={row.example ? 'Скопировать пример' : 'Скопировать строку'}
               aria-label={row.example ? 'Скопировать пример' : 'Скопировать строку'}
             >
-              ⧉
+              <WorkbenchIcon name="copy" />
             </button>
           </div>
           {editable ? (
             <DescriptionInput row={row} onUpdateRow={onUpdateRow} rows={3} />
           ) : (
-            <div style={{ fontSize: 12.5, lineHeight: 1.45, color: 'var(--wb-text-soft)' }}>
+            <div style={{ fontSize: 'var(--wb-editor-table-font, 13px)', lineHeight: 1.45, color: 'var(--wb-text-soft)' }}>
               {row.description || 'Описание не заполнено'}
               {row.example && (
-                <code style={{ display: 'block', marginTop: 6, fontFamily: 'var(--wb-font-mono)', fontSize: 11.5, color: 'var(--wb-text)', overflowWrap: 'anywhere' }}>
+                <code style={{ display: 'block', marginTop: 6, fontFamily: 'var(--wb-font-mono)', fontSize: 'var(--wb-editor-label-font, 12px)', color: 'var(--wb-text)', overflowWrap: 'anywhere' }}>
                   {row.example}
                 </code>
               )}

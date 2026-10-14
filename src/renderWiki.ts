@@ -342,12 +342,10 @@ function isProcessDiagramSection(section: DocSection): section is DiagramSection
 
 function shouldRenderTextSection(section: TextSection): boolean {
   if (isGoalSection(section)) return false;
-  if (!section.enabled) return true;
   return Boolean(section.value.trim());
 }
 
 function shouldRenderParsedSection(section: ParsedSection): boolean {
-  if (!section.enabled) return true;
   if (isDualModelSection(section)) {
     return Boolean(section.error) || Boolean(section.clientError) || requestHasRows(section) || hasParsedSourceExample(section);
   }
@@ -355,12 +353,10 @@ function shouldRenderParsedSection(section: ParsedSection): boolean {
 }
 
 function shouldRenderDiagramSection(section: DiagramSection): boolean {
-  if (!section.enabled) return true;
   return section.diagrams.some((diagram) => diagram.code.trim());
 }
 
 function shouldRenderErrorsSection(section: ErrorsSection): boolean {
-  if (!section.enabled) return true;
   return section.rows.length > 0;
 }
 
@@ -445,20 +441,12 @@ function renderResponseTable(rows: ParsedRow[]): string[] {
 }
 
 function renderTextSection(section: TextSection): string[] {
-  if (!section.enabled) {
-    return [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`, '', '_Не используется_'];
-  }
 
   return [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`, '', ...toWikiTextBlock(section.value)];
 }
 
 function renderRequestSection(section: ParsedSection): string[] {
   const lines: string[] = [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`];
-  if (!section.enabled) {
-    lines.push('');
-    lines.push('_Не используется_');
-    return lines;
-  }
 
   const { headers, otherRows } = splitRequestRows(getRequestRows(section));
   const requestError = section.error || section.clientError;
@@ -492,11 +480,6 @@ function renderRequestSection(section: ParsedSection): string[] {
 }
 function renderResponseSection(section: ParsedSection): string[] {
   const lines: string[] = [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`];
-  if (!section.enabled) {
-    lines.push('');
-    lines.push('_Не используется_');
-    return lines;
-  }
 
   if (section.error || section.clientError) {
     lines.push(`*Секция заблокирована:* ${toWikiCell(section.error || section.clientError || '')}`);
@@ -515,11 +498,6 @@ function renderParsedSection(section: ParsedSection): string[] {
 
   const lines: string[] = [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`];
 
-  if (!section.enabled) {
-    lines.push('');
-    lines.push('_Не используется_');
-    return lines;
-  }
 
   if (section.error) {
     lines.push(`*Секция заблокирована:* ${toWikiCell(section.error)}`);
@@ -533,11 +511,6 @@ function renderParsedSection(section: ParsedSection): string[] {
 function renderDiagramSection(section: DiagramSection, options: WikiRenderOptions): string[] {
   const lines: string[] = [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`];
 
-  if (!section.enabled) {
-    lines.push('');
-    lines.push('_Не используется_');
-    return lines;
-  }
 
   section.diagrams
     .filter((diagram) => diagram.code.trim())
@@ -569,11 +542,6 @@ function renderDiagramSection(section: DiagramSection, options: WikiRenderOption
 function renderProcessDiagramSection(section: DiagramSection, options: WikiRenderOptions): string[] {
   const lines: string[] = ['h2. Диаграмма процесса'];
 
-  if (!section.enabled) {
-    lines.push('');
-    lines.push('_Не используется_');
-    return lines;
-  }
 
   section.diagrams
     .filter((diagram) => diagram.code.trim())
@@ -603,11 +571,6 @@ function renderProcessDiagramSection(section: DiagramSection, options: WikiRende
 function renderErrorsSection(section: ErrorsSection): string[] {
   const lines: string[] = [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`];
 
-  if (!section.enabled) {
-    lines.push('');
-    lines.push('_Не используется_');
-    return lines;
-  }
 
   if (section.rows.length > 0) {
     lines.push('');

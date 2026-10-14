@@ -71,7 +71,7 @@ describe('Confluence method document', () => {
     ].join('\n'));
   });
 
-  it('renders the process first, retains section order, and excludes empty or disabled diagram source', () => {
+  it('renders the process first, retains legacy disabled diagrams, and excludes empty diagram source', () => {
     const process = makeDiagramSection({ id: 'process-diagram', title: 'Диаграмма процесса' });
     const disabled = makeDiagramSection({ id: 'disabled', title: 'Отключенная', enabled: false });
     const empty = makeDiagramSection({ id: 'empty', diagrams: [{ id: 'empty', title: 'Пустая', engine: 'mermaid', code: '  \n' }] });
@@ -81,12 +81,13 @@ describe('Confluence method document', () => {
       makeDiagramSection({ id: 'other', title: 'Другой сценарий' })
     ] }));
 
-    expect(document.diagrams).toHaveLength(2);
+    expect(document.diagrams).toHaveLength(3);
     expect(document.wiki.indexOf('h2. Диаграмма процесса')).toBeLessThan(document.wiki.indexOf('h2. Требования'));
     expect(document.wiki.indexOf('h2. Требования')).toBeLessThan(document.wiki.indexOf('h2. Другой сценарий'));
-    expect(document.wiki).toContain('h2. Отключенная\n\n_Не используется_');
+    expect(document.wiki).toContain('h2. Отключенная');
+    expect(document.wiki).not.toContain('_Не используется_');
     expect(document.wiki).not.toContain('Пустая');
-    expect(document.wiki.match(/h3\. Основной сценарий/g)).toHaveLength(1);
+    expect(document.wiki.match(/h3\. Основной сценарий/g)).toHaveLength(2);
     expect(document.wiki).toContain('*Кратко*\nСписок &#124; &#123;данные&#125;');
   });
 

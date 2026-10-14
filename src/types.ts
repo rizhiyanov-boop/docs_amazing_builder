@@ -41,6 +41,7 @@ export interface ParsedRow {
 export interface BaseSection {
   id: string;
   title: string;
+  /** Legacy workspace-v3 compatibility field; method sections are always included. */
   enabled: boolean;
   kind: SectionKind;
 }

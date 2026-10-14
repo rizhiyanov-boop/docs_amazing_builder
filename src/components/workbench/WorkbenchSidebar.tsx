@@ -328,7 +328,7 @@ export const WorkbenchSidebar = React.memo(function WorkbenchSidebar({
   const sectionIcon = (section: DocSection): WorkbenchIconName => {
     if (section.kind === 'diagram') return 'diagram';
     if (section.kind === 'errors') return 'alert';
-    if (section.kind === 'parsed') return section.sectionType === 'request' ? 'export' : 'json';
+    if (section.kind === 'parsed') return section.sectionType === 'request' ? 'request' : 'response';
     return section.id === 'functional' ? 'check' : 'document';
   };
 
@@ -416,7 +416,7 @@ export const WorkbenchSidebar = React.memo(function WorkbenchSidebar({
         </div>
         <nav className="wb-sidebar-section-list" aria-label="Разделы метода">
           {activeMethod ? sections.map((section) => (
-            <SidebarItem key={section.id} navigationKind="section" emoji={<WorkbenchIcon name={sectionIcon(section)} />} active={section.id === selectedSectionId} dim={!section.enabled} aria-current={section.id === selectedSectionId ? 'location' : undefined} onClick={() => onSelectSection(section.id)}>{resolveSectionTitle(section)}</SidebarItem>
+            <SidebarItem key={section.id} navigationKind="section" emoji={<WorkbenchIcon name={sectionIcon(section)} />} active={section.id === selectedSectionId} aria-current={section.id === selectedSectionId ? 'location' : undefined} onClick={() => onSelectSection(section.id)}>{resolveSectionTitle(section)}</SidebarItem>
           )) : <div className="wb-sidebar-empty">Выберите метод для навигации по разделам.</div>}
         </nav>
       </section>

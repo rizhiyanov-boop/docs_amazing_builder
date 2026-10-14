@@ -1,0 +1,26 @@
+import type { ReactNode } from 'react';
+export type EditorIconName = "text" | "heading" | "bold" | "italic" | "quote" | "list-bullet" | "list-number" | "wrap-code" | "block-type" | "request" | "response" | "copy" | "paste-above" | "paste-below" | "import" | "save" | "settings" | "folder" | "source-panel" | "ai-describe" | "mapping" | "mask";
+export const EDITOR_ICON_SHAPES: Record<EditorIconName, ReactNode> = {
+  'text': <><path d="M4 5h10M9 5v14M5 19h8M16 10h4M16 14h4M16 18h4"/></>,
+  'heading': <><path d="M4 5v14M13 5v14M4 12h9M17 10h3l-2 3c3 0 3 5 0 5h-1"/></>,
+  'bold': <><path d="M7 4h6a4 4 0 0 1 0 8H7V4Zm0 8h7a4 4 0 0 1 0 8H7v-8Z"/></>,
+  'italic': <><path d="M11 4h8M5 20h8M15 4 9 20"/></>,
+  'quote': <><path d="M4 6h6v7H5c0 3 2 5 5 5M14 6h6v7h-5c0 3 2 5 5 5"/></>,
+  'list-bullet': <><circle cx="4" cy="6" r=".7"/><circle cx="4" cy="12" r=".7"/><circle cx="4" cy="18" r=".7"/><path d="M9 6h11M9 12h11M9 18h11"/></>,
+  'list-number': <><path d="m3 5 2-1v5M3 9h4M3 14c0-3 4-3 4-1 0 2-4 2-4 5h4M11 6h10M11 16h10"/></>,
+  'wrap-code': <><path d="M3 6h18M3 11h14a4 4 0 0 1 0 8h-5m0 0 3-3m-3 3 3 3M3 16h4"/></>,
+  'block-type': <><rect x="3" y="4" width="11" height="16" rx="2"/><path d="M6 8h5M6 12h5M6 16h3m8-6 3 3 3-3"/></>,
+  'request': <><path d="M14 4h6v16h-6M3 12h12m-4-4 4 4-4 4"/></>,
+  'response': <><path d="M10 4H4v16h6M21 12H9m4-4-4 4 4 4"/></>,
+  'copy': <><rect x="9" y="9" width="10" height="10" rx="2"/><path d="M7 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1"/></>,
+  'paste-above': <><path d="M12 17V7m-4 4 4-4 4 4M5 20h14"/></>,
+  'paste-below': <><path d="M12 7v10m-4-4 4 4 4-4M5 4h14"/></>,
+  'import': <><path d="M12 4v10M8 8l4-4 4 4M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></>,
+  'save': <><path d="M5 4h10l4 4v12H5zM8 4v4h6V4M8 20v-5h8v5"/></>,
+  'settings': <><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a7 7 0 0 0-1.7-1L14.5 3h-5l-.4 2a7 7 0 0 0-1.7 1L5 5l-2 3.4 2 1.6a7 7 0 0 0 0 2L3 13.6 5 17l2.4-1a7 7 0 0 0 1.7 1l.4 2h5l.4-2a7 7 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6c.1-.3.1-.7.1-1Z"/></>,
+  'folder': <><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></>,
+  'source-panel': <><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></>,
+  'ai-describe': <><rect x="4" y="4" width="16" height="12" rx="3"/><path d="M8 9h8M12 16v4M8 20h8"/></>,
+  'mapping': <><circle cx="6" cy="12" r="2"/><circle cx="18" cy="7" r="2"/><circle cx="18" cy="17" r="2"/><path d="M8 12h4M12 12l4-5M12 12l4 5"/></>,
+  'mask': <><path d="M12 3 5 6v5c0 4.2 2.6 8.2 7 10 4.4-1.8 7-5.8 7-10V6l-7-3ZM9 12h6M10 9h4"/></>,
+};

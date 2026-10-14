@@ -314,7 +314,7 @@ function MethodSectionSidebarComponent({
                                           role="treeitem"
                                           aria-selected={selectedSectionId === section.id}
                                           aria-current={selectedSectionId === section.id ? 'true' : undefined}
-                                          className={`section-item section-item-level ${selectedSectionId === section.id ? 'active' : ''} ${error ? 'warn' : ''} ${!section.enabled ? 'disabled' : ''}`}
+                                          className={`section-item section-item-level ${selectedSectionId === section.id ? 'active' : ''} ${error ? 'warn' : ''}`}
                                           tabIndex={0}
                                           draggable
                                           onDragStart={() => onDragStartSection(section.id)}
@@ -344,7 +344,6 @@ function MethodSectionSidebarComponent({
                                               )}
                                               {section.kind === 'diagram' && <span className="chip">DIAGRAM</span>}
                                               {section.kind === 'errors' && <span className="chip">ERRORS</span>}
-                                              {!section.enabled && <span className="chip muted">off</span>}
                                               {error && <span className="chip danger">err</span>}
                                             </div>
                                           </div>

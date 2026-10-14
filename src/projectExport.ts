@@ -64,8 +64,8 @@ function slugify(value: string): string {
     .replace(/^-+|-+$/g, '') || 'item';
 }
 
-function enabledMethodSections(method: MethodDocument): DocSection[] {
-  return method.sections.filter((section) => section.enabled);
+function methodSections(method: MethodDocument): DocSection[] {
+  return method.sections;
 }
 
 function getMethodAnchor(method: MethodDocument): string {
@@ -309,7 +309,7 @@ function renderMethodHtml(
   methodDiagramImageMap?: Record<string, string>,
   detailMode: ProjectExportDetailMode = 'full'
 ): string {
-  const enabled = enabledMethodSections(method);
+  const enabled = methodSections(method);
   const body = detailMode === 'brief'
     ? renderMethodSummaryHtml(method)
     : enabled.map((section) => renderSectionHtml(section, methodDiagramImageMap, method)).join('');
@@ -352,7 +352,7 @@ function renderProjectHtmlNav(
         .map((method) => {
           const sections = detailMode === 'brief'
             ? ''
-            : enabledMethodSections(method)
+            : methodSections(method)
               .map((section) => `<li><a href="#${escapeHtml(getMethodSectionAnchor(method, section))}">${escapeHtml(resolveSectionTitle(section.title))}</a></li>`)
               .join('');
           return [
@@ -394,7 +394,7 @@ export function renderProjectHtmlDocument(input: ProjectHtmlExportInput): string
   const enabledProjectSections = input.projectSections.filter((section) => section.enabled);
   const enabledMethods = input.methods.map((method) => ({
     ...method,
-    sections: enabledMethodSections(method)
+    sections: methodSections(method)
   })).filter((method) => detailMode === 'brief' || method.sections.length > 0);
   const flows = input.flows;
   const methodTree = getProjectMethodTree(enabledMethods, input.groups);
@@ -530,7 +530,7 @@ export function renderProjectWikiDocument(params: {
 
   const enabledMethods = params.methods.map((method) => ({
     ...method,
-    sections: enabledMethodSections(method)
+    sections: methodSections(method)
   })).filter((method) => detailMode === 'brief' || method.sections.length > 0);
 
   if (enabledMethods.length === 0) {

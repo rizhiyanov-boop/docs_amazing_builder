@@ -1,13 +1,21 @@
 import type { ReactNode } from 'react';
 
+export type ToastKind = 'info' | 'success' | 'warning' | 'error' | 'ai';
+
 type ToastProps = {
   message: string;
-  kind?: 'success' | 'error' | 'ai';
+  kind?: ToastKind;
 };
 
-export function Toast({ message, kind = 'success' }: ToastProps): ReactNode {
+export function Toast({ message, kind = 'info' }: ToastProps): ReactNode {
   if (!message) return null;
-  const accent = kind === 'error' ? 'var(--wb-required)' : kind === 'ai' ? 'var(--wb-violet)' : 'var(--wb-accent)';
+  const accent = {
+    info: 'var(--wb-text-muted)',
+    success: 'var(--wb-success)',
+    warning: 'var(--wb-warning)',
+    error: 'var(--wb-danger)',
+    ai: 'var(--wb-violet)'
+  }[kind];
   return (
     <div
       role="status"

@@ -31,7 +31,7 @@ export function HttpChip({ method = 'POST', size = 'md', appearance = 'solid' }:
         display: 'inline-flex',
         alignItems: 'center',
         background: appearance === 'soft' ? `color-mix(in srgb, ${colors.bg} 12%, var(--wb-bg-surface))` : colors.bg,
-        color: appearance === 'soft' ? colors.bg : colors.fg,
+        color: appearance === 'soft' ? `var(--wb-${normalized === 'DELETE' ? 'del' : normalized.toLowerCase()}-label, ${colors.bg})` : colors.fg,
         border: appearance === 'soft' ? `1px solid color-mix(in srgb, ${colors.bg} 25%, var(--wb-bg-surface))` : undefined,
         fontFamily: 'var(--wb-font-mono)',
         fontWeight: 600,
@@ -93,7 +93,7 @@ export function WBButton({ variant = 'secondary', size = 'md', icon, children, f
     secondary: { bg: 'var(--wb-bg-surface)', fg: 'var(--wb-text)', border: 'var(--wb-border)' },
     ghost: { bg: 'transparent', fg: 'var(--wb-text-soft)', border: 'transparent' },
     accent: { bg: 'var(--wb-accent)', fg: 'var(--wb-accent-fg)', border: 'var(--wb-accent)' },
-    danger: { bg: 'var(--wb-danger-soft)', fg: 'var(--wb-danger)', border: 'var(--wb-danger)' }
+    danger: { bg: 'var(--wb-bg-surface)', fg: 'var(--wb-danger)', border: 'var(--wb-border)' }
   }[variant];
   const sizing = {
     sm: { padding: '4px 10px', fontSize: 12 },

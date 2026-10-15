@@ -125,7 +125,7 @@ import { ProjectFlowsEditor } from './components/ProjectFlowsEditor';
 import { AiDescriptionContextDialog, AI_DESCRIPTION_CONTEXT_MAX_LENGTH } from './components/dialogs/AiDescriptionContextDialog';
 import { AiDescriptionsPreview, type AiDescriptionSuggestion } from './components/dialogs/AiDescriptionsPreview';
 import { SearchPalette } from './components/dialogs/SearchPalette';
-import { Toast } from './components/Toast';
+import { Toast, type ToastKind } from './components/Toast';
 import { AiTableButton } from './components/primitives/WorkbenchPrimitives';
 import { WorkbenchSidebar } from './components/workbench/WorkbenchSidebar';
 import { WORKBENCH_FEATURES } from './workbenchFeatures';
@@ -682,7 +682,11 @@ export default function App() {
   const [isOnboardingNavVisible, setIsOnboardingNavVisible] = useState(false);
   const [pendingMethodNameFocus, setPendingMethodNameFocus] = useState(false);
   const [pendingProjectNameFocus, setPendingProjectNameFocus] = useState(false);
-  const [toastMessage, setToastMessage] = useState('');
+  const [toast, setToast] = useState<{ message: string; kind: ToastKind }>({ message: '', kind: 'info' });
+  const toastMessage = toast.message;
+  const setToastMessage = useCallback((message: string, kind: ToastKind = 'info') => {
+    setToast({ message, kind });
+  }, []);
   const [deletedRowUndo, setDeletedRowUndo] = useState<DeletedRowUndoState | null>(null);
   const sectionClipboardRef = useRef<SectionClipboardState | null>(null);
   const [hasSectionClipboard, setHasSectionClipboard] = useState(false);
@@ -1219,7 +1223,7 @@ export default function App() {
 
       setAuthUser(user);
       setServerSyncError('');
-      setToastMessage(current.mode === 'login' ? 'Вы вошли в аккаунт' : 'Регистрация выполнена');
+      setToastMessage(current.mode === 'login' ? 'Вы вошли в аккаунт' : 'Регистрация выполнена', 'success');
       completeAuthRequestStatus(current.mode === 'login' ? 'Авторизация: вход выполнен' : 'Авторизация: регистрация выполнена');
       setAuthDialog(null);
 
@@ -1236,7 +1240,7 @@ export default function App() {
         setServerSyncError(projectLoadMessage);
         if (/проект не найден/i.test(projectLoadMessage)) {
           setServerProjectId(null);
-          setToastMessage('Вход выполнен, но серверный проект недоступен');
+          setToastMessage('Вход выполнен, но серверный проект недоступен', 'warning');
         }
       }
     } catch (error) {
@@ -1306,7 +1310,7 @@ export default function App() {
       section: deepClone(section)
     };
     setHasSectionClipboard(true);
-    setToastMessage(`Секция «${resolveSectionTitle(section.title)}» скопирована`);
+    setToastMessage(`Секция «${resolveSectionTitle(section.title)}» скопирована`, 'success');
   }
 
   function pasteSectionRelative(targetSectionId: string, position: 'above' | 'below'): void {
@@ -1375,7 +1379,7 @@ export default function App() {
 
     try {
       await deleteServerProject(projectId);
-      setToastMessage('Проект удален');
+      setToastMessage('Проект удален', 'success');
     } catch (error) {
       if (deletedProjectCache) {
         upsertProjectCache(projectId, deletedProjectCache);
@@ -1391,7 +1395,7 @@ export default function App() {
       }
 
       setServerSyncError(error instanceof Error ? error.message : 'Ошибка удаления проекта');
-      setToastMessage('Не удалось удалить проект. Состояние восстановлено.');
+      setToastMessage('Не удалось удалить проект. Состояние восстановлено.', 'error');
     }
   }
 
@@ -1737,7 +1741,7 @@ export default function App() {
   function deleteActiveMethod(): void {
     if (!activeMethod) return;
     if (methods.length <= 1) {
-      setToastMessage('Нельзя удалить последний метод. Сначала создайте еще один метод.');
+      setToastMessage('Нельзя удалить последний метод. Сначала создайте еще один метод.', 'warning');
       return;
     }
 
@@ -1882,7 +1886,7 @@ export default function App() {
 
     setIsSectionPanelPulse(true);
     setToastMessage(`Выбран метод "${activeMethod.name.trim() || DEFAULT_METHOD_NAME}"`);
-  }, [activeMethodId, activeMethod]);
+  }, [activeMethodId, activeMethod, setToastMessage]);
 
   useEffect(() => {
     if (!isSectionPanelPulse) return;
@@ -1962,7 +1966,7 @@ export default function App() {
     if (!toastMessage) return;
     const timerId = window.setTimeout(() => setToastMessage(''), 2200);
     return () => window.clearTimeout(timerId);
-  }, [toastMessage]);
+  }, [toast, toastMessage, setToastMessage]);
 
   useEffect(() => {
     return () => {
@@ -2108,7 +2112,7 @@ export default function App() {
       source
     });
     setToastMessage('Навигация завершена: первый экспорт выполнен.');
-  }, [onboardingState.status, onboardingState.entryPath, onboardingState.currentStep, hasOnboardingExport]);
+  }, [onboardingState.status, onboardingState.entryPath, onboardingState.currentStep, hasOnboardingExport, setToastMessage]);
 
   const htmlPreviewCacheRef = useRef<{ sectionsRef: DocSection[]; theme: ThemeName; output: string } | null>(null);
   const wikiPreviewCacheRef = useRef<{ sectionsRef: DocSection[]; formatVersion: string; output: string } | null>(null);
@@ -2953,13 +2957,13 @@ export default function App() {
 
     const requestSection = sections.find((item): item is ParsedSection => item.kind === 'parsed' && item.sectionType === 'request');
     if (!requestSection) {
-      setToastMessage('Request секция не найдена');
+      setToastMessage('Request секция не найдена', 'warning');
       return;
     }
 
     const schemaInput = (requestSection.schemaInput ?? '').trim();
     if (!schemaInput) {
-      setToastMessage('Для автозаполнения добавьте JSON Schema в Server request');
+      setToastMessage('Для автозаполнения добавьте JSON Schema в Server request', 'warning');
       return;
     }
 
@@ -2971,7 +2975,7 @@ export default function App() {
       }
       normalizedSchemaInput = JSON.stringify(parsedSchema);
     } catch (error) {
-      setToastMessage(error instanceof Error ? error.message : 'Не удалось разобрать JSON Schema');
+      setToastMessage(error instanceof Error ? error.message : 'Не удалось разобрать JSON Schema', 'error');
       return;
     }
 
@@ -3078,7 +3082,7 @@ export default function App() {
     });
 
     if (usedFallback) {
-      setToastMessage(`AI вернул пустой ответ, применен fallback-генератор: ${generatedRules.length} правил`);
+      setToastMessage(`AI вернул пустой ответ, применен fallback-генератор: ${generatedRules.length} правил`, 'warning');
       completeAiRequestStatus('AI: применен fallback для таблицы валидации');
     } else {
       setToastMessage(`Таблица валидации заполнена из JSON Schema: ${generatedRules.length} правил`);
@@ -3295,7 +3299,7 @@ export default function App() {
       });
 
       setSourceEditorError('');
-      setToastMessage('AI исправил JSON и обновил таблицу');
+      setToastMessage('AI исправил JSON и обновил таблицу', 'ai');
       completeAiRequestStatus('AI: JSON исправлен');
     } catch (error) {
       setAiRequestStatus(null);
@@ -3450,7 +3454,7 @@ export default function App() {
     });
 
     setAiDescriptionsPreview(null);
-    setToastMessage(`AI применил описания: ${selectedCount}`);
+    setToastMessage(`AI применил описания: ${selectedCount}`, 'ai');
     completeAiRequestStatus('AI: описания применены');
   }
 
@@ -3544,7 +3548,7 @@ export default function App() {
     });
 
     setAiExamplesPreview(null);
-    setToastMessage(`AI применил примеры: ${selectedCount}`);
+    setToastMessage(`AI применил примеры: ${selectedCount}`, 'ai');
     completeAiRequestStatus('AI: примеры применены');
   }
 
@@ -3658,7 +3662,7 @@ export default function App() {
         return { ...current, clientMappings: nextMappings };
       });
 
-      setToastMessage('AI предложил маппинг параметров');
+      setToastMessage('AI предложил маппинг параметров', 'ai');
       completeAiRequestStatus('AI: маппинг подобран');
     } catch (error) {
       setAiRequestStatus(null);
@@ -3755,7 +3759,7 @@ export default function App() {
         return;
       }
 
-      setToastMessage(`AI включил маскирование для ${totalUpdated} полей`);
+      setToastMessage(`AI включил маскирование для ${totalUpdated} полей`, 'ai');
       completeAiRequestStatus('AI: маскирование применено');
     } catch (error) {
       setAiRequestStatus(null);
@@ -3948,7 +3952,7 @@ export default function App() {
       } else if (result.kind === 'sections') {
         setSections(result.sections);
         setSelectedId(result.sections[0]?.id ?? selectedId);
-        if (result.warnings.length > 0) setToastMessage(result.warnings.map(issue => `${issue.path}: ${issue.message}`).join('\n'));
+        if (result.warnings.length > 0) setToastMessage(result.warnings.map(issue => `${issue.path}: ${issue.message}`).join('\n'), 'warning');
       } else {
         const linkedSectionId = getParsedSectionIdByType(result.sampleType);
         const linkedSection = sections.find(
@@ -4071,7 +4075,7 @@ export default function App() {
       setWorkspaceMethodsImportRouting(null);
       if (skippedCount > 0) {
         setImportError(`Пропущены файлы: ${workspaceMethodsImportRouting.invalidFiles.map((item) => item.fileName).join(', ')}`);
-        setToastMessage(`Импортировано методов: ${importedCount}. Пропущено файлов: ${skippedCount}`);
+        setToastMessage(`Импортировано методов: ${importedCount}. Пропущено файлов: ${skippedCount}`, 'warning');
       } else {
         setImportError('');
         setToastMessage(`Импортировано методов: ${importedCount}`);
@@ -6996,7 +7000,7 @@ export default function App() {
                       setEditingSchema(null);
                       setSourceEditorError('');
                       const persisted = persistLocalWorkspace(buildWorkspaceProjectData());
-                      setToastMessage(persisted ? 'JSON Schema сохранена без парсинга' : 'Не удалось сохранить JSON Schema');
+                      setToastMessage(persisted ? 'JSON Schema сохранена без парсинга' : 'Не удалось сохранить JSON Schema', persisted ? 'success' : 'error');
                     }}
                   >
                     <WorkbenchIcon name="save" />
@@ -7478,7 +7482,7 @@ export default function App() {
     setSelectedId(nextSection.id);
     setIsAddSectionMenuOpen(false);
     setToastMessage('Раздел добавлен');
-  }, [setSections]);
+  }, [setSections, setToastMessage]);
 
   function updateWorkbenchRow(section: ParsedSection, row: ParsedRow, patch: Partial<ParsedRow>): void {
     const rowKey = getParsedRowKey(row);
@@ -7519,7 +7523,7 @@ export default function App() {
       return (
         <div style={{ display: 'grid', gap: 10 }}>
           {renderWorkbenchTable(section)}
-          {section.error && <div style={{ color: 'var(--wb-required)', fontSize: 12 }}>{section.error}</div>}
+          {section.error && <div style={{ color: 'var(--wb-danger)', fontSize: 12 }}>{section.error}</div>}
         </div>
       );
     }
@@ -7564,7 +7568,7 @@ export default function App() {
         {section.rows.length === 0 && <div style={{ color: 'var(--wb-text-muted)', fontSize: 13 }}>Ошибки не добавлены.</div>}
         {section.rows.map((row, index) => (
           <div key={`${row.internalCode}-${index}`} style={{ display: 'grid', gridTemplateColumns: '64px 1fr', gap: 8, padding: '7px 0', borderBottom: '1px solid var(--wb-border-soft)', fontSize: 13 }}>
-            <code style={{ fontFamily: 'var(--wb-font-mono)', color: 'var(--wb-required)' }}>{row.clientHttpStatus || row.serverHttpStatus || row.responseCode || 'ERR'}</code>
+            <code style={{ fontFamily: 'var(--wb-font-mono)', color: 'var(--wb-danger)' }}>{row.clientHttpStatus || row.serverHttpStatus || row.responseCode || 'ERR'}</code>
             <div>
               <div style={{ fontWeight: 600 }}>{row.message || row.trigger || 'Ошибка'}</div>
               <div style={{ color: 'var(--wb-text-soft)', fontSize: 12 }}>{row.clientResponse || row.internalCode}</div>
@@ -7664,7 +7668,7 @@ export default function App() {
                       padding: '10px 12px'
                     }}
                   />
-                  {inlineImportError && <div style={{ color: 'var(--wb-required)', fontSize: 12 }}>{inlineImportError}</div>}
+                  {inlineImportError && <div style={{ color: 'var(--wb-danger)', fontSize: 12 }}>{inlineImportError}</div>}
                   <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                     <button type="button" className="wb-table-view-btn" onClick={cancelInlineImport}>Отмена</button>
                     <button type="button" className="wb-table-view-btn" onClick={() => applyInlineImport(section)}>Применить</button>
@@ -8366,7 +8370,7 @@ export default function App() {
         onCreateMethod={createMethod}
       />
 
-      <Toast message={toastMessage} />
+      <Toast message={toastMessage} kind={toast.kind} />
 
       <WorkbenchSidebar
         disabled={confluenceBusy}

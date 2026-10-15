@@ -27,15 +27,17 @@
 }
 .wb-app-root .editor-stream > .editor-section-active,
 .wb-app-root .editor-stream > .editor-section-text.editor-section-active {
-  border-color: color-mix(in srgb, var(--wb-accent) 28%, var(--wb-border));
-  background: linear-gradient(var(--wb-accent), var(--wb-accent)) left center / 3px 100% no-repeat var(--wb-bg-surface);
+  border-color: var(--wb-border);
+  background: color-mix(in srgb, var(--wb-accent) 6%, var(--wb-bg-surface));
 }
 .wb-app-root .editor-stream .editor-section-heading { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
 .wb-app-root .editor-stream :is(.wb-shell-icon,.contract-mode-icon) { color: var(--wb-text-soft); }
 .wb-app-root .editor-stream button:hover:not(:disabled) .wb-shell-icon { color: var(--wb-text); }
 .wb-app-root .editor-stream :is(.danger,.section-delete-btn,.wb-button-danger) .wb-shell-icon { color: var(--wb-danger); }
-.wb-app-root .editor-stream .wb-button-danger:hover:not(:disabled) .wb-shell-icon { color: var(--wb-accent-fg); }
+.wb-app-root .editor-stream .wb-button-danger:hover:not(:disabled) .wb-shell-icon { color: inherit; }
 .wb-app-root .editor-stream :is(button[aria-pressed=true],.contract-mode-segment.active) :is(.wb-shell-icon,.contract-mode-icon) { color: var(--wb-accent); }
+.wb-app-root .editor-stream :is(.wb-button-primary,.wb-button-accent) :is(.wb-shell-icon,.contract-mode-icon,.ui-icon),
+.wb-app-root .editor-stream :is(.wb-button-primary,.wb-button-accent):hover:not(:disabled) :is(.wb-shell-icon,.contract-mode-icon,.ui-icon) { color: inherit; }
 .wb-app-root .editor-stream :is(.ui-icon,.wb-shell-icon),
 .wb-app-root .editor-stream .ui-icon > svg {
   width: var(--wb-editor-icon-size);
@@ -75,6 +77,12 @@
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8h8' stroke='white' stroke-width='1.7' stroke-linecap='round'/%3E%3C/svg%3E");
 }
 .wb-app-root .editor-stream input[type=checkbox]:disabled { opacity: .5; cursor: not-allowed; }
+.wb-app-root[data-wb-accent=violet] .editor-stream input[type=checkbox]:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m3 8 3 3 7-7' fill='none' stroke='%231c1830' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+.wb-app-root[data-wb-accent=violet] .editor-stream input[type=checkbox]:indeterminate {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8h8' stroke='%231c1830' stroke-width='1.7' stroke-linecap='round'/%3E%3C/svg%3E");
+}
 .wb-app-root .editor-stream .switch { min-height: 30px; gap: var(--space-2); }
 @media (forced-colors: active) {
   .wb-app-root .editor-stream input[type=checkbox] { appearance: auto; background-image: none; }
@@ -103,6 +111,7 @@
 .wb-app-root .editor-stream :is(th,td) { padding: var(--space-2) var(--wb-editor-gap); font-size: var(--wb-editor-table-font); line-height: 1.5; }
 .wb-app-root .editor-stream th { background: var(--wb-bg-soft); color: var(--wb-text-soft); }
 .wb-app-root .editor-stream :is(tr:nth-child(odd),tr:nth-child(even)) td { background: var(--wb-bg-surface); }
+.wb-app-root .editor-stream tr.mismatch-row td { background: var(--wb-warning-soft); }
 .wb-app-root .editor-stream .table-actions { background: var(--wb-bg-soft); }
 .wb-app-root .editor-stream .contract-side {
   border: 1px solid var(--wb-border);
@@ -119,7 +128,10 @@
 .wb-app-root .editor-stream .contract-side-summary:focus-visible { outline: 2px solid var(--wb-accent); outline-offset: 2px; }
 .wb-app-root .editor-stream .contract-side-summary::after { border-color: var(--wb-text-soft); }
 .wb-app-root .editor-stream .contract-side-body { padding: var(--wb-editor-gap); gap: var(--wb-editor-gap); border-top-color: var(--wb-border); }
-.wb-app-root .editor-stream .contract-side-badge { font-weight: 600; letter-spacing: 0; }
+.wb-app-root .editor-stream .contract-side-badge {
+  font-weight: 600; letter-spacing: 0;
+  color: var(--wb-text-soft); background: var(--wb-bg-hover); border-color: var(--wb-border);
+}
 .wb-app-root .editor-stream .contract-side-title { font-weight: 600; }
 .wb-app-root .editor-stream :is(.contract-side-subsection-title,.contract-mode-label,.contract-mapping-eyebrow) { font-size: var(--wb-editor-label-font); font-weight: 600; letter-spacing: 0; text-transform: none; }
 .wb-app-root .editor-stream .contract-mode-segment { padding: var(--space-1) var(--wb-editor-gap); min-height: 34px; }

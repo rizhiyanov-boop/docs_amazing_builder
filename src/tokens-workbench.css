@@ -45,6 +45,9 @@
   --wb-table-type-null: #9ca3af;
   --wb-danger: #ef4444;
   --wb-danger-soft: rgba(239, 68, 68, 0.1);
+  --wb-success: #22c55e;
+  --wb-warning: #f59e0b;
+  --wb-warning-soft: rgba(245, 158, 11, 0.14);
 }
 
 [data-wb-accent="blue"] {
@@ -112,6 +115,7 @@
   --wb-table-stripe-odd: rgba(255, 255, 255, 0.03);
   --wb-table-stripe-even: var(--wb-bg-surface);
   --wb-danger-soft: rgba(248, 113, 113, 0.14);
+  --wb-danger: #fda29b;
   --wb-shadow-card: 0 0 0 1px var(--wb-border);
   --wb-shadow-pop: 0 12px 36px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--wb-border);
 }

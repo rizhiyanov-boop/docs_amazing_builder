@@ -5978,6 +5978,7 @@ export default function App() {
                   <th
                     key={column}
                     className="draggable-column"
+                    data-column={column}
                     draggable
                     onDragStart={() => setDraggedColumn(column)}
                     onDragOver={(e) => e.preventDefault()}
@@ -6005,7 +6006,7 @@ export default function App() {
                   className={rowHasMismatch(row, duplicateFieldSet, duplicateClientFieldSet) ? 'mismatch-row' : undefined}
                 >
                   {columns.map((column) => (
-                    <td key={`${column}-${index}`} className={column === 'type' || column === 'example' ? 'mono' : undefined}>
+                    <td key={`${column}-${index}`} data-column={column} className={column === 'type' || column === 'example' ? 'mono' : undefined}>
                       {renderRequestCell(section, row, column)}
                     </td>
                   ))}
@@ -6074,7 +6075,7 @@ export default function App() {
         >
           <thead>
             <tr>
-              <th>{renderParsedFieldColumnHeader('Поле')}</th>
+              <th data-column="field">{renderParsedFieldColumnHeader('Поле')}</th>
               <th>Тип</th>
               <th>Обязательность</th>
               <th>Описание</th>
@@ -6088,7 +6089,7 @@ export default function App() {
                 key={`${row.field}-${row.clientField ?? 'server'}-${index}`}
                 className={rowHasMismatch(row, duplicateFieldSet, duplicateClientFieldSet) ? 'mismatch-row' : undefined}
               >
-                <td>
+                <td data-column="field">
                   {renderEditableFieldCell(
                     section,
                     row,

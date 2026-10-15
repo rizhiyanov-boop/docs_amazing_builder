@@ -20,9 +20,10 @@ type ParsedTableFrameProps = {
   fieldColumnWidth: number;
   label: string;
   children: ReactNode;
+  footer?: ReactNode;
 };
 
-export function ParsedTableFrame({ columns, fieldColumnWidth, label, children }: ParsedTableFrameProps): ReactNode {
+export function ParsedTableFrame({ columns, fieldColumnWidth, label, children, footer }: ParsedTableFrameProps): ReactNode {
   const widths = columns.map(column => column === 'field' ? fieldColumnWidth : COLUMN_WIDTHS[column]);
   const minimumWidth = widths.reduce((total, width) => total + width, 0);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -106,6 +107,7 @@ export function ParsedTableFrame({ columns, fieldColumnWidth, label, children }:
         {children}
       </table>
       </div>
+      {footer}
     </div>
   );
 }

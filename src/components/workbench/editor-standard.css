@@ -101,6 +101,22 @@
 .wb-app-root .editor-stream :is(input[type=text],select) { min-height: 34px; padding: var(--wb-editor-input-padding); border-radius: var(--wb-radius); font-size: var(--wb-editor-input-font); }
 .wb-app-root .editor-stream textarea { padding: var(--space-2) var(--wb-editor-gap); border-radius: var(--wb-radius); font-size: var(--wb-editor-input-font); line-height: 1.5; }
 .wb-app-root .editor-stream :is(.source-edit,.field-name-cell,.mono) { font-family: var(--wb-font-mono); font-size: var(--wb-editor-table-font); }
+.wb-app-root .editor-stream .parameter-name-parent { color: var(--wb-text-soft); }
+.wb-app-root .editor-stream .parameter-name-node { display: inline-block; position: relative; min-width: 4ch; max-width: 100%; vertical-align: top; }
+.wb-app-root .editor-stream .parameter-name-local { display: block; min-height: 30px; line-height: 28px; border: 1px solid transparent; padding: var(--space-0) var(--space-1); }
+.wb-app-root .editor-stream .parameter-name-node[data-editing=true] .parameter-name-local,
+.wb-app-root .editor-stream .parameter-name-actions-editing { visibility: hidden; }
+.wb-app-root .editor-stream input.parameter-name-input[type=text] { position: absolute; inset: 0; width: 100%; min-width: 0; min-height: 0; height: 100%; margin: var(--space-0); padding: var(--space-0) var(--space-1); border: 1px solid var(--wb-border); border-radius: var(--wb-radius-sm); font-family: inherit; font-size: inherit; line-height: inherit; }
+.wb-app-root .editor-stream input.parameter-name-input[aria-invalid=true] { border-color: var(--wb-danger); }
+.wb-app-root .editor-stream .parameter-rename-status { height: 36px; margin: var(--space-1) var(--wb-editor-gap); font-size: var(--wb-editor-label-font); line-height: 1.5; color: var(--wb-text-soft); }
+.wb-app-root .editor-stream .parameter-rename-status[data-error=true] { color: var(--wb-danger); }
+@media (pointer: coarse) {
+  .wb-app-root .editor-stream .parameter-name-node { font-size: var(--font-size-lg); }
+  .wb-app-root .editor-stream .parameter-name-local { min-height: 44px; line-height: 42px; }
+}
+@media (max-width: 480px) {
+  .wb-app-root .editor-stream .parameter-rename-status { height: 54px; }
+}
 .wb-app-root .editor-stream > .editor-section > .ds-section-card { border: 0; border-radius: 0; background: transparent; overflow: visible; }
 .wb-app-root .editor-stream > .editor-section > .ds-section-card > .ds-section-card-head { padding: var(--space-0); background: transparent; border: 0; margin-bottom: var(--space-2); }
 .wb-app-root .editor-stream > .editor-section > .ds-section-card > .ds-section-card-body { padding: var(--space-0); }

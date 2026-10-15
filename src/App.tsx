@@ -12,6 +12,7 @@ import { ERROR_CATALOG_BY_CODE } from './errorCatalog';
 import { buildServerErrorResponseTemplate } from './errorResponseTemplate';
 import { getRequestColumnLabel, getRequestColumnOrder, moveRequestColumn } from './requestColumns';
 import { buildMockServicePayload } from './mockServiceExport';
+import { createParameterRenameContext, mappingsAfterSourceSync, renameParameter, type ParameterRenameContext } from './parameterRename';
 import {
   DEFAULT_API_KEY_EXAMPLE,
   DEFAULT_API_KEY_HEADER,
@@ -364,6 +365,9 @@ type EditableFieldState = {
   draft: string;
   target: ParseTarget;
   column: 'field' | 'clientField';
+  table: VerticalTableKind;
+  error?: string;
+  anchorRowKey?: string;
 };
 type EditableRequestCellState = {
   sectionId: string;
@@ -649,6 +653,9 @@ export default function App() {
   const [isSidebarHidden, setIsSidebarHidden] = useState<boolean>(() => loadPersistedSidebarHidden());
   const [isCompactLayout, setIsCompactLayout] = useState<boolean>(() => isCompactLayoutViewport());
   const [editingField, setEditingField] = useState<EditableFieldState | null>(null);
+  const settledFieldEditRef = useRef<EditableFieldState | null>(null);
+  const [fieldRenameResult, setFieldRenameResult] = useState<{ sectionId: string; table: VerticalTableKind; target: ParseTarget; text: string } | null>(null);
+  const fieldFocusKey = editingField ? `${editingField.sectionId}:${editingField.rowKey}:${editingField.target}:${editingField.column}:${editingField.table}:${editingField.anchorRowKey ?? ''}` : '';
   const wikiReturnTargetRef = useRef<WikiReturnTarget | null>(null);
   const [editingRequestCell, setEditingRequestCell] = useState<EditableRequestCellState | null>(null);
   const [editingHeaderCell, setEditingHeaderCell] = useState<EditableHeaderCellState | null>(null);
@@ -853,9 +860,18 @@ export default function App() {
   const normalizedProjectName = projectName.trim() || DEFAULT_PROJECT_NAME;
   const activeMethod = methods.find((method) => method.id === activeMethodId) ?? methods[0];
   const sections = useMemo(() => activeMethod?.sections ?? EMPTY_SECTIONS, [activeMethod]);
+  const parameterRenameContexts = useMemo(() => {
+    const contexts = new Map<string, ParameterRenameContext>();
+    for (const section of sections) {
+      if (section.kind !== 'parsed') continue;
+      for (const target of ['server', 'client'] as const) contexts.set(`${section.id}:${target}`, createParameterRenameContext(section, target));
+    }
+    return contexts;
+  }, [sections]);
   const {
     canUndo,
     canRedo,
+    beginAtomicEdit,
     undoWorkspace,
     redoWorkspace,
     applyPersistedHistoryState
@@ -1835,7 +1851,7 @@ export default function App() {
   }, [pendingProjectNameFocus, editingProjectName]);
 
   useEffect(() => {
-    if (!editingField) return;
+    if (!fieldFocusKey) return;
     const target = inlineFieldInputRef.current;
     if (!target) return;
 
@@ -1845,15 +1861,16 @@ export default function App() {
       } catch {
         target.focus();
       }
+      target.select();
     };
 
     if (typeof window !== 'undefined') {
-      window.requestAnimationFrame(focusWithoutScroll);
-      return;
+      const frame = window.requestAnimationFrame(focusWithoutScroll);
+      return () => window.cancelAnimationFrame(frame);
     }
 
     focusWithoutScroll();
-  }, [editingField]);
+  }, [fieldFocusKey]);
 
   useEffect(() => {
     if (!editingRequestCell) return;
@@ -4657,6 +4674,7 @@ export default function App() {
             requestMethod: current.externalRequestMethod
           }),
           clientLastSyncedFormat: current.clientFormat ?? 'json',
+          clientMappings: mappingsAfterSourceSync(current, 'client'),
           clientRows: clientRows.map((row) =>
             row.origin === 'generated'
               ? row
@@ -4679,6 +4697,7 @@ export default function App() {
           requestMethod: current.requestMethod
         }),
         lastSyncedFormat: current.format,
+        clientMappings: mappingsAfterSourceSync(current, 'server'),
         rows: current.rows.map((row) =>
           row.origin === 'generated'
             ? row
@@ -4817,50 +4836,36 @@ export default function App() {
     }
   }
 
-  function startFieldEditing(section: ParsedSection, row: ParsedRow, target: ParseTarget = 'server'): void {
-    if (!row.field.trim()) return;
-    setEditingField({
-      sectionId: section.id,
-      rowKey: getParsedRowKey(row),
-      draft: row.field,
-      target,
-      column: 'field'
-    });
+  function getParameterRenameContext(section: ParsedSection, target: ParseTarget): ParameterRenameContext {
+    return parameterRenameContexts.get(`${section.id}:${target}`) ?? createParameterRenameContext(section, target);
+  }
+
+  function startFieldEditing(section: ParsedSection, row: ParsedRow, target: ParseTarget = 'server', column: 'field' | 'clientField' = 'field', table: VerticalTableKind = 'parameters'): boolean {
+    const context = getParameterRenameContext(section, target);
+    const rowKey = getParsedRowKey(row);
+    const info = context.names.get(rowKey);
+    if (!info?.editable) return false;
+    if (editingField && !saveFieldEditing()) return false;
+    setEditingField({ sectionId: section.id, rowKey, draft: info.name, target, column, table });
+    return true;
   }
 
   function startClientFieldEditing(section: ParsedSection, row: ParsedRow): void {
-    if (!row.clientField?.trim()) return;
-    setEditingField({
-      sectionId: section.id,
-      rowKey: getParsedRowKey(row),
-      draft: row.clientField,
-      target: 'client',
-      column: 'clientField'
-    });
+    startFieldEditing(section, row, 'client', 'clientField');
   }
 
-  function startMappedClientFieldEditing(section: ParsedSection, mappedClientKey: string): void {
-    if (!isDualModelSection(section)) return;
-
-    const clientRows = section.clientRows ?? [];
-    const clientRow =
-      clientRows.find((item) => getParsedRowKey(item) === mappedClientKey)
-      ?? clientRows.find((item) => item.sourceField?.trim() === mappedClientKey)
-      ?? clientRows.find((item) => item.field.trim() === mappedClientKey)
-      ?? clientRows.find((item) => item.clientField?.trim() === mappedClientKey);
-    if (!clientRow) return;
-
-    setEditingField({
-      sectionId: section.id,
-      rowKey: mappedClientKey,
-      draft: clientRow.field ?? '',
-      target: 'client',
-      column: 'field'
-    });
+  function startMappedClientFieldEditing(section: ParsedSection, mappedClientKey: string, anchorRowKey: string): void {
+    const row = (section.clientRows ?? []).find(item => getParsedRowKey(item) === mappedClientKey);
+    if (row && startFieldEditing(section, row, 'client')) {
+      setEditingField(current => current ? { ...current, anchorRowKey } : current);
+    }
   }
 
   function cancelFieldEditing(): void {
+    const trigger = inlineFieldInputRef.current?.closest('.field-display')?.querySelector<HTMLButtonElement>('button[aria-label="Редактировать поле"],button[aria-label="Редактировать client поле"]');
+    settledFieldEditRef.current = editingField;
     setEditingField(null);
+    if (trigger) window.requestAnimationFrame(() => trigger.focus({ preventScroll: true }));
   }
 
   function getRequestCellEditTarget(section: ParsedSection, row: ParsedRow): ParseTarget | null {
@@ -4889,6 +4894,7 @@ export default function App() {
     return rows.flatMap((row): VerticalCellAddress[] => {
       const rowKey = getParsedRowKey(row);
       if (row.enabled === false) return [];
+      if ((column === 'field' || column === 'clientField') && !getParameterRenameContext(section, target).names.get(rowKey)?.editable) return [];
 
       if (table === 'headers') {
         const unavailable = target === 'server' && (isDefaultRequestHeader(row) || isAuthHeader(section, row));
@@ -4941,7 +4947,7 @@ export default function App() {
     if (!row) return;
 
     if (address.column === 'field') {
-      startFieldEditing(section, row, address.target);
+      startFieldEditing(section, row, address.target, 'field', address.table);
       return;
     }
     if (address.column === 'clientField') {
@@ -5097,49 +5103,70 @@ export default function App() {
 
   function saveFieldEditing(draft = editingField?.draft ?? ''): boolean {
     if (!editingField) return false;
-
-    const nextField = draft.trim();
-    if (!nextField) {
-      setEditingField(null);
-      return true;
+    if (settledFieldEditRef.current === editingField) return true;
+    const edit = editingField;
+    const section = sections.find((item): item is ParsedSection => item.id === edit.sectionId && item.kind === 'parsed');
+    if (!section) { setEditingField(null); return false; }
+    const result = renameParameter(getParameterRenameContext(section, edit.target), edit.rowKey, draft);
+    if (!result.ok) {
+      setEditingField(current => current ? { ...current, draft, error: result.error } : current);
+      return false;
     }
-
-    if (editingField.target === 'client') {
-      updateSection(editingField.sectionId, (current) => {
-        if (current.kind !== 'parsed' || !isDualModelSection(current)) return current;
-
-        let updated = false;
-        const clientRows = (current.clientRows ?? []).map((row) => {
-          if (!updated && getParsedRowKey(row) === editingField.rowKey) {
-            updated = true;
-            return { ...row, field: nextField };
-          }
-          return row;
-        });
-
-        return updated ? { ...current, clientRows } : current;
-      });
-    } else {
-      updateSection(editingField.sectionId, (current) => {
+    settledFieldEditRef.current = editingField;
+    if (result.changedCount) {
+      beginAtomicEdit();
+      updateSection(edit.sectionId, current => {
         if (current.kind !== 'parsed') return current;
-
-        let updated = false;
-        const rows = current.rows.map((row) => {
-          if (!updated && getParsedRowKey(row) === editingField.rowKey) {
-            updated = true;
-            return { ...row, field: nextField };
-          }
-          return row;
-        });
-
-        if (!updated) return current;
-
-        return { ...current, rows };
+        const next = renameParameter(createParameterRenameContext(current, edit.target), edit.rowKey, draft);
+        if (!next.ok) return current;
+        return edit.target === 'client' ? { ...current, clientRows: next.rows } : { ...current, rows: next.rows };
       });
+      setFieldRenameResult({ sectionId: section.id, table: edit.table, target: edit.target,
+        text: result.descendantCount ? `Имя сохранено · обновлены пути вложенных полей: ${result.descendantCount}` : 'Имя параметра сохранено.' });
     }
-
     setEditingField(null);
     return true;
+  }
+
+  function fieldRenameFeedbackId(sectionId: string, table: VerticalTableKind, target: ParseTarget): string {
+    return `parameter-rename-${sectionId}-${table}${table === 'headers' ? `-${target}` : ''}`;
+  }
+
+  function renderFieldRenameFeedback(section: ParsedSection, table: VerticalTableKind = 'parameters', target: ParseTarget = 'server'): ReactNode {
+    const edit = editingField?.sectionId === section.id && editingField.table === table && (table !== 'headers' || editingField.target === target) ? editingField : null;
+    let message = fieldRenameResult?.sectionId === section.id && fieldRenameResult.table === table && (table !== 'headers' || fieldRenameResult.target === target) ? fieldRenameResult.text : '';
+    let error = false;
+    if (edit) {
+      const result = renameParameter(getParameterRenameContext(section, edit.target), edit.rowKey, edit.draft);
+      error = !result.ok;
+      message = result.ok ? (result.descendantCount ? `Обновятся пути вложенных полей: ${result.descendantCount}` : 'Enter — сохранить · Esc — отменить') : result.error;
+    }
+    return <div id={fieldRenameFeedbackId(section.id, table, target)} className="parameter-rename-status" data-error={error} role={error ? 'alert' : 'status'} aria-live="polite">{message}</div>;
+  }
+
+  function renderParameterName(section: ParsedSection, row: ParsedRow, target: ParseTarget, column: 'field' | 'clientField', table: VerticalTableKind, anchorRowKey?: string): ReactNode {
+    const context = getParameterRenameContext(section, target);
+    const rowKey = getParsedRowKey(row);
+    const info = context.names.get(rowKey);
+    if (!info) return renderFieldName(row.field);
+    const isEditing = editingField?.sectionId === section.id && editingField.rowKey === rowKey && editingField.target === target && editingField.column === column && editingField.table === table && editingField.anchorRowKey === anchorRowKey;
+    return <span className="field-name-text parameter-name" title={info.reason || row.field}>
+      {info.prefix && <span className="parameter-name-parent">{renderFieldName(info.prefix)}</span>}
+      <span className="parameter-name-node" data-editing={isEditing}>
+        <span className="parameter-name-local" aria-hidden={isEditing || undefined}>{info.name}</span>
+        {isEditing && <input ref={inlineFieldInputRef} type="text" className="parameter-name-input" aria-label="Имя параметра" aria-describedby={fieldRenameFeedbackId(section.id, table, target)}
+          aria-invalid={Boolean(editingField.error) || !renameParameter(context, rowKey, editingField.draft).ok}
+          value={editingField.draft} onChange={event => setEditingField(current => current ? { ...current, draft: event.target.value, error: undefined } : current)}
+          onMouseDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}
+          onBlur={event => consumeSuppressedInlineBlur({ table, sectionId: section.id, target, rowKey, column }, () => saveFieldEditing(event.currentTarget.value))}
+          onKeyDown={event => {
+            if (event.nativeEvent.isComposing) return;
+            handleFieldVerticalTab(event, section, row, table, target, column);
+            if (event.key === 'Enter') { event.preventDefault(); saveFieldEditing(event.currentTarget.value); }
+            if (event.key === 'Escape') { event.preventDefault(); cancelFieldEditing(); }
+          }} />}
+      </span>{info.suffix}
+    </span>;
   }
 
   function handleFieldVerticalTab(
@@ -5316,192 +5343,35 @@ export default function App() {
     );
   }
 
-  function renderEditableFieldCell(section: ParsedSection, row: ParsedRow, options: EditableFieldOptions = {}): ReactNode {
-    const allowEdit = options.allowEdit ?? true;
+  function renderEditableFieldCell(section: ParsedSection, row: ParsedRow, options: EditableFieldOptions = {}, column: 'field' | 'clientField' = 'field'): ReactNode {
     const editTarget = options.editTarget ?? 'server';
     const table = options.table ?? 'parameters';
+    const info = getParameterRenameContext(section, editTarget).names.get(getParsedRowKey(row));
+    const allowEdit = (options.allowEdit ?? true) && Boolean(info?.editable);
     if (!row.field.trim()) return '—';
-
-    const isEditing =
-      editingField?.sectionId === section.id &&
-      editingField.rowKey === getParsedRowKey(row) &&
-      editingField.target === editTarget &&
-      editingField.column === 'field';
-
-    if (isEditing) {
-      return (
-        <div className="field-edit">
-          <input
-            ref={inlineFieldInputRef}
-            type="text"
-            value={editingField.draft}
-            onChange={(e) => setEditingField((current) => (current ? { ...current, draft: e.target.value } : current))}
-            onMouseDown={(event) => event.stopPropagation()}
-            onClick={(event) => event.stopPropagation()}
-            onBlur={(event) =>
-              consumeSuppressedInlineBlur(
-                {
-                  table,
-                  sectionId: section.id,
-                  target: editTarget,
-                  rowKey: getParsedRowKey(row),
-                  column: 'field'
-                },
-                () => saveFieldEditing(event.currentTarget.value)
-              )
-            }
-            onKeyDown={(e) => {
-              handleFieldVerticalTab(e, section, row, table, editTarget, 'field');
-              if (e.key === 'Enter') saveFieldEditing(e.currentTarget.value);
-              if (e.key === 'Escape') cancelFieldEditing();
-            }}
-          />
-        </div>
-      );
-    }
-
-    return (
-      <div
-        className="field-display"
-        onClick={(event) => event.stopPropagation()}
-        onDoubleClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          if (allowEdit) startFieldEditing(section, row, editTarget);
-        }}
-      >
-        <span className="field-name-cell">{renderFieldName(row.field)}</span>
-        <span className="field-actions">
-          {allowEdit && (
-            <button
-              className="icon-button"
-              type="button"
-              onMouseDown={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-              }}
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                startFieldEditing(section, row, editTarget);
-              }}
-              aria-label="Редактировать поле"
-            >
-              <WorkbenchIcon name="edit" />
-            </button>
-          )}
-          {options.onDelete && (
-            <button
-              className="icon-button danger"
-              type="button"
-              onMouseDown={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-              }}
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                options.onDelete?.();
-              }}
-              aria-label="Удалить поле"
-            >
-              <WorkbenchIcon name="trash" />
-            </button>
-          )}
-        </span>
-      </div>
-    );
+    const isEditing = editingField?.sectionId === section.id && editingField.rowKey === getParsedRowKey(row) && editingField.target === editTarget && editingField.column === column && editingField.table === table;
+    return <div className="field-display" onClick={event => event.stopPropagation()} onDoubleClick={event => {
+      event.preventDefault(); event.stopPropagation();
+      if (allowEdit) startFieldEditing(section, row, editTarget, column, table);
+    }}>
+      <span className="field-name-cell">{renderParameterName(section, row, editTarget, column, table)}</span>
+      <span className={`field-actions${isEditing ? ' parameter-name-actions-editing' : ''}`} aria-hidden={isEditing || undefined}>
+        {allowEdit && <button className="icon-button" type="button" disabled={isEditing} aria-label={editTarget === 'client' ? 'Редактировать client поле' : 'Редактировать поле'}
+          onMouseDown={event => { event.preventDefault(); event.stopPropagation(); }} onClick={event => {
+            event.preventDefault(); event.stopPropagation(); startFieldEditing(section, row, editTarget, column, table);
+          }}><WorkbenchIcon name="edit" /></button>}
+        {options.onDelete && <button className="icon-button danger" type="button" disabled={isEditing} aria-label={editTarget === 'client' ? 'Удалить client поле' : 'Удалить поле'}
+          onMouseDown={event => { event.preventDefault(); event.stopPropagation(); }} onClick={event => {
+            event.preventDefault(); event.stopPropagation(); options.onDelete?.();
+          }}><WorkbenchIcon name="trash" /></button>}
+      </span>
+    </div>;
   }
 
   function renderEditableClientFieldCell(section: ParsedSection, row: ParsedRow): ReactNode {
-    const value = row.clientField?.trim();
-    if (!value) return '—';
-
-    const isEditing =
-      editingField?.sectionId === section.id &&
-      editingField.rowKey === getParsedRowKey(row) &&
-      editingField.target === 'client' &&
-      editingField.column === 'clientField';
-
-    if (isEditing) {
-      return (
-        <div className="field-edit">
-          <input
-            ref={inlineFieldInputRef}
-            type="text"
-            value={editingField.draft}
-            onChange={(e) => setEditingField((current) => (current ? { ...current, draft: e.target.value } : current))}
-            onMouseDown={(event) => event.stopPropagation()}
-            onClick={(event) => event.stopPropagation()}
-            onBlur={(event) =>
-              consumeSuppressedInlineBlur(
-                {
-                  table: 'parameters',
-                  sectionId: section.id,
-                  target: 'client',
-                  rowKey: getParsedRowKey(row),
-                  column: 'clientField'
-                },
-                () => saveFieldEditing(event.currentTarget.value)
-              )
-            }
-            onKeyDown={(e) => {
-              handleFieldVerticalTab(e, section, row, 'parameters', 'client', 'clientField');
-              if (e.key === 'Enter') saveFieldEditing(e.currentTarget.value);
-              if (e.key === 'Escape') cancelFieldEditing();
-            }}
-          />
-        </div>
-      );
-    }
-
-    return (
-      <div
-        className="field-display"
-        onClick={(event) => event.stopPropagation()}
-        onDoubleClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          startClientFieldEditing(section, row);
-        }}
-      >
-        <span className="field-name-cell">{renderFieldName(row.clientField)}</span>
-        <span className="field-actions">
-          <button
-            className="icon-button"
-            type="button"
-            onMouseDown={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-            }}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              startClientFieldEditing(section, row);
-            }}
-            aria-label="Редактировать client поле"
-          >
-            <WorkbenchIcon name="edit" />
-          </button>
-          <button
-            className="icon-button danger"
-            type="button"
-            onMouseDown={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-            }}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              deleteParsedRow(section.id, getParsedRowKey(row), 'client');
-            }}
-            aria-label="Удалить client поле"
-          >
-            <WorkbenchIcon name="trash" />
-          </button>
-        </span>
-      </div>
-    );
+    const clientRow = (section.clientRows ?? []).find(item => getParsedRowKey(item) === getParsedRowKey(row));
+    if (!clientRow) return '—';
+    return renderEditableFieldCell(section, clientRow, { editTarget: 'client', onDelete: () => deleteParsedRow(section.id, getParsedRowKey(clientRow), 'client') }, 'clientField');
   }
 
   function renderEditableRequestCell(
@@ -5700,34 +5570,15 @@ export default function App() {
         editingField?.sectionId === section.id &&
         editingField.rowKey === mappedValue &&
         editingField.target === 'client' &&
-        editingField.column === 'field';
+        editingField.column === 'field' && editingField.anchorRowKey === rowKey;
       const isMappingEditActive = editingMappingCell?.sectionId === section.id && editingMappingCell.rowKey === rowKey;
-
-      if (isEditingMappedValue && editingField) {
-        return (
-          <div className="field-edit">
-            <input
-              ref={inlineFieldInputRef}
-              type="text"
-              value={editingField.draft}
-              onChange={(e) => setEditingField((current) => (current ? { ...current, draft: e.target.value } : current))}
-              onMouseDown={(event) => event.stopPropagation()}
-              onClick={(event) => event.stopPropagation()}
-              onBlur={(event) => saveFieldEditing(event.currentTarget.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') saveFieldEditing(e.currentTarget.value);
-                if (e.key === 'Escape') cancelFieldEditing();
-              }}
-            />
-          </div>
-        );
-      }
 
       if (!isMappingEditActive) {
         return (
-          <div className="field-display" onDoubleClick={() => mappedValue && startMappedClientFieldEditing(section, mappedValue)}>
-            <span className="field-name-cell">{renderFieldName(mappedValue ? options.find((option) => getParsedRowKey(option) === mappedValue)?.field : '—')}</span>
-            <span className="field-actions">
+          <div className="field-display" onDoubleClick={() => mappedValue && startMappedClientFieldEditing(section, mappedValue, rowKey)}>
+            <span className="field-name-cell">{mappedValue && options.find(option => getParsedRowKey(option) === mappedValue)
+              ? renderParameterName(section, options.find(option => getParsedRowKey(option) === mappedValue)!, 'client', 'field', 'parameters', rowKey) : '—'}</span>
+            <span className={`field-actions${isEditingMappedValue ? ' parameter-name-actions-editing' : ''}`} aria-hidden={isEditingMappedValue || undefined}>
               <button
                 className="icon-button"
                 type="button"
@@ -5744,7 +5595,7 @@ export default function App() {
               >
                 ↔
               </button>
-              {mappedValue && (
+              {mappedValue && getParameterRenameContext(section, 'client').names.get(mappedValue)?.editable && (
                 <button
                   className="icon-button"
                   type="button"
@@ -5755,7 +5606,7 @@ export default function App() {
                   onClick={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
-                    startMappedClientFieldEditing(section, mappedValue);
+                    startMappedClientFieldEditing(section, mappedValue, rowKey);
                   }}
                   aria-label="Редактировать client поле"
                 >
@@ -5971,7 +5822,7 @@ export default function App() {
 
       return (
         <div className="table-wrap">
-          <ParsedTableFrame columns={columns} fieldColumnWidth={parsedFieldColumnWidth} label={`Параметры: ${section.title}`}>
+          <ParsedTableFrame columns={columns} fieldColumnWidth={parsedFieldColumnWidth} label={`Параметры: ${section.title}`} footer={renderFieldRenameFeedback(section)}>
             <thead>
               <tr>
                 {columns.map((column) => (
@@ -6072,6 +5923,7 @@ export default function App() {
           columns={['field', 'type', 'required', 'description', 'maskInLogs', 'example']}
           fieldColumnWidth={parsedFieldColumnWidth}
           label={`Параметры: ${section.title}`}
+          footer={renderFieldRenameFeedback(section)}
         >
           <thead>
             <tr>
@@ -6414,6 +6266,7 @@ export default function App() {
             })}
           </tbody>
         </table>
+        {renderFieldRenameFeedback(section, 'headers', target)}
         <div className="table-actions">
           <button className="ghost small table-action-icon" type="button" onClick={() => (isExternal ? addExternalRequestHeader(section) : addRequestHeader(section))} aria-label="Добавить header" title="Добавить header">
             <span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>

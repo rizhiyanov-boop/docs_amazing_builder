@@ -40,6 +40,7 @@ type UseWorkspaceHistoryResult = {
   canRedo: boolean;
   undoWorkspace: () => void;
   redoWorkspace: () => void;
+  beginAtomicEdit: () => void;
   getPersistedHistoryState: () => PersistedHistoryState;
   applyPersistedHistoryState: (history: PersistedHistoryState | null) => void;
 };
@@ -71,6 +72,7 @@ export function useWorkspaceHistory({
   const redoStackRef = useRef<WorkspaceSnapshot[]>([]);
   const historyLastSnapshotRef = useRef<WorkspaceSnapshot | null>(null);
   const historyLastPushAtRef = useRef(0);
+  const atomicEditPendingRef = useRef(false);
   const prevVersionRef = useRef(workspaceVersion);
 
   const cloneSnapshot = useCallback((snapshot: WorkspaceSnapshot): WorkspaceSnapshot => ({
@@ -133,6 +135,14 @@ export function useWorkspaceHistory({
     applyWorkspaceSnapshot(cloneSnapshot(next));
     setCanUndo(undoStackRef.current.length > 0);
     setCanRedo(redoStackRef.current.length > 0);
+  }
+
+  function beginAtomicEdit(): void {
+    // A structural rename has its own before/after snapshot, even when another
+    // edit happened within the ordinary typing coalescence window.
+    historyLastSnapshotRef.current = cloneSnapshot(getWorkspaceSnapshot());
+    historyLastPushAtRef.current = 0;
+    atomicEditPendingRef.current = true;
   }
 
   function toPersistedHistorySnapshot(snapshot: WorkspaceSnapshot): PersistedHistoryState['undoStack'][number] {
@@ -218,7 +228,8 @@ export function useWorkspaceHistory({
       undoStackRef.current.shift();
     }
     redoStackRef.current = [];
-    historyLastPushAtRef.current = now;
+    historyLastPushAtRef.current = atomicEditPendingRef.current ? 0 : now;
+    atomicEditPendingRef.current = false;
     setCanUndo(undoStackRef.current.length > 0);
     setCanRedo(redoStackRef.current.length > 0);
   }, [workspaceVersion, cloneSnapshot, getWorkspaceSnapshot, historyCoalesceMs, historyLimit]);
@@ -228,6 +239,7 @@ export function useWorkspaceHistory({
     canRedo,
     undoWorkspace,
     redoWorkspace,
+    beginAtomicEdit,
     getPersistedHistoryState,
     applyPersistedHistoryState
   };

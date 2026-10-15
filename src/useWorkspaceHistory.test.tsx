@@ -14,7 +14,7 @@ function createMethod(name: string): MethodDocument {
   };
 }
 
-function useHistoryHarness(initialMethods: MethodDocument[] = [createMethod('Method A')]) {
+function useHistoryHarness(initialMethods: MethodDocument[] = [createMethod('Method A')], historyCoalesceMs = -1) {
   const [projectName, setProjectName] = useState('Project A');
   const [workspaceVersion, setWorkspaceVersion] = useState(0);
   const [methods, setMethodsState] = useState<MethodDocument[]>(initialMethods);
@@ -33,7 +33,7 @@ function useHistoryHarness(initialMethods: MethodDocument[] = [createMethod('Met
     selectedId,
     workspaceVersion,
     historyLimit: 50,
-    historyCoalesceMs: -1,
+    historyCoalesceMs,
     normalizeProjectName: (value) => value?.trim() || 'New Project',
     deepClone: (value) => JSON.parse(JSON.stringify(value)),
     setProjectName,
@@ -62,6 +62,20 @@ const publishedBinding: ConfluenceBinding = {
   lastPublishedVersion: 1, publishedFingerprint: 'docbuilder-v1-a1b2c3d4a1b2c3d4',
   publishedAt: '2026-10-02T10:00:00.000Z'
 };
+
+it('keeps atomic edits separate from rapid typing and from each other', () => {
+  const { result } = renderHook(() => useHistoryHarness(undefined, 10000));
+  act(() => result.current.setProjectName('Typed name'));
+  act(() => { result.current.beginAtomicEdit(); result.current.setProjectName('First rename'); });
+  act(() => { result.current.beginAtomicEdit(); result.current.setProjectName('Second rename'); });
+  act(() => result.current.setProjectName('Following edit'));
+  act(() => result.current.undoWorkspace());
+  expect(result.current.projectName).toBe('Second rename');
+  act(() => result.current.undoWorkspace());
+  expect(result.current.projectName).toBe('First rename');
+  act(() => result.current.undoWorkspace());
+  expect(result.current.projectName).toBe('Typed name');
+});
 
 describe('useWorkspaceHistory', () => {
   it('keeps the first publication binding on undo and its newer external version on redo', () => {

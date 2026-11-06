@@ -1,0 +1,5 @@
+[
+  { "clickText": "Подготовить", "wait": 800 },
+  { "clickText": "Создать User Story", "wait": 1000 },
+  { "eval": "document.documentElement.setAttribute('data-theme', 'dark'); document.documentElement.classList.add('dark'); document.body.style.background = '#12161f';", "wait": 300, "screenshot": "review-real-dark.png" }
+]

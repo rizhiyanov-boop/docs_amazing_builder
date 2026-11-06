@@ -489,9 +489,11 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
         const currentEpicName = currentEpicObj?.name;
         const statusTitle = standalone
           ? 'Созданная задача этого сценария'
-          : !createdInSession && onLinked && !jiraTicket && !issue
-            ? 'В локальном журнале найдена ранее созданная задача'
-            : 'Метод уже связан с задачей Jira';
+          : createdInSession
+            ? 'Задача создана'
+            : !createdInSession && onLinked && !jiraTicket && !issue
+              ? 'В локальном журнале найдена ранее созданная задача'
+              : 'Метод уже связан с задачей Jira';
 
         const copyTicketUrl = () => {
           if (!currentIssueUrl) return;
@@ -1130,7 +1132,7 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
                 </div>
               )}
 
-              {activeTagRules.length > 0 && (
+              {conflicts.length > 0 && activeTagRules.length > 0 && (
                 <div className="cf-jira-priority-rules-hint">
                   <span className="cf-muted">Правила тегов: </span>
                   {activeTagRules.map(({ label, rules }) => (

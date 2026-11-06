@@ -176,6 +176,19 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onBack, on
   const [jiraVisited, setJiraVisited] = useState(false);
   const [status, setStatus] = useState<ConfluenceStatus | null>(null);
   const [connectionBusy, setConnectionBusy] = useState(true);
+  const [checkFeedback, setCheckFeedback] = useState<'success' | 'error' | null>(null);
+  const handleCheckConnection = async () => {
+    setConnectionBusy(true);
+    setCheckFeedback(null);
+    try {
+      await refreshConnection();
+      setCheckFeedback('success');
+      window.setTimeout(() => setCheckFeedback(null), 3000);
+    } catch {
+      setCheckFeedback('error');
+      window.setTimeout(() => setCheckFeedback(null), 3000);
+    }
+  };
   const [spaces, setSpaces] = useState<ConfluenceCollection<ConfluenceSpace>>({ items: [], nextStart: null });
   const [spacesBusy, setSpacesBusy] = useState(false);
   const [spaceKey, setSpaceKey] = useState(binding?.spaceKey ?? '');
@@ -269,6 +282,14 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onBack, on
   useEffect(() => {
     if (connected && activeSpaceKey && spaces.items.some(space => space.key === activeSpaceKey)) rememberedSpaces.set(`${baseUrl}/${tab}`, activeSpaceKey);
   }, [connected, baseUrl, activeSpaceKey, spaces, tab, rememberedSpaces]);
+  useEffect(() => {
+    const handleFocus = () => {
+      if (alive.current && !busy) void refreshConnection();
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [busy, refreshConnection]);
+
   useEffect(() => {
     let active = true;
     let pending = false;
@@ -488,11 +509,39 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onBack, on
 
   return <section className="cf-screen" aria-label="Confluence">
     <header className="cf-header">
-      <div><button type="button" className="cf-back" aria-label="Назад в редактор" title="Назад в редактор" onClick={onBack} disabled={preparing || publishing || jiraBusy || Boolean(unknown)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5m7-7-7 7 7 7" /></svg></button><h2>Confluence</h2><p className="cf-muted">{method.name}</p></div>
-      <div className="cf-connection"><span className={`cf-status ${connected ? 'cf-status-active' : ''}`} role="status" aria-label={connectionBusy ? 'Проверка подключения' : connected ? 'Локальное подключение активно' : 'Нет подключения'} title={connectionBusy ? 'Проверка подключения…' : connected ? 'Локальное подключение активно' : 'Нет подключения'}>●</span>{status?.user && <span className="cf-muted">{status.user}</span>}
+      <div><button type="button" className="cf-back" aria-label="Назад в редактор" title="Назад в редактор" onClick={onBack} disabled={preparing || publishing || jiraBusy || Boolean(unknown)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5m7-7-7 7 7 7" /></svg></button><h2>Confluence & Jira</h2></div>
+      <div className="cf-connection">
+        <span
+          className={`cf-status-badge ${connected ? 'is-connected' : 'is-disconnected'}`}
+          role="status"
+          aria-label={connectionBusy ? 'Проверка подключения' : connected ? 'Локальное подключение активно' : 'Нет подключения'}
+          title={connectionBusy ? 'Проверка подключения…' : connected ? 'Confluence подключен' : status === null ? 'Локальный мост не запущен' : 'Confluence не подключен'}
+        >
+          <span className="cf-status-dot" aria-hidden="true" />
+          <span className="cf-status-label">{connectionBusy ? 'Проверка…' : connected ? 'Confluence' : status === null ? 'Мост отключен' : 'Confluence не подключен'}</span>
+        </span>
+        {status?.user && <span className="cf-status-user">{status.user}</span>}
         {connected && <span className="cf-muted">{baseUrl}</span>}
-        {!connected && !connectionBusy && <a href={`${CONFLUENCE_BRIDGE_URL}/`} target="_blank" rel="noopener noreferrer">Открыть локальное подключение</a>}
-        <WBButton size="sm" disabled={connectionBusy} onClick={() => { setConnectionBusy(true); void refreshConnection(); }}>Проверить подключение</WBButton>
+        {!connected && !connectionBusy && (
+          <a href={`${CONFLUENCE_BRIDGE_URL}/`} target="_blank" rel="noopener noreferrer" className="cf-confluence-bridge-link">
+            Открыть локальное подключение
+          </a>
+        )}
+        <WBButton
+          size="sm"
+          variant="ghost"
+          aria-label="Проверить подключение"
+          title={connectionBusy ? 'Проверка подключения…' : checkFeedback === 'success' ? 'Подключение активно' : checkFeedback === 'error' ? 'Ошибка проверки' : 'Проверить подключение'}
+          className={`cf-connection-refresh-btn ${checkFeedback ? `is-${checkFeedback}` : ''}`}
+          disabled={connectionBusy}
+          onClick={() => void handleCheckConnection()}
+        >
+          {checkFeedback === 'success' ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" /><path d="M21 21v-5h-5" /></svg>
+          )}
+        </WBButton>
       </div>
     </header>
     <nav className="cf-tabs" aria-label="Действия Confluence">

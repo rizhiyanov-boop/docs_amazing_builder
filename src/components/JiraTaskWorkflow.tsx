@@ -41,17 +41,58 @@ export function JiraTaskWorkflow(props: Props) {
     setCompletedIdentity('');
   };
   const onBusyChange = (value: boolean) => { setBusy(value); props.onBusyChange(value); };
-  return <>
-    <div className="cf-actions" role="group" aria-label="Сценарий Jira">
-      <WBButton variant={source === 'method' ? 'accent' : 'secondary'} disabled={busy} aria-pressed={source === 'method'} onClick={() => select('method')}>{props.jiraTicket ? 'Обновить связанную задачу' : 'Создать по текущему методу'}</WBButton>
-      <WBButton variant={source === 'freeform' ? 'accent' : 'secondary'} disabled={busy} aria-pressed={source === 'freeform'} onClick={() => select('freeform')}>Свободное описание</WBButton>
-      <WBButton variant={source === 'new-method' ? 'accent' : 'secondary'} disabled={busy} aria-pressed={source === 'new-method'} onClick={() => select('new-method')}>Новая задача по методу</WBButton>
+  const headerActions = (
+    <div className="cf-jira-workflow-actions" role="group" aria-label="Сценарий Jira">
+      {source !== 'method' && (
+        <span className="cf-jira-workflow-mode-badge">
+          {source === 'freeform' ? 'Свободное описание' : 'Новая задача по методу'}
+        </span>
+      )}
+      {source === 'method' ? (
+        <>
+          {props.jiraTicket && (
+            <WBButton
+              size="sm"
+              variant="secondary"
+              disabled={busy}
+              onClick={() => select('new-method')}
+              aria-label="Новая задача по методу"
+              title="Создать отдельную задачу по этому методу"
+            >
+              + Новая задача по методу
+            </WBButton>
+          )}
+          <WBButton
+            size="sm"
+            variant="secondary"
+            disabled={busy}
+            onClick={() => select('freeform')}
+            aria-label="Свободное описание"
+            title="Создать произвольную задачу без привязки к текущему методу"
+          >
+            + Произвольная задача
+          </WBButton>
+        </>
+      ) : (
+        <WBButton
+          size="sm"
+          variant="secondary"
+          disabled={busy}
+          onClick={() => select('method')}
+          aria-label="Создать по текущему методу"
+        >
+          ← К текущему методу
+        </WBButton>
+      )}
     </div>
-    <div hidden={source !== 'method'}><JiraPanel {...props} active={props.active && source === 'method'} onBusyChange={onBusyChange} onConnectionScopeChange={setConnectionScope} /></div>
+  );
+
+  return <>
+    <div hidden={source !== 'method'}><JiraPanel {...props} headerExtra={headerActions} active={props.active && source === 'method'} onBusyChange={onBusyChange} onConnectionScopeChange={setConnectionScope} /></div>
     {source !== 'method' && !connectionScope && <p className="cf-notice">Подключите Jira, чтобы подготовить задачу. <a href={`${CONFLUENCE_BRIDGE_URL}/`} target="_blank" rel="noopener noreferrer">Подключить Jira локально</a> · <a href="/docbuilder-confluence-local.zip" download>Скачать локальное приложение 1.3.6</a></p>}
     {source !== 'method' && connectionScope && <>
       {source === 'new-method' && <p className="cf-notice">Создаётся отдельная задача по текущему методу. Существующая связь метода с Jira сохраняется.</p>}
-      {identity.error ? <p role="alert" className="cf-notice cf-error">{identity.error}</p> : <JiraPanel key={`${source}:${identity.id}`} methodId={identity.id} methodName={source === 'freeform' ? 'Отдельная задача' : props.methodName} methodContext={source === 'freeform' ? '' : props.methodContext} confluenceUrl={source === 'freeform' ? undefined : props.confluenceUrl} source={source === 'freeform' ? 'freeform' : 'method'} active={props.active} onBusyChange={onBusyChange} onCompletedChange={setCompleted} client={props.client} prepareDraft={props.prepareDraft} />}
+      {identity.error ? <p role="alert" className="cf-notice cf-error">{identity.error}</p> : <JiraPanel key={`${source}:${identity.id}`} headerExtra={headerActions} methodId={identity.id} methodName={source === 'freeform' ? 'Отдельная задача' : props.methodName} methodContext={source === 'freeform' ? '' : props.methodContext} confluenceUrl={source === 'freeform' ? undefined : props.confluenceUrl} source={source === 'freeform' ? 'freeform' : 'method'} active={props.active} onBusyChange={onBusyChange} onCompletedChange={setCompleted} client={props.client} prepareDraft={props.prepareDraft} />}
       <WBButton disabled={busy || !completed} onClick={startNext}>Начать следующую задачу</WBButton>
     </>}
   </>;

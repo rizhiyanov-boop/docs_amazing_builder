@@ -137,7 +137,7 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
       : autosaveState === 'saved' ? 'Сохранено' : 'Автосохранение';
   const autosaveTitle = autosaveState === 'error' ? 'Не удалось сохранить изменения в этом браузере'
     : `${autosaveLabel} в этом браузере${autosaveAt ? ` · ${autosaveAt}` : ''}`;
-  const confluenceLabel = `Confluence${confluenceConnected ? ' · подключено' : ''}${confluenceBound ? ' · страница привязана' : ''}`;
+  const confluenceLabel = `Confluence & Jira${confluenceConnected ? ' · подключено' : ''}${confluenceBound ? ' · страница привязана' : ''}`;
   const runAction = (action: () => void) => { setOpenMenu(null); action(); };
   const toggleMenu = (menu: NonNullable<typeof openMenu>) => setOpenMenu((current) => current === menu ? null : menu);
 
@@ -181,7 +181,7 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
 
         {onOpenConfluence && (
           <button type="button" className={`wb-topbar-action wb-topbar-publish${confluenceConnected ? ' is-connected' : ''}`} aria-label={confluenceLabel} title={confluenceLabel} onClick={onOpenConfluence}>
-            <WorkbenchIcon name="confluence" /><span className="wb-topbar-action-label">Confluence</span>
+            <WorkbenchIcon name="confluence" /><span className="wb-topbar-action-label">Confluence & Jira</span>
             {confluenceConnected && <span className="wb-connection-dot" aria-hidden="true" />}
           </button>
         )}

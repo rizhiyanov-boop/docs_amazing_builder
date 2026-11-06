@@ -85,7 +85,7 @@ describe('Jira integration panel', () => {
     expect(prepareDraft.mock.calls[0][0].epics.map((epic: { key: string }) => epic.key)).toEqual(['IN-5', 'IN-9']);
     expect(client.create).not.toHaveBeenCalled();
     expect(screen.getByLabelText(/Привязать к эпику/)).toHaveValue('');
-    fireEvent.click(screen.getByText('Все теги · 14'));
+    fireEvent.click(screen.getByRole('button', { name: /^тег$/i }));
     const catalog = within(screen.getByRole('group', { name: 'Все теги' }));
     expect(within(catalog.getByRole('group', { name: 'Основные', exact: true })).getByRole('checkbox', { name: /business/ })).toBeChecked();
     fireEvent.click(within(catalog.getByRole('group', { name: 'Дополнительные', exact: true })).getByRole('checkbox', { name: /qaa/ }));
@@ -179,7 +179,7 @@ describe('Jira integration panel', () => {
     await screen.findByText('В документации не указан источник задачи.');
     expect(prepareDraft.mock.calls[0][0].epics).toEqual([]);
     expect(screen.getByRole('button', { name: 'Создать User Story' })).toBeDisabled();
-    fireEvent.click(screen.getByText('Все теги · 14'));
+    fireEvent.click(screen.getByRole('button', { name: /^тег$/i }));
     const catalog = within(screen.getByRole('group', { name: 'Все теги' }));
     fireEvent.click(catalog.getByRole('checkbox', { name: /qaa/ }));
     expect(screen.getByRole('button', { name: 'Создать User Story' })).toBeDisabled();
@@ -204,5 +204,34 @@ describe('Jira integration panel', () => {
     expect(screen.getByRole('button', { name: 'Создать User Story' })).toBeDisabled();
     fireEvent.change(screen.getByLabelText(/Привязать к эпику/), { target: { value: 'IN-5' } });
     expect(screen.getByRole('button', { name: 'Создать User Story' })).toBeEnabled();
+  });
+  it('displays priority conflict and resolves it with recommended priority quick action', async () => {
+    const client = fixture(); const meta = await client.metadata({ baseUrl: 'https://jira.example', projectId: '101' });
+    vi.mocked(client.metadata).mockResolvedValue({
+      ...meta,
+      priorities: [
+        { id: '1', name: 'Critical' },
+        { id: '2', name: 'High' },
+        { id: '3', name: 'Medium' }
+      ],
+      defaultPriorityId: '3'
+    });
+    render(<JiraPanel client={client} methodId="method-1" methodName="Method" onBusyChange={vi.fn()} />);
+    await screen.findByRole('option', { name: 'Medium' });
+
+    fireEvent.click(screen.getByRole('button', { name: /^тег$/i }));
+    const catalog = within(screen.getByRole('group', { name: 'Все теги' }));
+    fireEvent.click(catalog.getByRole('checkbox', { name: /cbs/ }));
+
+    await screen.findByRole('alert');
+    expect(screen.getByText(/Выбранный приоритет выходит за рекомендованный диапазон: cbs/)).toBeInTheDocument();
+
+    const applyHighBtn = screen.getByRole('button', { name: 'Применить High' });
+    expect(applyHighBtn).toBeInTheDocument();
+
+    fireEvent.click(applyHighBtn);
+
+    expect(screen.queryByText(/Выбранный приоритет выходит за рекомендованный диапазон/)).toBeNull();
+    expect(screen.getByRole('combobox', { name: /Приоритет/ })).toHaveValue('2');
   });
 });

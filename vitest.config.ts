@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   test: {
-    exclude: [...configDefaults.exclude, 'scripts/confluence/**'],
+    exclude: [...configDefaults.exclude, 'scripts/**'],
     maxWorkers: 4,
     testTimeout: 10000,
     environment: 'jsdom',

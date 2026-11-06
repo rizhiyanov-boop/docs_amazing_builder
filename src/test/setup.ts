@@ -53,3 +53,27 @@ if (!window.URL.revokeObjectURL) {
     value: () => {}
   });
 }
+
+if (typeof globalThis.localStorage?.clear !== 'function') {
+  let store: Record<string, string> = {};
+  const mockStorage = {
+    getItem: (key: string) => store[key] ?? null,
+    setItem: (key: string, value: string) => { store[key] = String(value); },
+    removeItem: (key: string) => { delete store[key]; },
+    clear: () => { store = {}; },
+    get length() { return Object.keys(store).length; },
+    key: (index: number) => Object.keys(store)[index] ?? null,
+  };
+  Object.defineProperty(globalThis, 'localStorage', {
+    value: mockStorage,
+    configurable: true,
+    writable: true,
+  });
+  if (typeof window !== 'undefined') {
+    Object.defineProperty(window, 'localStorage', {
+      value: mockStorage,
+      configurable: true,
+      writable: true,
+    });
+  }
+}

@@ -21,4 +21,14 @@ export const JIRA_PRIORITY_RULES: Record<string, readonly string[]> = {
   platform: ['Critical', 'Highest', 'High', 'Medium', 'Low']
 };
 
+export function findMediumPriority(priorities?: readonly { id: string; name: string }[] | { id: string; name: string }[]): { id: string; name: string } | undefined {
+  if (!priorities || priorities.length === 0) return undefined;
+  return priorities.find(p => /^(medium\b|med\b|normal|средн|обыч)/i.test(p.name))
+    || priorities.find(p => /med|norm|средн|обыч/i.test(p.name))
+    || priorities.find(p => p.name.toLowerCase() === 'medium')
+    || priorities.find(p => p.id === '3')
+    || (priorities.length >= 3 ? priorities[Math.floor(priorities.length / 2)] : undefined)
+    || priorities[0];
+}
+
 export function jiraDescription(ru: string, en: string, uz: string): string { return [ru.trim(), en.trim(), uz.trim()].join('\n\n'); }

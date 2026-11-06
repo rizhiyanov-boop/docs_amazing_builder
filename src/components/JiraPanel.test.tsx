@@ -234,4 +234,26 @@ describe('Jira integration panel', () => {
     expect(screen.queryByText(/Выбранный приоритет выходит за рекомендованный диапазон/)).toBeNull();
     expect(screen.getByRole('combobox', { name: /Приоритет/ })).toHaveValue('2');
   });
+  it('defaults to Medium priority even when Low is first in metadata and no explicit user priority', async () => {
+    const client = fixture();
+    const meta = await client.metadata({ baseUrl: 'https://jira.example', projectId: '101' });
+    vi.mocked(client.metadata).mockResolvedValue({
+      ...meta,
+      priorities: [
+        { id: '4', name: 'Low' },
+        { id: '3', name: 'Medium' },
+        { id: '2', name: 'High' },
+        { id: '1', name: 'Critical' }
+      ],
+      defaultPriorityId: ''
+    });
+    render(<JiraPanel client={client} methodId="method-priority-test" methodName="Method" onBusyChange={vi.fn()} />);
+    await screen.findByRole('option', { name: 'Medium' });
+
+    expect(screen.getByRole('combobox', { name: /Приоритет/ })).toHaveValue('3');
+    const rangeInput = screen.getByRole('slider', { name: /Приоритет/ });
+    expect(rangeInput).toHaveValue('2');
+    const mediumBtn = screen.getByRole('button', { name: /Medium/i });
+    expect(mediumBtn).toHaveClass('active');
+  });
 });

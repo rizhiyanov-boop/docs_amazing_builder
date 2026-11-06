@@ -7,6 +7,7 @@ export type JiraFormCache = {
   issueKindExplicit?: boolean;
   summary: string; descriptionRu: string; descriptionEn: string; descriptionUz: string;
   description: string; epic: string; labels: string[]; priorityId: string;
+  priorityExplicit?: boolean;
   search: string; epicQuery: string; draft?: JiraDraft;
   issueKey?: string; fingerprint?: string;
   dirty?: boolean;
@@ -24,6 +25,7 @@ export function readJiraFormCache(key: string): JiraFormCache | undefined {
     if (value.issueKey !== undefined && typeof value.issueKey !== 'string' || value.fingerprint !== undefined && typeof value.fingerprint !== 'string') return;
     if (value.dirty !== undefined && typeof value.dirty !== 'boolean') return;
     if (value.issueKindExplicit !== undefined && typeof value.issueKindExplicit !== 'boolean') return;
+    if (value.priorityExplicit !== undefined && typeof value.priorityExplicit !== 'boolean') return;
     if (value.sourceDescription !== undefined && (typeof value.sourceDescription !== 'string' || value.sourceDescription.length > 20000)) return;
     if (value.draft && (!Array.isArray(value.draft.labels) || !Array.isArray(value.draft.rankedEpics) || [...value.draft.labels, ...value.draft.rankedEpics].some(item => !item || typeof item.key !== 'string' || typeof item.reason !== 'string'))) delete value.draft;
     return value;

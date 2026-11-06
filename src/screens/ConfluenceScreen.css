@@ -667,17 +667,29 @@
   user-select: none;
 }
 
+.cf-jira-range-track-bg {
+  position: absolute;
+  top: var(--space-2);
+  left: 0;
+  right: 0;
+  height: 6px;
+  border-radius: var(--wb-radius-sm);
+  background: var(--wb-border);
+  z-index: 1;
+  pointer-events: none;
+}
+
 .cf-jira-range-input {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
   height: 6px;
   border-radius: var(--wb-radius-sm);
-  background: var(--wb-border);
+  background: transparent;
   outline: none;
   cursor: grab;
   position: relative;
-  z-index: 2;
+  z-index: 3;
   margin: var(--space-0);
   transition: background 0.15s ease;
 }
@@ -735,13 +747,26 @@
   height: 6px;
   border-radius: var(--wb-radius-sm);
   pointer-events: none;
-  transition: width 0.15s ease;
-  background: linear-gradient(90deg, var(--success) 0%, #eab308 40%, #f97316 70%, #ff003c 100%);
+  z-index: 2;
+  transition: width 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+  background: var(--success);
 }
-.cf-jira-range-fill.lvl-1 { box-shadow: 0 0 6px var(--success); }
-.cf-jira-range-fill.lvl-2 { box-shadow: 0 0 6px #eab308; }
-.cf-jira-range-fill.lvl-3 { box-shadow: 0 0 8px #f97316; }
-.cf-jira-range-fill.lvl-4 { box-shadow: 0 0 10px #ff003c; }
+.cf-jira-range-fill.lvl-1 {
+  background: var(--success);
+  box-shadow: 0 0 6px var(--success);
+}
+.cf-jira-range-fill.lvl-2 {
+  background: linear-gradient(90deg, var(--success), #eab308);
+  box-shadow: 0 0 6px #eab308;
+}
+.cf-jira-range-fill.lvl-3 {
+  background: linear-gradient(90deg, var(--success), #eab308 50%, #f97316);
+  box-shadow: 0 0 8px #f97316;
+}
+.cf-jira-range-fill.lvl-4 {
+  background: linear-gradient(90deg, var(--success), #eab308 30%, #f97316 65%, #ff003c);
+  box-shadow: 0 0 10px #ff003c;
+}
 
 .cf-jira-range-steps {
   display: flex;

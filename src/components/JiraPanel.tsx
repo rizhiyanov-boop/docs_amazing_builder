@@ -3,7 +3,7 @@ import { CONFLUENCE_BRIDGE_URL } from '../confluenceClient';
 import { jiraClient, type JiraClient, type JiraEpics, type JiraIssue, type JiraIssueResult, type JiraIssueKind, type JiraMetadata, type JiraOperation, type JiraStatus } from '../jiraClient';
 import { prepareJiraTaskWithAi } from '../openrouterClient';
 import type { JiraDraft, JiraDraftInput } from '../jiraDraft';
-import { JIRA_LABELS, JIRA_PRIORITY_RULES, jiraDescription } from '../jiraLabels';
+import { JIRA_LABELS, JIRA_PRIORITY_RULES, findMediumPriority, jiraDescription } from '../jiraLabels';
 import { jiraFormCacheKey, readJiraFormCache, writeJiraFormCache, type JiraFormCache } from '../jiraFormCache';
 import { WBButton, WBInput } from './primitives/WorkbenchPrimitives';
 import { WorkbenchIcon } from './workbench/WorkbenchIcon';
@@ -49,6 +49,7 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
   const [fingerprint, setFingerprint] = useState(''); const [localConflict, setLocalConflict] = useState(false);
   const [cacheKey, setCacheKey] = useState(''); const [cacheWarning, setCacheWarning] = useState(false);
   const [labels, setLabels] = useState<string[]>([]); const [priorityId, setPriorityId] = useState('');
+  const [priorityExplicit, setPriorityExplicit] = useState(false);
   const [draft, setDraft] = useState<JiraDraft>(); const [operation, setOperation] = useState<JiraOperation>();
   useEffect(() => { onCompletedChange?.(operation?.state === 'success' && !operation.updateState); }, [operation, onCompletedChange]);
   const [recovery, setRecovery] = useState(''); const [error, setError] = useState('');
@@ -60,16 +61,17 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
   const bindingRef = useRef(jiraTicket);
   useEffect(() => { bindingRef.current = jiraTicket; }, [jiraTicket]);
   const changed = Boolean(issue && (summary.trim() !== issue.summary || description !== issue.description || epic !== issue.epic || priorityId !== issue.priorityId || JSON.stringify([...labels].sort()) !== JSON.stringify([...issue.labels].sort())));
-  const form = { issueKind, issueKindExplicit, summary, descriptionRu, descriptionEn, descriptionUz, description, epic, labels, priorityId, search, epicQuery, draft, sourceDescription, ...(issue ? { issueKey: issue.key, fingerprint, dirty: changed } : {}) };
+  const form = { issueKind, issueKindExplicit, summary, descriptionRu, descriptionEn, descriptionUz, description, epic, labels, priorityId, priorityExplicit, search, epicQuery, draft, sourceDescription, ...(issue ? { issueKey: issue.key, fingerprint, dirty: changed } : {}) };
   useEffect(() => {
     const saved = !cacheKey || writeJiraFormCache(cacheKey, form); let cancelled = false;
     void Promise.resolve().then(() => { if (!cancelled) setCacheWarning(!saved); });
     return () => { cancelled = true; };
   // Only form values belong to the local draft; connection status polling must not reset it.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cacheKey, issueKind, issueKindExplicit, summary, descriptionRu, descriptionEn, descriptionUz, description, epic, labels, priorityId, search, epicQuery, draft, sourceDescription, issue?.key, fingerprint, changed]);
+  }, [cacheKey, issueKind, issueKindExplicit, summary, descriptionRu, descriptionEn, descriptionUz, description, epic, labels, priorityId, priorityExplicit, search, epicQuery, draft, sourceDescription, issue?.key, fingerprint, changed]);
   const applyForm = (value: JiraFormCache) => {
     setIssueKindExplicit(value.issueKindExplicit ?? false);
+    setPriorityExplicit(value.priorityExplicit ?? false);
     setSourceDescription(value.sourceDescription ?? '');
     setSummary(value.summary); setDescriptionRu(value.descriptionRu); setDescriptionEn(value.descriptionEn); setDescriptionUz(value.descriptionUz); setDescription(value.description);
     setEpic(value.epic); setLabels(value.labels); setPriorityId(value.priorityId); setSearch(value.search); setEpicQuery(value.epicQuery); setDraft(value.draft); setFingerprint(value.fingerprint ?? '');
@@ -81,7 +83,7 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
     const dirty = matching && cached.dirty && (cached.summary !== result.issue.summary || cached.description !== result.issue.description || cached.epic !== result.issue.epic || cached.priorityId !== result.issue.priorityId || JSON.stringify([...cached.labels].sort()) !== JSON.stringify([...result.issue.labels].sort()));
     if (matching && dirty) { applyForm(cached); setLocalConflict(cached.fingerprint !== result.issue.fingerprint); }
     else {
-      applyForm({ issueKind: result.metadata.issueKind ?? 'task', summary: result.issue.summary, description: result.issue.description, descriptionRu: '', descriptionEn: '', descriptionUz: '', sourceDescription: cached?.sourceDescription ?? sourceDescription, epic: result.issue.epic, labels: result.issue.labels, priorityId: result.issue.priorityId, search: '', epicQuery: '', issueKey: result.issue.key, fingerprint: result.issue.fingerprint });
+      applyForm({ issueKind: result.metadata.issueKind ?? 'task', summary: result.issue.summary, description: result.issue.description, descriptionRu: '', descriptionEn: '', descriptionUz: '', sourceDescription: cached?.sourceDescription ?? sourceDescription, epic: result.issue.epic, labels: result.issue.labels, priorityId: result.issue.priorityId, priorityExplicit: true, search: '', epicQuery: '', issueKey: result.issue.key, fingerprint: result.issue.fingerprint });
       setLocalConflict(false);
     }
     return Boolean(matching && dirty);
@@ -119,8 +121,30 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
           meta = await client.metadata(scope, issueKind);
           if (generation.value !== current) return;
           setMetadata(meta);
-          const defaultMed = meta.priorities?.find(p => /^(medium\b|med\b|normal|средн|обыч)/i.test(p.name)) || meta.priorities?.find(p => /med|norm|средн|обыч/i.test(p.name));
-          applyForm(cached && !cached.issueKey ? cached : { issueKind, summary: '', descriptionRu: '', descriptionEn: '', descriptionUz: '', description: '', epic: '', labels: [], priorityId: (cached && !cached.issueKey && cached.priorityId) ? cached.priorityId : (defaultMed?.id || meta.defaultPriorityId || meta.priorities?.[0]?.id || ''), search: '', epicQuery: '' });
+          const defaultMed = findMediumPriority(meta.priorities);
+          const resolvedPriorityId = (cached && !cached.issueKey && cached.priorityExplicit && cached.priorityId)
+            ? cached.priorityId
+            : (defaultMed?.id || meta.defaultPriorityId || meta.priorities?.[0]?.id || '');
+          const formToApply: JiraFormCache = cached && !cached.issueKey ? {
+            ...cached,
+            priorityId: resolvedPriorityId,
+            priorityExplicit: cached.priorityExplicit ?? false
+          } : {
+            issueKind,
+            issueKindExplicit: false,
+            summary: '',
+            descriptionRu: '',
+            descriptionEn: '',
+            descriptionUz: '',
+            description: '',
+            epic: '',
+            labels: [],
+            priorityId: resolvedPriorityId,
+            priorityExplicit: false,
+            search: '',
+            epicQuery: ''
+          };
+          applyForm(formToApply);
           query = cached && !cached.issueKey ? cached.epicQuery : '';
         }
         setCacheKey(key);
@@ -291,7 +315,9 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
           cleanedResultLabels.push(item.key);
         }
       }
-      setLabels(metadata.labelsSupported ? [...labels.filter(label => !JIRA_LABELS.some(item => item.key === label)), ...cleanedResultLabels] : labels); setPriorityId(result.priorityId || (issue ? priorityId : metadata.defaultPriorityId) || ''); if (!issue) setEpic('');
+      const defaultMed = findMediumPriority(metadata.priorities);
+      const targetPriorityId = result.priorityId || (issue ? priorityId : (priorityExplicit ? priorityId : (defaultMed?.id || metadata.defaultPriorityId))) || defaultMed?.id || '';
+      setLabels(metadata.labelsSupported ? [...labels.filter(label => !JIRA_LABELS.some(item => item.key === label)), ...cleanedResultLabels] : labels); setPriorityId(targetPriorityId); if (!issue) setEpic('');
     } catch (failure) { if (current === epoch.current.value) setError(failure instanceof Error ? failure.message : 'Не удалось подготовить задачу.'); }
     finally { lock.current = false; setGenerating(false); onBusyChange(false); }
   };
@@ -381,6 +407,11 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
   })();
 
   const activeTier = priorityTiers.find(t => t.level === activeLevel) || priorityTiers.find(t => t.level === 2) || priorityTiers[0];
+  const stepsCount = priorityTiers.length || 4;
+  const fillRatio = stepsCount > 1 ? (activeLevel - 1) / (stepsCount - 1) : 0;
+  const fillWidth = activeLevel === stepsCount
+    ? '100%'
+    : `calc(10px + ${fillRatio} * (100% - 20px))`;
   const disabled = busy || generating || loading;
   const hasPrimaryLabel = labels.some(key => JIRA_LABELS.some(label => label.key === key && label.role !== 'Дополнительный'));
   const editing = Boolean(issue); const updateUnknown = operation?.updateState === 'unknown';
@@ -845,10 +876,11 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
             <div className="cf-jira-priority-block">
               <div className="cf-jira-boost-container">
                 <div className="cf-jira-range-track-wrap">
+                  <div className="cf-jira-range-track-bg" />
                   <div
                     className={`cf-jira-range-fill lvl-${activeLevel}`}
                     style={{
-                      width: activeLevel === 1 ? '16%' : activeLevel === 2 ? '48%' : activeLevel === 3 ? '78%' : '100%'
+                      width: fillWidth
                     }}
                   />
                   <input
@@ -866,7 +898,7 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
                     onChange={event => {
                       const lvl = Number(event.target.value);
                       const targetTier = priorityTiers.find(t => t.level === lvl);
-                      if (targetTier) setPriorityId(targetTier.id);
+                      if (targetTier) { setPriorityId(targetTier.id); setPriorityExplicit(true); }
                     }}
                   />
                   <div className="cf-jira-range-steps" role="group" aria-label="Уровень приоритета">
@@ -879,7 +911,7 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
                           type="button"
                           className={`cf-jira-range-step-btn ${isCurrent ? 'active' : ''} tier-${tier.level} ${isRecommended ? 'recommended' : ''}`}
                           disabled={disabled || (editing && !metadata?.editableFields?.includes('priority'))}
-                          onClick={() => setPriorityId(tier.id)}
+                          onClick={() => { setPriorityId(tier.id); setPriorityExplicit(true); }}
                           title={`${tier.name} (${tier.russianName})${isRecommended ? ' · Рекомендуется правилами тегов' : ''}`}
                         >
                           <span className="cf-jira-range-step-name">{tier.name}</span>
@@ -897,7 +929,7 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
                 style={{ position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0,0,0,0)', border: 0 }}
                 disabled={disabled || (editing && !metadata?.editableFields?.includes('priority'))}
                 value={priorityId}
-                onChange={event => setPriorityId(event.target.value)}
+                onChange={event => { setPriorityId(event.target.value); setPriorityExplicit(true); }}
               >
                 <option value="">{metadata?.priorityRequired ? 'Выберите приоритет' : 'Не задан'}</option>
                 {priorityId && !priorities.some(priority => priority.id === priorityId) && (
@@ -949,7 +981,7 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
                             key={rec.id}
                             type="button"
                             className="cf-jira-priority-quick-btn"
-                            onClick={() => setPriorityId(rec.id)}
+                            onClick={() => { setPriorityId(rec.id); setPriorityExplicit(true); }}
                             disabled={disabled || (editing && !metadata?.editableFields?.includes('priority'))}
                           >
                             <WorkbenchIcon name="check" />

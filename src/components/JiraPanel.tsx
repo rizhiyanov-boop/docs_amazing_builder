@@ -52,6 +52,11 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
   const [priorityExplicit, setPriorityExplicit] = useState(false);
   const [draft, setDraft] = useState<JiraDraft>(); const [operation, setOperation] = useState<JiraOperation>();
   const [createdInSession, setCreatedInSession] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
+  }, []);
   useEffect(() => { onCompletedChange?.(operation?.state === 'success' && !operation.updateState); }, [operation, onCompletedChange]);
   const [recovery, setRecovery] = useState(''); const [error, setError] = useState('');
   const [busy, setBusy] = useState(false); const [generating, setGenerating] = useState(false); const [loading, setLoading] = useState(false);
@@ -249,7 +254,7 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
       if (cacheKey) { try { localStorage.removeItem(cacheKey); } catch { setCacheWarning(true); } }
       bindingRef.current = undefined;
       linkedCallback.current?.(methodId, '');
-      setCacheKey(''); setIssue(undefined); setOperation(result); setUnlinkRevision(value => value + 1);
+      setCacheKey(''); setIssue(undefined); setOperation(result); setCreatedInSession(false); setUnlinkRevision(value => value + 1);
     } catch (failure) { if (epoch.current.value === current) setError(failure instanceof Error ? failure.message : 'Не удалось отвязать задачу. Обновите локальное приложение до 1.3.6.'); }
     finally { lock.current = false; if (epoch.current.value === current) { setBusy(false); onBusyChange(false); } }
   };
@@ -484,9 +489,49 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
         const currentEpicName = currentEpicObj?.name;
         const statusTitle = standalone
           ? 'Созданная задача этого сценария'
-          : onLinked && !jiraTicket && !issue
+          : !createdInSession && onLinked && !jiraTicket && !issue
             ? 'В локальном журнале найдена ранее созданная задача'
             : 'Метод уже связан с задачей Jira';
+
+        const copyTicketUrl = () => {
+          if (!currentIssueUrl) return;
+          if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
+          const onDone = () => {
+            setCopied(true);
+            copyTimerRef.current = window.setTimeout(() => setCopied(false), 2000);
+          };
+          if (navigator?.clipboard?.writeText) {
+            navigator.clipboard.writeText(currentIssueUrl).then(onDone).catch(() => {
+              try {
+                const el = document.createElement('textarea');
+                el.value = currentIssueUrl;
+                el.style.position = 'fixed';
+                el.style.opacity = '0';
+                document.body.appendChild(el);
+                el.select();
+                document.execCommand('copy');
+                document.body.removeChild(el);
+                onDone();
+              } catch {
+                // ignore
+              }
+            });
+          } else {
+            try {
+              const el = document.createElement('textarea');
+              el.value = currentIssueUrl;
+              el.style.position = 'fixed';
+              el.style.opacity = '0';
+              document.body.appendChild(el);
+              el.select();
+              document.execCommand('copy');
+              document.body.removeChild(el);
+              onDone();
+            } catch {
+              // ignore
+            }
+          }
+        };
 
         return (
           <div className="cf-jira-linked-hub">
@@ -543,7 +588,7 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
               </div>
 
               <div className="cf-jira-hub-header-right">
-                {onLinked && !jiraTicket && !issue && (
+                {!createdInSession && onLinked && !jiraTicket && !issue && (
                   <WBButton
                     size="sm"
                     disabled={disabled}
@@ -573,10 +618,21 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
                     <span aria-hidden="true">↗</span>
                   </a>
                 )}
+                {currentIssueUrl && (
+                  <button
+                    type="button"
+                    className={`cf-jira-hub-icon-action${copied ? ' is-copied' : ''}`}
+                    onClick={copyTicketUrl}
+                    aria-label={copied ? 'Ссылка скопирована' : 'Скопировать ссылку на задачу'}
+                    title={copied ? 'Ссылка скопирована!' : 'Скопировать ссылку на задачу'}
+                  >
+                    <WorkbenchIcon name={copied ? 'check' : 'copy'} />
+                  </button>
+                )}
                 {onLinked && (
                   <button
                     type="button"
-                    className="cf-jira-hub-icon-action"
+                    className="cf-jira-hub-icon-action is-danger"
                     disabled={disabled || operation?.updateState === 'unknown'}
                     onClick={() => void unlink()}
                     aria-label="Отвязать задачу"
@@ -595,11 +651,7 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
             )}
 
             {operation?.message && <div className="cf-jira-hub-subtext">{operation.message}</div>}
-            {!standalone && !jiraTicket && !issue && (
-              <p className="cf-jira-hub-subtext cf-muted">
-                Связь с методом пока не сохранена. Привяжите задачу явно или удалите запись кнопкой «Отвязать задачу».
-              </p>
-            )}
+
           </div>
         );
       })()}

@@ -76,4 +76,45 @@ const client: JiraClient = {
   confirm: async () => { throw new Error('Не используется в демонстрации'); },
   acceptCurrent: async () => { throw new Error('Не используется в демонстрации'); }
 };
-createRoot(document.getElementById('root')!).render(<div className="wb-app-root" data-accent="warm"><main className="cf-screen"><h2>Jira · проверка на синтетических данных</h2><p>Эта страница не обращается к реальной Jira или ИИ — можно безопасно тестировать форму и создание задач.</p><JiraTaskWorkflow methodId="demo-method" methodName="Получить статус заявки" methodContext="Получение статуса заявки по идентификатору." active onBusyChange={() => {}} onLinked={(m, url) => console.log('Linked method:', m, url)} client={client} prepareDraft={async input => ({ summary: '[OpenAPI] Implement GET /api/organization/account/info routing to Account Domain', descriptionRu: input.source?.description ?? 'Реализовать маршрутизацию запросов GET /api/organization/account/info в контур Account Domain.', descriptionEn: 'Implement routing of GET /api/organization/account/info requests to Account Domain contour.', descriptionUz: 'GET /api/organization/account/info so\'rovlarini Account Domain konturiga marshrutlashni amalga oshirish.', rankedEpics: [{ key: 'DI-1083', reason: 'Спецификация OpenAPI и доработка роутинга' }, { key: 'DI-181', reason: 'Оптимизация внутренних систем' }], labels: [{ key: 'business', reason: 'Задача от бизнеса' }, { key: 'improvement', reason: 'Улучшение существующего интерфейса' }], priorityId: '3', priorityReason: 'Обычное улучшение' })} /></main></div>);
+function DemoPreview() {
+  const [jiraTicket, setJiraTicket] = React.useState('');
+  return (
+    <div className="wb-app-root" data-accent="warm">
+      <main className="cf-screen">
+        <h2>Jira · проверка на синтетических данных</h2>
+        <p>Эта страница не обращается к реальной Jira или ИИ — можно безопасно тестировать форму и создание задач.</p>
+        <JiraTaskWorkflow
+          methodId="demo-method"
+          methodName="Получить статус заявки"
+          methodContext="Получение статуса заявки по идентификатору."
+          jiraTicket={jiraTicket}
+          active
+          onBusyChange={() => {}}
+          onLinked={(_m, url) => {
+            console.log('Linked method:', _m, url);
+            setJiraTicket(url);
+          }}
+          client={client}
+          prepareDraft={async input => ({
+            summary: '[OpenAPI] Implement GET /api/organization/account/info routing to Account Domain',
+            descriptionRu: input.source?.description ?? 'Реализовать маршрутизацию запросов GET /api/organization/account/info в контур Account Domain.',
+            descriptionEn: 'Implement routing of GET /api/organization/account/info requests to Account Domain contour.',
+            descriptionUz: 'GET /api/organization/account/info so\'rovlarini Account Domain konturiga marshrutlashni amalga oshirish.',
+            rankedEpics: [
+              { key: 'DI-1083', reason: 'Спецификация OpenAPI и доработка роутинга' },
+              { key: 'DI-181', reason: 'Оптимизация внутренних систем' }
+            ],
+            labels: [
+              { key: 'business', reason: 'Задача от бизнеса' },
+              { key: 'improvement', reason: 'Улучшение существующего интерфейса' }
+            ],
+            priorityId: '3',
+            priorityReason: 'Обычное улучшение'
+          })}
+        />
+      </main>
+    </div>
+  );
+}
+
+createRoot(document.getElementById('root')!).render(<DemoPreview />);

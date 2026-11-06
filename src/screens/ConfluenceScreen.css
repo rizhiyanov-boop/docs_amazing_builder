@@ -1043,9 +1043,9 @@ a.cf-jira-hub-open-btn {
   width: 24px;
   height: 24px;
   padding: 0;
-  border: 1px solid transparent;
+  border: 1px solid var(--wb-border);
   border-radius: var(--wb-button-radius);
-  background: transparent;
+  background: var(--wb-bg-surface);
   color: var(--wb-text-muted);
   cursor: pointer;
   transition: all 0.15s ease;
@@ -1054,8 +1054,19 @@ a.cf-jira-hub-open-btn {
 
 .cf-jira-hub-icon-action:hover {
   background: var(--wb-bg-hover);
+  color: var(--wb-text);
+  border-color: var(--wb-border-strong, var(--wb-border));
+}
+
+.cf-jira-hub-icon-action.is-danger:hover {
   color: var(--wb-danger);
-  border-color: var(--wb-border);
+  border-color: color-mix(in srgb, var(--wb-danger) 40%, transparent);
+}
+
+.cf-jira-hub-icon-action.is-copied {
+  color: var(--wb-success);
+  border-color: color-mix(in srgb, var(--wb-success) 40%, transparent);
+  background: color-mix(in srgb, var(--wb-success) 10%, transparent);
 }
 
 .cf-jira-hub-icon-action .wb-shell-icon {

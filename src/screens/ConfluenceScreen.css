@@ -864,3 +864,213 @@
 .cf-confluence-bridge-link:hover {
   text-decoration: underline;
 }
+
+/* Jira Linked Ticket Hub Card (Variant 1) */
+.cf-jira-linked-hub {
+  background: var(--wb-bg-surface);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius);
+  padding: var(--space-3) var(--space-4);
+  margin: var(--space-3) 0 var(--space-4);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2-5);
+}
+
+.cf-jira-hub-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.cf-jira-hub-main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  min-width: 0;
+  flex: 1;
+}
+
+.cf-jira-hub-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-0-5) var(--space-2);
+  border-radius: var(--wb-radius-sm);
+  font-size: var(--font-size-2xs);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--wb-success) 12%, transparent);
+  color: var(--wb-success);
+  border: 1px solid color-mix(in srgb, var(--wb-success) 28%, transparent);
+  white-space: nowrap;
+}
+
+.cf-jira-hub-status-badge .wb-shell-icon {
+  width: 12px;
+  height: 12px;
+}
+
+.cf-jira-hub-status-heading {
+  margin: 0;
+  padding: 0;
+  font-size: var(--font-size-2xs);
+  font-weight: 600;
+  line-height: inherit;
+  color: inherit;
+  display: inline;
+}
+
+.cf-jira-hub-key-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-0-5);
+  padding: var(--space-0-5) var(--space-2);
+  border-radius: var(--wb-radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  font-family: var(--wb-font-mono);
+  background: color-mix(in srgb, var(--wb-accent) 10%, transparent);
+  color: var(--wb-accent);
+  border: 1px solid color-mix(in srgb, var(--wb-accent) 26%, transparent);
+  text-decoration: none;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.cf-jira-hub-key-link:hover {
+  background: color-mix(in srgb, var(--wb-accent) 20%, transparent);
+  border-color: var(--wb-accent);
+}
+
+.cf-jira-hub-arrow {
+  font-size: var(--font-size-2xs);
+  opacity: 0.85;
+}
+
+.cf-jira-hub-summary {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--wb-text);
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.cf-screen .cf-jira-hub-open-btn,
+a.cf-jira-hub-open-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--wb-button-radius);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  background: var(--wb-accent);
+  color: #ffffff !important;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: opacity 0.15s ease;
+  line-height: 1.4;
+}
+
+.cf-jira-hub-open-btn:hover {
+  opacity: 0.9;
+}
+
+.cf-jira-hub-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--wb-border);
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.cf-jira-hub-chips {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  flex-wrap: wrap;
+}
+
+.cf-jira-hub-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-0-5);
+  padding: var(--space-0-5) var(--space-2);
+  border-radius: var(--wb-radius-sm);
+  font-size: var(--font-size-2xs);
+  color: var(--wb-text-muted);
+  background: var(--wb-bg-soft);
+  border: 1px solid var(--wb-border);
+  white-space: nowrap;
+}
+
+.cf-jira-hub-chip.epic {
+  color: var(--wb-text);
+  font-weight: 500;
+}
+
+.cf-jira-hub-chip.priority {
+  font-weight: 600;
+}
+
+.cf-jira-hub-chip.priority.tier-critical {
+  color: var(--wb-danger);
+  border-color: color-mix(in srgb, var(--wb-danger) 30%, transparent);
+  background: color-mix(in srgb, var(--wb-danger) 10%, transparent);
+}
+
+.cf-jira-hub-chip.priority.tier-high {
+  color: #ea580c;
+  border-color: rgba(234, 88, 12, 0.3);
+  background: rgba(234, 88, 12, 0.1);
+}
+
+.cf-jira-hub-chip.priority.tier-medium {
+  color: #d97706;
+  border-color: rgba(217, 119, 6, 0.3);
+  background: rgba(217, 119, 6, 0.1);
+}
+
+.cf-jira-hub-chip.priority.tier-low {
+  color: #2563eb;
+  border-color: rgba(37, 99, 235, 0.3);
+  background: rgba(37, 99, 235, 0.1);
+}
+
+.cf-jira-hub-chip-confluence {
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+
+.cf-jira-hub-chip-confluence:hover {
+  background: var(--wb-bg-hover);
+  color: var(--wb-accent);
+}
+
+.cf-jira-hub-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  flex-wrap: wrap;
+}
+
+.cf-jira-hub-unlink-btn {
+  color: var(--wb-text-muted) !important;
+}
+
+.cf-jira-hub-unlink-btn:hover {
+  color: var(--wb-danger) !important;
+}
+
+.cf-jira-hub-subtext {
+  font-size: var(--font-size-xs);
+  color: var(--wb-text-muted);
+  margin: var(--space-1) 0 0;
+}

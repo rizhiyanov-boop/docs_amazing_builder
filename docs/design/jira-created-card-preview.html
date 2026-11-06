@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Jira Created Card Redesign — Сравнение вариантов</title>
+  <link rel="stylesheet" href="../../src/tokens.css">
+  <link rel="stylesheet" href="../../src/tokens-workbench.css">
+  <link rel="stylesheet" href="../../src/App.css">
+  <link rel="stylesheet" href="../../src/screens/ConfluenceScreen.css">
+  <link rel="stylesheet" href="../../src/components/workbench/workbench-shell.css">
+  <style>
+    body {
+      background: var(--wb-bg-base, #0f172a);
+      color: var(--wb-text, #f8fafc);
+      font-family: var(--wb-font-sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
+      padding: var(--space-8, 32px);
+      max-width: 900px;
+      margin: 0 auto;
+      line-height: 1.5;
+    }
+
+    .preview-header {
+      margin-bottom: var(--space-8, 32px);
+      padding-bottom: var(--space-4, 16px);
+      border-bottom: 1px solid var(--wb-border, #334155);
+    }
+    .preview-header h1 {
+      margin: 0 0 var(--space-2, 8px);
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--wb-text);
+    }
+    .preview-header p {
+      margin: 0;
+      color: var(--wb-text-muted, #94a3b8);
+      font-size: 14px;
+    }
+
+    .section-card {
+      margin-bottom: var(--space-8, 32px);
+    }
+
+    .section-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2, 8px);
+      margin-bottom: var(--space-3, 12px);
+    }
+    .tag-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .tag-bad { background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); }
+    .tag-rec { background: rgba(34, 197, 94, 0.15); color: #22c55e; border: 1px solid rgba(34, 197, 94, 0.3); }
+    .tag-alt { background: rgba(59, 130, 246, 0.15); color: #3b82f6; border: 1px solid rgba(59, 130, 246, 0.3); }
+
+    .section-desc {
+      font-size: 13px;
+      color: var(--wb-text-muted, #94a3b8);
+    }
+
+    /* V1: Modern Ticket Hub Card */
+    .v1-card {
+      background: var(--wb-bg-surface, #1e293b);
+      border: 1px solid var(--wb-border, #334155);
+      border-radius: var(--wb-radius-md, 8px);
+      padding: var(--space-4, 16px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-3, 12px);
+    }
+
+    .v1-top-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: var(--space-4, 16px);
+    }
+
+    .v1-left-meta {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2-5, 10px);
+      flex-wrap: wrap;
+    }
+
+    .v1-status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      background: rgba(34, 197, 94, 0.12);
+      color: #22c55e;
+      border: 1px solid rgba(34, 197, 94, 0.25);
+    }
+
+    .v1-issue-key {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 9px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 700;
+      font-family: var(--wb-font-mono, monospace);
+      background: rgba(234, 179, 8, 0.12);
+      color: #eab308;
+      border: 1px solid rgba(234, 179, 8, 0.3);
+      text-decoration: none;
+      transition: all 0.15s ease;
+    }
+    .v1-issue-key:hover {
+      background: rgba(234, 179, 8, 0.22);
+      color: #fde047;
+    }
+
+    .v1-issue-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--wb-text, #f8fafc);
+      letter-spacing: -0.2px;
+    }
+
+    .v1-open-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      background: var(--wb-accent, #3b82f6);
+      color: #ffffff;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: opacity 0.15s ease;
+    }
+    .v1-open-btn:hover {
+      opacity: 0.9;
+    }
+
+    .v1-bottom-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-top: var(--space-2-5, 10px);
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      flex-wrap: wrap;
+      gap: var(--space-2, 8px);
+    }
+
+    .v1-chips {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .v1-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      color: var(--wb-text-muted, #94a3b8);
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .v1-chip.epic {
+      color: var(--wb-text, #f8fafc);
+    }
+    .v1-chip.priority {
+      color: #eab308;
+      border-color: rgba(234, 179, 8, 0.25);
+      background: rgba(234, 179, 8, 0.08);
+      font-weight: 600;
+    }
+
+    .v1-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .v1-btn-sec {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 10px;
+      border-radius: 5px;
+      font-size: 12px;
+      font-weight: 500;
+      background: transparent;
+      color: var(--wb-text-muted, #94a3b8);
+      border: 1px solid var(--wb-border, #334155);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .v1-btn-sec:hover {
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--wb-text, #f8fafc);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    /* V2: Ultra-Compact Bar */
+    .v2-bar {
+      background: var(--wb-bg-surface, #1e293b);
+      border: 1px solid var(--wb-border, #334155);
+      border-radius: 6px;
+      padding: 8px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .v2-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      overflow: hidden;
+    }
+    .v2-check {
+      color: #22c55e;
+      font-weight: bold;
+    }
+    .v2-title {
+      font-size: 13px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: var(--wb-text, #f8fafc);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="preview-header">
+    <h1>Редизайн карточки созданной задачи Jira</h1>
+    <p>Сравнение текущего вида и новых решений без обращения к реальной Jira</p>
+  </div>
+
+  <!-- BEFORE -->
+  <div class="section-card">
+    <div class="section-title-wrap">
+      <span class="tag-badge tag-bad">Было (текущий вид из вашего скриншота)</span>
+      <span class="section-desc">Оранжевая полоса, много лишнего бюрократического текста, голая ссылка</span>
+    </div>
+
+    <div class="cf-notice" style="margin: 0;">
+      <h3>Созданная задача этого сценария</h3>
+      <p><a href="https://jira.example/browse/DI-22498" style="color: var(--wb-accent);">DI-22498</a></p>
+      <p>Эта задача относится к отдельному сценарию и не привязана к текущему методу.</p>
+      <p>После публикации страницы здесь можно добавить ссылку Confluence в задачу.</p>
+      <button type="button" class="v1-btn-sec" style="margin-top: 6px;">Загрузить из Jira</button>
+    </div>
+  </div>
+
+  <!-- VARIANT 1: RECOMMENDED -->
+  <div class="section-card">
+    <div class="section-title-wrap">
+      <span class="tag-badge tag-rec">Вариант 1 (Рекомендуемый): Ticket Hub Card</span>
+      <span class="section-desc">Статус, интерактивный чип ключа, название задачи, параметры в чипах и быстрые действия</span>
+    </div>
+
+    <div class="v1-card">
+      <div class="v1-top-row">
+        <div class="v1-left-meta">
+          <span class="v1-status-pill">
+            <span>✓</span>
+            <span>Задача создана</span>
+          </span>
+
+          <a href="https://jira.example/browse/DI-22498" target="_blank" class="v1-issue-key" title="Открыть DI-22498 в Jira">
+            <span>DI-22498</span>
+            <span>↗</span>
+          </a>
+
+          <span class="v1-issue-title">
+            [OpenAPI] Implement GET /api/organization/account/info routing to Account Domain
+          </span>
+        </div>
+
+        <a href="https://jira.example/browse/DI-22498" target="_blank" class="v1-open-btn">
+          <span>В Jira</span>
+          <span>↗</span>
+        </a>
+      </div>
+
+      <div class="v1-bottom-row">
+        <div class="v1-chips">
+          <span class="v1-chip">⚡ Отдельный сценарий</span>
+          <span class="v1-chip">User Story</span>
+          <span class="v1-chip priority">⚡ Medium</span>
+          <span class="v1-chip epic">📁 DI-1083 · OpenAPI Improvements</span>
+        </div>
+
+        <div class="v1-actions">
+          <button type="button" class="v1-btn-sec" title="Синхронизировать поля из Jira">
+            <span>↻ Синхронизировать</span>
+          </button>
+          <button type="button" class="v1-btn-sec" title="Привязать опубликованную страницу Confluence">
+            <span>🔗 Confluence</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- VARIANT 2: COMPACT BAR -->
+  <div class="section-card">
+    <div class="section-title-wrap">
+      <span class="tag-badge tag-alt">Вариант 2: Ультракомпактный Status Bar</span>
+      <span class="section-desc">Занимает всего ~40px в одну строчку, минималистично и не двигает форму</span>
+    </div>
+
+    <div class="v2-bar">
+      <div class="v2-left">
+        <span class="v2-check">✓</span>
+        <a href="https://jira.example/browse/DI-22498" target="_blank" class="v1-issue-key">DI-22498 ↗</a>
+        <span class="v2-title">[OpenAPI] Implement GET /api/organization/account/info routing to Account Domain</span>
+        <span class="v1-chip" style="margin-left: 6px;">Отдельный сценарий</span>
+      </div>
+
+      <div style="display: flex; gap: 8px; align-items: center; flex-shrink: 0;">
+        <button type="button" class="v1-btn-sec" title="Синхронизировать">↻</button>
+        <a href="https://jira.example/browse/DI-22498" target="_blank" class="v1-open-btn" style="padding: 4px 10px; font-size: 11px;">Открыть в Jira ↗</a>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>

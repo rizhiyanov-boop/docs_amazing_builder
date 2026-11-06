@@ -466,16 +466,149 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
     {generating && <div className="cf-notice"><AiRequestProgress message={preparationPhase === 'epics' ? 'Подготовка ИИ: загружаем эпики проекта…' : 'ИИ: готовим название, описание и рекомендации…'} /></div>}
     {status?.connected && <>
       {loading && <p role="status">Чтение Jira…</p>}
-      {(operation?.state === 'none' && jiraTicket?.trim() || operation?.state === 'success') && <div className="cf-notice"><h3>{standalone ? 'Созданная задача этого сценария' : onLinked && !jiraTicket && !issue ? 'В локальном журнале найдена ранее созданная задача' : 'Метод уже связан с задачей Jira'}</h3>{operation?.issue ? <a href={operation.issue.url} target="_blank" rel="noopener noreferrer">{operation.issue.key}</a> : <p>{jiraTicket}</p>}
-        {onLinked && !jiraTicket && !issue && <p><WBButton disabled={disabled} onClick={() => void readCurrent()}>Привязать к текущему методу</WBButton></p>}
-        {onLinked && <p><WBButton disabled={disabled || operation?.updateState === 'unknown'} onClick={() => void unlink()}>Отвязать задачу</WBButton><span className="cf-muted"> Удаляется только связь в DocBuilder. Задача в Jira остаётся.</span></p>}
-        {operation?.message && <p>{operation.message}</p>}
-        {operation?.linkedUrl && <p>Документация: <a href={operation.linkedUrl} target="_blank" rel="noopener noreferrer">Confluence</a></p>}
-        {confluenceUrl && operation?.issue && operation.linkedUrl !== confluenceUrl && <p><WBButton disabled={disabled} onClick={() => void act(() => client.link(scope, methodId, confluenceUrl))}>Добавить ссылку Confluence</WBButton></p>}
-        <p>{standalone ? 'Эта задача относится к отдельному сценарию и не привязана к текущему методу.' : jiraTicket || issue ? 'Ссылка на задачу сохранена в поле Jira метода и включена в Wiki-разметку. В Confluence она появится при следующей публикации страницы.' : 'Связь с методом пока не сохранена. Привяжите задачу явно или удалите запись журнала кнопкой «Отвязать задачу».'}</p>
-        {!confluenceUrl && <p className="cf-muted">После публикации страницы здесь можно добавить ссылку Confluence в задачу.</p>}
-        <WBButton disabled={disabled} onClick={() => void readCurrent()}>Загрузить из Jira</WBButton>
-      </div>}
+      {(() => {
+        const isLinkedCardVisible = Boolean((operation?.state === 'none' && jiraTicket?.trim()) || operation?.state === 'success');
+        if (!isLinkedCardVisible) return null;
+
+        const currentIssueKey = operation?.issue?.key || issue?.key || (jiraTicket ? jiraTicket.split('/').pop()?.trim() : '');
+        const currentIssueUrl = operation?.issue?.url || issue?.url || (jiraTicket?.startsWith('http') ? jiraTicket : (status?.baseUrl && currentIssueKey ? `${status.baseUrl.replace(/\/+$/, '')}/browse/${currentIssueKey}` : undefined));
+        const displaySummary = issue?.summary || summary || '';
+        const currentEpicKey = issue?.epic || epic;
+        const currentEpicObj = currentEpicKey ? epics.items.find(e => e.key === currentEpicKey) : undefined;
+        const currentEpicName = currentEpicObj?.name;
+        const statusTitle = standalone
+          ? 'Созданная задача этого сценария'
+          : onLinked && !jiraTicket && !issue
+            ? 'В локальном журнале найдена ранее созданная задача'
+            : 'Метод уже связан с задачей Jira';
+
+        return (
+          <div className="cf-jira-linked-hub">
+            <div className="cf-jira-hub-top">
+              <div className="cf-jira-hub-main">
+                <div className="cf-jira-hub-status-badge">
+                  <WorkbenchIcon name="check" />
+                  <h3 className="cf-jira-hub-status-heading">{statusTitle}</h3>
+                </div>
+                {currentIssueKey && (
+                  currentIssueUrl ? (
+                    <a
+                      href={currentIssueUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="cf-jira-hub-key-link"
+                      aria-label={currentIssueKey}
+                      title={`Открыть ${currentIssueKey} в Jira`}
+                    >
+                      <span>{currentIssueKey}</span>
+                      <span aria-hidden="true" className="cf-jira-hub-arrow">↗</span>
+                    </a>
+                  ) : (
+                    <span className="cf-jira-hub-key-link">{currentIssueKey}</span>
+                  )
+                )}
+                {displaySummary && (
+                  <span className="cf-jira-hub-summary" title={displaySummary}>
+                    {displaySummary}
+                  </span>
+                )}
+              </div>
+              {currentIssueUrl && (
+                <a
+                  href={currentIssueUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="cf-jira-hub-open-btn"
+                  title={`Открыть ${currentIssueKey || 'задачу'} в Jira`}
+                >
+                  <span>В Jira</span>
+                  <span aria-hidden="true">↗</span>
+                </a>
+              )}
+            </div>
+
+            <div className="cf-jira-hub-bottom">
+              <div className="cf-jira-hub-chips">
+                {standalone ? (
+                  <span className="cf-jira-hub-chip">⚡ Отдельный сценарий</span>
+                ) : (
+                  <span className="cf-jira-hub-chip cf-jira-hub-chip-bound">🔗 Привязана к методу</span>
+                )}
+                <span className="cf-jira-hub-chip">
+                  {issue?.issueType?.name || (issueKind === 'story' ? 'User Story' : 'Задача · тестирование')}
+                </span>
+                {activeTier && (
+                  <span className={`cf-jira-hub-chip priority tier-${activeTier.isCritical ? 'critical' : activeTier.name?.toLowerCase()}`}>
+                    {activeTier.icon} {activeTier.russianName || activeTier.name}
+                  </span>
+                )}
+                {currentEpicKey && (
+                  <span className="cf-jira-hub-chip epic" title={`Эпик: ${currentEpicName || currentEpicKey}`}>
+                    📁 {currentEpicKey}{currentEpicName ? ` · ${currentEpicName}` : ''}
+                  </span>
+                )}
+                {operation?.linkedUrl && (
+                  <a
+                    href={operation.linkedUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="cf-jira-hub-chip cf-jira-hub-chip-confluence"
+                    title="Документация Confluence"
+                  >
+                    📄 Confluence <span aria-hidden="true">↗</span>
+                  </a>
+                )}
+              </div>
+
+              <div className="cf-jira-hub-actions">
+                {onLinked && !jiraTicket && !issue && (
+                  <WBButton
+                    size="sm"
+                    disabled={disabled}
+                    onClick={() => void readCurrent()}
+                  >
+                    Привязать к текущему методу
+                  </WBButton>
+                )}
+                {confluenceUrl && operation?.issue && operation.linkedUrl !== confluenceUrl && (
+                  <WBButton
+                    size="sm"
+                    disabled={disabled}
+                    onClick={() => void act(() => client.link(scope, methodId, confluenceUrl))}
+                  >
+                    Добавить ссылку Confluence
+                  </WBButton>
+                )}
+                <WBButton
+                  size="sm"
+                  disabled={disabled}
+                  onClick={() => void readCurrent()}
+                >
+                  Загрузить из Jira
+                </WBButton>
+                {onLinked && (
+                  <WBButton
+                    size="sm"
+                    variant="ghost"
+                    className="cf-jira-hub-unlink-btn"
+                    disabled={disabled || operation?.updateState === 'unknown'}
+                    onClick={() => void unlink()}
+                    title="Удаляется только связь в DocBuilder. Задача в Jira остаётся."
+                  >
+                    Отвязать задачу
+                  </WBButton>
+                )}
+              </div>
+            </div>
+            {operation?.message && <div className="cf-jira-hub-subtext">{operation.message}</div>}
+            {!standalone && !jiraTicket && !issue && (
+              <p className="cf-jira-hub-subtext cf-muted">
+                Связь с методом пока не сохранена. Привяжите задачу явно или удалите запись кнопкой «Отвязать задачу».
+              </p>
+            )}
+          </div>
+        );
+      })()}
       {localConflict && <div className="cf-notice" role="alert"><p>Задача изменилась в Jira. Местные правки сохранены; обновление заблокировано до выбора версии.</p><details><summary>Текущая версия Jira</summary><p>{issue?.summary}</p><pre style={{ whiteSpace: 'pre-wrap' }}>{issue?.description}</pre><p>Эпик: {issue?.epic || 'Без эпика'} · Теги: {issue?.labels.join(', ')} · Приоритет: {issue?.priorityId || 'Не задан'}</p></details><div className="cf-actions"><WBButton disabled={disabled} onClick={() => void readCurrent(false)}>Использовать версию Jira</WBButton><WBButton disabled={disabled || updateUnknown} onClick={() => { setFingerprint(issue?.fingerprint ?? ''); setLocalConflict(false); }}>Оставить мои правки</WBButton></div></div>}
       {updateUnknown && <div className="cf-notice" role="alert"><h3>Результат обновления не подтверждён</h3><p>Повторное обновление заблокировано. Черновик сохранён локально.</p><div className="cf-actions"><WBButton disabled={disabled} onClick={() => void readCurrent()}>Проверить обновление</WBButton><WBButton disabled={disabled} onClick={() => void readCurrent(false, true)}>Принять текущую версию Jira</WBButton></div></div>}
       {operation?.state === 'unknown' ? <div className="cf-notice"><h3>Результат создания не подтверждён</h3><p>Проверьте Jira. Повторное создание заблокировано, чтобы избежать дублей.</p><WBInput label="Ссылка на созданную задачу" value={recovery} onChange={event => setRecovery(event.target.value)} /><p><WBButton disabled={disabled || !recovery.trim()} onClick={() => void act(() => client.confirm(scope, methodId, recovery.trim()))}>Проверить и привязать задачу</WBButton></p></div> : (editing || operation?.state === 'none' && !jiraTicket?.trim()) && <>

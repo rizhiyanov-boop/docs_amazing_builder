@@ -21,12 +21,21 @@
 ## UI Quality, Modern Design & Visual Review Standard
 
 - **Mandatory Visual Review**: Conduct visual inspection for any UI modification before concluding the turn. Inspect rendered screenshots using `read_file`.
-- **Visual Tooling & Automation**: Use `node scripts/visual-review.cjs --url <url> --out <path>` to capture pixel-perfect screenshots of rendered components.
-- **Full Interactive Flow Traversal**: When changes affect multi-step states (e.g. form → submission → success card → action → unlinking/reset), walk through and visually inspect every state in the complete flow (using `--flow` steps in visual-review tool).
+- **Visual Tooling & Automation**: Use `node scripts/visual-review.cjs --url <url> --out <path>` to capture pixel-perfect screenshots and run automated DOM audit checks.
+- **Scenario Matrix Coverage (No Happy-Path Blindness)**: Never test only the single default happy path. When modifying a component with branching modes (e.g. standard method vs standalone/freeform vs pre-linked vs error states), systematically traverse and capture screenshots for EVERY scenario in the matrix.
+- **Information Hierarchy First (Primary Law of UI)**:
+  - The primary entity (Title, Name, Subject, Ticket Key) MUST dominate the top row or primary visual anchor. NEVER bury the title underneath a cluster of secondary metadata chips or badges.
+  - Secondary metadata (status, type, priority, epic, tags) belongs on a separate subordinate row or softly muted alongside.
+  - Action buttons (Open, Copy, Delete) must be clustered logically on the right with strict 24px/32px uniform height.
+- **Strict Minimalism & Anti-Noise**:
+  - Ruthlessly eliminate redundant, duplicate, or useless text/elements. Remove boilerplate instructions, obvious helper text, duplicate statuses, and obsolete buttons.
+  - **Conciseness in Badges**: Badges/chips must be 1–2 words (<= 18 characters, e.g. `[ ✓ Создана ]` instead of full sentences like `[ ✓ Созданная задача этого сценария ]`).
+  - **Zero Tautology**: Forbid repeating terms or word stems across adjacent badges/chips (e.g. no repeating "сценарий" in multiple sibling chips).
+- **Pruning Transparency (Explicit Reporting in Chat)**: Whenever elements, buttons, notices, or fields are removed or simplified during UI cleanup, ALWAYS output a dedicated section in the chat response:
+  `### Исключенные / удаленные элементы`
+  listing each discarded item and the exact rationale, ensuring critical functionality is never silently lost in the background.
 - **Accuracy, Typography & Alignment**: Ensure strict vertical alignment (e.g. unified 24px/32px heights across badges, buttons, chips and icon actions), consistent font hierarchy, balanced padding, and no clumsy text wrapping.
-- **Modern UI Patterns**: Prioritize critical user information and primary actions; keep technical or secondary metadata softly muted. Group controls logically.
-- **Strict Minimalism**: Ruthlessly eliminate redundant, duplicate, or useless text/elements. Remove boilerplate instructions, obvious helper text, duplicate statuses, and obsolete buttons.
-- **Autonomous Remediation**: If visual review reveals any flaws, misalignment, awkward wrapping, or unnecessary visual noise, immediately fix them autonomously without stopping to ask the user.
+- **Autonomous Remediation**: If visual review or automated audit reveals any flaws, misalignment, awkward wrapping, inverted hierarchy, or unnecessary visual noise, immediately fix them autonomously without stopping to ask the user.
 
 ## Engineering rules
 
@@ -41,7 +50,7 @@
 
 ## Verification & Testing Strategy
 
-- **Visual Review First**: Visual inspection of rendered screens via screenshots is mandatory for all UI work.
+- **Visual Review & DOM Audit First**: Visual inspection of rendered screens via screenshots is mandatory for all UI work, supported by automated DOM audit checks in `scripts/visual-review.cjs`.
 - **Contextual Autotests (Time-Saving)**: Autotests are run only when strictly necessary as determined by AI per request (e.g., core parser changes, shared contract shifts) to save iteration cycle time.
 - **Pre-Release Verification**: Run `npm run test:ci` and `npm run build` before release or when shared contracts/data models change.
-- Report visual inspection findings, reviewed flow states, commands run, failures, and residual risk.
+- Report visual inspection findings, reviewed flow states, pruned elements list, commands run, failures, and residual risk.

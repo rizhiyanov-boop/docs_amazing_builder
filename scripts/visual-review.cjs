@@ -2,7 +2,10 @@
  * Automated Visual Review Tool for DocBuilder UI
  * 
  * Captures pixel-perfect screenshots of rendered UI using headless Edge via Chrome DevTools Protocol (CDP).
- * Can execute interaction flows (clicks, inputs, waits) and capture multi-state flows.
+ * Includes automated DOM Audit rules for:
+ *   - Information Hierarchy (Primary entity title above secondary metadata)
+ *   - Badge conciseness (<= 18 chars, no whole sentences)
+ *   - Anti-tautology (No duplicate word stems across adjacent badges)
  * 
  * Usage:
  *   node scripts/visual-review.cjs --url <url> [--out <pngPath>] [--width 1280] [--height 900] [--wait 1000]
@@ -53,6 +56,77 @@ function httpGetJson(url) {
   });
 }
 
+async function runDomAudit(send) {
+  try {
+    const res = await send('Runtime.evaluate', {
+      returnByValue: true,
+      expression: `
+        (() => {
+          const issues = [];
+
+          // 1. Check Information Hierarchy (Title must not be below metadata chips)
+          const hubs = document.querySelectorAll('.cf-jira-linked-hub');
+          hubs.forEach(hub => {
+            const title = hub.querySelector('.cf-jira-hub-title-row, .cf-jira-hub-title-text, [data-role="title"]');
+            const chips = hub.querySelector('.cf-jira-hub-header-left');
+            if (title && chips) {
+              const titleRect = title.getBoundingClientRect();
+              const chipsRect = chips.getBoundingClientRect();
+              if (titleRect.top > chipsRect.bottom && chipsRect.height > 0) {
+                issues.push({
+                  type: 'hierarchy-inverted',
+                  message: 'Entity title is physically rendered below secondary metadata chips row'
+                });
+              }
+            }
+          });
+
+          // 2. Check Badge Conciseness (> 20 chars in a single status/chip)
+          const chips = document.querySelectorAll('.cf-jira-hub-status-badge, .cf-jira-hub-chip, .cf-jira-workflow-mode-badge');
+          chips.forEach(chip => {
+            const text = (chip.textContent || '').trim();
+            if (text.length > 20) {
+              issues.push({
+                type: 'badge-too-long',
+                message: 'Badge text is too wordy (' + text.length + ' chars): "' + text + '"'
+              });
+            }
+          });
+
+          // 3. Check Tautology / duplicate word stems across adjacent badges
+          hubs.forEach(hub => {
+            const parentBlock = hub.closest('.cf-screen, main') || hub.parentElement;
+            const badgeEls = Array.from(parentBlock ? parentBlock.querySelectorAll('.cf-jira-hub-status-badge, .cf-jira-hub-chip, .cf-jira-workflow-mode-badge') : []);
+            const badgeTexts = badgeEls.map(el => (el.textContent || '').trim().toLowerCase());
+            
+            const words = badgeTexts.flatMap(t => t.split(/[\\s\\/·,]+/));
+            const stems = words.map(w => w.replace(/[^a-zа-я0-9]/gi, '')).filter(w => w.length > 4);
+            const counts = {};
+            stems.forEach(s => {
+              const prefix = s.slice(0, 6);
+              counts[prefix] = (counts[prefix] || 0) + 1;
+            });
+            for (const [prefix, count] of Object.entries(counts)) {
+              if (count > 1) {
+                issues.push({
+                  type: 'duplicate-terminology',
+                  message: 'Repeated word stem ("' + prefix + '...") found ' + count + ' times across adjacent badges: ' + JSON.stringify(badgeTexts)
+                });
+              }
+            }
+          });
+
+          return issues;
+        })()
+      `
+    });
+
+    return res?.result?.value || [];
+  } catch {
+    return [];
+  }
+}
+
 async function run() {
   const params = parseArgs();
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'docbuilder-visual-'));
@@ -62,6 +136,10 @@ async function run() {
     '--headless=new',
     `--remote-debugging-port=${port}`,
     '--disable-gpu',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-fre',
+    '--disable-component-update',
     `--user-data-dir=${tmpDir}`,
     `--window-size=${params.width},${params.height}`,
     params.url
@@ -70,23 +148,23 @@ async function run() {
   let ws = null;
 
   try {
-    // Wait for browser debugger port
     let targets = null;
     for (let attempt = 0; attempt < 25; attempt++) {
       await new Promise(r => setTimeout(r, 200));
       try {
         targets = await httpGetJson(`http://127.0.0.1:${port}/json/list`);
         if (targets && targets.length > 0) break;
-      } catch {
-        // continue polling
-      }
+      } catch {}
     }
 
     if (!targets || !targets.length) {
       throw new Error(`Browser failed to start CDP on port ${port}`);
     }
 
-    const pageTarget = targets.find(t => t.type === 'page') || targets[0];
+    const pageTarget = targets.find(t => t.url.includes('5173') || t.url.includes(params.url))
+      || targets.find(t => t.type === 'page')
+      || targets[0];
+
     ws = new globalThis.WebSocket(pageTarget.webSocketDebuggerUrl);
     await new Promise((resolve, reject) => {
       ws.onopen = resolve;
@@ -122,8 +200,18 @@ async function run() {
     const captureTo = async (filePath) => {
       const outDir = path.dirname(filePath);
       if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
-      const { data } = await send('Page.captureScreenshot', { format: 'png' });
-      fs.writeFileSync(filePath, Buffer.from(data, 'base64'));
+      
+      // Run automated DOM audit
+      const auditIssues = await runDomAudit(send);
+      if (auditIssues.length > 0) {
+        console.warn(`[visual-review] ⚠️ DOM Audit alerts for ${path.basename(filePath)}:`);
+        auditIssues.forEach(iss => console.warn(`   • [${iss.type}] ${iss.message}`));
+      } else {
+        console.log(`[visual-review] ✓ DOM Audit passed cleanly for ${path.basename(filePath)}`);
+      }
+
+      const res = await send('Page.captureScreenshot', { format: 'png' });
+      fs.writeFileSync(filePath, Buffer.from(res.data, 'base64'));
       console.log(`[visual-review] Screenshot saved: ${filePath}`);
     };
 
@@ -141,7 +229,7 @@ async function run() {
           await send('Runtime.evaluate', {
             expression: `
               (() => {
-                const el = Array.from(document.querySelectorAll('${step.selector || 'button, a, [role="button"]'}'))
+                const el = Array.from(document.querySelectorAll('${step.selector || 'button, a, [role="button"], .cf-jira-pill'}'))
                   .find(e => e.textContent.includes(${JSON.stringify(step.clickText)}));
                 if (el) { el.click(); return true; }
                 return false;

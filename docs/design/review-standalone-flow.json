@@ -1,0 +1,6 @@
+[
+  { "clickText": "Произвольная задача", "wait": 500 },
+  { "click": "textarea[aria-label=\"Что нужно сделать\"]", "eval": "const ta = document.querySelector('textarea[aria-label=\"Что нужно сделать\"]'); if (ta) { ta.value = 'Сделать синхронизацию'; ta.dispatchEvent(new Event('input', { bubbles: true })); }", "wait": 300 },
+  { "clickText": "Подготовить через ИИ", "wait": 1200 },
+  { "clickText": "Создать", "wait": 1500, "screenshot": "review-standalone-created.png" }
+]

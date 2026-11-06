@@ -18,6 +18,16 @@
 - AI work: inspect src/openrouterClient.ts and api/ai.ts; retain authentication, input validation, timeout, output limits and normalization.
 - Backend persistence: inspect src/serverSyncClient.ts, relevant hooks, api/projects.ts and api/_lib/db.ts.
 
+## UI Quality, Modern Design & Visual Review Standard
+
+- **Mandatory Visual Review**: Conduct visual inspection for any UI modification before concluding the turn. Inspect rendered screenshots using `read_file`.
+- **Visual Tooling & Automation**: Use `node scripts/visual-review.cjs --url <url> --out <path>` to capture pixel-perfect screenshots of rendered components.
+- **Full Interactive Flow Traversal**: When changes affect multi-step states (e.g. form → submission → success card → action → unlinking/reset), walk through and visually inspect every state in the complete flow (using `--flow` steps in visual-review tool).
+- **Accuracy, Typography & Alignment**: Ensure strict vertical alignment (e.g. unified 24px/32px heights across badges, buttons, chips and icon actions), consistent font hierarchy, balanced padding, and no clumsy text wrapping.
+- **Modern UI Patterns**: Prioritize critical user information and primary actions; keep technical or secondary metadata softly muted. Group controls logically.
+- **Strict Minimalism**: Ruthlessly eliminate redundant, duplicate, or useless text/elements. Remove boilerplate instructions, obvious helper text, duplicate statuses, and obsolete buttons.
+- **Autonomous Remediation**: If visual review reveals any flaws, misalignment, awkward wrapping, or unnecessary visual noise, immediately fix them autonomously without stopping to ask the user.
+
 ## Engineering rules
 
 - Treat src/types.ts as the canonical model and workspace version 3 as the current persisted format.
@@ -29,10 +39,9 @@
 - Never expose secrets or place server credentials in frontend code.
 - Do not edit Cyrillic JSON/Markdown through inline Node/Python piped from PowerShell; use apply_patch or a checked-in script.
 
-## Verification
+## Verification & Testing Strategy
 
-- Run the narrow script matching the change: test:wiki, test:import, test:ai, test:sync or test:ui.
-- Run npm run build for TypeScript/runtime changes.
-- Run npm run lint:all for component or CSS changes.
-- Run npm run test:ci before release or when shared contracts change.
-- Report commands run, failures and residual risk.
+- **Visual Review First**: Visual inspection of rendered screens via screenshots is mandatory for all UI work.
+- **Contextual Autotests (Time-Saving)**: Autotests are run only when strictly necessary as determined by AI per request (e.g., core parser changes, shared contract shifts) to save iteration cycle time.
+- **Pre-Release Verification**: Run `npm run test:ci` and `npm run build` before release or when shared contracts/data models change.
+- Report visual inspection findings, reviewed flow states, commands run, failures, and residual risk.

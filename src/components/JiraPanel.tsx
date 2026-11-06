@@ -51,6 +51,7 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
   const [labels, setLabels] = useState<string[]>([]); const [priorityId, setPriorityId] = useState('');
   const [priorityExplicit, setPriorityExplicit] = useState(false);
   const [draft, setDraft] = useState<JiraDraft>(); const [operation, setOperation] = useState<JiraOperation>();
+  const [createdInSession, setCreatedInSession] = useState(false);
   useEffect(() => { onCompletedChange?.(operation?.state === 'success' && !operation.updateState); }, [operation, onCompletedChange]);
   const [recovery, setRecovery] = useState(''); const [error, setError] = useState('');
   const [busy, setBusy] = useState(false); const [generating, setGenerating] = useState(false); const [loading, setLoading] = useState(false);
@@ -100,7 +101,7 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
     const refresh = async () => {
       await Promise.resolve(); if (generation.value !== current) return;
       if (!active) return;
-      setCacheKey(''); setMetadata(undefined); setOperation(undefined); setIssue(undefined); setLocalConflict(false); setEpics({ items: [], nextStart: null }); setError(''); setLoading(false);
+      setCacheKey(''); setMetadata(undefined); setOperation(undefined); setIssue(undefined); setLocalConflict(false); setEpics({ items: [], nextStart: null }); setError(''); setLoading(false); setCreatedInSession(false);
       if (!status?.connected || !origin || !projectId) return;
       setLoading(true); const scope = { baseUrl: origin, projectId };
       const key = jiraFormCacheKey(scope, methodId); const cached = readJiraFormCache(key);
@@ -252,15 +253,20 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
     } catch (failure) { if (epoch.current.value === current) setError(failure instanceof Error ? failure.message : 'Не удалось отвязать задачу. Обновите локальное приложение до 1.3.6.'); }
     finally { lock.current = false; if (epoch.current.value === current) { setBusy(false); onBusyChange(false); } }
   };
-  const act = async (action: () => Promise<JiraOperation>) => {
+  const act = async (action: () => Promise<JiraOperation>, isCreation = false) => {
     if (lock.current) return; lock.current = true; setBusy(true); onBusyChange(true); setError(''); const current = epoch.current.value;
     const accept = (result: JiraOperation) => {
       if (epoch.current.value !== current) return;
-      setOperation(result); if (result.state === 'success' && result.issue) linkedCallback.current?.(methodId, result.issue.url);
+      setOperation(result);
+      if (result.state === 'success' && result.issue) {
+        if (isCreation) setCreatedInSession(true);
+        linkedCallback.current?.(methodId, result.issue.url);
+      }
     };
     try {
       const result = await action(); accept(result);
       if (result.state === 'success' && result.issue && current === epoch.current.value) {
+        if (isCreation) setCreatedInSession(true);
         const loaded = await client.issue(scope, methodId, result.issue.url);
         if (current === epoch.current.value) acceptIssue(loaded, issue ? readJiraFormCache(cacheKey) : undefined);
       }
@@ -484,8 +490,8 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
 
         return (
           <div className="cf-jira-linked-hub">
-            <div className="cf-jira-hub-top">
-              <div className="cf-jira-hub-main">
+            <div className="cf-jira-hub-header">
+              <div className="cf-jira-hub-header-left">
                 <div className="cf-jira-hub-status-badge">
                   <WorkbenchIcon name="check" />
                   <h3 className="cf-jira-hub-status-heading">{statusTitle}</h3>
@@ -507,32 +513,8 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
                     <span className="cf-jira-hub-key-link">{currentIssueKey}</span>
                   )
                 )}
-                {displaySummary && (
-                  <span className="cf-jira-hub-summary" title={displaySummary}>
-                    {displaySummary}
-                  </span>
-                )}
-              </div>
-              {currentIssueUrl && (
-                <a
-                  href={currentIssueUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="cf-jira-hub-open-btn"
-                  title={`Открыть ${currentIssueKey || 'задачу'} в Jira`}
-                >
-                  <span>В Jira</span>
-                  <span aria-hidden="true">↗</span>
-                </a>
-              )}
-            </div>
-
-            <div className="cf-jira-hub-bottom">
-              <div className="cf-jira-hub-chips">
-                {standalone ? (
+                {standalone && (
                   <span className="cf-jira-hub-chip">⚡ Отдельный сценарий</span>
-                ) : (
-                  <span className="cf-jira-hub-chip cf-jira-hub-chip-bound">🔗 Привязана к методу</span>
                 )}
                 <span className="cf-jira-hub-chip">
                   {issue?.issueType?.name || (issueKind === 'story' ? 'User Story' : 'Задача · тестирование')}
@@ -560,7 +542,7 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
                 )}
               </div>
 
-              <div className="cf-jira-hub-actions">
+              <div className="cf-jira-hub-header-right">
                 {onLinked && !jiraTicket && !issue && (
                   <WBButton
                     size="sm"
@@ -579,27 +561,39 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
                     Добавить ссылку Confluence
                   </WBButton>
                 )}
-                <WBButton
-                  size="sm"
-                  disabled={disabled}
-                  onClick={() => void readCurrent()}
-                >
-                  Загрузить из Jira
-                </WBButton>
+                {currentIssueUrl && (
+                  <a
+                    href={currentIssueUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="cf-jira-hub-open-btn"
+                    title={`Открыть ${currentIssueKey || 'задачу'} в Jira`}
+                  >
+                    <span>В Jira</span>
+                    <span aria-hidden="true">↗</span>
+                  </a>
+                )}
                 {onLinked && (
-                  <WBButton
-                    size="sm"
-                    variant="ghost"
-                    className="cf-jira-hub-unlink-btn"
+                  <button
+                    type="button"
+                    className="cf-jira-hub-icon-action"
                     disabled={disabled || operation?.updateState === 'unknown'}
                     onClick={() => void unlink()}
-                    title="Удаляется только связь в DocBuilder. Задача в Jira остаётся."
+                    aria-label="Отвязать задачу"
+                    title="Отвязать задачу от метода (задача в Jira остаётся)"
                   >
-                    Отвязать задачу
-                  </WBButton>
+                    <WorkbenchIcon name="trash" />
+                  </button>
                 )}
               </div>
             </div>
+
+            {displaySummary && (
+              <div className="cf-jira-hub-title-row">
+                <span className="cf-jira-hub-title-text">{displaySummary}</span>
+              </div>
+            )}
+
             {operation?.message && <div className="cf-jira-hub-subtext">{operation.message}</div>}
             {!standalone && !jiraTicket && !issue && (
               <p className="cf-jira-hub-subtext cf-muted">
@@ -611,7 +605,7 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
       })()}
       {localConflict && <div className="cf-notice" role="alert"><p>Задача изменилась в Jira. Местные правки сохранены; обновление заблокировано до выбора версии.</p><details><summary>Текущая версия Jira</summary><p>{issue?.summary}</p><pre style={{ whiteSpace: 'pre-wrap' }}>{issue?.description}</pre><p>Эпик: {issue?.epic || 'Без эпика'} · Теги: {issue?.labels.join(', ')} · Приоритет: {issue?.priorityId || 'Не задан'}</p></details><div className="cf-actions"><WBButton disabled={disabled} onClick={() => void readCurrent(false)}>Использовать версию Jira</WBButton><WBButton disabled={disabled || updateUnknown} onClick={() => { setFingerprint(issue?.fingerprint ?? ''); setLocalConflict(false); }}>Оставить мои правки</WBButton></div></div>}
       {updateUnknown && <div className="cf-notice" role="alert"><h3>Результат обновления не подтверждён</h3><p>Повторное обновление заблокировано. Черновик сохранён локально.</p><div className="cf-actions"><WBButton disabled={disabled} onClick={() => void readCurrent()}>Проверить обновление</WBButton><WBButton disabled={disabled} onClick={() => void readCurrent(false, true)}>Принять текущую версию Jira</WBButton></div></div>}
-      {operation?.state === 'unknown' ? <div className="cf-notice"><h3>Результат создания не подтверждён</h3><p>Проверьте Jira. Повторное создание заблокировано, чтобы избежать дублей.</p><WBInput label="Ссылка на созданную задачу" value={recovery} onChange={event => setRecovery(event.target.value)} /><p><WBButton disabled={disabled || !recovery.trim()} onClick={() => void act(() => client.confirm(scope, methodId, recovery.trim()))}>Проверить и привязать задачу</WBButton></p></div> : (editing || operation?.state === 'none' && !jiraTicket?.trim()) && <>
+      {operation?.state === 'unknown' ? <div className="cf-notice"><h3>Результат создания не подтверждён</h3><p>Проверьте Jira. Повторное создание заблокировано, чтобы избежать дублей.</p><WBInput label="Ссылка на созданную задачу" value={recovery} onChange={event => setRecovery(event.target.value)} /><p><WBButton disabled={disabled || !recovery.trim()} onClick={() => void act(() => client.confirm(scope, methodId, recovery.trim()))}>Проверить и привязать задачу</WBButton></p></div> : (!createdInSession && (editing || operation?.state === 'none' && !jiraTicket?.trim())) && <>
         {metadata?.message && <p role="alert" className="cf-notice">{metadata.message}</p>}
         {!editing && metadata?.story && metadata.labelsSupported === false && <p role="alert" className="cf-notice cf-error">В Jira недоступно поле тегов для выбранного типа задачи. Добавьте его на экран создания в Jira: основной тег обязателен.</p>}
         {!editing && metadata && (metadata.issueKind !== issueKind || typeof metadata.epicRequired !== 'boolean') && <p role="alert" className="cf-notice cf-error">Обновите локальный сервис до версии 1.3.4. <a href="/docbuilder-confluence-local.zip" download>Скачать</a></p>}
@@ -1200,7 +1194,7 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
             </div>
           )}
         </section></div>
-        <footer className="cf-footer"><span className="cf-muted">{editing ? changed ? 'Есть несохранённые изменения' : 'Задача загружена из Jira' : metadata?.epicRequired && !epic ? 'Выберите обязательный эпик для создания задачи' : ''}</span>{editing ? <WBButton variant="accent" disabled={disabled || !canUpdate} onClick={() => void update()}>{busy ? 'Обновление…' : 'Обновить задачу'}</WBButton> : <WBButton variant="accent" disabled={disabled || !canCreate} onClick={() => void act(() => client.create(scope, { methodId, issueKind, summary: summary.trim(), description: jiraDescription(descriptionRu, descriptionEn, descriptionUz), ...(epic ? { epic } : {}), labels, ...(priorityId ? { priorityId } : {}), ...(confluenceUrl ? { confluenceUrl } : {}) }))}>{busy ? 'Создание…' : issueKind === 'task' ? 'Создать задачу' : 'Создать User Story'}</WBButton>}</footer>
+        <footer className="cf-footer"><span className="cf-muted">{editing ? changed ? 'Есть несохранённые изменения' : 'Задача загружена из Jira' : metadata?.epicRequired && !epic ? 'Выберите обязательный эпик для создания задачи' : ''}</span>{editing ? <WBButton variant="accent" disabled={disabled || !canUpdate} onClick={() => void update()}>{busy ? 'Обновление…' : 'Обновить задачу'}</WBButton> : <WBButton variant="accent" disabled={disabled || !canCreate} onClick={() => void act(() => client.create(scope, { methodId, issueKind, summary: summary.trim(), description: jiraDescription(descriptionRu, descriptionEn, descriptionUz), ...(epic ? { epic } : {}), labels, ...(priorityId ? { priorityId } : {}), ...(confluenceUrl ? { confluenceUrl } : {}) }), true)}>{busy ? 'Создание…' : issueKind === 'task' ? 'Создать задачу' : 'Создать User Story'}</WBButton>}</footer>
         {!status.remembered && <p className="cf-muted">Включите сохранение Jira в локальной форме для защиты от повторного создания задач.</p>}
       </>}
     </>}

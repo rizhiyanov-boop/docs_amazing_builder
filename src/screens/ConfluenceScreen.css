@@ -865,47 +865,64 @@
   text-decoration: underline;
 }
 
-/* Jira Linked Ticket Hub Card (Variant 1) */
+/* Jira Linked Ticket Hub Card (Redesigned & Aligned) */
 .cf-jira-linked-hub {
   background: var(--wb-bg-surface);
   border: 1px solid var(--wb-border);
   border-radius: var(--wb-radius);
   padding: var(--space-3) var(--space-4);
   margin: var(--space-3) 0 var(--space-4);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
   display: flex;
   flex-direction: column;
-  gap: var(--space-2-5);
+  gap: var(--space-2);
 }
 
-.cf-jira-hub-top {
+.cf-jira-hub-header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--space-3);
+  flex-wrap: wrap;
 }
 
-.cf-jira-hub-main {
+.cf-jira-hub-header-left {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1-5);
   flex-wrap: wrap;
   min-width: 0;
   flex: 1;
 }
 
-.cf-jira-hub-status-badge {
+.cf-jira-hub-header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  flex-shrink: 0;
+}
+
+/* Strict uniform height & typography across all header badges/chips */
+.cf-jira-hub-status-badge,
+.cf-jira-hub-key-link,
+.cf-jira-hub-chip {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-0-5) var(--space-2);
+  height: 24px;
+  box-sizing: border-box;
+  padding: 0 var(--space-2);
   border-radius: var(--wb-radius-sm);
-  font-size: var(--font-size-2xs);
+  font-size: var(--font-size-xs);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.cf-jira-hub-status-badge {
+  gap: var(--space-1);
   font-weight: 600;
   background: color-mix(in srgb, var(--wb-success) 12%, transparent);
   color: var(--wb-success);
   border: 1px solid color-mix(in srgb, var(--wb-success) 28%, transparent);
-  white-space: nowrap;
 }
 
 .cf-jira-hub-status-badge .wb-shell-icon {
@@ -916,20 +933,15 @@
 .cf-jira-hub-status-heading {
   margin: 0;
   padding: 0;
-  font-size: var(--font-size-2xs);
+  font-size: var(--font-size-xs);
   font-weight: 600;
-  line-height: inherit;
+  line-height: 1;
   color: inherit;
   display: inline;
 }
 
 .cf-jira-hub-key-link {
-  display: inline-flex;
-  align-items: center;
   gap: var(--space-0-5);
-  padding: var(--space-0-5) var(--space-2);
-  border-radius: var(--wb-radius-sm);
-  font-size: var(--font-size-xs);
   font-weight: 700;
   font-family: var(--wb-font-mono);
   background: color-mix(in srgb, var(--wb-accent) 10%, transparent);
@@ -937,7 +949,6 @@
   border: 1px solid color-mix(in srgb, var(--wb-accent) 26%, transparent);
   text-decoration: none;
   transition: all 0.15s ease;
-  white-space: nowrap;
 }
 
 .cf-jira-hub-key-link:hover {
@@ -950,65 +961,11 @@
   opacity: 0.85;
 }
 
-.cf-jira-hub-summary {
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  color: var(--wb-text);
-  line-height: 1.35;
-  word-break: break-word;
-}
-
-.cf-screen .cf-jira-hub-open-btn,
-a.cf-jira-hub-open-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-1) var(--space-3);
-  border-radius: var(--wb-button-radius);
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  background: var(--wb-accent);
-  color: #ffffff !important;
-  text-decoration: none;
-  border: none;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: opacity 0.15s ease;
-  line-height: 1.4;
-}
-
-.cf-jira-hub-open-btn:hover {
-  opacity: 0.9;
-}
-
-.cf-jira-hub-bottom {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding-top: var(--space-2);
-  border-top: 1px solid var(--wb-border);
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-
-.cf-jira-hub-chips {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1-5);
-  flex-wrap: wrap;
-}
-
 .cf-jira-hub-chip {
-  display: inline-flex;
-  align-items: center;
   gap: var(--space-0-5);
-  padding: var(--space-0-5) var(--space-2);
-  border-radius: var(--wb-radius-sm);
-  font-size: var(--font-size-2xs);
   color: var(--wb-text-muted);
   background: var(--wb-bg-soft);
   border: 1px solid var(--wb-border);
-  white-space: nowrap;
 }
 
 .cf-jira-hub-chip.epic {
@@ -1054,23 +1011,73 @@ a.cf-jira-hub-open-btn {
   color: var(--wb-accent);
 }
 
-.cf-jira-hub-actions {
-  display: flex;
+.cf-screen .cf-jira-hub-open-btn,
+a.cf-jira-hub-open-btn {
+  display: inline-flex;
   align-items: center;
-  gap: var(--space-1-5);
-  flex-wrap: wrap;
+  gap: var(--space-1);
+  height: 24px;
+  padding: 0 var(--space-3);
+  border-radius: var(--wb-button-radius);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  background: var(--wb-accent);
+  color: #ffffff !important;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: opacity 0.15s ease;
+  line-height: 1;
+  box-sizing: border-box;
 }
 
-.cf-jira-hub-unlink-btn {
-  color: var(--wb-text-muted) !important;
+.cf-jira-hub-open-btn:hover {
+  opacity: 0.9;
 }
 
-.cf-jira-hub-unlink-btn:hover {
-  color: var(--wb-danger) !important;
+.cf-jira-hub-icon-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--wb-button-radius);
+  background: transparent;
+  color: var(--wb-text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-sizing: border-box;
+}
+
+.cf-jira-hub-icon-action:hover {
+  background: var(--wb-bg-hover);
+  color: var(--wb-danger);
+  border-color: var(--wb-border);
+}
+
+.cf-jira-hub-icon-action .wb-shell-icon {
+  width: 14px;
+  height: 14px;
+}
+
+/* Dedicated, readable task title line */
+.cf-jira-hub-title-row {
+  padding-top: var(--space-0-5);
+}
+
+.cf-jira-hub-title-text {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--wb-text);
+  line-height: 1.4;
+  word-break: break-word;
 }
 
 .cf-jira-hub-subtext {
   font-size: var(--font-size-xs);
   color: var(--wb-text-muted);
-  margin: var(--space-1) 0 0;
+  margin: var(--space-0-5) 0 0;
 }

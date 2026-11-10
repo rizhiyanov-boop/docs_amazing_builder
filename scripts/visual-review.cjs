@@ -114,6 +114,22 @@ async function runDomAudit(send) {
                 });
               }
             }
+
+            // Strict Vertical Center Alignment: Every element must be vertically centered in the line (diff <= 2.5px)
+            const hubRect = hub.getBoundingClientRect();
+            const hubCenterY = (hubRect.top + hubRect.bottom) / 2;
+            const alignCheckItems = Array.from(hub.querySelectorAll('.cf-jira-hub-key-link, .cf-jira-hub-title-text, .cf-jira-hub-chip, .cf-jira-hub-actions button, .cf-jira-hub-actions a'));
+            for (const item of alignCheckItems) {
+              const r = item.getBoundingClientRect();
+              const itemCenterY = (r.top + r.bottom) / 2;
+              const diff = Math.abs(itemCenterY - hubCenterY);
+              if (diff > 2.5) {
+                issues.push({
+                  type: 'vertical-alignment-off',
+                  message: 'Item in Jira hub is not vertically centered (diff: ' + diff.toFixed(1) + 'px > 2.5px): "' + (item.textContent || item.getAttribute('title') || '').trim().slice(0, 30) + '"'
+                });
+              }
+            }
           });
 
           // 2. Check Badge Conciseness (> 20 chars in a single status/chip, > 50 for epic)
@@ -198,7 +214,7 @@ async function run() {
       throw new Error(`Browser failed to start CDP on port ${port}`);
     }
 
-    const pageTarget = targets.find(t => t.url.includes('5173') || t.url.includes(params.url))
+    const pageTarget = targets.find(t => t.type === 'page' && (t.url.includes('5173') || t.url.includes(params.url)))
       || targets.find(t => t.type === 'page')
       || targets[0];
 
@@ -225,12 +241,42 @@ async function run() {
 
     await send('Page.enable');
     await send('Runtime.enable');
+    send('Console.enable').catch(() => {});
+    ws.addEventListener('message', evt => {
+      const msg = JSON.parse(evt.data);
+      if (msg.method === 'Runtime.exceptionThrown') {
+        console.error('[browser-error]', msg.params?.exceptionDetails?.text, msg.params?.exceptionDetails?.exception?.description);
+      }
+      if (msg.method === 'Console.messageAdded') {
+        console.log('[browser-console]', msg.params?.message?.text);
+      }
+    });
+    await send('Page.navigate', { url: params.url });
     await send('Emulation.setDeviceMetricsOverride', {
       width: params.width,
       height: params.height,
       deviceScaleFactor: 1,
       mobile: false
     });
+
+    // Wait for page to finish loading / React to mount
+    try {
+      await send('Runtime.evaluate', {
+        expression: `new Promise((resolve) => {
+          const start = Date.now();
+          const check = () => {
+            if (document.querySelector('#root')?.children.length > 0 || Date.now() - start > 10000) {
+              resolve(true);
+            } else {
+              setTimeout(check, 100);
+            }
+          };
+          check();
+        })`,
+        awaitPromise: true,
+        returnByValue: true
+      });
+    } catch {}
 
     await new Promise(r => setTimeout(r, params.wait));
 

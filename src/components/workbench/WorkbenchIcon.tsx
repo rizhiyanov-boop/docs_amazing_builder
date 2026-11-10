@@ -1,11 +1,12 @@
 import type { ReactNode } from 'react';
 import { EDITOR_ICON_SHAPES, type EditorIconName } from './EditorIconShapes';
 
-export type WorkbenchIconName = 'document' | 'search' | 'command' | 'menu' | 'export' | 'chevron' | 'json' | 'html' | 'wiki' | 'confluence' | 'undo' | 'redo' | 'more' | 'check' | 'alert' | 'spinner' | 'plus' | 'edit' | 'trash' | 'diagram' | 'close' | 'highlight' | EditorIconName;
+export type WorkbenchIconName = 'document' | 'search' | 'command' | 'menu' | 'export' | 'chevron' | 'json' | 'html' | 'wiki' | 'confluence' | 'jira' | 'undo' | 'redo' | 'more' | 'check' | 'alert' | 'spinner' | 'plus' | 'edit' | 'trash' | 'diagram' | 'close' | 'highlight' | EditorIconName;
 
 export function WorkbenchIcon({ name }: { name: WorkbenchIconName }): ReactNode {
   if (name === 'confluence') return <svg className="wb-shell-icon" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor" stroke="none"><path d="M3 17c2-4 4-6 7-6 3 0 5 3 11 6l-3 5c-5-3-7-6-9-6-1 0-2 1-3 3zM21 7c-2 4-4 6-7 6-3 0-5-3-11-6l3-5c5 3 7 6 9 6 1 0 2-1 3-3z" /></svg>;
-  const shapes: Record<Exclude<WorkbenchIconName, 'confluence'>, ReactNode> = {
+  if (name === 'jira') return <svg className="wb-shell-icon" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor" stroke="none"><path d="M11.53 2c0 2.4 1.97 4.35 4.35 4.35h1.78v1.7c0 2.4 1.94 4.34 4.34 4.35V2.02L11.53 2zM6.77 6.8a4.36 4.36 0 0 0 4.34 4.34h1.8v1.72a4.36 4.36 0 0 0 4.34 4.34V6.8H6.77zM2 11.6a4.35 4.35 0 0 0 4.35 4.35h1.78v1.7c.01 2.4 1.95 4.34 4.35 4.35v-10.4H2z" /></svg>;
+  const shapes: Record<Exclude<WorkbenchIconName, 'confluence' | 'jira'>, ReactNode> = {
     ...EDITOR_ICON_SHAPES,
     close: <path d="m6 6 12 12M18 6 6 18" />,
     highlight: <><path d="m14 3 7 7-9 9H5v-7l9-9ZM11 6l7 7M3 21h12" /></>,

@@ -487,13 +487,11 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
         const currentEpicKey = issue?.epic || epic;
         const currentEpicObj = currentEpicKey ? epics.items.find(e => e.key === currentEpicKey) : undefined;
         const currentEpicName = currentEpicObj?.name;
-        const statusTitle = standalone
-          ? 'Созданная задача этого сценария'
-          : createdInSession
-            ? 'Задача создана'
-            : !createdInSession && onLinked && !jiraTicket && !issue
-              ? 'В локальном журнале найдена ранее созданная задача'
-              : 'Метод уже связан с задачей Jira';
+        const statusTitle = createdInSession || standalone
+          ? 'Задача создана'
+          : !createdInSession && onLinked && !jiraTicket && !issue
+            ? 'В локальном журнале найдена ранее созданная задача'
+            : 'Метод уже связан с задачей Jira';
 
         const copyTicketUrl = () => {
           if (!currentIssueUrl) return;
@@ -537,12 +535,9 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
 
         return (
           <div className="cf-jira-linked-hub">
-            <div className="cf-jira-hub-header">
-              <div className="cf-jira-hub-header-left">
-                <div className="cf-jira-hub-status-badge">
-                  <WorkbenchIcon name="check" />
-                  <h3 className="cf-jira-hub-status-heading">{statusTitle}</h3>
-                </div>
+            {/* ROW 1: PRIMARY ENTITY (Key + Title + Actions) */}
+            <div className="cf-jira-hub-primary-row">
+              <div className="cf-jira-hub-primary-main">
                 {currentIssueKey && (
                   currentIssueUrl ? (
                     <a
@@ -560,32 +555,10 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
                     <span className="cf-jira-hub-key-link">{currentIssueKey}</span>
                   )
                 )}
-                {standalone && (
-                  <span className="cf-jira-hub-chip">⚡ Отдельный сценарий</span>
-                )}
-                <span className="cf-jira-hub-chip">
-                  {issue?.issueType?.name || (issueKind === 'story' ? 'User Story' : 'Задача · тестирование')}
-                </span>
-                {activeTier && (
-                  <span className={`cf-jira-hub-chip priority tier-${activeTier.isCritical ? 'critical' : activeTier.name?.toLowerCase()}`}>
-                    {activeTier.icon} {activeTier.russianName || activeTier.name}
+                {displaySummary && (
+                  <span className="cf-jira-hub-title-text" title={displaySummary}>
+                    {displaySummary}
                   </span>
-                )}
-                {currentEpicKey && (
-                  <span className="cf-jira-hub-chip epic" title={`Эпик: ${currentEpicName || currentEpicKey}`}>
-                    📁 {currentEpicKey}{currentEpicName ? ` · ${currentEpicName}` : ''}
-                  </span>
-                )}
-                {operation?.linkedUrl && (
-                  <a
-                    href={operation.linkedUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="cf-jira-hub-chip cf-jira-hub-chip-confluence"
-                    title="Документация Confluence"
-                  >
-                    📄 Confluence <span aria-hidden="true">↗</span>
-                  </a>
                 )}
               </div>
 
@@ -609,18 +582,6 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
                   </WBButton>
                 )}
                 {currentIssueUrl && (
-                  <a
-                    href={currentIssueUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="cf-jira-hub-open-btn"
-                    title={`Открыть ${currentIssueKey || 'задачу'} в Jira`}
-                  >
-                    <span>В Jira</span>
-                    <span aria-hidden="true">↗</span>
-                  </a>
-                )}
-                {currentIssueUrl && (
                   <button
                     type="button"
                     className={`cf-jira-hub-icon-action${copied ? ' is-copied' : ''}`}
@@ -630,6 +591,18 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
                   >
                     <WorkbenchIcon name={copied ? 'check' : 'copy'} />
                   </button>
+                )}
+                {currentIssueUrl && (
+                  <a
+                    href={currentIssueUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="cf-jira-hub-open-btn cf-jira-hub-btn-secondary"
+                    title={`Открыть ${currentIssueKey || 'задачу'} в Jira`}
+                  >
+                    <span>В Jira</span>
+                    <span aria-hidden="true">↗</span>
+                  </a>
                 )}
                 {onLinked && (
                   <button
@@ -646,11 +619,37 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
               </div>
             </div>
 
-            {displaySummary && (
-              <div className="cf-jira-hub-title-row">
-                <span className="cf-jira-hub-title-text">{displaySummary}</span>
+            {/* ROW 2: SUBORDINATE METADATA CHIPS */}
+            <div className="cf-jira-hub-meta-row">
+              <div className="cf-jira-hub-status-badge">
+                <WorkbenchIcon name="check" />
+                <h3 className="cf-jira-hub-status-heading">{statusTitle}</h3>
               </div>
-            )}
+              <span className="cf-jira-hub-chip">
+                {issue?.issueType?.name || (issueKind === 'story' ? 'User Story' : 'Задача · тестирование')}
+              </span>
+              {activeTier && (
+                <span className={`cf-jira-hub-chip priority tier-${activeTier.isCritical ? 'critical' : activeTier.name?.toLowerCase()}`}>
+                  {activeTier.icon} {activeTier.russianName || activeTier.name}
+                </span>
+              )}
+              {currentEpicKey && (
+                <span className="cf-jira-hub-chip epic" title={`Эпик: ${currentEpicName || currentEpicKey}`}>
+                  📁 {currentEpicKey}{currentEpicName ? ` · ${currentEpicName}` : ''}
+                </span>
+              )}
+              {operation?.linkedUrl && (
+                <a
+                  href={operation.linkedUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="cf-jira-hub-chip cf-jira-hub-chip-confluence"
+                  title="Документация Confluence"
+                >
+                  📄 Confluence <span aria-hidden="true">↗</span>
+                </a>
+              )}
+            </div>
 
             {operation?.message && <div className="cf-jira-hub-subtext">{operation.message}</div>}
 

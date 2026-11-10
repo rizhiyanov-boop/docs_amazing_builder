@@ -1,6 +1,7 @@
 [
-  { "clickText": "Подготовить через ИИ", "wait": 1200, "screenshot": "review-1-prepared.png" },
-  { "clickText": "DI-1083", "wait": 500, "screenshot": "review-2-epic-selected.png" },
+  { "wait": 1000 },
+  { "clickText": "Подготовить через ИИ", "wait": 1500, "screenshot": "review-1-prepared.png" },
+  { "clickText": "DI-1083", "wait": 800, "screenshot": "review-2-epic-selected.png" },
   { "clickText": "Создать User Story", "wait": 1500, "screenshot": "review-3-created-card.png" },
-  { "click": "button[aria-label=\"Скопировать ссылку на задачу\"]", "wait": 400, "screenshot": "review-4-copied-active.png" }
+  { "click": "button[aria-label=\"Скопировать ссылку на задачу\"]", "wait": 500, "screenshot": "review-4-copied-active.png" }
 ]

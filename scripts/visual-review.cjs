@@ -64,6 +64,15 @@ async function runDomAudit(send) {
         (() => {
           const issues = [];
 
+          // 0. Check Root Render
+          const rootEl = document.getElementById('root');
+          if (rootEl && rootEl.children.length === 0) {
+            issues.push({
+              type: 'empty-root',
+              message: 'Page #root has 0 children; React application did not render'
+            });
+          }
+
           // 1. Check Information Hierarchy (Title must not be below metadata chips)
           const hubs = document.querySelectorAll('.cf-jira-linked-hub');
           hubs.forEach(hub => {

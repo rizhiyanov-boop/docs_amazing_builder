@@ -878,7 +878,8 @@
   gap: var(--space-2);
 }
 
-.cf-jira-hub-header {
+.cf-jira-hub-header,
+.cf-jira-hub-primary-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -886,13 +887,22 @@
   flex-wrap: wrap;
 }
 
-.cf-jira-hub-header-left {
+.cf-jira-hub-header-left,
+.cf-jira-hub-primary-main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  min-width: 0;
+  flex: 1;
+}
+
+.cf-jira-hub-meta-row {
   display: flex;
   align-items: center;
   gap: var(--space-1-5);
   flex-wrap: wrap;
   min-width: 0;
-  flex: 1;
 }
 
 .cf-jira-hub-header-right {
@@ -971,6 +981,10 @@
 .cf-jira-hub-chip.epic {
   color: var(--wb-text);
   font-weight: 500;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cf-jira-hub-chip.priority {
@@ -1017,23 +1031,26 @@ a.cf-jira-hub-open-btn {
   align-items: center;
   gap: var(--space-1);
   height: 24px;
-  padding: 0 var(--space-3);
+  padding: 0 var(--space-2-5);
   border-radius: var(--wb-button-radius);
   font-size: var(--font-size-xs);
-  font-weight: 600;
-  background: var(--wb-accent);
-  color: #ffffff !important;
+  font-weight: 500;
+  background: var(--wb-bg-surface);
+  color: var(--wb-text-muted) !important;
   text-decoration: none;
-  border: none;
+  border: 1px solid var(--wb-border);
   cursor: pointer;
   flex-shrink: 0;
-  transition: opacity 0.15s ease;
+  transition: all 0.15s ease;
   line-height: 1;
   box-sizing: border-box;
 }
 
-.cf-jira-hub-open-btn:hover {
-  opacity: 0.9;
+.cf-screen .cf-jira-hub-open-btn:hover,
+a.cf-jira-hub-open-btn:hover {
+  background: var(--wb-bg-hover);
+  color: var(--wb-accent) !important;
+  border-color: var(--wb-border-strong, var(--wb-border));
 }
 
 .cf-jira-hub-icon-action {

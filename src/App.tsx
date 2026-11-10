@@ -8319,7 +8319,7 @@ export default function App() {
           onExportHtml={handleOpenMethodHtmlPreview}
           onExportWiki={handleOpenMethodWikiPreview}
           onOpenConfluence={handleOpenConfluence}
-          confluenceBound={Boolean(activeMethod?.confluence)}
+          confluenceBound={Boolean(activeMethod?.confluence ?? activeMethod?.confluenceImport)}
           onExportFullProjectHtml={handleOpenProjectHtmlPreview}
           onExportFullProjectWiki={handleOpenProjectWikiPreview}
           onExportJson={exportProjectJson}

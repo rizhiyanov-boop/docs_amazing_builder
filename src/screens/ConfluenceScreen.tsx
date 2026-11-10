@@ -171,8 +171,11 @@ function PageTree({ spaceKey, baseUrl, client, selectedId, revealPage, onSelect 
 
 export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMethod, onOpenImported, onBack, onBusyChange, client = confluenceClient }: ConfluenceScreenProps): ReactNode {
   const binding = method.confluence;
+  const importedTarget = binding ? undefined : method.confluenceImport;
+  const target = binding ?? importedTarget;
+  const targetVersion = binding?.lastPublishedVersion ?? importedTarget?.version;
   const rememberedSpaces = navigationState(client).spaces;
-  const bindingBaseUrl = binding?.baseUrl;
+  const targetBaseUrl = target?.baseUrl;
   const bindingSpaceKey = binding?.spaceKey;
   const document = useMemo(() => renderConfluenceDocument(method), [method]);
   const [tab, setTab] = useState<Tab>('publish');
@@ -197,7 +200,7 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMe
   const [spaceKey, setSpaceKey] = useState(binding?.spaceKey ?? '');
   const [browseSpaceKey, setBrowseSpaceKey] = useState(binding?.spaceKey ?? '');
   const [treeRevision, setTreeRevision] = useState(0);
-  const [mode, setMode] = useState<'create' | 'update'>(binding ? 'update' : 'create');
+  const [mode, setMode] = useState<'create' | 'update'>(target ? 'update' : 'create');
   const [title, setTitle] = useState(method.name);
   const [updateTitle, setUpdateTitle] = useState<string>();
   const [parent, setParent] = useState<ConfluencePage>();
@@ -224,16 +227,16 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMe
   const boundPageSequence = useRef({ value: 0 });
   const preparationSequence = useRef(0);
   const currentOrigin = useRef('');
-  const previousOrigin = useRef(binding?.baseUrl ?? '');
+  const previousOrigin = useRef(targetBaseUrl ?? '');
   const writeLock = useRef(false);
   const alive = useRef(true);
   const baseUrl = status?.baseUrl ?? '';
   const connected = status?.connected === true && Boolean(baseUrl);
-  const bindingMatches = binding?.baseUrl === baseUrl;
+  const targetMatches = targetBaseUrl === baseUrl;
   const unknownMatches = connected && unknown?.prepared.baseUrl === baseUrl;
   const busy = preparing || publishing || pageBusy || boundPageBusy || jiraBusy;
   const activeSpaceKey = tab === 'browse' ? browseSpaceKey : spaceKey;
-  const boundPageId = binding?.pageId;
+  const boundPageId = target?.pageId;
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => { onBusyChange?.(preparing || publishing || jiraBusy || Boolean(unknown)); }, [onBusyChange, preparing, publishing, jiraBusy, unknown]);
   useEffect(() => () => onBusyChange?.(false), [onBusyChange]);
@@ -256,8 +259,8 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMe
         setParent(undefined); setBoundPage(undefined); setBrowsePage(undefined); setRevealTarget(undefined);
         setPrepared(undefined); setResult(undefined); setConflict(false); setOverwriteConfirmed(false); setShowPreview(false); setUpdateTitle(undefined); setBoundPageBusy(false);
         setPageBusy(false); setPreparing(false); setSpacesBusy(false); setLink(''); setRecoveryLink('');
-        setSpaceKey(bindingBaseUrl === nextOrigin ? bindingSpaceKey ?? '' : '');
-        setBrowseSpaceKey(bindingBaseUrl === nextOrigin ? bindingSpaceKey ?? '' : '');
+        setSpaceKey(targetBaseUrl === nextOrigin ? bindingSpaceKey ?? '' : '');
+        setBrowseSpaceKey(targetBaseUrl === nextOrigin ? bindingSpaceKey ?? '' : '');
         setSpaces({ items: [], nextStart: null }); setTreeRevision(old => old + 1);
       }
       if (nextOrigin) previousOrigin.current = nextOrigin;
@@ -278,7 +281,7 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMe
     } catch (failure) {
       if (alive.current && sequence === connectionSequence.current) { currentOrigin.current = ''; boundPageSequence.current.value++; setBoundPageBusy(false); setStatus(null); setSpaces({ items: [], nextStart: null }); reportError(failure); }
     } finally { if (alive.current && sequence === connectionSequence.current) { setConnectionBusy(false); setSpacesBusy(false); } }
-  }, [client, reportError, bindingBaseUrl, bindingSpaceKey, rememberedSpaces]);
+  }, [client, reportError, targetBaseUrl, bindingSpaceKey, rememberedSpaces]);
   useEffect(() => {
     void Promise.resolve().then(() => { if (alive.current) void refreshConnection(); });
   }, [refreshConnection]);
@@ -312,7 +315,7 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMe
     return () => { active = false; window.clearInterval(interval); };
   }, [client, baseUrl, connected, busy, unknown, refreshConnection]);
   const refreshBoundPage = useCallback(async () => {
-    if (!connected || !bindingMatches || !boundPageId || mode !== 'update') return;
+    if (!connected || !targetMatches || !boundPageId || mode !== 'update') return;
     const counter = boundPageSequence.current;
     const sequence = ++counter.value;
     const active = () => alive.current && sequence === counter.value && currentOrigin.current === baseUrl;
@@ -322,13 +325,13 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMe
       if (active()) { setBoundPage(page); setUpdateTitle(old => old ?? page.title); }
     } catch (failure) { if (active()) reportError(failure); }
     finally { if (active()) setBoundPageBusy(false); }
-  }, [client, connected, bindingMatches, boundPageId, baseUrl, mode, reportError]);
+  }, [client, connected, targetMatches, boundPageId, baseUrl, mode, reportError]);
   useEffect(() => {
     const counter = boundPageSequence.current;
     let active = true;
     void Promise.resolve().then(() => { if (active) void refreshBoundPage(); });
     return () => { active = false; counter.value++; };
-  }, [refreshBoundPage, binding?.lastPublishedVersion]);
+  }, [refreshBoundPage, targetVersion]);
 
   async function selectPage(id: string, context = tab, reveal = false) {
     if (!connected) return;
@@ -357,7 +360,7 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMe
   }
   async function preparePublication() {
     if (!connected || busy || unknown || mode === 'create' && (!spaceKey || !title.trim()) || mode === 'update' && !updateTitle?.trim()) return;
-    if (mode === 'update' && (!binding || !bindingMatches)) {
+    if (mode === 'update' && (!target || !targetMatches)) {
       reportError(new ConfluenceClientError('INVALID_TARGET', 'Страница связана с другим подключением. Подключите её Confluence или опубликуйте документ как новую страницу.'));
       return;
     }
@@ -371,12 +374,13 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMe
       if (!active()) return;
       const draft: Prepared = { document: snapshot, storage: conversion.storage, methodId: method.id, mode, baseUrl: origin, title: title.trim(), spaceKey, sectionTitles: method.sections.map(section => section.title) };
       if (mode === 'update') {
-        if (!binding || binding.baseUrl !== status?.baseUrl) throw new ConfluenceClientError('INVALID_TARGET', 'Страница связана с другим подключением. Опубликуйте документ как новую страницу.');
-        const page = await client.getPage(binding.pageId, origin);
+        if (!target || target.baseUrl !== origin) throw new ConfluenceClientError('INVALID_TARGET', 'Страница связана с другим подключением. Опубликуйте документ как новую страницу.');
+        const page = await client.getPage(target.pageId, origin);
         if (!active()) return;
         draft.target = page; draft.spaceKey = page.spaceKey; draft.title = updateTitle!.trim();
         setBoundPage(page);
-        if (page.version !== binding.lastPublishedVersion) { setConflict(true); setPrepared(draft); return; }
+        const changed = page.version !== targetVersion;
+        if (changed || importedTarget) { setConflict(changed); setPrepared(draft); return; }
       } else if (parent) {
         draft.parent = await client.getPage(parent.id, origin);
         if (!active()) return;
@@ -404,7 +408,8 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMe
   }
   async function publish(draft: Prepared | undefined = prepared) {
     const publication = draft;
-    if (!publication || conflict && !overwriteConfirmed || !connected || publication.baseUrl !== baseUrl || unknown || writeLock.current) return;
+    if (!publication || (conflict || publication.mode === 'update' && importedTarget) && !overwriteConfirmed
+      || !connected || publication.baseUrl !== baseUrl || unknown || writeLock.current) return;
     const prepared = publication;
     writeLock.current = true; setPublishing(true); setError('');
     const attempt: Attempt = { operationId: crypto.randomUUID(), prepared };
@@ -490,8 +495,10 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMe
   }
   const shownPage = mode === 'update' ? prepared?.target ?? boundPage : prepared?.parent ?? parent;
   const newerChanges = result && (result.fingerprint !== document.fingerprint || updateTitle?.trim() !== result.page.title);
-  const remoteChanged = boundPage && binding && boundPage.version !== binding.lastPublishedVersion;
-  const updateHasChanges = binding && (binding.publishedFingerprint !== document.fingerprint || updateTitle?.trim() !== boundPage?.title || remoteChanged);
+  const remoteChanged = boundPage && target && boundPage.version !== targetVersion;
+  const updateHasChanges = importedTarget || binding && (binding.publishedFingerprint !== document.fingerprint || updateTitle?.trim() !== boundPage?.title || remoteChanged);
+  const reviewRequired = conflict || prepared?.mode === 'update' && Boolean(importedTarget);
+  const versionLabel = importedTarget ? 'Импортированная версия' : 'Последняя публикация';
 
   function treeControls() {
     return <section>
@@ -566,31 +573,35 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMe
       </> : <p className="cf-muted">Выберите страницу в дереве. Просмотр не изменяет проект и место публикации.</p>}
     </section></div>}
     {tab === 'publish' && <>
-      <p className="cf-publication-state">{result ? newerChanges ? 'Опубликован снимок документа · есть более новые изменения' : 'Опубликовано в Confluence' : binding ? binding.publishedFingerprint !== document.fingerprint || updateTitle !== undefined && boundPage && updateTitle.trim() !== boundPage.title ? 'Есть изменения в DocBuilder' : 'Последняя публикация соответствует документу' : 'Метод ещё не опубликован'}</p>
+      <p className="cf-publication-state">{result ? newerChanges ? 'Опубликован снимок документа · есть более новые изменения' : 'Опубликовано в Confluence' : binding ? binding.publishedFingerprint !== document.fingerprint || updateTitle !== undefined && boundPage && updateTitle.trim() !== boundPage.title ? 'Есть изменения в DocBuilder' : 'Последняя публикация соответствует документу' : importedTarget ? `Импортировано из Confluence · версия ${importedTarget.version}` : 'Метод ещё не опубликован'}</p>
       {unknown && <section className="cf-notice cf-error"><h3>Результат публикации не подтверждён</h3><p>Страница могла быть создана или обновлена. Сначала проверьте результат; повторная запись заблокирована. Не закрывайте этот экран до проверки.</p><p>Исходный Confluence: {unknown.prepared.baseUrl}</p>{!unknownMatches && <p>Подключите этот адрес в локальном приложении и проверьте подключение здесь. Проверка через другой Confluence заблокирована.</p>}<WBButton disabled={checkingOperation || !unknownMatches} onClick={() => void checkOperation()}>{checkingOperation ? 'Проверка результата…' : 'Проверить результат операции'}</WBButton>
         {(unknown.prepared.parent || unknown.prepared.target) && <p><a href={confluencePageUrl((unknown.prepared.target ?? unknown.prepared.parent)!.id, unknown.prepared.baseUrl)} target="_blank" rel="noopener noreferrer">Открыть место публикации в Confluence</a></p>}
         <p>Если страница появилась в Confluence, вставьте ссылку. Приложение проверит её содержимое и назначение перед сохранением привязки.</p><WBInput label="Ссылка на опубликованную страницу" value={recoveryLink} onChange={event => setRecoveryLink(event.target.value)} /><div className="cf-actions"><WBButton disabled={checkingOperation || !unknownMatches || !recoveryLink.trim()} onClick={() => void confirmPage()}>Проверить эту страницу</WBButton></div>
       </section>}
       {result && <section className="cf-notice"><h3>Страница {result.page.version === 1 ? 'создана' : 'обновлена'}</h3><p>{pagePath(result.page)} · версия {result.page.version}</p><a href={confluencePageUrl(result.page.id, result.baseUrl)} target="_blank" rel="noopener noreferrer">Открыть в Confluence</a></section>}
       {!prepared && !unknown && <>
-        {binding && <div className="cf-actions"><WBButton aria-pressed={mode === 'update'} disabled={busy || !connected || !bindingMatches} onClick={() => setMode('update')}>Обновить привязанную страницу</WBButton><WBButton aria-pressed={mode === 'create'} disabled={busy} onClick={createNew}>Опубликовать как новую страницу</WBButton></div>}
+        {target && <div className="cf-actions"><WBButton aria-pressed={mode === 'update'} disabled={busy || !connected || !targetMatches} onClick={() => setMode('update')}>{importedTarget ? 'Обновить исходную страницу' : 'Обновить привязанную страницу'}</WBButton><WBButton aria-pressed={mode === 'create'} disabled={busy} onClick={createNew}>Опубликовать как новую страницу</WBButton></div>}
         {mode === 'create' ? <div className="cf-grid">{connected ? treeControls() : <p className="cf-muted">После подключения здесь появится дерево пространств.</p>}<section><h3>Новая страница</h3><WBInput label="Заголовок страницы" value={title} disabled={busy} onChange={event => setTitle(event.target.value)} />
           <p className="cf-muted">{parent ? `Новая страница будет создана внутри: ${parent.title}` : 'Выберите родительскую страницу в дереве. Её содержимое останется без изменений.'}</p>
           <ConfluencePagePreview page={parent} baseUrl={baseUrl} connected={connected} loading={pageBusy} />
         </section></div> : <div className="cf-grid"><section>
-          <h3>Обновление текущей страницы</h3>
-          <p className="cf-destination">{binding?.baseUrl}<br />{!connected || !bindingMatches ? 'Подключите Confluence привязанной страницы или создайте отдельную страницу в текущем подключении.' : boundPage ? pagePath(boundPage) : 'Читаем актуальное название и путь…'}</p>
-          <WBInput label="Заголовок страницы" value={updateTitle ?? ''} maxLength={255} disabled={busy || !connected || !bindingMatches || !boundPage} onChange={event => setUpdateTitle(event.target.value)} />
+          <h3>{importedTarget ? 'Обновление исходной страницы' : 'Обновление текущей страницы'}</h3>
+          <p className="cf-destination">{targetBaseUrl}<br />{!connected || !targetMatches ? 'Подключите Confluence привязанной страницы или создайте отдельную страницу в текущем подключении.' : boundPage ? pagePath(boundPage) : 'Читаем актуальное название и путь…'}</p>
+          <WBInput label="Заголовок страницы" value={updateTitle ?? ''} maxLength={255} disabled={busy || !connected || !targetMatches || !boundPage} onChange={event => setUpdateTitle(event.target.value)} />
           <p className="cf-muted">Измените документ в редакторе DocBuilder и обновите эту страницу. Ссылка и место в дереве сохранятся.</p>
           <p className="cf-notice">Документ DocBuilder заменит всё содержимое этой страницы. Версия проверяется перед записью.</p>
-          {remoteChanged && <p className="cf-notice">В Confluence появилась версия {boundPage.version}. Последняя публикация из DocBuilder: {binding.lastPublishedVersion}. Перед заменой потребуется подтверждение.</p>}
-          {connected && bindingMatches && <div className="cf-actions"><WBButton size="sm" disabled={busy} onClick={() => void refreshBoundPage()}>{boundPageBusy ? 'Чтение страницы…' : 'Обновить просмотр'}</WBButton></div>}
+          {remoteChanged && <p className="cf-notice">В Confluence появилась версия {boundPage.version}. {versionLabel}: {targetVersion}. Перед заменой потребуется подтверждение.</p>}
+          {connected && targetMatches && <div className="cf-actions"><WBButton size="sm" disabled={busy} onClick={() => void refreshBoundPage()}>{boundPageBusy ? 'Чтение страницы…' : 'Обновить просмотр'}</WBButton></div>}
           {boundPage && !busy && !updateHasChanges && <p className="cf-muted">Изменений для публикации нет.</p>}
-        </section><ConfluencePagePreview page={boundPage} baseUrl={baseUrl} connected={connected && Boolean(bindingMatches)} loading={boundPageBusy} updating /></div>}
-        <footer className="cf-footer"><WBButton variant="accent" disabled={!connected || busy || (mode === 'update' && (!bindingMatches || !boundPage || !updateTitle?.trim() || !updateHasChanges)) || (mode === 'create' && (!title.trim() || !spaceKey || !parent))} onClick={() => void preparePublication()}>{preparing || publishing ? 'Публикация…' : mode === 'update' ? 'Обновить страницу' : 'Опубликовать'}</WBButton></footer>
+        </section><ConfluencePagePreview page={boundPage} baseUrl={baseUrl} connected={connected && targetMatches} loading={boundPageBusy} updating /></div>}
+        <footer className="cf-footer"><WBButton variant="accent" disabled={!connected || busy || (mode === 'update' && (!targetMatches || !boundPage || !updateTitle?.trim() || !updateHasChanges)) || (mode === 'create' && (!title.trim() || !spaceKey || !parent))} onClick={() => void preparePublication()}>{preparing || publishing ? 'Публикация…' : mode === 'update' ? importedTarget ? 'Подготовить обновление' : 'Обновить страницу' : 'Опубликовать'}</WBButton></footer>
       </>}
       {prepared && !result && !unknown && <section><h3>{prepared.mode === 'update' ? 'Проверка обновления' : 'Проверка новой страницы'}</h3><p className="cf-destination">{prepared.baseUrl}<br />{shownPage ? pagePath(shownPage) : `${prepared.spaceKey} / Корень пространства`}<br /><strong>{prepared.title}</strong></p>
-        {conflict ? <><div className="cf-notice cf-error" role="alert"><h3>Страницу изменили в Confluence</h3><p>Запись остановлена. Последняя публикация: версия {binding?.lastPublishedVersion ?? 'неизвестна'}; сейчас: {prepared.target?.version ?? 'новая версия'}.</p><p>Проверьте содержимое ниже. Замена полностью перезапишет заголовок и содержимое текущей страницы документом из DocBuilder.</p></div><div className="cf-grid"><section><h3>Сейчас в Confluence</h3><p>{prepared.target?.title}</p><pre className="cf-content">{confluenceContentText(prepared.target?.storage ?? '')}</pre></section><section><h3>Подготовлено в DocBuilder</h3><p>{prepared.title}</p><pre className="cf-content">{confluenceContentText(prepared.storage)}</pre></section></div><div className="cf-actions">{binding && <a href={confluencePageUrl(binding.pageId, prepared.baseUrl)} target="_blank" rel="noopener noreferrer">Открыть страницу</a>}<WBButton disabled={publishing || jiraBusy} onClick={createNew}>Создать отдельную страницу</WBButton></div>
+        {reviewRequired ? <><div className={conflict ? 'cf-notice cf-error' : 'cf-notice'} role={conflict ? 'alert' : undefined}>
+          <h3>{conflict ? 'Страницу изменили в Confluence' : 'Первое обновление после импорта'}</h3>
+          {conflict && <p>Запись остановлена. {versionLabel}: {targetVersion ?? 'неизвестна'}. Сейчас: версия {prepared.target?.version ?? 'неизвестна'}.</p>}
+          <p>Документ из DocBuilder заменит заголовок и всё содержимое страницы. Проверьте, перенеслись ли нужные разделы, макросы и ссылки на вложения.</p>
+        </div><div className="cf-grid"><section><h3>Сейчас в Confluence</h3><p>{prepared.target?.title}</p><pre className="cf-content">{confluenceContentText(prepared.target?.storage ?? '')}</pre></section><section><h3>Подготовлено в DocBuilder</h3><p>{prepared.title}</p><pre className="cf-content">{confluenceContentText(prepared.storage)}</pre></section></div><div className="cf-actions">{prepared.target && <a href={confluencePageUrl(prepared.target.id, prepared.baseUrl)} target="_blank" rel="noopener noreferrer">Открыть страницу</a>}<WBButton disabled={publishing || jiraBusy} onClick={createNew}>Создать отдельную страницу</WBButton></div>
           <label className="cf-overwrite-confirm"><input type="checkbox" checked={overwriteConfirmed} disabled={publishing || jiraBusy} onChange={event => setOverwriteConfirmed(event.target.checked)} /><span>Я проверил версию {prepared.target?.version} и подтверждаю замену заголовка и содержимого страницы.</span></label>
         </> : <>
           {prepared.mode === 'update' && <p className="cf-notice">Всё содержимое выбранной страницы будет заменено. Текущая версия {prepared.target?.version}; после обновления {prepared.target ? prepared.target.version + 1 : ''}.</p>}
@@ -598,7 +609,7 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMe
           <p className="cf-muted">Отрисовка плагинов проверяется на странице Confluence. Внешние сервисы изображений не используются.</p><WBButton onClick={() => setShowPreview(old => !old)}>{showPreview ? 'Скрыть предпросмотр' : 'Предпросмотр документа'}</WBButton>{showPreview && <pre className="cf-content">{confluenceContentText(prepared.storage)}</pre>}
         </>}
         {document.fingerprint !== prepared.document.fingerprint && <p className="cf-notice">Документ изменился после проверки. Будет опубликован проверенный снимок; новые изменения останутся неопубликованными.</p>}
-        <footer className="cf-footer"><WBButton disabled={publishing || jiraBusy || Boolean(unknown)} onClick={() => { setPrepared(undefined); setConflict(false); setOverwriteConfirmed(false); }}>Вернуться к назначению</WBButton><WBButton variant="accent" disabled={!connected || prepared.baseUrl !== baseUrl || publishing || jiraBusy || conflict && !overwriteConfirmed || Boolean(unknown)} onClick={() => void publish()}>{publishing ? 'Публикация…' : conflict ? 'Заменить содержимое' : prepared.mode === 'update' ? 'Обновить страницу' : 'Создать страницу'}</WBButton></footer>
+        <footer className="cf-footer"><WBButton disabled={publishing || jiraBusy || Boolean(unknown)} onClick={() => { setPrepared(undefined); setConflict(false); setOverwriteConfirmed(false); }}>Вернуться к назначению</WBButton><WBButton variant="accent" disabled={!connected || prepared.baseUrl !== baseUrl || publishing || jiraBusy || reviewRequired && !overwriteConfirmed || Boolean(unknown)} onClick={() => void publish()}>{publishing ? 'Публикация…' : reviewRequired ? 'Заменить содержимое' : prepared.mode === 'update' ? 'Обновить страницу' : 'Создать страницу'}</WBButton></footer>
       </section>}
     </>}
   </section>;

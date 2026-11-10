@@ -16,12 +16,14 @@ vi.mock('./confluenceClient', async importOriginal => ({
 afterEach(() => { cleanup(); localStorage.clear(); vi.resetAllMocks(); vi.unstubAllGlobals(); });
 
 describe('Confluence workspace integration', () => {
-  it('previews, cancels, saves and reopens a Confluence version without creating a publication binding', async () => {
-    let page = templateImportPage();
+  it('imports and reopens a draft, then updates the source only after reviewing its current version', async () => {
+    let page = { ...templateImportPage(), view: '<p>Current page</p>' };
     bridge.getStatus.mockResolvedValue({ connected: true, baseUrl: importTestOrigin });
     bridge.getSpaces.mockResolvedValue({ items: [{ key: 'TEST', name: 'Test space' }], nextStart: null });
     bridge.getTree.mockResolvedValue({ items: [{ id: page.id, title: page.title }], nextStart: null });
     bridge.getPage.mockImplementation(async () => page);
+    bridge.prepare.mockResolvedValue({ storage: '<p>Prepared update</p>' });
+    bridge.publish.mockImplementation(async () => ({ ...page, version: page.version + 1 }));
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({}) }));
     localStorage.setItem('doc-builder-onboarding-entry-suppressed-v1', '1');
     localStorage.setItem('doc-builder-project-v2', JSON.stringify({ version: 3, activeMethodId: 'existing', methods: [{
@@ -55,6 +57,32 @@ describe('Confluence workspace integration', () => {
     await waitFor(() => expect(stored()).toHaveLength(3));
     expect(stored().slice(1).map(method => method.confluenceImport?.version)).toEqual([2, 3]);
     expect(bridge.publish).not.toHaveBeenCalled();
+    await user.click(await screen.findByRole('button', { name: /^Confluence & Jira\b/ }));
+    expect(await screen.findByRole('heading', { name: 'Обновление исходной страницы' })).toBeInTheDocument();
+    const prepareUpdate = screen.getByRole('button', { name: 'Подготовить обновление' });
+    await waitFor(() => expect(prepareUpdate).toBeEnabled());
+    await user.click(prepareUpdate);
+    await screen.findByRole('heading', { name: 'Первое обновление после импорта' });
+    expect(bridge.prepare).toHaveBeenCalledWith(expect.stringContaining('|Цель|Сохранить запрос|'), expect.any(Array), importTestOrigin);
+    expect(bridge.prepare.mock.calls[0][0]).not.toContain('|Внешний URL|/api/example|');
+    const replace = screen.getByRole('button', { name: 'Заменить содержимое' });
+    expect(replace).toBeDisabled();
+    expect(bridge.publish).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('checkbox', { name: /Я проверил версию 3/ }));
+    page = { ...page, version: 4, storage: '<p>Remote edit</p>' };
+    await user.click(replace);
+    await screen.findByRole('heading', { name: 'Страницу изменили в Confluence' });
+    const confirm = await screen.findByRole('checkbox', { name: /Я проверил версию 4/ });
+    expect(confirm).not.toBeChecked();
+    expect(bridge.publish).not.toHaveBeenCalled();
+    await user.click(confirm);
+    await user.click(screen.getByRole('button', { name: 'Заменить содержимое' }));
+    await screen.findByRole('heading', { name: 'Страница обновлена' });
+    expect(bridge.publish).toHaveBeenCalledOnce();
+    expect(bridge.publish).toHaveBeenCalledWith(expect.objectContaining({
+      baseUrl: importTestOrigin, pageId: page.id, spaceKey: page.spaceKey, expectedVersion: 4, mode: 'update'
+    }));
+    await waitFor(() => expect(stored()[2].confluence).toMatchObject({ pageId: page.id, lastPublishedVersion: 5 }));
   }, 20_000);
 
   it('blocks history hotkeys during a write and persists only the confirmed binding', async () => {

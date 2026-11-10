@@ -18,14 +18,16 @@ export function renderConfluenceDocument(method: MethodDocument, meta: WikiRende
   const request = method.sections.find((section): section is ParsedSection => (
     section.kind === 'parsed' && section.sectionType === 'request'
   ));
+  const goal = method.confluenceImport ? method.sections.find(section => section.kind === 'text' && section.id === 'goal') : undefined;
   const renderMeta: WikiRenderMeta = {
     httpMethod: request?.requestMethod ?? 'POST',
     path: request?.requestUrl?.trim() || request?.externalRequestUrl?.trim() || '/',
     jiraTicket: method.jiraTicket,
     epic: method.epic,
+    goal: goal?.kind === 'text' ? goal.value : undefined,
     initiators: method.initiators,
     responsible: method.responsible,
-    externalUrl: method.externalUrl,
+    externalUrl: method.externalUrl ?? (method.confluenceImport ? '' : undefined),
     updatedAt: method.updatedAt,
     ...meta
   };

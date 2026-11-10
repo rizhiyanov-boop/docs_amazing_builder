@@ -59,6 +59,7 @@ export function ConfluencePageImport({ page, baseUrl, onOpenExisting, onImport }
   return <section className="cf-notice cf-import-review" aria-label="Предпросмотр импорта">
     <h3>Предпросмотр импорта</h3>
     <p className="cf-import-title">{request?.requestMethod} {request?.requestUrl}</p>
+    <p className="cf-muted">После импорта метод будет связан с этой страницей для обновления.</p>
     <ul aria-label="Секции метода">
       {preview.method.sections.map(section => <li key={section.id}>
         {section.title}

@@ -17,6 +17,7 @@ export interface WikiRenderMeta {
   path?: string;
   jiraTicket?: string;
   epic?: string;
+  goal?: string;
   initiators?: string;
   responsible?: string;
   externalUrl?: string;
@@ -609,7 +610,7 @@ function renderWikiTemplateIntro(meta: WikiRenderMeta): string[] {
 
   const taskTable = wrapWikiTable([
     `|Epic|${toWikiCell(meta.epic ?? '')}|`,
-    `|Цель|${EMPTY_WIKI_CELL}|`,
+    `|Цель|${toWikiCell(meta.goal ?? '')}|`,
     `|Инициаторы|${toWikiCell(meta.initiators ?? '')}|`
   ]);
 

@@ -34,36 +34,36 @@ export function InlineSectionTitle({ value, onCommit }: InlineSectionTitleProps)
 
   return (
     <span className="inline-section-title-wrap">
-    <span
-      ref={titleRef}
-      className="inline-section-title"
-      contentEditable={isEditing}
-      suppressContentEditableWarning
-      role={isEditing ? 'textbox' : undefined}
-      aria-label={isEditing ? 'Название секции' : undefined}
-      onDoubleClick={startEditing}
-      spellCheck={false}
-      onFocus={() => {
-        initialValueRef.current = value;
-      }}
-      onBlur={commit}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter') {
-          event.preventDefault();
-          event.currentTarget.blur();
-        }
-        if (event.key === 'Escape') {
-          event.preventDefault();
-          event.currentTarget.textContent = initialValueRef.current;
-          event.currentTarget.blur();
-        }
-      }}
-    >
-      {value}
-    </span>
-    <button type="button" className="inline-section-title-edit" aria-label="Редактировать название секции" onClick={startEditing}>
-      <WorkbenchIcon name="edit" />
-    </button>
+      <span
+        ref={titleRef}
+        className="inline-section-title"
+        contentEditable={isEditing}
+        suppressContentEditableWarning
+        role={isEditing ? 'textbox' : undefined}
+        aria-label={isEditing ? 'Название секции' : undefined}
+        onDoubleClick={isEditing ? undefined : startEditing}
+        spellCheck={false}
+        onFocus={() => {
+          initialValueRef.current = value;
+        }}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            event.currentTarget.blur();
+          }
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            event.currentTarget.textContent = initialValueRef.current;
+            event.currentTarget.blur();
+          }
+        }}
+      >
+        {value}
+      </span>
+      <button type="button" className="inline-section-title-edit" aria-label="Редактировать название секции" onClick={startEditing} title="Редактировать название">
+        <WorkbenchIcon name="edit" />
+      </button>
     </span>
   );
 }

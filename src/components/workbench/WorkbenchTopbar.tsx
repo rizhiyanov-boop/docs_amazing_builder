@@ -1,6 +1,6 @@
 import React, { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { RequestMethod } from '../../types';
-import { HttpChip, WBButton } from '../primitives/WorkbenchPrimitives';
+import { HttpChip, HttpMethodSelect, WBButton } from '../primitives/WorkbenchPrimitives';
 import { confluenceClient } from '../../confluenceClient';
 import { jiraClient } from '../../jiraClient';
 import { WORKBENCH_FEATURES } from '../../workbenchFeatures';
@@ -17,6 +17,8 @@ type WorkbenchTopbarProps = {
   methodTemplateLabel?: string;
   methodPath: string;
   methodHttpMethod: RequestMethod;
+  onChangeHttpMethod?: (method: RequestMethod) => void;
+  onClickPath?: () => void;
   authUserLogin: string | null;
   isLogoutBusy: boolean;
   canUndo: boolean;
@@ -64,7 +66,8 @@ function IconButton({ label, icon, onClick, disabled, expanded, controls }: {
 }
 
 export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
-  disabled, topbarRef, importInputRef, methodName, methodTemplateLabel, methodPath, methodHttpMethod, authUserLogin, isLogoutBusy,
+  disabled, topbarRef, importInputRef, methodName, methodTemplateLabel, methodPath, methodHttpMethod,
+  onChangeHttpMethod, onClickPath, authUserLogin, isLogoutBusy,
   canUndo, canRedo, autosaveState, autosaveAt, onOpenProjectImport, onImportProjectJson, onExportHtml,
   onExportWiki, onOpenConfluence, confluenceBound, onOpenJira, onExportFullProjectHtml, onExportFullProjectWiki,
   onExportJson, onToggleSidebar, onRenameMethod, onDeleteMethod, canDeleteMethod, onUndo, onRedo,
@@ -165,12 +168,42 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
     <header ref={topbarRef} className="wb-topbar" inert={disabled || undefined}>
       <button type="button" className="wb-mobile-menu-button" aria-label={isSidebarHidden ? 'Открыть навигацию' : 'Скрыть навигацию'} title={isSidebarHidden ? 'Открыть навигацию' : 'Скрыть навигацию'} aria-expanded={!isSidebarHidden} onClick={onToggleSidebar}><WorkbenchIcon name="menu" /></button>
       <div className="wb-topbar-context" aria-label="Текущий метод">
-        <strong className="wb-topbar-method-name" title={methodName}>{methodName ?? 'Метод не выбран'}</strong>
-        {methodName && <div className="wb-topbar-endpoint" title={`${methodHttpMethod} ${methodPath || '/'}`}>
-          <HttpChip method={methodHttpMethod} size="sm" />
-          <span className="wb-topbar-path">{methodPath || '/'}</span>
-          {methodTemplateLabel && <span className="wb-topbar-template" title={methodTemplateLabel}>{methodTemplateLabel}</span>}
-        </div>}
+        {methodName ? (
+          <button
+            type="button"
+            className="wb-topbar-method-name wb-topbar-method-name-btn"
+            aria-label={`Переименовать метод: ${methodName}`}
+            title={`Переименовать метод: ${methodName}`}
+            onClick={onRenameMethod}
+          >
+            {methodName}
+          </button>
+        ) : (
+          <strong className="wb-topbar-method-name">Метод не выбран</strong>
+        )}
+        {methodName && (
+          <div className="wb-topbar-endpoint" title={`${methodHttpMethod} ${methodPath || '/'}`}>
+            {onChangeHttpMethod ? (
+              <HttpMethodSelect method={methodHttpMethod} onChange={onChangeHttpMethod} size="sm" />
+            ) : (
+              <HttpChip method={methodHttpMethod} size="sm" />
+            )}
+            {onClickPath ? (
+              <button
+                type="button"
+                className="wb-topbar-path wb-topbar-path-btn"
+                aria-label={`Перейти к настройке URL: ${methodPath || '/'}`}
+                title={`Перейти к настройке URL: ${methodPath || '/'}`}
+                onClick={onClickPath}
+              >
+                {methodPath || '/'}
+              </button>
+            ) : (
+              <span className="wb-topbar-path">{methodPath || '/'}</span>
+            )}
+            {methodTemplateLabel && <span className="wb-topbar-template" title={methodTemplateLabel}>{methodTemplateLabel}</span>}
+          </div>
+        )}
       </div>
 
       <div className="wb-topbar-actions">

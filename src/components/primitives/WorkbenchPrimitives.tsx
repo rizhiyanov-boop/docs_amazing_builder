@@ -48,6 +48,65 @@ export function HttpChip({ method = 'POST', size = 'md', appearance = 'solid' }:
   );
 }
 
+export function HttpMethodSelect({
+  method = 'POST',
+  onChange,
+  size = 'sm'
+}: {
+  method?: RequestMethod | string;
+  onChange: (method: RequestMethod) => void;
+  size?: 'sm' | 'md';
+}): ReactNode {
+  const normalized = String(method || 'POST').toUpperCase() as RequestMethod;
+  const colors = HTTP_STYLES[normalized] ?? HTTP_STYLES.POST;
+  const compact = size === 'sm';
+
+  return (
+    <label
+      className="wb-http-chip-select-wrap"
+      title="Изменить HTTP метод"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        position: 'relative',
+        cursor: 'pointer'
+      }}
+    >
+      <span style={{ position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0,0,0,0)', border: 0 }}>HTTP метод</span>
+      <select
+        value={normalized}
+        onChange={(e) => onChange(e.target.value as RequestMethod)}
+        aria-label="HTTP метод"
+        style={{
+          appearance: 'none',
+          WebkitAppearance: 'none',
+          MozAppearance: 'none',
+          backgroundColor: colors.bg,
+          color: colors.fg,
+          border: 'none',
+          borderRadius: 4,
+          fontFamily: 'var(--wb-font-mono)',
+          fontWeight: 600,
+          fontSize: compact ? 10 : 11,
+          lineHeight: 1.35,
+          padding: compact ? '2px 18px 2px 6px' : '2px 20px 2px 8px',
+          cursor: 'pointer',
+          outline: 'none',
+          backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
+          backgroundRepeat: 'no-repeat',
+          backgroundPosition: 'right 4px center'
+        }}
+      >
+        <option value="GET">GET</option>
+        <option value="POST">POST</option>
+        <option value="PUT">PUT</option>
+        <option value="DELETE">DELETE</option>
+        <option value="PATCH">PATCH</option>
+      </select>
+    </label>
+  );
+}
+
 export function TypeChip({ type }: { type: string }): ReactNode {
   const typeKind = normalizeTypeKind(type || 'string');
 

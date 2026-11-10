@@ -88,6 +88,13 @@
   .wb-app-root .editor-stream input[type=checkbox] { appearance: auto; background-image: none; }
 }
 .wb-app-root .editor-stream :is(.panel-title,.inline-section-title) { font-family: var(--font-sans); font-size: var(--font-size-lg); font-weight: 600; line-height: 1.5; }
+.wb-app-root .editor-stream .inline-section-title-wrap { display: inline-flex; align-items: center; gap: var(--space-1); }
+.wb-app-root .editor-stream .inline-section-title { cursor: pointer; border-radius: var(--wb-radius-sm); padding: 1px 4px; margin: -1px -4px; transition: background-color 0.15s ease; }
+.wb-app-root .editor-stream .inline-section-title:hover { background-color: var(--wb-bg-hover); }
+.wb-app-root .editor-stream .inline-section-title-edit { opacity: 0; transition: opacity 0.15s ease-in-out; cursor: pointer; }
+.wb-app-root .editor-stream .panel-head:hover .inline-section-title-edit,
+.wb-app-root .editor-stream .inline-section-title-wrap:hover .inline-section-title-edit,
+.wb-app-root .editor-stream .inline-section-title-edit:focus-visible { opacity: 1; }
 .wb-app-root .editor-stream .panel-head { gap: var(--space-2); align-items: center; flex-wrap: wrap; }
 .wb-app-root .editor-stream .panel-head > .row { gap: var(--space-1); margin-left: auto; }
 .wb-app-root .editor-stream :is(.row.gap,.text-toolbar,.section-head-actions) { gap: var(--space-2); }

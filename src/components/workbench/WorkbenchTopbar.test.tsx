@@ -155,4 +155,31 @@ describe('WorkbenchTopbar', () => {
     expect(screen.queryByRole('menu', { name: 'Экспорт' })).not.toBeInTheDocument();
     expect(screen.getByRole('menu', { name: 'Дополнительные действия' })).toBeInTheDocument();
   });
+
+  it('supports interactive method name renaming, http method selecting, and path navigation', async () => {
+    const user = userEvent.setup();
+    const onRenameMethod = vi.fn();
+    const onChangeHttpMethod = vi.fn();
+    const onClickPath = vi.fn();
+
+    renderTopbar({
+      onRenameMethod,
+      onChangeHttpMethod,
+      onClickPath,
+      methodName: 'Order Details',
+      methodPath: '/v1/order'
+    });
+
+    const nameBtn = screen.getByRole('button', { name: /Order Details/ });
+    await user.click(nameBtn);
+    expect(onRenameMethod).toHaveBeenCalledOnce();
+
+    const pathBtn = screen.getByRole('button', { name: /Перейти к настройке URL/ });
+    await user.click(pathBtn);
+    expect(onClickPath).toHaveBeenCalledOnce();
+
+    const methodSelect = screen.getByRole('combobox', { name: 'HTTP метод' });
+    await user.selectOptions(methodSelect, 'GET');
+    expect(onChangeHttpMethod).toHaveBeenCalledWith('GET');
+  });
 });

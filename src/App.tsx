@@ -2824,6 +2824,48 @@ export default function App() {
     updateSection(id, (section) => ({ ...section, title }));
   }
 
+  function handleUpdateActiveMethodHttpMethod(nextMethod: RequestMethod): void {
+    const requestSection = getMethodRequestSection(activeMethod);
+    if (!requestSection) return;
+
+    updateSection(requestSection.id, (current) => {
+      if (current.kind !== 'parsed' || !isRequestSection(current)) return current;
+
+      const next = { ...current, requestMethod: nextMethod };
+      const normalizedServerRows = normalizeRequestRowsForMethod(next.rows, nextMethod);
+      const normalizedNext = {
+        ...next,
+        rows: normalizedServerRows
+      };
+      if (next.format !== 'curl') return normalizedNext;
+
+      const syncRows = [
+        ...getRequestHeaderRowsForEditor(normalizedNext).filter((row) => row.enabled !== false),
+        ...normalizedNext.rows.filter((row) => row.source !== 'header')
+      ];
+
+      return {
+        ...normalizedNext,
+        input: buildInputFromRows(next.format, syncRows, {
+          requestUrl: normalizedNext.requestUrl,
+          requestMethod: normalizedNext.requestMethod
+        }),
+        lastSyncedFormat: next.format
+      };
+    });
+  }
+
+  function handleScrollToRequestSection(): void {
+    const requestSection = getMethodRequestSection(activeMethod);
+    if (!requestSection) return;
+    const sectionEl = document.getElementById(`section-${requestSection.id}`);
+    if (sectionEl) {
+      sectionEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const urlInput = sectionEl.querySelector<HTMLInputElement>('input[placeholder*="https://api.example.com"]');
+      urlInput?.focus();
+    }
+  }
+
   function deleteSection(id: string): void {
     setSections((prev) => {
       const deletedIndex = prev.findIndex((section) => section.id === id);
@@ -5815,49 +5857,66 @@ export default function App() {
           <div className="table-wrap table-wrap-empty">
             <div className="muted">Таблица пока пустая</div>
             <div className="table-actions">
-              <button className="ghost small table-action-icon" type="button" onClick={() => addManualRow(section, 'server')} aria-label={addServerParameterLabel} title={addServerParameterLabel}>
-                <span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>
-              </button>
+              <WBButton
+                variant="secondary"
+                size="sm"
+                onClick={() => addManualRow(section, 'server')}
+                aria-label={addServerParameterLabel}
+                title={addServerParameterLabel}
+                icon={<span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>}
+              >
+                {section.domainModelEnabled ? 'Server параметр' : 'Параметр'}
+              </WBButton>
               {section.domainModelEnabled && (
-                <button className="ghost small table-action-icon" type="button" onClick={() => addManualRow(section, 'client')} aria-label="Добавить Client parameter" title="Добавить Client parameter">
-                  <span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>
-                </button>
+                <WBButton
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => addManualRow(section, 'client')}
+                  aria-label="Добавить Client parameter"
+                  title="Добавить Client parameter"
+                  icon={<span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>}
+                >
+                  Client параметр
+                </WBButton>
               )}
               <div className="table-actions-divider" aria-hidden />
-              <button
-                className="ghost small table-action-icon"
-                type="button"
+              <WBButton
+                variant="ghost"
+                size="sm"
                 onClick={() => openAiDescriptionContextDialog(section)}
                 disabled={Boolean(aiBusyKey)}
                 aria-label="AI: заполнить описания"
                 aria-busy={fillDescriptionsBusy}
                 title={fillDescriptionsBusy ? 'AI: заполняю описания...' : 'AI: заполнить описания'}
+                icon={renderAiActionIcon('ai_describe', fillDescriptionsBusy)}
               >
-                {renderAiActionIcon('ai_describe', fillDescriptionsBusy)}
-              </button>
-              <button
-                className="ghost small table-action-icon"
-                type="button"
+                Описания
+              </WBButton>
+              <WBButton
+                variant="ghost"
+                size="sm"
                 onClick={() => void runAiMasking(section, { target: 'both', scope: 'body' })}
                 disabled={Boolean(aiBusyKey)}
                 aria-label="AI: маскирование полей"
                 aria-busy={maskBothBodyBusy}
                 title={maskBothBodyBusy ? 'AI: определяю поля для маскирования...' : 'AI: маскирование полей'}
+                icon={renderAiActionIcon('ai_mask', maskBothBodyBusy)}
               >
-                {renderAiActionIcon('ai_mask', maskBothBodyBusy)}
-              </button>
+                Маскирование
+              </WBButton>
               {section.domainModelEnabled && (
-                <button
-                  className="ghost small table-action-icon"
-                  type="button"
+                <WBButton
+                  variant="ghost"
+                  size="sm"
                   onClick={() => void suggestParameterMappingsWithAi(section)}
                   disabled={Boolean(aiBusyKey)}
                   aria-label="AI: подобрать маппинг"
                   aria-busy={suggestMappingsBusy}
                   title={suggestMappingsBusy ? 'AI: подбираю маппинг...' : 'AI: подобрать маппинг'}
+                  icon={renderAiActionIcon('ai_map', suggestMappingsBusy)}
                 >
-                  {renderAiActionIcon('ai_map', suggestMappingsBusy)}
-                </button>
+                  Маппинг
+                </WBButton>
               )}
             </div>
           </div>
@@ -5910,49 +5969,66 @@ export default function App() {
             </tbody>
           </ParsedTableFrame>
           <div className="table-actions">
-            <button className="ghost small table-action-icon" type="button" onClick={() => addManualRow(section, 'server')} aria-label={addServerParameterLabel} title={addServerParameterLabel}>
-              <span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>
-            </button>
+            <WBButton
+              variant="secondary"
+              size="sm"
+              onClick={() => addManualRow(section, 'server')}
+              aria-label={addServerParameterLabel}
+              title={addServerParameterLabel}
+              icon={<span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>}
+            >
+              {section.domainModelEnabled ? 'Server параметр' : 'Параметр'}
+            </WBButton>
             {section.domainModelEnabled && (
-              <button className="ghost small table-action-icon" type="button" onClick={() => addManualRow(section, 'client')} aria-label="Добавить Client parameter" title="Добавить Client parameter">
-                <span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>
-              </button>
+              <WBButton
+                variant="secondary"
+                size="sm"
+                onClick={() => addManualRow(section, 'client')}
+                aria-label="Добавить Client parameter"
+                title="Добавить Client parameter"
+                icon={<span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>}
+              >
+                Client параметр
+              </WBButton>
             )}
             <div className="table-actions-divider" aria-hidden />
-            <button
-              className="ghost small table-action-icon"
-              type="button"
+            <WBButton
+              variant="ghost"
+              size="sm"
               onClick={() => openAiDescriptionContextDialog(section)}
               disabled={Boolean(aiBusyKey)}
               aria-label="AI: заполнить описания"
               aria-busy={fillDescriptionsBusy}
               title={fillDescriptionsBusy ? 'AI: заполняю описания...' : 'AI: заполнить описания'}
+              icon={renderAiActionIcon('ai_describe', fillDescriptionsBusy)}
             >
-              {renderAiActionIcon('ai_describe', fillDescriptionsBusy)}
-            </button>
-            <button
-              className="ghost small table-action-icon"
-              type="button"
+              Описания
+            </WBButton>
+            <WBButton
+              variant="ghost"
+              size="sm"
               onClick={() => void runAiMasking(section, { target: 'both', scope: 'body' })}
               disabled={Boolean(aiBusyKey)}
               aria-label="AI: маскирование полей"
               aria-busy={maskBothBodyBusy}
               title={maskBothBodyBusy ? 'AI: определяю поля для маскирования...' : 'AI: маскирование полей'}
+              icon={renderAiActionIcon('ai_mask', maskBothBodyBusy)}
             >
-              {renderAiActionIcon('ai_mask', maskBothBodyBusy)}
-            </button>
+              Маскирование
+            </WBButton>
             {section.domainModelEnabled && (
-              <button
-                className="ghost small table-action-icon"
-                type="button"
+              <WBButton
+                variant="ghost"
+                size="sm"
                 onClick={() => void suggestParameterMappingsWithAi(section)}
                 disabled={Boolean(aiBusyKey)}
                 aria-label="AI: подобрать маппинг"
                 aria-busy={suggestMappingsBusy}
                 title={suggestMappingsBusy ? 'AI: подбираю маппинг...' : 'AI: подобрать маппинг'}
+                icon={renderAiActionIcon('ai_map', suggestMappingsBusy)}
               >
-                {renderAiActionIcon('ai_map', suggestMappingsBusy)}
-              </button>
+                Маппинг
+              </WBButton>
             )}
           </div>
         </div>
@@ -6026,28 +6102,41 @@ export default function App() {
           </tbody>
         </ParsedTableFrame>
         <div className="table-actions">
-          <button
-            className="ghost small table-action-icon"
-            type="button"
+          <WBButton
+            variant="secondary"
+            size="sm"
+            onClick={() => addManualRow(section, 'server')}
+            aria-label="Добавить параметр"
+            title="Добавить параметр"
+            icon={<span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>}
+          >
+            Параметр
+          </WBButton>
+          <div className="table-actions-divider" aria-hidden />
+          <WBButton
+            variant="ghost"
+            size="sm"
             onClick={() => openAiDescriptionContextDialog(section)}
             disabled={Boolean(aiBusyKey)}
             aria-label="AI: заполнить описания"
             aria-busy={fillDescriptionsBusy}
             title={fillDescriptionsBusy ? 'AI: заполняю описания...' : 'AI: заполнить описания'}
+            icon={renderAiActionIcon('ai_describe', fillDescriptionsBusy)}
           >
-            {renderAiActionIcon('ai_describe', fillDescriptionsBusy)}
-          </button>
-          <button
-            className="ghost small table-action-icon"
-            type="button"
+            Описания
+          </WBButton>
+          <WBButton
+            variant="ghost"
+            size="sm"
             onClick={() => void runAiMasking(section, { target: 'server', scope: 'body' })}
             disabled={Boolean(aiBusyKey)}
             aria-label="AI: маскирование полей"
             aria-busy={maskServerBodyBusy}
             title={maskServerBodyBusy ? 'AI: определяю поля для маскирования...' : 'AI: маскирование полей'}
+            icon={renderAiActionIcon('ai_mask', maskServerBodyBusy)}
           >
-            {renderAiActionIcon('ai_mask', maskServerBodyBusy)}
-          </button>
+            Маскирование
+          </WBButton>
         </div>
       </div>
     );
@@ -6312,20 +6401,29 @@ export default function App() {
         </table>
         {renderFieldRenameFeedback(section, 'headers', target)}
         <div className="table-actions">
-          <button className="ghost small table-action-icon" type="button" onClick={() => (isExternal ? addExternalRequestHeader(section) : addRequestHeader(section))} aria-label="Добавить header" title="Добавить header">
-            <span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>
-          </button>
-          <button
-            className="ghost small table-action-icon"
-            type="button"
+          <WBButton
+            variant="secondary"
+            size="sm"
+            onClick={() => (isExternal ? addExternalRequestHeader(section) : addRequestHeader(section))}
+            aria-label="Добавить header"
+            title="Добавить header"
+            icon={<span className="ui-icon" aria-hidden>{renderUiIcon('add_row')}</span>}
+          >
+            Header
+          </WBButton>
+          <div className="table-actions-divider" aria-hidden />
+          <WBButton
+            variant="ghost"
+            size="sm"
             onClick={() => void runAiMasking(section, { target: isExternal ? 'client' : 'server', scope: 'headers' })}
             disabled={Boolean(aiBusyKey)}
             aria-label="AI: маскирование полей"
             aria-busy={maskHeadersBusy}
             title={maskHeadersBusy ? 'AI: определяю поля для маскирования...' : 'AI: маскирование полей'}
+            icon={renderAiActionIcon('ai_mask', maskHeadersBusy)}
           >
-            {renderAiActionIcon('ai_mask', maskHeadersBusy)}
-          </button>
+            Маскирование
+          </WBButton>
         </div>
       </div>
     );
@@ -8376,6 +8474,8 @@ export default function App() {
             methodTemplateLabel={activeMethod ? activeTemplate?.label ?? 'Без шаблона' : undefined}
             methodPath={getMethodPath(activeMethod)}
             methodHttpMethod={getMethodHttpMethod(activeMethod)}
+            onChangeHttpMethod={handleUpdateActiveMethodHttpMethod}
+            onClickPath={handleScrollToRequestSection}
             authUserLogin={authUser?.login ?? null}
             isLogoutBusy={authBusyKey === 'auth:logout'}
             canUndo={canUndo}

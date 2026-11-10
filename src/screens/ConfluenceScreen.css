@@ -583,7 +583,7 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  padding: var(--space-1) 0 var(--space-3);
+  padding: 0 0 var(--space-3);
   border-bottom: 1px solid var(--wb-border);
   margin-bottom: var(--space-4);
   flex-wrap: wrap;
@@ -591,7 +591,7 @@
 .cf-jira-header-left {
   display: flex;
   align-items: center;
-  gap: var(--space-2-5);
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 .cf-jira-header-right {
@@ -600,25 +600,39 @@
   gap: var(--space-2);
   margin-left: auto;
 }
-.cf-jira-project-link {
+/* Unified 28px height across all header items */
+.cf-status-badge,
+.cf-jira-project-link,
+.cf-jira-change-link {
   display: inline-flex;
   align-items: center;
+  height: 28px;
+  box-sizing: border-box;
+  border-radius: var(--wb-radius-sm);
+  font-size: var(--font-size-xs);
+  line-height: 1;
+}
+.cf-status-badge {
   gap: var(--space-1-5);
-  padding: var(--space-0-5) var(--space-2);
+  padding: 0 var(--space-2-5);
+  font-weight: 600;
+  font-family: var(--wb-font-mono);
+}
+.cf-jira-project-link {
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
   background: var(--wb-bg-soft);
   border: 1px solid var(--wb-border);
-  border-radius: var(--wb-radius-sm);
   text-decoration: none;
-  font-size: var(--font-size-xs);
   color: var(--wb-text);
-  transition: border-color 0.15s, background 0.15s;
+  transition: all 0.15s ease;
 }
 .cf-jira-project-link:hover {
   background: var(--wb-bg-hover);
   border-color: var(--wb-border-strong);
 }
 .cf-jira-project-name {
-  font-weight: 600;
+  font-weight: 500;
 }
 .cf-jira-project-key {
   font-family: var(--wb-font-mono);
@@ -626,18 +640,18 @@
   color: var(--wb-accent);
 }
 .cf-jira-change-link {
-  display: inline-flex;
-  align-items: center;
   gap: var(--space-1);
-  font-size: var(--font-size-xs);
   color: var(--wb-text-soft);
   text-decoration: none;
-  padding: var(--space-0-5) var(--space-1);
-  border-radius: var(--wb-radius-sm);
+  padding: 0 var(--space-2);
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
 }
 .cf-jira-change-link:hover {
   color: var(--wb-accent);
-  text-decoration: underline;
+  background: var(--wb-bg-soft);
+  border-color: var(--wb-border);
+  text-decoration: none;
 }
 .cf-jira-change-link .wb-shell-icon {
   width: 12px;
@@ -887,10 +901,17 @@
   flex-wrap: wrap;
 }
 
-.cf-jira-hub-header-left,
-.cf-jira-hub-primary-main {
+.cf-jira-hub-header-left {
   display: flex;
   align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  min-width: 0;
+  flex: 1;
+}
+.cf-jira-hub-primary-main {
+  display: flex;
+  align-items: baseline;
   gap: var(--space-2);
   flex-wrap: wrap;
   min-width: 0;
@@ -1097,10 +1118,12 @@ a.cf-jira-hub-open-btn:hover {
 }
 
 .cf-jira-hub-title-text {
-  font-size: var(--font-size-sm);
+  font-size: 16px;
   font-weight: 600;
   color: var(--wb-text);
-  line-height: 1.4;
+  line-height: 1.35;
+  margin: 0;
+  padding: 0;
   word-break: break-word;
 }
 

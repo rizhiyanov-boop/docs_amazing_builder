@@ -449,20 +449,28 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
   return <section aria-label="Jira" className="cf-jira-panel">
     <div className="cf-jira-header-bar">
       <div className="cf-jira-header-left">
-        <span
-          className={`cf-status-badge ${status?.connected ? 'is-connected' : 'is-disconnected'}`}
-          role="status"
-          aria-label={status?.connected ? 'Jira подключена' : 'Jira не подключена'}
-          title={status?.connected ? 'Jira подключена' : 'Jira не подключена'}
-        >
-          <span className="cf-status-dot" aria-hidden="true" />
-          <span className="cf-status-label">{status?.connected ? 'Jira' : 'Не подключено'}</span>
-        </span>
-        {status?.project && (
-          <a href={status.project.url} target="_blank" rel="noopener noreferrer" className="cf-jira-project-link">
+        {status?.connected && status?.project ? (
+          <a
+            href={status.project.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="cf-jira-project-link is-connected"
+            title={`Проект Jira: ${status.project.name} (${status.project.key})`}
+          >
+            <span className="cf-status-dot" aria-hidden="true" />
             <span className="cf-jira-project-name">{status.project.name}</span>
             <span className="cf-jira-project-key">{status.project.key}</span>
           </a>
+        ) : (
+          <span
+            className={`cf-status-badge ${status?.connected ? 'is-connected' : 'is-disconnected'}`}
+            role="status"
+            aria-label={status?.connected ? 'Jira подключена' : 'Jira не подключена'}
+            title={status?.connected ? 'Jira подключена' : 'Jira не подключена'}
+          >
+            <span className="cf-status-dot" aria-hidden="true" />
+            <span className="cf-status-label">{status?.connected ? 'Jira' : 'Не подключено'}</span>
+          </span>
         )}
         <a href={`${CONFLUENCE_BRIDGE_URL}/`} target="_blank" rel="noopener noreferrer" className="cf-jira-change-link">
           <WorkbenchIcon name="edit" />
@@ -556,9 +564,9 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
                   )
                 )}
                 {displaySummary && (
-                  <span className="cf-jira-hub-title-text" title={displaySummary}>
+                  <h3 className="cf-jira-hub-title-text" title={displaySummary}>
                     {displaySummary}
-                  </span>
+                  </h3>
                 )}
               </div>
 
@@ -597,11 +605,15 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
                     href={currentIssueUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="cf-jira-hub-open-btn cf-jira-hub-btn-secondary"
+                    className="cf-jira-hub-icon-action"
                     title={`Открыть ${currentIssueKey || 'задачу'} в Jira`}
+                    aria-label={`Открыть ${currentIssueKey || 'задачу'} в Jira`}
                   >
-                    <span>В Jira</span>
-                    <span aria-hidden="true">↗</span>
+                    <svg className="wb-shell-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M12 9v4H3V4h4" />
+                      <path d="M9.5 2.5H13.5V6.5" />
+                      <path d="M6.5 9.5L13.5 2.5" />
+                    </svg>
                   </a>
                 )}
                 {onLinked && (
@@ -621,10 +633,10 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
 
             {/* ROW 2: SUBORDINATE METADATA CHIPS */}
             <div className="cf-jira-hub-meta-row">
-              <div className="cf-jira-hub-status-badge">
+              <span className="cf-jira-hub-status-badge">
                 <WorkbenchIcon name="check" />
-                <h3 className="cf-jira-hub-status-heading">{statusTitle}</h3>
-              </div>
+                <span>{statusTitle}</span>
+              </span>
               <span className="cf-jira-hub-chip">
                 {issue?.issueType?.name || (issueKind === 'story' ? 'User Story' : 'Задача · тестирование')}
               </span>
@@ -1121,15 +1133,6 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
                   </option>
                 ))}
               </select>
-
-              {draft?.priorityReason && (
-                <div className="cf-jira-priority-ai-hint">
-                  <span className="cf-jira-priority-ai-icon" aria-hidden="true">
-                    <WorkbenchIcon name="ai-describe" />
-                  </span>
-                  <span className="cf-jira-priority-ai-text">{draft.priorityReason}</span>
-                </div>
-              )}
 
               {conflicts.length > 0 && activeTagRules.length > 0 && (
                 <div className="cf-jira-priority-rules-hint">

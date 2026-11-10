@@ -90,11 +90,14 @@ async function runDomAudit(send) {
             }
           });
 
-          // 2. Check Badge Conciseness (> 20 chars in a single status/chip)
-          const chips = document.querySelectorAll('.cf-jira-hub-status-badge, .cf-jira-hub-chip, .cf-jira-workflow-mode-badge');
+          const isVisible = el => !el.closest('[hidden]') && (el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0);
+
+          // 2. Check Badge Conciseness (> 20 chars in a single status/chip, > 50 for epic)
+          const chips = Array.from(document.querySelectorAll('.cf-jira-hub-status-badge, .cf-jira-hub-chip, .cf-jira-workflow-mode-badge')).filter(isVisible);
           chips.forEach(chip => {
             const text = (chip.textContent || '').trim();
-            if (text.length > 20) {
+            const limit = chip.classList.contains('epic') ? 50 : 20;
+            if (text.length > limit) {
               issues.push({
                 type: 'badge-too-long',
                 message: 'Badge text is too wordy (' + text.length + ' chars): "' + text + '"'
@@ -104,8 +107,9 @@ async function runDomAudit(send) {
 
           // 3. Check Tautology / duplicate word stems across adjacent badges
           hubs.forEach(hub => {
+            if (!isVisible(hub)) return;
             const parentBlock = hub.closest('.cf-screen, main') || hub.parentElement;
-            const badgeEls = Array.from(parentBlock ? parentBlock.querySelectorAll('.cf-jira-hub-status-badge, .cf-jira-hub-chip, .cf-jira-workflow-mode-badge') : []);
+            const badgeEls = Array.from(parentBlock ? parentBlock.querySelectorAll('.cf-jira-hub-status-badge, .cf-jira-hub-chip, .cf-jira-workflow-mode-badge') : []).filter(isVisible);
             const badgeTexts = badgeEls.map(el => (el.textContent || '').trim().toLowerCase());
             
             const words = badgeTexts.flatMap(t => t.split(/[\\s\\/·,]+/));

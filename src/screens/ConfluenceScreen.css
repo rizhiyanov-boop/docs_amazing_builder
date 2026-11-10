@@ -86,26 +86,24 @@
 .cf-jira-tag-role-pill.primary { background: var(--wb-bg-active); color: var(--wb-accent); }
 .cf-jira-tag-role-pill.extra { background: var(--wb-bg-soft); color: var(--wb-text-muted); }
 
-/* Closed State Input Frame */
+/* Linear-style compact inline chips list */
 .cf-jira-tags-input-frame {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  min-height: 38px;
-  padding: var(--space-1) var(--space-2-25);
-  background: var(--wb-bg-surface);
-  border: 1px solid var(--wb-border);
-  border-radius: var(--wb-radius);
-  cursor: pointer;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  gap: var(--space-1-5);
+  flex-wrap: wrap;
+  padding: var(--space-0-5) 0;
+  background: transparent;
+  border: none;
+  min-height: auto;
+  cursor: default;
 }
 .cf-jira-tags-input-frame:hover {
-  border-color: var(--wb-border-strong);
+  border-color: transparent;
 }
 .cf-jira-tags-input-frame-active {
-  border-color: var(--wb-accent);
-  box-shadow: 0 0 0 1px var(--wb-accent);
+  border-color: transparent;
+  box-shadow: none;
 }
 .cf-jira-tags-chips-wrap {
   display: flex;
@@ -562,9 +560,11 @@
   border-radius: 50%;
   flex-shrink: 0;
 }
-.cf-status-badge.is-connected .cf-status-dot {
-  background: var(--success);
-  box-shadow: 0 0 6px var(--success);
+.cf-status-badge.is-connected .cf-status-dot,
+.cf-jira-project-link.is-connected .cf-status-dot,
+.cf-jira-project-link .cf-status-dot {
+  background: var(--wb-success, var(--success));
+  box-shadow: 0 0 6px var(--wb-success, var(--success));
 }
 .cf-status-badge.is-disconnected .cf-status-dot {
   background: var(--wb-text-subtle);

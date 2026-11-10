@@ -557,7 +557,6 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
                       title={`Открыть ${currentIssueKey} в Jira`}
                     >
                       <span>{currentIssueKey}</span>
-                      <span aria-hidden="true" className="cf-jira-hub-arrow">↗</span>
                     </a>
                   ) : (
                     <span className="cf-jira-hub-key-link">{currentIssueKey}</span>

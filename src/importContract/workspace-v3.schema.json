@@ -28,6 +28,7 @@
         "id": { "$ref": "#/definitions/id" }, "name": { "$ref": "#/definitions/nonBlank" }, "updatedAt": { "$ref": "#/definitions/timestamp" },
         "jiraTicket": { "type": "string" }, "epic": { "type": "string" }, "initiators": { "type": "string" }, "responsible": { "type": "string" },
         "externalUrl": { "type": "string" }, "status": { "enum": ["draft", "review", "done"] },
+        "templateId": { "$ref": "#/definitions/nonBlank" },
         "sections": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/section" } }
       }
     },
@@ -63,7 +64,7 @@
     },
     "parsedSection": {
       "type": "object", "additionalProperties": false,
-      "required": ["id", "title", "enabled", "kind", "sectionType", "format", "lastSyncedFormat", "input", "schemaInput", "rows", "error", "domainModelEnabled", "clientFormat", "clientLastSyncedFormat", "clientInput", "clientSchemaInput", "clientRows", "clientError", "clientMappings", "requestColumnOrder"],
+      "required": ["id", "title", "enabled", "kind", "sectionType", "format", "lastSyncedFormat", "input", "schemaInput", "rows", "error", "clientFormat", "clientLastSyncedFormat", "clientInput", "clientSchemaInput", "clientRows", "clientError", "clientMappings", "requestColumnOrder"],
       "properties": {
         "id": { "$ref": "#/definitions/id" }, "title": { "$ref": "#/definitions/nonBlank" }, "enabled": { "type": "boolean" }, "kind": { "const": "parsed" },
         "sectionType": { "enum": ["request", "response", "generic"] }, "format": { "enum": ["json", "curl", "xml"] }, "lastSyncedFormat": { "enum": ["json", "curl", "xml"] },

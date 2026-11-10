@@ -1,5 +1,6 @@
 import { normalizeArrayFieldPath } from './fieldPath';
 import { getRequestHeaderRows, getRequestRows } from './requestHeaders';
+import { sectionsForMethodTemplate } from './methodTemplates';
 import type { ErrorRow, ErrorsSection, MethodDocument, ParseFormat, ParsedRow, ParsedSection, ValidationRuleRow } from './types';
 
 type MockBody = Record<string, unknown> | string;
@@ -264,7 +265,8 @@ function findErrorsSection(method: MethodDocument): ErrorsSection | null {
   return method.sections.find((section): section is ErrorsSection => section.kind === 'errors') ?? null;
 }
 
-export function buildMockServicePayload(method: MethodDocument): Record<string, unknown> {
+export function buildMockServicePayload(source: MethodDocument): Record<string, unknown> {
+  const method = { ...source, sections: sectionsForMethodTemplate(source.sections, source.templateId) };
   const requestSection = findRequestSection(method);
   const responseSection = findResponseSection(method);
   const errorsSection = findErrorsSection(method);

@@ -1,4 +1,5 @@
 import type { ConfluenceBinding, ConfluenceImportSource } from './confluenceTypes';
+import type { MethodTemplateId } from './methodTemplates';
 
 export type ParseFormat = 'json' | 'curl' | 'xml';
 export type RequestColumnKey = 'field' | 'type' | 'required' | 'validations' | 'clientField' | 'description' | 'maskInLogs' | 'example';
@@ -124,6 +125,7 @@ export type DocSection = TextSection | ParsedSection | DiagramSection | ErrorsSe
 
 export interface MethodDocument {
   id: string;
+  readonly templateId?: MethodTemplateId;
   name: string;
   updatedAt: string;
   sections: DocSection[];

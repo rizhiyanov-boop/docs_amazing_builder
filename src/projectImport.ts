@@ -142,7 +142,7 @@ export function loadWorkspaceProjectFromPayload(payload: unknown, enableMultiMet
 
   const activeMethodId = typeof payload.activeMethodId === 'string' && methods.some((method) => method.id === payload.activeMethodId)
     ? payload.activeMethodId
-    : methods[0].id;
+    : methods[0]?.id;
 
   const workspace: WorkspaceProjectData = {
     version: 3,

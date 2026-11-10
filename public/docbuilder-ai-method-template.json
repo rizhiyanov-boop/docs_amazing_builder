@@ -11,7 +11,7 @@
       "При существенных неизвестных или конфликтах сначала задай вопросы. После согласования заполни documentTemplate по материалам ровно одного метода.",
       "Верни только заполненное содержимое documentTemplate как отдельный JSON метода. Затем пользователь загрузит его через Импорт и подтвердит «Импортировать метод»."
     ],
-    "output": "После согласования верни один корневой объект метода: id, name, updatedAt, jiraTicket, epic, initiators, responsible, externalUrl, status и sections. Без Markdown-ограждения, пояснений, проектной обёртки, importProfile, version, methods, groups, projectSections, flows и оболочки этого файла. Если пользователь просит файл, сохрани итоговый JSON отдельным файлом.",
+    "output": "После согласования верни один корневой объект метода с id, name, templateId, updatedAt, jiraTicket, epic, initiators, responsible, externalUrl, status и sections. Без Markdown-ограждения, пояснений, проектной обёртки, importProfile, version, methods, groups, projectSections, flows и оболочки этого файла. Если пользователь просит файл, сохрани итоговый JSON отдельным файлом.",
     "promptToCopy": "Используй приложенный docbuilder-ai-method-template.json и материалы задачи. Подготовь один метод для импорта в DocBuilder по instructions и outputSchema. Сначала уточни существенные неизвестные. После согласования верни только заполненный documentTemplate отдельным JSON, без оболочки шаблона.",
     "editing": "Редактировать instructions и referenceData непосредственно в этом JSON. При изменении структуры documentTemplate сверять outputSchema и проверять отдельный импорт метода. outputSchema содержит определения метода из действующей схемы приложения; изменение этого файла не меняет код импортёра.",
     "templateDefaults": "METHOD_NAME_TO_REPLACE заменить. POST, REST, authType none, data как object, updatedAt и технические значения ответа — структурные заготовки, а не факты о новом методе: подтвердить/заменить по материалам. Пустые строки и массивы означают незаполненную документацию. Структурная валидность не означает полноту или согласование требований."
@@ -95,8 +95,8 @@
     ],
     "mapping": [
       "Физические роли Server/Client установить по источникам. Названия вкладок сами по себе не определяют направление вызова.",
-      "domainModelEnabled false: rows/input описывают единственную модель; clientRows/clientInput пустые, clientMappings пустой объект, externalRequestUrl пустой, externalAuthType none.",
-      "domainModelEnabled true: rows/input/requestUrl/requestMethod/auth* относятся к Server; clientRows/clientInput/externalRequestUrl/externalRequestMethod/externalAuth* — к Client. Заполнить обе стороны отдельно.",
+      "Выбери один templateId на весь метод. Значение simple означает один публичный контракт. Значение orchestration означает отдельные контракты Server и Client с маппингом. Выбор подтверждается материалами задачи.",
+      "Для simple заполняй rows и input публичного контракта. Оставь Client-поля и внешний endpoint пустыми, externalAuthType укажи none. Для orchestration заполняй обе стороны отдельно. Поле domainModelEnabled в секциях не добавляй.",
       "clientMappings всегда хранит Server sourceField → Client sourceField одинаково на request и response. Маппинг не преобразует source автоматически.",
       "Существующие поля и пути сохранять. Ключи маппинга — sourceField, а не id строки; каждый ключ и значение должны существовать на соответствующей стороне. Header/url Server в маппинг не включать.",
       "Объяснять подтверждённые преобразования в описании/validations поля или отдельной текстовой секции, не вводя неподдерживаемые ключи JSON.",
@@ -775,6 +775,9 @@
           "externalUrl": {
             "type": "string"
           },
+          "templateId": {
+            "$ref": "#/definitions/nonBlank"
+          },
           "status": {
             "enum": [
               "draft",
@@ -977,7 +980,6 @@
           "schemaInput",
           "rows",
           "error",
-          "domainModelEnabled",
           "clientFormat",
           "clientLastSyncedFormat",
           "clientInput",
@@ -1524,6 +1526,7 @@
     "initiators": "",
     "responsible": "",
     "externalUrl": "",
+    "templateId": "simple",
     "status": "draft",
     "sections": [
       {
@@ -1650,7 +1653,6 @@
           }
         ],
         "error": "",
-        "domainModelEnabled": false,
         "clientFormat": "json",
         "clientLastSyncedFormat": "json",
         "clientInput": "",
@@ -1804,7 +1806,6 @@
           }
         ],
         "error": "",
-        "domainModelEnabled": false,
         "clientFormat": "json",
         "clientLastSyncedFormat": "json",
         "clientInput": "",

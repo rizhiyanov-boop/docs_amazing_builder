@@ -6,13 +6,16 @@ import { renderWikiDocument } from './renderWiki';
 import { getRequestRows } from './requestHeaders';
 import { importTestOrigin, templateImportPage } from './test/confluenceImportFixtures';
 import { asWorkspaceProjectData, normalizeMethodDocument } from './workspaceBootstrap';
+import { sectionsForMethodTemplate } from './methodTemplates';
 
 describe('Confluence method import', () => {
   it('imports the publication template with canonical rows, examples and a diagram', () => {
     const preview = prepareConfluenceImport(templateImportPage(), importTestOrigin);
     if (!preview.ok) throw new Error(preview.reasons.join(', '));
     const method = normalizeMethodDocument(buildConfluenceImport(preview, {}));
-    const request = method.sections.find(section => section.kind === 'parsed' && section.id === 'request');
+    expect(method.templateId).toBe('orchestration');
+    expect(() => buildConfluenceImport(preview, { templateId: 'simple' })).toThrow(/есть данные Client/);
+    const request = sectionsForMethodTemplate(method.sections, method.templateId).find(section => section.kind === 'parsed' && section.id === 'request');
     if (request?.kind !== 'parsed') throw new Error('Expected Request');
     expect(request).toMatchObject({ requestUrl: '/api/example', format: 'curl', clientMappings: { 'data.id': 'requestId' } });
     expect(getRequestRows(request).filter(row => row.source === 'header')).toEqual([]);

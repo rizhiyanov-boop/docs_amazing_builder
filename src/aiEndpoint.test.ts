@@ -190,6 +190,24 @@ describe('ai endpoint auth', () => {
     });
   });
 
+  it('applies approved template instructions and rejects a mapping request from a simple method', async () => {
+    const { default: aiHandler } = await import('../api/ai');
+    process.env.OPENAI_API_KEY = 'test-key';
+    dbMock.getUserBySessionToken.mockResolvedValue({ id: 'template-prompt-user' });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true, json: async () => ({ choices: [{ message: { content: '{"examples":[]}' } }] })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const res = createResponse();
+    await aiHandler({ method: 'POST', body: { task: 'generate-examples', payload: { templateId: 'orchestration', rows: [] } } }, res);
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).messages[1].content).toContain('Подбирай значения для контракта Server');
+    const rejected = createResponse();
+    await aiHandler({ method: 'POST', body: { task: 'suggest-mappings', payload: { templateId: 'simple' } } }, rejected);
+    expect(rejected.statusCode).toBe(400);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it('preserves numeric and boolean examples returned by the model as strings', async () => {
     process.env.OPENAI_API_KEY = 'test-key';
     dbMock.getUserBySessionToken.mockResolvedValue({ id: 'u_1', login: 'tester' });

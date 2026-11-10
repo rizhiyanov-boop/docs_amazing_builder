@@ -91,7 +91,7 @@ import {
   DEFAULT_PROJECT_NAME,
   createDefaultFlow,
   createDefaultProjectSections,
-  createMethodDocument,
+  createTemplatedMethod,
   createMethodId,
   normalizeMethodDocument,
   createOnboardingDemoWorkspace,
@@ -128,7 +128,11 @@ import { AiDescriptionContextDialog, AI_DESCRIPTION_CONTEXT_MAX_LENGTH } from '.
 import { AiDescriptionsPreview, type AiDescriptionSuggestion } from './components/dialogs/AiDescriptionsPreview';
 import { SearchPalette } from './components/dialogs/SearchPalette';
 import { Toast, type ToastKind } from './components/Toast';
-import { AiTableButton } from './components/primitives/WorkbenchPrimitives';
+import { AiTableButton, WBButton } from './components/primitives/WorkbenchPrimitives';
+import {
+  getMethodTemplate, isMethodTemplateId, methodTemplateConflict, methodTemplateExternalUrl, methodTemplateIds, methodTemplates,
+  methodTemplateSectionsForStorage, sectionsForMethodTemplate, suggestMethodTemplate, type MethodTemplateId
+} from './methodTemplates';
 import { WorkbenchSidebar } from './components/workbench/WorkbenchSidebar';
 import { WORKBENCH_FEATURES } from './workbenchFeatures';
 import { WorkbenchDiagramPreview } from './components/workbench/WorkbenchDiagramPreview';
@@ -466,6 +470,7 @@ type WorkspaceMethodsImportRoutingState = {
   items: WorkspaceMethodImportPreviewItem[];
   invalidFiles: WorkspaceMethodImportPreviewIssue[];
   allowReplace: boolean;
+  templateChoices?: Record<string, MethodTemplateId>;
 };
 
 type ProjectTextImportState = {
@@ -537,6 +542,22 @@ type OnboardingStepTarget = {
 
 function countImportedMethods(items: WorkspaceMethodImportPreviewItem[]): number {
   return items.reduce((total, item) => total + item.workspace.methods.length, 0);
+}
+
+function importedTemplateId(method: MethodDocument, itemIndex: number, routing: WorkspaceMethodsImportRoutingState): MethodTemplateId {
+  return method.templateId ?? routing.templateChoices?.[`${itemIndex}:${method.id}`] ?? suggestMethodTemplate(method);
+}
+
+function resolveWorkspaceImportTemplates(routing: WorkspaceMethodsImportRoutingState) {
+  return routing.items.map(({ workspace }, index) => ({
+    ...workspace,
+    methods: workspace.methods.map(method => {
+      const templateId = importedTemplateId(method, index, routing);
+      const conflict = methodTemplateConflict(method, templateId);
+      if (conflict) throw new Error(`${method.name}. ${conflict}`);
+      return { ...method, templateId, sections: methodTemplateSectionsForStorage(method.sections, templateId) };
+    })
+  }));
 }
 
 function asWorkspaceProjectData(
@@ -626,6 +647,8 @@ export default function App() {
   );
   const [projectName, setProjectName] = useState<string>(() => normalizeProjectName(initialWorkspace.projectName));
   const [methods, setMethodsState] = useState<MethodDocument[]>(() => initialWorkspace.methods);
+  const [methodTemplatePicker, setMethodTemplatePicker] = useState(false);
+  const methodTemplateTrigger = useRef<HTMLElement | null>(null);
   const [methodGroups, setMethodGroups] = useState<MethodGroup[]>(() => initialWorkspace.groups);
   const [projectSections, setProjectSections] = useState<ProjectSection[]>(() => initialProjectSections);
   const [flows, setFlows] = useState<ProjectFlow[]>(() => initialFlows);
@@ -715,6 +738,9 @@ export default function App() {
   const [pendingSectionDelete, setPendingSectionDelete] = useState<PendingSectionDeleteState | null>(null);
   const [jsonImportRouting, setJsonImportRouting] = useState<JsonImportRoutingState | null>(null);
   const [workspaceMethodsImportRouting, setWorkspaceMethodsImportRouting] = useState<WorkspaceMethodsImportRoutingState | null>(null);
+  const workspaceImportHasTemplateConflict = workspaceMethodsImportRouting?.items.some(({ workspace }, index) =>
+    workspace.methods.some(method => methodTemplateConflict(method, importedTemplateId(method, index, workspaceMethodsImportRouting)))
+  ) ?? false;
   const [projectTextImport, setProjectTextImport] = useState<ProjectTextImportState | null>(null);
   const [sourceTextImport, setSourceTextImport] = useState<SourceTextImportState | null>(null);
   const [hasOnboardingExport, setHasOnboardingExport] = useState(false);
@@ -860,7 +886,12 @@ export default function App() {
   const localAutosaveFlushRef = useRef<number | null>(null);
   const normalizedProjectName = projectName.trim() || DEFAULT_PROJECT_NAME;
   const activeMethod = methods.find((method) => method.id === activeMethodId) ?? methods[0];
-  const sections = useMemo(() => activeMethod?.sections ?? EMPTY_SECTIONS, [activeMethod]);
+  const activeTemplateId = activeMethod?.templateId;
+  const activeTemplate = getMethodTemplate(activeTemplateId);
+  const sections = useMemo(
+    () => sectionsForMethodTemplate(activeMethod?.sections ?? EMPTY_SECTIONS, activeMethod?.templateId),
+    [activeMethod]
+  );
   const parameterRenameContexts = useMemo(() => {
     const contexts = new Map<string, ParameterRenameContext>();
     for (const section of sections) {
@@ -979,7 +1010,7 @@ export default function App() {
     if (!current) return [];
     return validateProjectFlow(current, methods);
   }, [flows, activeFlowId, methods]);
-  const canRenderWorkspace = workspaceScope !== 'methods' || sections.length > 0;
+  const canRenderWorkspace = workspaceScope !== 'methods' || sections.length > 0 || tab === 'confluence';
 
   useEffect(() => {
     if (!serverProjectId) return;
@@ -1176,6 +1207,7 @@ export default function App() {
     const seed = createWorkspaceSeed();
     markWorkspaceChanged();
     applyWorkspaceState(seed);
+    openMethodTemplatePicker();
     setToastMessage('Создан новый пустой проект.');
   }
 
@@ -1470,7 +1502,7 @@ export default function App() {
 
       const base = existing
         ? prev
-        : [...prev, createParsedSection(targetType, targetId)];
+        : [...prev, ...sectionsForMethodTemplate([createParsedSection(targetType, targetId)], activeTemplateId)];
 
       const next = base.map((section) => {
         if (section.kind !== 'parsed' || section.id !== targetId) return section;
@@ -1478,7 +1510,7 @@ export default function App() {
         let parsedRows: ParsedRow[] = [];
         let parseError = '';
         try {
-          const shouldWrap = targetFormat === 'json' && section.sectionType === 'response' && !section.domainModelEnabled;
+          const shouldWrap = !activeTemplateId && targetFormat === 'json' && section.sectionType === 'response' && !section.domainModelEnabled;
           const inputToParse = shouldWrap ? wrapNonDomainResponseJson(jsonImportRouting.rawText) : jsonImportRouting.rawText;
           const curlMeta = isRequestSection(section) && targetFormat === 'curl' ? parseCurlMeta(jsonImportRouting.rawText) : null;
           const requestMethod =
@@ -1490,30 +1522,9 @@ export default function App() {
           parseError = error instanceof Error ? error.message : 'Ошибка парсинга';
         }
 
-        const nextDomainEnabled = jsonImportRouting.domainModelEnabled ? true : section.domainModelEnabled;
-        const initializedClientProps = nextDomainEnabled
-          ? {
-              clientFormat: section.clientFormat ?? 'json',
-              clientLastSyncedFormat: section.clientLastSyncedFormat ?? 'json',
-              clientInput: section.clientInput ?? '',
-              clientRows: section.clientRows ?? [],
-              clientError: section.clientError ?? '',
-              clientMappings: section.clientMappings ?? {}
-            }
-          : {
-              clientFormat: section.clientFormat,
-              clientLastSyncedFormat: section.clientLastSyncedFormat,
-              clientInput: section.clientInput,
-              clientRows: section.clientRows,
-              clientError: section.clientError,
-              clientMappings: section.clientMappings
-            };
-
-        if (jsonImportRouting.targetSide === 'client') {
+        if (jsonImportRouting.targetSide === 'client' && section.domainModelEnabled) {
           return {
             ...section,
-            domainModelEnabled: nextDomainEnabled,
-            ...initializedClientProps,
             clientFormat: targetFormat,
             clientLastSyncedFormat: targetFormat,
             clientInput: jsonImportRouting.rawText,
@@ -1524,8 +1535,6 @@ export default function App() {
 
         return {
           ...section,
-          domainModelEnabled: nextDomainEnabled,
-          ...initializedClientProps,
           format: targetFormat,
           lastSyncedFormat: targetFormat,
           input: jsonImportRouting.rawText,
@@ -1609,34 +1618,41 @@ export default function App() {
   }
 
   function setSections(next: DocSection[] | ((prev: DocSection[]) => DocSection[])): void {
+    if (!activeMethod) return;
     markWorkspaceChanged();
     setMethodsState((prev) => {
-      if (prev.length === 0) {
-        const baseSections = typeof next === 'function' ? next(createInitialSections()) : next;
-        const seedMethod = createMethodDocument(DEFAULT_METHOD_NAME, baseSections);
-        setActiveMethodId(seedMethod.id);
-        return [seedMethod];
-      }
-
-      const targetMethodId = activeMethodId || prev[0].id;
+      const targetMethodId = activeMethod.id;
       const methodIndex = prev.findIndex((method) => method.id === targetMethodId);
       if (methodIndex === -1) return prev;
 
       const currentMethod = prev[methodIndex];
-      const nextSections = typeof next === 'function' ? next(currentMethod.sections) : next;
+      const nextSections = typeof next === 'function'
+        ? next(sectionsForMethodTemplate(currentMethod.sections, currentMethod.templateId)) : next;
       const nextMethods = [...prev];
       nextMethods[methodIndex] = {
         ...currentMethod,
         updatedAt: new Date().toISOString(),
-        sections: nextSections
+        sections: methodTemplateSectionsForStorage(nextSections, currentMethod.templateId)
       };
       return nextMethods;
     });
   }
 
-  function createMethod(): void {
+  function openMethodTemplatePicker(): void {
+    methodTemplateTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setIsAddEntityMenuOpen(false);
+    setMethodTemplatePicker(true);
+  }
+
+  function closeMethodTemplatePicker(): void {
+    const trigger = methodTemplateTrigger.current;
+    setMethodTemplatePicker(false);
+    requestAnimationFrame(() => { if (trigger?.isConnected) trigger.focus(); });
+  }
+
+  function createMethod(templateId: MethodTemplateId): void {
     const name = `Метод ${methods.length + 1}`;
-    const method = createMethodDocument(name, createInitialSections());
+    const method = createTemplatedMethod(templateId, name);
     clearPreviewCaches();
     markWorkspaceChanged();
     setMethodsState((prev) => [...prev, method]);
@@ -1647,7 +1663,7 @@ export default function App() {
     setEditingMethodNameDraft(name);
     setPendingMethodNameFocus(true);
     setTab('editor');
-    setIsAddEntityMenuOpen(false);
+    setMethodTemplatePicker(false);
   }
 
   function createProject(): void {
@@ -2188,10 +2204,10 @@ export default function App() {
       epic: activeMethod?.epic,
       initiators: activeMethod?.initiators,
       responsible: activeMethod?.responsible,
-      externalUrl: activeMethod?.externalUrl,
+      externalUrl: activeMethod && methodTemplateExternalUrl(activeMethod),
       updatedAt: activeMethod?.updatedAt
     };
-    const output = renderWikiDocument(sections, meta);
+    const output = renderWikiDocument(activeMethod?.sections ?? EMPTY_SECTIONS, meta, { templateId: activeTemplateId });
     wikiPreviewCacheRef.current = { sectionsRef: sections, formatVersion: WIKI_EXPORT_CACHE_VERSION, output };
     return output;
   }
@@ -3005,6 +3021,7 @@ export default function App() {
     let usedFallback = false;
     try {
       generatedRules = await buildValidationRulesWithAi({
+        templateId: activeTemplateId,
         schemaInput: normalizedSchemaInput,
         allowedValidationCases: [...VALIDATION_CASE_OPTIONS]
       });
@@ -3178,7 +3195,7 @@ export default function App() {
     const useSchemaPriority = Boolean(normalizedSchema);
 
     try {
-      const shouldWrap = section.sectionType === 'response' && !section.domainModelEnabled && !useSchemaPriority && format === 'json';
+      const shouldWrap = !activeTemplateId && section.sectionType === 'response' && !section.domainModelEnabled && !useSchemaPriority && format === 'json';
       const inputToParse = shouldWrap ? wrapNonDomainResponseJson(input) : input;
       const parsedRows = useSchemaPriority ? parseJsonSchemaToRows(normalizedSchema) : parseToRows(format, inputToParse);
       const curlMeta = isRequestSection(section) && !useSchemaPriority && format === 'curl' ? parseCurlMeta(input) : null;
@@ -3280,7 +3297,7 @@ export default function App() {
     try {
       const fixed = await repairJsonWithAi(draft);
       const normalized = JSON.stringify(JSON.parse(fixed), null, 2);
-      const shouldWrap = section.sectionType === 'response' && !section.domainModelEnabled;
+      const shouldWrap = !activeTemplateId && section.sectionType === 'response' && !section.domainModelEnabled;
       const inputToParse = shouldWrap ? wrapNonDomainResponseJson(normalized) : normalized;
       const parsedRows = parseToRows('json', inputToParse);
       const requestMethod = isRequestSection(section)
@@ -3363,6 +3380,7 @@ export default function App() {
 
     try {
       const suggestions = await fillDescriptionsWithAi({
+        templateId: activeTemplateId,
         sectionType: section.sectionType ?? 'generic',
         rows: targetRows.map((row) => ({
           field: row.field,
@@ -3494,6 +3512,7 @@ export default function App() {
 
     try {
       const suggestions = await generateExamplesWithAi({
+        templateId: activeTemplateId,
         sectionType: section.sectionType ?? 'generic',
         rows: rowsWithoutExample.map((row) => ({
           field: row.field,
@@ -3592,7 +3611,7 @@ export default function App() {
     const format = detectSourceFormat(rawText, isRequestSection(section)) ?? 'json';
 
     try {
-      const shouldWrap = section.sectionType === 'response' && !section.domainModelEnabled && format === 'json';
+      const shouldWrap = !activeTemplateId && section.sectionType === 'response' && !section.domainModelEnabled && format === 'json';
       const inputToParse = shouldWrap ? wrapNonDomainResponseJson(rawText) : rawText;
       const parsedRows = parseToRows(format, inputToParse);
       const curlMeta = isRequestSection(section) && format === 'curl' ? parseCurlMeta(rawText) : null;
@@ -3646,6 +3665,7 @@ export default function App() {
 
     try {
       const suggestions = await suggestMappingsWithAi({
+        templateId: activeTemplateId,
         serverFields: serverRows.map((row) => row.field),
         clientFields: clientRows.map((row) => row.field)
       });
@@ -3692,6 +3712,7 @@ export default function App() {
 
   async function requestAiMaskFieldSet(section: ParsedSection, rows: ParsedRow[]): Promise<Set<string>> {
     const suggestions = await suggestMaskFieldsWithAi({
+      templateId: activeTemplateId,
       sectionType: section.sectionType ?? 'generic',
       rows: rows.map((row) => ({
         field: row.field,
@@ -3970,15 +3991,19 @@ export default function App() {
           allowReplace: true
         });
       } else if (result.kind === 'sections') {
+        if (!activeMethod) throw new Error('Сначала создайте метод и выберите шаблон');
+        const conflict = activeTemplateId && methodTemplateConflict({ sections: result.sections }, activeTemplateId);
+        if (conflict) throw new Error(conflict);
         setSections(result.sections);
         setSelectedId(result.sections[0]?.id ?? selectedId);
         if (result.warnings.length > 0) setToastMessage(result.warnings.map(issue => `${issue.path}: ${issue.message}`).join('\n'), 'warning');
       } else {
+        if (!activeMethod) throw new Error('Сначала создайте метод и выберите шаблон');
         const linkedSectionId = getParsedSectionIdByType(result.sampleType);
         const linkedSection = sections.find(
           (section): section is ParsedSection => section.kind === 'parsed' && section.id === linkedSectionId
         );
-        const domainModelEnabled = Boolean(linkedSection?.domainModelEnabled);
+        const domainModelEnabled = activeTemplate?.clientContract ?? Boolean(linkedSection?.domainModelEnabled);
         setJsonImportRouting({
           fileName,
           rawText: result.rawText,
@@ -4072,7 +4097,12 @@ export default function App() {
 
   function applyWorkspaceImportAsReplace(): void {
     if (!workspaceMethodsImportRouting || workspaceMethodsImportRouting.items.length === 0) return;
-    const loaded = workspaceMethodsImportRouting.items[0].workspace;
+    let loaded: WorkspaceProjectData;
+    try { [loaded] = resolveWorkspaceImportTemplates(workspaceMethodsImportRouting); }
+    catch (error) {
+      setImportError(error instanceof Error ? error.message : 'Ошибка импорта');
+      return;
+    }
     markWorkspaceChanged();
     applyWorkspaceState({ ...loaded, groups: ENABLE_MULTI_METHODS ? loaded.groups : [] });
     setWorkspaceMethodsImportRouting(null);
@@ -4085,7 +4115,7 @@ export default function App() {
 
     let importedCount: number;
     try {
-      importedCount = mergeWorkspaceImportsAsMethods(workspaceMethodsImportRouting.items.map((item) => item.workspace));
+      importedCount = mergeWorkspaceImportsAsMethods(resolveWorkspaceImportTemplates(workspaceMethodsImportRouting));
     } catch (error) {
       setImportError(error instanceof Error ? error.message : 'Ошибка импорта');
       return;
@@ -6989,67 +7019,6 @@ export default function App() {
 
     return (
       <div className="stack">
-        <div className="contract-mode-control">
-          <div className="contract-mode-label">{isRequestSection(section) ? 'Модель запроса' : 'Модель ответа'}</div>
-          <div className="contract-mode-segments" role="group" aria-label={isRequestSection(section) ? 'Модель запроса' : 'Модель ответа'}>
-            <button
-              className={`contract-mode-segment ${!section.domainModelEnabled ? 'active' : ''}`}
-              type="button"
-              aria-pressed={!section.domainModelEnabled}
-              onClick={() =>
-                updateSection(section.id, (current) =>
-                  current.kind === 'parsed' && isDualModelSection(current)
-                    ? { ...current, domainModelEnabled: false }
-                    : current
-                )
-              }
-            >
-              <svg className="contract-mode-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <circle cx="4.5" cy="12" r="2.2" />
-                <circle cx="19.5" cy="12" r="2.2" />
-                <path d="M7 12h10M14 9l3 3-3 3" />
-              </svg>
-              <span>Простой метод</span>
-            </button>
-            <button
-              className={`contract-mode-segment ${section.domainModelEnabled ? 'active' : ''}`}
-              type="button"
-              aria-pressed={Boolean(section.domainModelEnabled)}
-              onClick={() =>
-                updateSection(section.id, (current) => {
-                  if (current.kind !== 'parsed' || !isDualModelSection(current)) return current;
-                  return {
-                    ...current,
-                    domainModelEnabled: true,
-                    clientFormat: current.clientFormat ?? 'json',
-                    clientInput: current.clientInput ?? '',
-                    clientRows: current.clientRows ?? [],
-                    clientError: current.clientError ?? '',
-                    clientMappings: current.clientMappings ?? {}
-                  };
-                })
-              }
-            >
-              <svg className="contract-mode-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <circle cx="4.5" cy="12" r="2.2" />
-                <circle cx="19.5" cy="5" r="2.2" />
-                <circle cx="19.5" cy="12" r="2.2" />
-                <circle cx="19.5" cy="19" r="2.2" />
-                <path d="M7 12h4.5M11.5 5v14M11.5 5h5.8M11.5 12h5.8M11.5 19h5.8" />
-              </svg>
-              <span>Оркестрация</span>
-            </button>
-          </div>
-          <div className="contract-mode-hint">
-            <span className="contract-mode-hint-dot" aria-hidden="true" />
-            <span>
-              {section.domainModelEnabled
-                ? 'Метод использует отдельные Client и Server модели с маппингом полей.'
-                : 'Метод состоит из единого контракта запроса или ответа.'}
-            </span>
-          </div>
-        </div>
-
         {!section.domainModelEnabled && (
           <ContractSideAccordion
             side="contract"
@@ -7470,8 +7439,8 @@ export default function App() {
           methods={methods}
           groups={methodGroups}
           getMethodHttpMethod={getMethodHttpMethod}
-          onCreateMethod={createMethod}
-          onImportOpenApi={handleOpenProjectImport}
+          onCreateMethod={openMethodTemplatePicker}
+          onImportJson={handleOpenProjectImport}
           onCreateService={createProject}
           onOpenMethod={handleSwitchMethod}
         />
@@ -7984,6 +7953,35 @@ export default function App() {
         </div>
       )}
 
+      {methodTemplatePicker && (
+        <div className="import-routing-backdrop" role="dialog" aria-modal="true" aria-labelledby="method-template-title"
+          onKeyDown={event => {
+            if (event.key === 'Escape') { closeMethodTemplatePicker(); return; }
+            if (event.key !== 'Tab') return;
+            const buttons = event.currentTarget.querySelectorAll('button');
+            const first = buttons[0];
+            const last = buttons[buttons.length - 1];
+            if (event.shiftKey && event.target === first || !event.shiftKey && event.target === last) {
+              event.preventDefault();
+              (event.shiftKey ? last : first).focus();
+            }
+          }}>
+          <div className="import-routing-card">
+            <h2 id="method-template-title">Шаблон нового метода</h2>
+            <div className="method-template-options">
+              {methodTemplateIds.map((id, index) => <WBButton key={id} className="method-template-option" autoFocus={index === 0}
+                style={{ alignItems: 'flex-start', whiteSpace: 'normal' }}
+                onClick={() => createMethod(id)}>
+                <strong>{methodTemplates[id].label}</strong>
+                <span>{methodTemplates[id].description}</span>
+              </WBButton>)}
+            </div>
+            <div className="method-template-actions">
+              <WBButton variant="ghost" onClick={closeMethodTemplatePicker}>Отмена</WBButton>
+            </div>
+          </div>
+        </div>
+      )}
       {workspaceMethodsImportRouting && (
         <div className="import-routing-backdrop" role="dialog" aria-modal="true" aria-label="Импорт методов из JSON">
           <div className="import-routing-card">
@@ -8016,13 +8014,29 @@ export default function App() {
             <div className="import-preview-block">
               <div className="label">Будут импортированы методы</div>
               <ul className="import-preview-list">
-                {workspaceMethodsImportRouting.items.flatMap((item) =>
-                  item.workspace.methods.map((method) => (
-                    <li key={`${item.sourceName}:${method.id}`} className="import-preview-item">
+                {workspaceMethodsImportRouting.items.flatMap((item, index) =>
+                  item.workspace.methods.map(method => {
+                    const key = `${index}:${method.id}`;
+                    const templateId = importedTemplateId(method, index, workspaceMethodsImportRouting);
+                    const conflict = methodTemplateConflict(method, templateId);
+                    return <li key={key} className="import-preview-item">
                       <strong>{method.name}</strong>
                       <span className="import-routing-file">{item.sourceName}</span>
-                    </li>
-                  ))
+                      {method.templateId ? <span>{methodTemplates[method.templateId].label}</span> : <label className="field">
+                        <span>Шаблон метода</span>
+                        <select value={templateId} aria-label={`Шаблон метода «${method.name}»`} onChange={event => {
+                          const value = event.target.value;
+                          if (!isMethodTemplateId(value)) return;
+                          setWorkspaceMethodsImportRouting(current => current
+                            ? { ...current, templateChoices: { ...current.templateChoices, [key]: value } } : current);
+                          setImportError('');
+                        }}>
+                          {methodTemplateIds.map(id => <option key={id} value={id}>{methodTemplates[id].label}</option>)}
+                        </select>
+                      </label>}
+                      {conflict && <p role="alert">{conflict}</p>}
+                    </li>;
+                  })
                 )}
               </ul>
             </div>
@@ -8044,9 +8058,9 @@ export default function App() {
             <div className="import-routing-actions">
               <button type="button" className="ghost" onClick={cancelWorkspaceMethodsImportRouting}>Отмена</button>
               {workspaceMethodsImportRouting.allowReplace && (
-                <button type="button" className="ghost" onClick={applyWorkspaceImportAsReplace}>Заменить проект</button>
+                <button type="button" className="ghost" disabled={workspaceImportHasTemplateConflict} onClick={applyWorkspaceImportAsReplace}>Заменить проект</button>
               )}
-              <button type="button" onClick={applyWorkspaceImportAsMethodsMerge}>
+              <button type="button" disabled={workspaceImportHasTemplateConflict} onClick={applyWorkspaceImportAsMethodsMerge}>
                 {countImportedMethods(workspaceMethodsImportRouting.items) === 1 ? 'Импортировать метод' : 'Импортировать методы'}
               </button>
             </div>
@@ -8070,7 +8084,7 @@ export default function App() {
                   const linkedSection = sections.find(
                     (section): section is ParsedSection => section.kind === 'parsed' && section.id === linkedId
                   );
-                  const domainModelEnabled = Boolean(linkedSection?.domainModelEnabled);
+                  const domainModelEnabled = activeTemplate?.clientContract ?? Boolean(linkedSection?.domainModelEnabled);
                   setJsonImportRouting((current) =>
                     current
                       ? {
@@ -8086,25 +8100,6 @@ export default function App() {
                 <option value="request">Пример запроса</option>
                 <option value="response">Пример ответа</option>
               </select>
-            </label>
-
-            <label className="switch import-routing-switch">
-              <input
-                type="checkbox"
-                checked={jsonImportRouting.domainModelEnabled}
-                onChange={(event) =>
-                  setJsonImportRouting((current) =>
-                    current
-                      ? {
-                          ...current,
-                          domainModelEnabled: event.target.checked,
-                          targetSide: event.target.checked ? current.targetSide : 'server'
-                        }
-                      : current
-                  )
-                }
-              />
-              <span>Доменная модель</span>
             </label>
 
             {jsonImportRouting.domainModelEnabled && (
@@ -8250,7 +8245,7 @@ export default function App() {
         getMethodHttpMethod={getMethodHttpMethod}
         onClose={handleCloseSearchPalette}
         onSelectMethod={handleSwitchMethod}
-        onCreateMethod={createMethod}
+        onCreateMethod={openMethodTemplatePicker}
       />
 
       <Toast message={toastMessage} kind={toast.kind} />
@@ -8286,7 +8281,7 @@ export default function App() {
         onMethodNameDraftChange={setEditingMethodNameDraft}
         onFinishMethodRename={finishMethodRename}
         onCancelMethodRename={cancelMethodRename}
-        onCreateMethod={createMethod}
+        onCreateMethod={openMethodTemplatePicker}
         onCreateProject={createProject}
         onOpenSearch={handleOpenSearchPalette}
         onDeleteActiveMethod={deleteActiveMethod}
@@ -8298,7 +8293,8 @@ export default function App() {
           disabled={confluenceBusy}
           topbarRef={topbarRef}
           importInputRef={importInputRef}
-          methodName={activeMethod?.name ?? DEFAULT_METHOD_NAME}
+          methodName={activeMethod?.name}
+          methodTemplateLabel={activeMethod ? activeTemplate?.label ?? 'Без шаблона' : undefined}
           methodPath={getMethodPath(activeMethod)}
           methodHttpMethod={getMethodHttpMethod(activeMethod)}
           authUserLogin={authUser?.login ?? null}
@@ -8531,6 +8527,7 @@ export default function App() {
 
                         {section.kind === 'errors' && (
                           <ErrorsSectionEditor
+                            showClient={activeTemplate?.clientContract}
                             section={section}
                             sections={sections}
                             validationCaseOptions={getValidationCaseOptionsForSection(section)}
@@ -8697,9 +8694,9 @@ export default function App() {
                 );
               })()}
 
-              {tab === 'confluence' && workspaceScope === 'methods' && activeMethod && (
+              {tab === 'confluence' && workspaceScope === 'methods' && (
                 <ConfluenceScreen
-                  key={activeMethod.id}
+                  key={activeMethod?.id ?? 'confluence-browse'}
                   method={activeMethod}
                   onPublished={(methodId, binding) => {
                     if (confluenceWorkspaceRef.current === confluenceWorkspaceGeneration) {
@@ -8735,7 +8732,7 @@ export default function App() {
               })()}
               </div>
             </>
-          ) : (
+          ) : !activeMethod && tab === 'editor' ? renderWorkbenchEditor() : (
             <section className="panel empty-state-panel" aria-label="Метод не выбран">
               <div className="panel-title">Метод не выбран</div>
               <div className="muted">Выберите метод слева или создайте новый метод.</div>

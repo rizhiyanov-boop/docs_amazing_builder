@@ -568,7 +568,8 @@ export function renderProjectWikiDocument(params: {
         {
           includeToc: false,
           includeTemplateIntro: false,
-          headingOffset: 2
+          headingOffset: 2,
+          templateId: method.templateId
         }
       );
       if (methodWiki.trim()) {

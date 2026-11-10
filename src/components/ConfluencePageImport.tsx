@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
-import { buildConfluenceImport, confluenceImportExtras, prepareConfluenceImport, type ConfluenceImportPreview } from '../confluenceImport';
+import { buildConfluenceImport, confluenceImportExtras, confluenceImportTemplateConflict, prepareConfluenceImport, type ConfluenceImportPreview } from '../confluenceImport';
+import { isMethodTemplateId, methodTemplateIds, methodTemplates, type MethodTemplateId } from '../methodTemplates';
 import type { ConfluenceImportSource, ConfluencePage } from '../confluenceTypes';
 import type { MethodDocument, ParsedSection } from '../types';
 import { WBButton } from './primitives/WorkbenchPrimitives';
@@ -22,6 +23,7 @@ type Props = {
 export function ConfluencePageImport({ page, baseUrl, onOpenExisting, onImport }: Props) {
   const [preview, setPreview] = useState<ConfluenceImportPreview>();
   const [externalCall, setExternalCall] = useState('');
+  const [templateChoice, setTemplateChoice] = useState<MethodTemplateId>();
   const [examples, setExamples] = useState<Partial<Record<ExampleGroup, string>>>({});
   const [error, setError] = useState('');
   const committed = useRef(false);
@@ -34,6 +36,7 @@ export function ConfluencePageImport({ page, baseUrl, onOpenExisting, onImport }
   function cancel() {
     setPreview(undefined);
     setExternalCall('');
+    setTemplateChoice(undefined);
     setExamples({});
     setError('');
   }
@@ -51,7 +54,9 @@ export function ConfluencePageImport({ page, baseUrl, onOpenExisting, onImport }
   const groups = (Object.keys(exampleLabels) as ExampleGroup[]).map(group => ({
     group, items: preview.examples.filter(example => example.group === group)
   }));
-  const needsChoice = preview.externalCalls.length > 1 && !externalCall
+  const templateId = templateChoice ?? preview.recommendedTemplateId;
+  const templateConflict = confluenceImportTemplateConflict(preview, templateId);
+  const needsChoice = Boolean(templateConflict) || preview.externalCalls.length > 1 && !externalCall
     || groups.some(({ group, items }) => items.length > 1 && !examples[group]);
   const request = preview.method.sections.find((section): section is ParsedSection => section.kind === 'parsed' && section.id === 'request');
   const additionalByTitle = confluenceImportExtras(preview, { examples });
@@ -60,6 +65,16 @@ export function ConfluencePageImport({ page, baseUrl, onOpenExisting, onImport }
     <h3>Предпросмотр импорта</h3>
     <p className="cf-import-title">{request?.requestMethod} {request?.requestUrl}</p>
     <p className="cf-muted">После импорта метод будет связан с этой страницей для обновления.</p>
+    <label className="cf-import-choice">
+      <span>Шаблон метода</span>
+      <select value={templateId} onChange={event => {
+        if (isMethodTemplateId(event.target.value)) setTemplateChoice(event.target.value);
+        setError('');
+      }}>
+        {methodTemplateIds.map(id => <option key={id} value={id}>{methodTemplates[id].label}</option>)}
+      </select>
+    </label>
+    {templateConflict && <p role="alert" className="cf-import-warnings">{templateConflict}</p>}
     <ul aria-label="Секции метода">
       {preview.method.sections.map(section => <li key={section.id}>
         {section.title}
@@ -110,7 +125,7 @@ export function ConfluencePageImport({ page, baseUrl, onOpenExisting, onImport }
       <WBButton size="sm" variant="primary" disabled={needsChoice} onClick={() => {
         if (committed.current) return;
         committed.current = true;
-        try { onImport(buildConfluenceImport(preview, { externalCall, examples })); }
+        try { onImport(buildConfluenceImport(preview, { externalCall, examples, templateId })); }
         catch (failure) {
           committed.current = false;
           setError(failure instanceof Error ? failure.message : 'Не удалось добавить метод');

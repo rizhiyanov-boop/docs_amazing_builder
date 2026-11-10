@@ -27,7 +27,7 @@ function getStoredProject(): Record<string, unknown> | null {
   return JSON.parse(raw) as Record<string, unknown>;
 }
 
-function seedSingleMethodWorkspace(section: Record<string, unknown>): void {
+function seedSingleMethodWorkspace(section: Record<string, unknown>, templateId?: 'simple' | 'orchestration'): void {
   window.localStorage.setItem(
     STORAGE_KEY,
     JSON.stringify({
@@ -39,6 +39,7 @@ function seedSingleMethodWorkspace(section: Record<string, unknown>): void {
         {
           id: 'm_review',
           name: 'Review Method',
+          templateId,
           updatedAt: '2026-05-07T10:00:00.000Z',
           sections: [section]
         }
@@ -46,6 +47,12 @@ function seedSingleMethodWorkspace(section: Record<string, unknown>): void {
       groups: []
     })
   );
+}
+
+async function createMethodWithTemplate(user: ReturnType<typeof userEvent.setup>, label = 'Оркестрация'): Promise<void> {
+  await user.click(within(screen.getByRole('region', { name: 'Методы' })).getByRole('button', { name: 'Новый метод' }));
+  const picker = screen.getByRole('dialog', { name: 'Шаблон нового метода' });
+  await user.click(within(picker).getByRole('button', { name: new RegExp(label) }));
 }
 
 function seedTwoMethodWorkspace(): void {
@@ -170,13 +177,19 @@ describe('App integration', () => {
     cleanup();
   });
 
-  it('renders the Editor shell without legacy mode controls and autosaves initial workspace', async () => {
+  it('requires a template before creating the first method and persists a simple contract', async () => {
+    const user = userEvent.setup();
     renderApp();
 
     expect(getMethodNavigation()).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Workbench' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Editor' })).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: /Request/ })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /^Request$/ })).not.toBeInTheDocument();
+    await createMethodWithTemplate(user, 'Простой метод');
+    expect(screen.getByRole('heading', { name: /^Request$/ })).toBeInTheDocument();
+    expect(screen.queryByText('Client Request')).not.toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Client HTTP Status' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Модель запроса' })).not.toBeInTheDocument();
     expect(screen.getAllByRole('textbox', { name: 'Содержимое текстовой секции' }).length).toBeGreaterThan(1);
     expect(screen.queryByRole('toolbar', { name: 'Форматирование текста' })).not.toBeInTheDocument();
     expect(findTopbarButton(/^Экспорт$/)).toBeInTheDocument();
@@ -186,6 +199,8 @@ describe('App integration', () => {
       expect(raw).toBeTruthy();
       expect(raw).toContain('"version":3');
       expect(raw).toContain('"methods"');
+      expect(raw).toContain('"templateId":"simple"');
+      expect(raw).not.toContain('domainModelEnabled');
     });
   });
 
@@ -374,8 +389,7 @@ describe('App integration', () => {
     expect(clientZone).not.toHaveAttribute('open');
   });
 
-  it('renders one neutral contract and preserves client data while switching modes', async () => {
-    const user = userEvent.setup();
+  it('opens a saved orchestration method with Client data and no template switch', async () => {
     seedSingleMethodWorkspace({
       id: 's_response',
       title: 'Response',
@@ -412,38 +426,11 @@ describe('App integration', () => {
       }],
       clientError: '',
       clientMappings: { status: 'result' }
-    });
+    }, 'orchestration');
 
     renderApp();
-    const apiModeButton = screen.getByRole('button', { name: 'Простой метод' });
-    const domainModeButton = screen.getByRole('button', { name: 'Оркестрация' });
-    expect(domainModeButton).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByText('Метод использует отдельные Client и Server модели с маппингом полей.')).toBeInTheDocument();
-    await user.click(apiModeButton);
-    expect(apiModeButton).toHaveAttribute('aria-pressed', 'true');
-    expect(domainModeButton).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.getByText('Метод состоит из единого контракта запроса или ответа.')).toBeInTheDocument();
-    const singleContract = document.querySelector('.contract-side-contract');
-    expect(singleContract).not.toBeNull();
-    if (!singleContract) throw new Error('Single contract not found');
-    expect(singleContract.querySelector('.contract-side-badge')).not.toBeInTheDocument();
-    expect(apiModeButton.querySelector('.contract-mode-icon')).not.toBeNull();
-    expect(domainModeButton.querySelectorAll('.contract-mode-icon circle')).toHaveLength(4);
-    const singleContractTitle = singleContract.querySelector('.contract-side-title');
-    expect(singleContractTitle).toHaveTextContent('Response');
-    if (!singleContractTitle) throw new Error('Single contract title not found');
-    expect(screen.queryByText('Server Response')).not.toBeInTheDocument();
-    expect(screen.queryByText('Client Response')).not.toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Маппинг Client ↔ Server' })).not.toBeInTheDocument();
-
-    expect(singleContract).not.toHaveAttribute('open');
-    await user.click(singleContractTitle);
-    expect(screen.getByRole('heading', { name: 'Параметры ответа' })).toBeInTheDocument();
-    expect(within(singleContract as HTMLElement).getByRole('columnheader', { name: 'Response' })).toBeInTheDocument();
-    expect(within(singleContract as HTMLElement).getByRole('button', { name: 'Добавить параметр' })).toBeInTheDocument();
-
-    await user.click(domainModeButton);
-    expect(domainModeButton).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('group', { name: 'Модель ответа' })).not.toBeInTheDocument();
+    expect(screen.getByText('Оркестрация')).toBeInTheDocument();
     expect(screen.getByText('Server Response')).toBeInTheDocument();
     expect(screen.getByText('Client Response')).toBeInTheDocument();
     const clientContract = document.querySelector('.contract-side-client');
@@ -764,6 +751,7 @@ describe('App integration', () => {
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
 
     renderApp();
+    await createMethodWithTemplate(user);
     expect(screen.queryByText(/Published HTML/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: /^Wiki$/i })).not.toBeInTheDocument();
 
@@ -940,6 +928,7 @@ describe('App integration', () => {
   it('shows parse validation error for empty request source', async () => {
     const user = userEvent.setup();
     renderApp();
+    await createMethodWithTemplate(user);
 
     await user.click(within(screen.getByRole('navigation', { name: 'Разделы метода' })).getByRole('button', { name: 'Request', exact: true }));
 

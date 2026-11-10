@@ -3,6 +3,7 @@ import { createParsedSection } from './sectionFactories';
 import { DEFAULT_REQUEST_HEADERS, getParsedRowKey } from './requestHeaders';
 import { sanitizeSections } from './sectionTitles';
 import { validateImportedSections, validateProjectImportPayload } from './projectImportValidation';
+import { getMethodTemplate, isMethodTemplateId, methodTemplateConflict, methodTemplateSectionsForStorage, type MethodTemplateId } from './methodTemplates';
 import { normalizeConfluenceImportSource } from './confluenceBinding';
 import type { ConfluencePage } from './confluenceTypes';
 import type { DocSection, ErrorRow, ErrorsSection, MethodDocument, ParsedRow, ParsedSection, ParseFormat, RequestMethod } from './types';
@@ -43,9 +44,10 @@ type Supplemental = {
   title: string; text: string; order: number;
   publication?: 'history' | 'task' | 'info' | 'raw' | 'error-table' | { notes: string[] };
 };
-type ImportChoices = { examples?: Partial<Record<ExampleGroup, string>>; externalCall?: string };
+type ImportChoices = { examples?: Partial<Record<ExampleGroup, string>>; externalCall?: string; templateId?: MethodTemplateId };
 type ImportData = {
   method: MethodDocument;
+  recommendedTemplateId: MethodTemplateId;
   examples: Example[];
   externalCalls: ExternalCall[];
   supplemental: Supplemental[];
@@ -336,8 +338,9 @@ export function prepareConfluenceImport(page: ConfluencePage, baseUrl: string, p
     });
   }).join('\n');
   const externalCalls = externalCallsFrom(callsText);
-  if (callsText) extra(metadataTables.get('info')![0], callsText, 'Внешние вызовы');
-  if (callsText && !externalCalls.length) warnings.add('Внешний адрес сохранён как текст. Его не удалось определить однозначно');
+  let hasClientData = Boolean(callsText.trim() && callsText.trim() !== '-');
+  if (hasClientData) extra(metadataTables.get('info')![0], callsText, 'Внешние вызовы');
+  if (hasClientData && !externalCalls.length) warnings.add('Внешний адрес сохранён как текст. Его не удалось определить однозначно');
 
   for (const block of blocks) {
     const table = tables.get(block);
@@ -349,6 +352,17 @@ export function prepareConfluenceImport(page: ConfluencePage, baseUrl: string, p
       const first = table.physical[0] ?? [];
       const headers = first.map(storageText);
       const columns = tableColumns(first);
+      if (kind === 'request' || kind === 'response' || kind === 'errors') {
+        hasClientData ||= headers.map(column).some((column, index) =>
+          (column === 'clientRequest' || column === 'clientResponse' || column === 'clientStatus')
+          && table.grid.slice(1).some(row => {
+            const cell = row[index]?.element;
+            const value = cell ? storageText(cell) : '';
+            return Boolean(value && value !== '-');
+          }));
+        hasClientData ||= table.physical.length > 1 && block.path.some(item =>
+          /^(?:внешние headers|client headers|внешние заголовки)$/u.test(normalized(item.title)));
+      }
       const known = columns.filter(item => item !== undefined);
       const unambiguous = table.usable && first.every(cell => !cell.hasAttribute('rowspan') && !cell.hasAttribute('colspan'))
         && new Set(known).size === known.length;
@@ -412,8 +426,6 @@ export function prepareConfluenceImport(page: ConfluencePage, baseUrl: string, p
   }
   const existingHeaderNames = new Set(request.rows.filter(row => row.source === 'header').map(row => row.field.toLowerCase()));
   request.rows.push(...DEFAULT_REQUEST_HEADERS.filter(row => !existingHeaderNames.has(row.field.toLowerCase())).map(row => ({ ...row, enabled: false })));
-  request.domainModelEnabled = Boolean(request.clientRows?.length || externalCalls.length || examples.some(item => item.group === 'client-request'));
-  response.domainModelEnabled = Boolean(response.clientRows?.length || examples.some(item => item.group === 'client-response'));
   const proseSection = (key: SectionRole, id: string, title: string): DocSection[] => prose.has(key)
     ? [{ id, kind: 'text', title, enabled: true, value: prose.get(key)!.join('\n\n') }] : [];
   const sections: DocSection[] = [
@@ -427,7 +439,9 @@ export function prepareConfluenceImport(page: ConfluencePage, baseUrl: string, p
   const jiraRefs = [...new Set(historyTable.grid.slice(1).map(cells => valueFor(historyColumns, valuesAt(cells), 'jira'))
     .filter(value => /^[A-Z][A-Z0-9_]*-\d+$|^https:\/\/[^\s]+\/browse\/[A-Z][A-Z0-9_]*-\d+$/u.test(value)))];
   const author = historyTable.grid.length === 2 ? valueFor(historyColumns, valuesAt(historyTable.grid[1]), 'author') : '';
-  return { ok: true, method: {
+  const recommendedTemplateId = hasClientData || externalCalls.length || examples.some(item => item.group.startsWith('client-'))
+    || methodTemplateConflict({ sections }, 'simple') ? 'orchestration' : 'simple';
+  return { ok: true, recommendedTemplateId, method: {
     id: '', name: page.title.trim() || endpoint.method + ' ' + endpoint.path, updatedAt: '', status: 'draft', confluenceImport: source,
     epic: taskValue('epic'), initiators: taskValue('инициаторы'), jiraTicket: jiraRefs.length === 1 ? jiraRefs[0] : undefined,
     responsible: author || undefined, sections
@@ -450,7 +464,17 @@ export function confluenceImportExtras(preview: ImportData, choices: ImportChoic
   return grouped;
 }
 
+export function confluenceImportTemplateConflict(preview: ImportData, templateId: MethodTemplateId): string | undefined {
+  if (getMethodTemplate(templateId)?.clientContract === false && preview.recommendedTemplateId === 'orchestration') {
+    return 'В источнике есть данные Client. Для них нужен шаблон с контрактом Client';
+  }
+}
+
 export function buildConfluenceImport(preview: ImportData, choices: ImportChoices): MethodDocument {
+  const templateId = choices.templateId ?? preview.recommendedTemplateId;
+  if (!isMethodTemplateId(templateId)) throw new Error('Выберите шаблон метода');
+  const conflict = confluenceImportTemplateConflict(preview, templateId);
+  if (conflict) throw new Error(conflict);
   const sections = preview.method.sections.map(section => section.kind === 'parsed' ? { ...section } : section);
   const request = sections.find((section): section is ParsedSection => section.kind === 'parsed' && section.id === 'request')!;
   const response = sections.find((section): section is ParsedSection => section.kind === 'parsed' && section.id === 'response');
@@ -476,7 +500,12 @@ export function buildConfluenceImport(preview: ImportData, choices: ImportChoice
   for (const [title, texts] of confluenceImportExtras(preview, choices)) sections.push({
     id: 'confluence-extra-' + sections.length, title, enabled: true, kind: 'text', value: texts.join('\n\n')
   });
-  const result = { ...preview.method, externalUrl: primaryCall?.url, sections };
+  const result = {
+    ...preview.method, templateId, externalUrl: primaryCall?.url,
+    sections: methodTemplateSectionsForStorage(sections, templateId)
+  };
+  const templateIssue = methodTemplateConflict(result, templateId);
+  if (templateIssue) throw new Error(templateIssue);
   const problems = [...validateProjectImportPayload(result, 'method'), ...validateImportedSections(sections)];
   if (problems.length) throw new Error(problems.map(problem => problem.message).join(' · '));
   return result;

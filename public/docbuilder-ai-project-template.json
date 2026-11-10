@@ -95,8 +95,8 @@
     ],
     "mapping": [
       "Физические роли Server/Client установить по источникам. Названия вкладок сами по себе не определяют направление вызова.",
-      "domainModelEnabled false: rows/input описывают единственную модель; clientRows/clientInput пустые, clientMappings пустой объект, externalRequestUrl пустой, externalAuthType none.",
-      "domainModelEnabled true: rows/input/requestUrl/requestMethod/auth* относятся к Server; clientRows/clientInput/externalRequestUrl/externalRequestMethod/externalAuth* — к Client. Заполнить обе стороны отдельно.",
+      "Выбери один templateId на весь метод. Значение simple означает один публичный контракт. Значение orchestration означает отдельные контракты Server и Client с маппингом. Выбор подтверждается материалами задачи.",
+      "Для simple заполняй rows и input публичного контракта. Оставь Client-поля и внешний endpoint пустыми, externalAuthType укажи none. Для orchestration заполняй обе стороны отдельно. Поле domainModelEnabled в секциях не добавляй.",
       "clientMappings всегда хранит Server sourceField → Client sourceField одинаково на request и response. Маппинг не преобразует source автоматически.",
       "Существующие поля и пути сохранять. Ключи маппинга — sourceField, а не id строки; каждый ключ и значение должны существовать на соответствующей стороне. Header/url Server в маппинг не включать.",
       "Объяснять подтверждённые преобразования в описании/validations поля или отдельной текстовой секции, не вводя неподдерживаемые ключи JSON.",
@@ -841,6 +841,9 @@
           "externalUrl": {
             "type": "string"
           },
+          "templateId": {
+            "$ref": "#/definitions/nonBlank"
+          },
           "status": {
             "enum": [
               "draft",
@@ -1043,7 +1046,6 @@
           "schemaInput",
           "rows",
           "error",
-          "domainModelEnabled",
           "clientFormat",
           "clientLastSyncedFormat",
           "clientInput",
@@ -1985,6 +1987,7 @@
         "initiators": "",
         "responsible": "",
         "externalUrl": "",
+        "templateId": "simple",
         "status": "draft",
         "sections": [
           {
@@ -2111,7 +2114,6 @@
               }
             ],
             "error": "",
-            "domainModelEnabled": false,
             "clientFormat": "json",
             "clientLastSyncedFormat": "json",
             "clientInput": "",
@@ -2265,7 +2267,6 @@
               }
             ],
             "error": "",
-            "domainModelEnabled": false,
             "clientFormat": "json",
             "clientLastSyncedFormat": "json",
             "clientInput": "",

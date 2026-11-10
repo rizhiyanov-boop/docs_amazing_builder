@@ -19,10 +19,11 @@ import type {
   ConfluencePageSummary, ConfluencePublishRequest, ConfluenceSpace, ConfluenceStatus
 } from '../confluenceTypes';
 import type { MethodDocument } from '../types';
+import { methodTemplateConflict } from '../methodTemplates';
 import './ConfluenceScreen.css';
 
 export type ConfluenceScreenProps = {
-  method: MethodDocument;
+  method?: MethodDocument;
   onPublished: (methodId: string, binding: ConfluenceBinding) => void;
   onJiraLinked?: (methodId: string, issueUrl: string) => void;
   onImportMethod?: (method: MethodDocument) => void;
@@ -32,6 +33,7 @@ export type ConfluenceScreenProps = {
   client?: ConfluenceClient;
 };
 type Tab = 'publish' | 'browse' | 'jira';
+const browseOnlyMethod: MethodDocument = { id: '', name: '', updatedAt: '', sections: [] };
 type TreeLevel = ConfluenceCollection<ConfluencePageSummary> & { loading: boolean; error?: string };
 type Prepared = {
   document: ConfluenceDocument; storage: string; methodId: string; mode: 'create' | 'update';
@@ -187,7 +189,8 @@ function PageTree({ spaceKey, baseUrl, client, selectedId, revealPage, onSelect 
   return <div ref={treeElement} className="cf-tree" aria-label="Дерево доступных страниц Confluence">{renderLevel()}</div>;
 }
 
-export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMethod, onOpenImported, onBack, onBusyChange, client = confluenceClient }: ConfluenceScreenProps): ReactNode {
+export function ConfluenceScreen({ method: selectedMethod, onPublished, onJiraLinked, onImportMethod, onOpenImported, onBack, onBusyChange, client = confluenceClient }: ConfluenceScreenProps): ReactNode {
+  const method = selectedMethod ?? browseOnlyMethod;
   const binding = method.confluence;
   const importedTarget = binding ? undefined : method.confluenceImport;
   const target = binding ?? importedTarget;
@@ -196,7 +199,7 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMe
   const targetBaseUrl = target?.baseUrl;
   const bindingSpaceKey = binding?.spaceKey;
   const document = useMemo(() => renderConfluenceDocument(method), [method]);
-  const [tab, setTab] = useState<Tab>('publish');
+  const [tab, setTab] = useState<Tab>(selectedMethod ? 'publish' : 'browse');
   const [jiraVisited, setJiraVisited] = useState(false);
   const [status, setStatus] = useState<ConfluenceStatus | null>(null);
   const [connectionBusy, setConnectionBusy] = useState(true);
@@ -390,6 +393,8 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMe
     setParent(undefined); setRevealTarget(undefined); setError(''); setTab('publish');
   }
   async function preparePublication() {
+    const templateIssue = method.templateId && methodTemplateConflict(method, method.templateId);
+    if (templateIssue) { setError(templateIssue); return; }
     if (!connected || busy || unknown || mode === 'create' && (!spaceKey || !title.trim()) || mode === 'update' && !updateTitle?.trim()) return;
     if (mode === 'update' && (!target || !targetMatches)) {
       reportError(new ConfluenceClientError('INVALID_TARGET', 'Страница связана с другим подключением. Подключите её Confluence или опубликуйте документ как новую страницу.'));
@@ -630,9 +635,9 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMe
       </div>
     </header>
     <nav className="cf-tabs" aria-label="Действия Confluence">
-      <WBButton aria-pressed={tab === 'publish'} disabled={preparing || publishing || jiraBusy || Boolean(unknown)} onClick={() => { setTab('publish'); setTreeRevision(old => old + 1); }}>Публикация</WBButton>
+      {selectedMethod && <WBButton aria-pressed={tab === 'publish'} disabled={preparing || publishing || jiraBusy || Boolean(unknown)} onClick={() => { setTab('publish'); setTreeRevision(old => old + 1); }}>Публикация</WBButton>}
       <WBButton aria-pressed={tab === 'browse'} disabled={busy || Boolean(unknown)} onClick={() => { setTab('browse'); setTreeRevision(old => old + 1); }}>Страницы</WBButton>
-      <WBButton aria-pressed={tab === 'jira'} disabled={busy || Boolean(unknown)} onClick={() => { setJiraVisited(true); setTab('jira'); }}>Jira</WBButton>
+      {selectedMethod && <WBButton aria-pressed={tab === 'jira'} disabled={busy || Boolean(unknown)} onClick={() => { setJiraVisited(true); setTab('jira'); }}>Jira</WBButton>}
     </nav>
     {jiraVisited && <div hidden={tab !== 'jira'}><JiraTaskWorkflow key={method.id} active={tab === 'jira'} methodId={method.id} methodName={method.name} methodContext={jiraMethodContext(method)} jiraTicket={method.jiraTicket} confluenceUrl={binding ? confluencePageUrl(binding.pageId, binding.baseUrl) : undefined} onBusyChange={setJiraBusy} onLinked={onJiraLinked} /></div>}
     {error && <p className="cf-notice cf-error" role="alert">{error}</p>}

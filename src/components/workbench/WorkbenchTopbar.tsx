@@ -12,7 +12,8 @@ type WorkbenchTopbarProps = {
   disabled?: boolean;
   topbarRef: RefObject<HTMLElement | null>;
   importInputRef: RefObject<HTMLInputElement | null>;
-  methodName: string;
+  methodName?: string;
+  methodTemplateLabel?: string;
   methodPath: string;
   methodHttpMethod: RequestMethod;
   authUserLogin: string | null;
@@ -61,7 +62,7 @@ function IconButton({ label, icon, onClick, disabled, expanded, controls }: {
 }
 
 export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
-  disabled, topbarRef, importInputRef, methodName, methodPath, methodHttpMethod, authUserLogin, isLogoutBusy,
+  disabled, topbarRef, importInputRef, methodName, methodTemplateLabel, methodPath, methodHttpMethod, authUserLogin, isLogoutBusy,
   canUndo, canRedo, autosaveState, autosaveAt, onOpenProjectImport, onImportProjectJson, onExportHtml,
   onExportWiki, onOpenConfluence, confluenceBound, onExportFullProjectHtml, onExportFullProjectWiki,
   onExportJson, onToggleSidebar, onRenameMethod, onDeleteMethod, canDeleteMethod, onUndo, onRedo,
@@ -145,11 +146,12 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
     <header ref={topbarRef} className="wb-topbar" inert={disabled || undefined}>
       <button type="button" className="wb-mobile-menu-button" aria-label={isSidebarHidden ? 'Открыть навигацию' : 'Скрыть навигацию'} title={isSidebarHidden ? 'Открыть навигацию' : 'Скрыть навигацию'} aria-expanded={!isSidebarHidden} onClick={onToggleSidebar}><WorkbenchIcon name="menu" /></button>
       <div className="wb-topbar-context" aria-label="Текущий метод">
-        <strong className="wb-topbar-method-name" title={methodName}>{methodName}</strong>
-        <div className="wb-topbar-endpoint" title={`${methodHttpMethod} ${methodPath || '/'}`}>
+        <strong className="wb-topbar-method-name" title={methodName}>{methodName ?? 'Метод не выбран'}</strong>
+        {methodName && <div className="wb-topbar-endpoint" title={`${methodHttpMethod} ${methodPath || '/'}`}>
           <HttpChip method={methodHttpMethod} size="sm" />
-          <span>{methodPath || '/'}</span>
-        </div>
+          <span className="wb-topbar-path">{methodPath || '/'}</span>
+          {methodTemplateLabel && <span className="wb-topbar-template" title={methodTemplateLabel}>{methodTemplateLabel}</span>}
+        </div>}
       </div>
 
       <div className="wb-topbar-actions">

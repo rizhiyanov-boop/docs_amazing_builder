@@ -1,5 +1,6 @@
-import { prepareConfluenceImport } from './confluenceImport';
-import { macroName, macroParameter, parseStorageDocument, readStorage, storageText } from './confluenceImportStorage';
+import { confluenceImportTemplateConflict, confluenceStorageColumn, prepareConfluenceImport } from './confluenceImport';
+import { macroName, macroParameter, parseStorageDocument, readStorage, readStorageTable, storageText } from './confluenceImportStorage';
+import { getMethodTemplate } from './methodTemplates';
 import type { ConfluencePage } from './confluenceTypes';
 import type { MethodDocument, TextSection } from './types';
 
@@ -31,6 +32,9 @@ export function restoreConfluencePublication(
   }
   const imported = prepareConfluenceImport(source, origin, parser);
   if (!imported.ok) throw new Error('Исходная версия больше не распознаётся. Проверьте документ в Confluence.');
+  const conflict = method.templateId && confluenceImportTemplateConflict(imported, method.templateId);
+  if (conflict) throw new Error(conflict);
+  const showClient = getMethodTemplate(method.templateId)?.clientContract ?? true;
   const baseline = imported.method;
   const originalBlocks = readStorage(source.storage!, parser).blocks;
   const doc = parseStorageDocument(storage, parser);
@@ -231,8 +235,22 @@ export function restoreConfluencePublication(
         restore = pieces.length === 1 && mergeMetadata(kind, block.element);
       } else {
         const element = copy(block.element);
-        if (element) replacements.push(element);
-        else restore = false;
+        if (element) {
+          if (!showClient && kind === 'error-table' && element.nodeType === 1) {
+            const { physical, grid } = readStorageTable(element as Element);
+            const clientColumns = (physical[0] ?? []).flatMap((cell, index) => {
+              const column = confluenceStorageColumn(storageText(cell));
+              return column === 'clientStatus' || column === 'clientResponse' ? [index] : [];
+            });
+            for (const cell of new Set(grid.flat())) {
+              if (!cell) continue;
+              const removed = clientColumns.filter(index => index >= cell.column && index < cell.column + cell.width).length;
+              if (removed === cell.width) cell.element.remove();
+              else if (removed > 0) cell.element.setAttribute('colspan', String(cell.width - removed));
+            }
+          }
+          replacements.push(element);
+        } else restore = false;
         errorTable ||= kind === 'error-table';
       }
     }

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
@@ -43,9 +43,14 @@ describe('Confluence workspace integration', () => {
     await user.click(screen.getByRole('button', { name: 'Отмена', exact: true }));
     expect(stored()).toHaveLength(1);
     await user.click(screen.getByRole('button', { name: 'Подготовить импорт' }));
+    const template = screen.getByRole('combobox', { name: 'Шаблон метода' });
+    expect(template).toHaveValue('orchestration');
+    await user.selectOptions(template, 'simple');
+    expect(screen.getByRole('button', { name: 'Добавить метод' })).toBeDisabled();
+    await user.selectOptions(template, 'orchestration');
     await user.click(screen.getByRole('button', { name: 'Добавить метод' }));
     await waitFor(() => expect(stored()).toHaveLength(2));
-    expect(stored()[1]).toMatchObject({ status: 'draft', confluenceImport: { pageId: page.id, version: 2 } });
+    expect(stored()[1]).toMatchObject({ templateId: 'orchestration', status: 'draft', confluenceImport: { pageId: page.id, version: 2 } });
     expect(stored()[1].confluence).toBeUndefined();
     expect(document.querySelector('img[src*="plantuml.com"]')).not.toBeInTheDocument();
     await prepare();
@@ -108,6 +113,7 @@ describe('Confluence workspace integration', () => {
     render(<App />);
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Новый метод', exact: true }));
+    await user.click(within(screen.getByRole('dialog', { name: 'Шаблон нового метода' })).getByRole('button', { name: /Простой метод/ }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Отменить', exact: true })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: /Confluence/ }));
     await user.click(await screen.findByRole('button', { name: parent.title, exact: true }));

@@ -14,6 +14,7 @@ type InternalCodePopoverState = {
 
 type ErrorsSectionEditorProps = {
   section: ErrorsSection;
+  showClient?: boolean;
   sections: DocSection[];
   validationCaseOptions: readonly string[];
   openInternalCodeKey: string | null;
@@ -41,6 +42,7 @@ type ErrorsSectionEditorProps = {
 
 export function ErrorsSectionEditor({
   section,
+  showClient = true,
   sections,
   validationCaseOptions,
   openInternalCodeKey,
@@ -124,8 +126,7 @@ export function ErrorsSectionEditor({
           <thead>
             <tr>
               <th>№</th>
-              <th>Client HTTP Status</th>
-              <th>Client Response</th>
+              {showClient && <><th>Client HTTP Status</th><th>Client Response</th></>}
               <th>Trigger (условия возникновения)</th>
               <th>Error Type</th>
               <th>Server HTTP Status</th>
@@ -156,7 +157,7 @@ export function ErrorsSectionEditor({
               return (
                 <tr key={`${section.id}-error-${index}`}>
                   <td>{index + 1}</td>
-                  <td>
+                  {showClient && <><td>
                     <input
                       type="text"
                       list="http-status-options"
@@ -184,7 +185,7 @@ export function ErrorsSectionEditor({
                       </button>
                       {clientResponseError && <div className="inline-error">{clientResponseError}</div>}
                     </div>
-                  </td>
+                  </td></>}
                   <td>
                     <textarea
                       rows={getDynamicTextareaRows(row.trigger, 2, 8)}

@@ -49,6 +49,9 @@ async function fixture(t, options = {}) {
       if (state.mode === 'hold-read') await new Promise(resolve => { state.release = resolve; });
       const existing = pages.get(url.pathname.split('/').at(-1));
       if (!existing) { json(res, 404, {}); return; }
+      if (url.searchParams.get('status') === 'historical' && state.mode === 'historical') {
+        json(res, 200, page(existing.id, 'Previous title', null, 2, '<p>Previous content</p>')); return;
+      }
       if (state.mode === 'readback-fail' && state.writes) { json(res, 503, { message: TEST_TOKEN }); return; }
       const value = structuredClone(existing);
       if (state.mode === 'readback-nbsp') value.body.storage.value = value.body.storage.value.replace(/&nbsp;/g, '\u00a0');
@@ -503,6 +506,19 @@ test('page inspection returns Confluence view without publishing or following as
   assert.equal(f.state.requests.at(-1).expand, 'space,version,ancestors,body.storage,body.view');
   assert.equal(f.state.writes, 0);
   assert.ok(f.state.requests.every(request => !request.path.includes('image')));
+});
+
+test('page inspection can read the imported version and rejects a different revision', async t => {
+  const f = await fixture(t); await f.connect();
+  f.pages.get('10').version.number = 3;
+  f.state.mode = 'historical';
+  const previous = await f.api('/api/page?id=10&version=2');
+  assert.equal(previous.status, 200);
+  assert.deepEqual([previous.body.version, previous.body.title, previous.body.storage], [2, 'Previous title', '<p>Previous content</p>']);
+  assert.equal((await f.api('/api/page?id=10&version=3')).body.version, 3);
+  assert.equal((await f.api('/api/page?id=10&version=1')).body.code, 'UPSTREAM_INVALID');
+  assert.equal((await f.api('/api/page?id=10&version=0')).status, 400);
+  assert.equal(f.state.writes, 0);
 });
 
 test('uncertain native diagram publication is also blocked with newly generated macro ids', async t => {

@@ -54,7 +54,7 @@ export function storageText(element: Element): string {
   return read(element).trim();
 }
 
-export function readStorage(storage: string, parser: DOMParser) {
+export function parseStorageDocument(storage: string, parser: DOMParser) {
   const entities = new Map([['nbsp', '&#160;'], ['ndash', '&#8211;'], ['mdash', '&#8212;'],
     ['hellip', '&#8230;'], ['laquo', '&#171;'], ['raquo', '&#187;'], ['plusmn', '&#177;'], ['bull', '&#8226;']]);
   const source = storage.replace(/<!\[CDATA\[[\s\S]*?\]\]>|<!--[\s\S]*?-->|&([a-z]+);/gu,
@@ -63,6 +63,11 @@ export function readStorage(storage: string, parser: DOMParser) {
   if (doc.documentElement.localName !== 'docbuilder-root' || doc.querySelector('parsererror')) {
     throw new Error('Не удалось разобрать исходную разметку страницы Confluence');
   }
+  return doc;
+}
+
+export function readStorage(storage: string, parser: DOMParser) {
+  const doc = parseStorageDocument(storage, parser);
   const path: StorageHeading[] = [];
   const headings: StorageHeading[] = [];
   const blocks: StorageBlock[] = [];

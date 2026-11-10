@@ -3,7 +3,7 @@ import { createJira, JiraError } from './jira.mjs';
 import { jiraForm } from './jira-form.mjs';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 
-export const BRIDGE_VERSION = '1.3.7';
+export const BRIDGE_VERSION = '1.3.8';
 const VERSION_MESSAGE_LIMIT = 255;
 const VERSION_MESSAGE_DIGEST = Symbol('versionMessageDigest');
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -561,7 +561,21 @@ export function createBridge(options = {}) {
         const path = parent === null ? `/rest/api/space/${encodeURIComponent(key)}/content/page?depth=root&expand=ancestors&start=${start}&limit=${limit}` : `/rest/api/content/${parent}/child/page?expand=ancestors&start=${start}&limit=${limit}`;
         send(200, collection(await upstream(path, { connection }), path, start, value => { if (parent === null && (!isRecord(value) || !Array.isArray(value.ancestors) || value.ancestors.length !== 0)) throw new BridgeError(502, 'UPSTREAM_INVALID', 'Confluence не подтвердил корневые страницы пространства.'); return summary(value, parent); }, connection)); return;
       }
-      if (url.pathname === '/api/page' && req.method === 'GET') { send(200, await readPage(pageId(url.searchParams.get('id')), connection, true)); return; }
+      if (url.pathname === '/api/page' && req.method === 'GET') {
+        const id = pageId(url.searchParams.get('id'));
+        const requested = url.searchParams.get('version');
+        if (requested === null) { send(200, await readPage(id, connection, true)); return; }
+        const version = Number(requested);
+        if (!/^[1-9]\d*$/u.test(requested) || !Number.isSafeInteger(version)) throw invalid('Некорректная версия страницы.');
+        const current = await readPage(id, connection);
+        if (current.version === version) { send(200, current); return; }
+        const historic = await upstream(`/rest/api/content/${id}?status=historical&version=${version}&expand=version,body.storage`, { connection });
+        if (historic.version?.number !== version || typeof historic.body?.storage?.value !== 'string') {
+          throw new BridgeError(502, 'UPSTREAM_INVALID', 'Confluence не вернул исходную версию страницы.');
+        }
+        send(200, { ...current, title: typeof historic.title === 'string' ? historic.title : current.title, version, storage: historic.body.storage.value });
+        return;
+      }
       if (url.pathname === '/api/prepare' && req.method === 'POST') { send(200, await prepare(await readJsonBody(req), connection)); return; }
       if (url.pathname === '/api/publish' && req.method === 'POST') { send(200, await publish(await readJsonBody(req), connection)); return; }
       throw new BridgeError(404, 'NOT_FOUND', 'Маршрут не найден.');

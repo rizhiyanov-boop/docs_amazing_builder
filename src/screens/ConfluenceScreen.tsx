@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { WBButton, WBInput } from '../components/primitives/WorkbenchPrimitives';
 import { ConfluenceSpacePicker } from '../components/ConfluenceSpacePicker';
-import { ConfluencePagePreview } from '../components/ConfluencePagePreview';
+import { ConfluenceContentPreview, ConfluencePagePreview } from '../components/ConfluencePagePreview';
 import { ConfluencePageImport } from '../components/ConfluencePageImport';
 import { JiraTaskWorkflow } from '../components/JiraTaskWorkflow';
 import { jiraMethodContext } from '../jiraMethodContext';
@@ -11,6 +11,7 @@ import {
   confluenceContentText, confluenceOrigin, confluencePageIdFromLink, confluencePageUrl, type ConfluenceClient
 } from '../confluenceClient';
 import { renderConfluenceDocument } from '../confluenceDocument';
+import { importedPublicationSections, restoreConfluencePublication } from '../confluencePublicationStorage';
 import { CONFLUENCE_VERSION_NOTE_LIMIT, suggestConfluenceVersionNote } from '../confluenceVersionNote';
 import type {
   ConfluenceBinding, ConfluenceCollection, ConfluenceDocument, ConfluenceImportSource, ConfluencePage,
@@ -33,7 +34,7 @@ type Tab = 'publish' | 'browse' | 'jira';
 type TreeLevel = ConfluenceCollection<ConfluencePageSummary> & { loading: boolean; error?: string };
 type Prepared = {
   document: ConfluenceDocument; storage: string; methodId: string; mode: 'create' | 'update';
-  baseUrl: string; title: string; spaceKey: string; sectionTitles: string[]; parent?: ConfluencePage; target?: ConfluencePage;
+  baseUrl: string; title: string; spaceKey: string; sectionTitles: string[]; parent?: ConfluencePage; target?: ConfluencePage; source?: ConfluencePage;
   versionNote?: { value: string; edited: boolean };
 };
 type Attempt = { operationId: string; prepared: Prepared };
@@ -389,6 +390,15 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMe
       const conversion = await client.prepare(snapshot.wiki, snapshot.diagrams, origin);
       if (!active()) return;
       const draft: Prepared = { document: snapshot, storage: conversion.storage, methodId: method.id, mode, baseUrl: origin, title: title.trim(), spaceKey, sectionTitles: method.sections.map(section => section.title) };
+      const source = method.confluenceImport;
+      if (source && importedPublicationSections(method).length) {
+        if (source.baseUrl !== origin) throw new Error('Для переноса материалов исходной страницы подключите её Confluence.');
+        const current = await client.getPage(source.pageId, origin);
+        if (!active()) return;
+        draft.source = current.version === source.version ? current : await client.getPage(source.pageId, origin, source.version);
+        if (!active()) return;
+        draft.storage = restoreConfluencePublication(method, conversion.storage, draft.source, mode === 'update' ? target?.pageId : undefined);
+      }
       if (mode === 'update') {
         if (!target || target.baseUrl !== origin) throw new ConfluenceClientError('INVALID_TARGET', 'Страница связана с другим подключением. Опубликуйте документ как новую страницу.');
         const page = await client.getPage(target.pageId, origin);
@@ -398,7 +408,7 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMe
         const reviewed = withReviewedPage(draft, page, Boolean(importedTarget));
         setBoundPage(page);
         const changed = page.version !== targetVersion;
-        if (changed || importedTarget || reviewed.versionNote) {
+        if (changed || method.confluenceImport || reviewed.versionNote) {
           setConflict(changed); setShowPreview(false); setPrepared(reviewed); return;
         }
         await publish(reviewed);
@@ -410,6 +420,7 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMe
         setParent(draft.parent);
       } else throw new ConfluenceClientError('INVALID_TARGET', 'Выберите родительскую страницу в дереве.');
       setShowPreview(false);
+      if (method.confluenceImport) { setPrepared(draft); return; }
       await publish(draft);
     } catch (failure) { if (active()) reportError(failure); }
     finally { if (alive.current && sequence === preparationSequence.current) setPreparing(false); }
@@ -621,7 +632,7 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMe
           {connected && targetMatches && <div className="cf-actions"><WBButton size="sm" disabled={busy} onClick={() => void refreshBoundPage()}>{boundPageBusy ? 'Чтение страницы…' : 'Обновить просмотр'}</WBButton></div>}
           {boundPage && !busy && !updateHasChanges && <p className="cf-muted">Изменений для публикации нет.</p>}
         </section><ConfluencePagePreview page={boundPage} baseUrl={baseUrl} connected={connected && targetMatches} loading={boundPageBusy} updating /></div>}
-        <footer className="cf-footer"><WBButton variant="accent" disabled={!connected || busy || (mode === 'update' && (!targetMatches || !boundPage || !updateTitle?.trim() || !updateHasChanges)) || (mode === 'create' && (!title.trim() || !spaceKey || !parent))} onClick={() => void preparePublication()}>{preparing || publishing ? 'Публикация…' : mode === 'update' ? importedTarget || supportsVersionComments ? 'Подготовить обновление' : 'Обновить страницу' : 'Опубликовать'}</WBButton></footer>
+        <footer className="cf-footer"><WBButton variant="accent" disabled={!connected || busy || (mode === 'update' && (!targetMatches || !boundPage || !updateTitle?.trim() || !updateHasChanges)) || (mode === 'create' && (!title.trim() || !spaceKey || !parent))} onClick={() => void preparePublication()}>{publishing ? 'Публикация…' : preparing ? 'Подготовка…' : mode === 'update' ? method.confluenceImport || supportsVersionComments ? 'Подготовить обновление' : 'Обновить страницу' : method.confluenceImport ? 'Подготовить публикацию' : 'Опубликовать'}</WBButton></footer>
       </>}
       {prepared && !result && !unknown && <section><h3>{prepared.mode === 'update' ? 'Проверка обновления' : 'Проверка новой страницы'}</h3><p className="cf-destination">{prepared.baseUrl}<br />{shownPage ? pagePath(shownPage) : `${prepared.spaceKey} / Корень пространства`}<br /><strong>{prepared.title}</strong></p>
         {prepared.versionNote && <div className="cf-version-note">
@@ -639,8 +650,15 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMe
           <h3>{conflict ? 'Страницу изменили в Confluence' : 'Первое обновление после импорта'}</h3>
           {conflict && <p>Запись остановлена. {versionLabel}: {targetVersion ?? 'неизвестна'}. Сейчас: версия {prepared.target?.version ?? 'неизвестна'}.</p>}
           <p>Документ из DocBuilder заменит заголовок и всё содержимое страницы. Проверьте, перенеслись ли нужные разделы, макросы и ссылки на вложения.</p>
-        </div><div className="cf-grid"><section><h3>Сейчас в Confluence</h3><p>{prepared.target?.title}</p><pre className="cf-content">{confluenceContentText(prepared.target?.storage ?? '')}</pre></section><section><h3>Подготовлено в DocBuilder</h3><p>{prepared.title}</p><pre className="cf-content">{confluenceContentText(prepared.storage)}</pre></section></div><div className="cf-actions">{prepared.target && <a href={confluencePageUrl(prepared.target.id, prepared.baseUrl)} target="_blank" rel="noopener noreferrer">Открыть страницу</a>}<WBButton disabled={publishing || jiraBusy} onClick={createNew}>Создать отдельную страницу</WBButton></div>
+        </div><div className="cf-grid"><section><h3>Сейчас в Confluence</h3><ConfluenceContentPreview storage={prepared.target?.storage ?? ''} baseUrl={prepared.baseUrl} /></section><section><h3>Подготовлено в DocBuilder</h3><ConfluenceContentPreview storage={prepared.storage} baseUrl={prepared.baseUrl} /></section></div><div className="cf-actions">{prepared.target && <a href={confluencePageUrl(prepared.target.id, prepared.baseUrl)} target="_blank" rel="noopener noreferrer">Открыть страницу</a>}<WBButton disabled={publishing || jiraBusy} onClick={createNew}>Создать отдельную страницу</WBButton></div>
           <label className="cf-overwrite-confirm"><input type="checkbox" checked={overwriteConfirmed} disabled={publishing || jiraBusy} onChange={event => setOverwriteConfirmed(event.target.checked)} /><span>Я проверил версию {prepared.target?.version} и подтверждаю замену заголовка и содержимого страницы.</span></label>
+        </> : method.confluenceImport ? <>
+          {prepared.mode === 'update' && <p className="cf-notice">Всё содержимое страницы будет заменено. Текущая версия {prepared.target?.version}.</p>}
+          <div className={prepared.target || prepared.source ? 'cf-grid' : undefined}>
+            {(prepared.target || prepared.source) && <section><h3>{prepared.target ? 'Сейчас в Confluence' : 'Исходная страница'}</h3><ConfluenceContentPreview storage={(prepared.target || prepared.source)?.storage ?? ''} baseUrl={prepared.baseUrl} /></section>}
+            <section><h3>Подготовлено в DocBuilder</h3><ConfluenceContentPreview storage={prepared.storage} baseUrl={prepared.baseUrl} /></section>
+          </div>
+          <p className="cf-muted">Интерактивные макросы отображаются в Confluence.</p>
         </> : <>
           {prepared.mode === 'update' && <p className="cf-notice">Всё содержимое выбранной страницы будет заменено. Текущая версия {prepared.target?.version}; после обновления {prepared.target ? prepared.target.version + 1 : ''}.</p>}
           <ul className="cf-check-list">{prepared.sectionTitles.map((name, index) => <li key={index}>{name}</li>)}{prepared.document.diagrams.map((diagram, index) => <li key={diagram.placeholder}>Диаграмма {index + 1} · {diagram.engine === 'plantuml' ? 'PlantUML' : 'Mermaid'} · нативный макрос сформирован</li>)}</ul>

@@ -1,21 +1,21 @@
 import { createElement, useMemo, type ReactNode } from 'react';
 import type { ConfluencePage } from '../confluenceTypes';
 import { confluencePageUrl } from '../confluenceClient';
+import { parseStorageDocument } from '../confluenceImportStorage';
 
 const tags = new Set(['p', 'div', 'span', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'b', 'em', 'i', 'u', 's', 'del', 'sub', 'sup', 'br', 'hr', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'details', 'summary']);
 const blocked = new Set(['script', 'style', 'iframe', 'object', 'embed', 'link', 'meta', 'base', 'form', 'input', 'button', 'textarea', 'select', 'template']);
 
 /** Build React elements from inert content. Never mount upstream HTML, scripts or assets. */
-function renderConfluencePreview(page: ConfluencePage, baseUrl: string): ReactNode {
+function renderConfluencePreview(page: Pick<ConfluencePage, 'view' | 'storage'>, baseUrl: string): ReactNode {
   let root: Node;
   if (page.view !== undefined) {
     const template = document.createElement('template');
     template.innerHTML = page.view;
     root = template.content;
   } else {
-    const xml = new DOMParser().parseFromString(`<root xmlns:ac="http://atlassian.com/content" xmlns:ri="http://atlassian.com/resource">${page.storage ?? ''}</root>`, 'application/xml');
-    if (xml.querySelector('parsererror')) return <p>Не удалось отобразить содержимое. Откройте страницу в Confluence.</p>;
-    root = xml.documentElement;
+    try { root = parseStorageDocument(page.storage ?? '', new DOMParser()).documentElement; }
+    catch { return <p>Не удалось отобразить содержимое страницы.</p>; }
   }
   let index = 0;
   const walk = (node: Node): ReactNode => {
@@ -30,7 +30,10 @@ function renderConfluencePreview(page: ConfluencePage, baseUrl: string): ReactNo
       const name = element.getAttribute('ac:name') ?? 'Макрос';
       const code = Array.from(element.children).find(child => child.localName === 'plain-text-body')?.textContent;
       const content = Array.from(element.children).find(child => child.localName === 'rich-text-body');
-      return <details key={key} open={name !== 'expand'}><summary>{name === 'expand' ? 'Развернуть содержимое' : name}</summary>{code ? <pre>{code}</pre> : content ? Array.from(content.childNodes).map(walk) : <p className="cf-muted">Макрос доступен в Confluence.</p>}</details>;
+      const parameter = (key: string) => Array.from(element.children).find(child => child.localName === 'parameter' && child.getAttribute('ac:name') === key)?.textContent;
+      const label = name === 'expand' ? parameter('title') || 'Развернуть содержимое' : name === 'jira' ? parameter('key') || 'Jira' : name;
+      if (name === 'toc') return <p key={key} className="cf-muted">Оглавление</p>;
+      return <details key={key} open={name !== 'expand' && name !== 'plantuml' && name !== 'mermaiddiagram'}><summary>{label}</summary>{code ? <pre>{code}</pre> : content ? Array.from(content.childNodes).map(walk) : <p className="cf-muted">Макрос доступен в Confluence.</p>}</details>;
     }
     const children = Array.from(node.childNodes).map(walk);
     if (tag === 'a') {
@@ -50,6 +53,11 @@ function renderConfluencePreview(page: ConfluencePage, baseUrl: string): ReactNo
     return createElement(tag, attributes, ...(['br', 'hr'].includes(tag) ? [] : children));
   };
   return Array.from(root.childNodes).map(walk);
+}
+
+export function ConfluenceContentPreview({ storage, baseUrl }: { storage: string; baseUrl: string }) {
+  const content = useMemo(() => renderConfluencePreview({ storage }, baseUrl), [storage, baseUrl]);
+  return <div className="cf-preview-body cf-publication-preview">{content}</div>;
 }
 
 export function ConfluencePagePreview({ page, baseUrl, loading = false, connected, updating = false }: {

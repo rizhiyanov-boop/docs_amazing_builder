@@ -1,5 +1,6 @@
 import type { ConfluenceDiagram, ConfluenceDocument } from './confluenceTypes';
 import { resolveDiagramEngine } from './diagramUtils';
+import { importedPublicationSections } from './confluencePublicationStorage';
 import { renderWikiDocument } from './renderWiki';
 import type { WikiRenderMeta } from './renderWiki';
 import type { MethodDocument, ParsedSection } from './types';
@@ -49,6 +50,8 @@ export function renderConfluenceDocument(method: MethodDocument, meta: WikiRende
   return {
     wiki,
     diagrams,
-    fingerprint: contentFingerprint(JSON.stringify([method.name, wiki, diagrams]))
+    fingerprint: contentFingerprint(JSON.stringify(method.confluenceImport && importedPublicationSections(method).length
+      ? [method.name, wiki, diagrams, method.confluenceImport, 'structured-import-publication']
+      : [method.name, wiki, diagrams]))
   };
 }

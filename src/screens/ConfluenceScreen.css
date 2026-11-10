@@ -67,6 +67,8 @@
 .cf-preview-body pre { white-space: pre-wrap; background: var(--wb-bg-soft); padding: var(--space-4); font-family: var(--wb-font-mono); }
 .cf-preview-body ul, .cf-preview-body ol { padding-left: var(--space-7); }
 .cf-preview-body h1, .cf-preview-body h2 { font-size: var(--font-size-xl); }
+.cf-publication-preview { max-height: 30rem; border: 1px solid var(--wb-border); border-radius: var(--wb-radius); }
+.cf-publication-preview table { min-width: 0; }
 .cf-preview-empty { color: var(--wb-text-soft); padding: var(--space-8); margin: auto !important; text-align: center; }
 .cf-preview-unavailable { display: block; padding: var(--space-4); background: var(--wb-bg-soft); color: var(--wb-text-soft); }
 .cf-page-preview .cf-preview-note { margin: 0; padding: var(--space-4) var(--space-6); border-top: 1px solid var(--wb-border); }

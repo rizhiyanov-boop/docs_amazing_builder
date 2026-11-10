@@ -41,6 +41,19 @@ it('shows selected parent content beside the new page form without preparing or 
   expect(client.prepare).not.toHaveBeenCalled();
   expect(client.publish).not.toHaveBeenCalled();
 });
+it('requires reviewing the prepared storage before creating a copy of an imported page', async () => {
+  const client = mockClient();
+  vi.mocked(client.prepare).mockResolvedValue({ storage: '<table><tbody><tr><td>Prepared cell</td></tr></tbody></table>' });
+  const imported = { ...method, confluenceImport: { baseUrl, pageId: '126', version: 1 } };
+  const { user } = setup(client, imported);
+  await user.click(await screen.findByRole('button', { name: 'Опубликовать как новую страницу' }));
+  await user.click(await screen.findByRole('button', { name: 'Раздел', exact: true }));
+  await user.click(screen.getByRole('button', { name: 'Подготовить публикацию' }));
+  expect(await screen.findByRole('cell', { name: 'Prepared cell' })).toBeInTheDocument();
+  expect(client.publish).not.toHaveBeenCalled();
+  await user.click(screen.getByRole('button', { name: 'Создать страницу' }));
+  await waitFor(() => expect(client.publish).toHaveBeenCalledWith(expect.objectContaining({ mode: 'create', parentId: '123' })));
+});
 function linkedMethod(): MethodDocument {
   return { ...method, confluence: { baseUrl, pageId: '126', spaceKey: 'TEST', lastPublishedVersion: 1, publishedAt: '2026-10-02T12:00:00Z', publishedFingerprint: renderConfluenceDocument(method).fingerprint } };
 }

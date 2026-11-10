@@ -342,6 +342,18 @@ function getSectionWorkbenchMeta(section: DocSection): {
   return { emoji: '□', eyebrow: 'Текст' };
 }
 
+function isJiraStandaloneUrl(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const view = params.get('view') || params.get('tab');
+    if (view === 'jira') return true;
+    const hash = window.location.hash.toLowerCase();
+    if (hash === '#/jira' || hash === '#jira') return true;
+  } catch {}
+  return false;
+}
+
 type TabKey = 'editor' | 'html' | 'wiki' | 'confluence' | 'jira';
 type WorkspaceScope = 'methods' | 'project-docs' | 'flows';
 type WikiReturnTarget = {
@@ -633,7 +645,8 @@ export default function App() {
   const [activeFlowId, setActiveFlowId] = useState<string | null>(() => initialFlows[0]?.id ?? null);
   const [activeMethodId, setActiveMethodId] = useState<string>(() => initialWorkspace.activeMethodId ?? initialWorkspace.methods[0]?.id ?? createMethodId());
   const [selectedId, setSelectedId] = useState<string>(() => initialWorkspace.methods[0]?.sections[0]?.id ?? createInitialSections()[0].id);
-  const [tab, setTab] = useState<TabKey>('editor');
+  const [isDirectStandaloneJira, setIsDirectStandaloneJira] = useState(() => isJiraStandaloneUrl());
+  const [tab, setTab] = useState<TabKey>(() => isJiraStandaloneUrl() ? 'jira' : 'editor');
   const [confluenceBusy, setConfluenceBusy] = useState(false);
   const [jiraBusy, setJiraBusy] = useState(false);
   const confluenceWorkspaceRef = useRef(0);
@@ -7180,6 +7193,7 @@ export default function App() {
   }, [isCompactLayout, isSidebarHidden, tab, workspaceScope]);
 
   const handleReturnFromJira = useCallback(() => {
+    setIsDirectStandaloneJira(false);
     const target = jiraReturnTargetRef.current;
     if (target) {
       setWorkspaceScope(target.workspaceScope);
@@ -7189,6 +7203,46 @@ export default function App() {
       return;
     }
     setTab('editor');
+  }, []);
+
+  useEffect(() => {
+    try {
+      const url = new URL(window.location.href);
+      if (tab === 'jira') {
+        if (url.searchParams.get('view') !== 'jira' && url.hash !== '#jira' && url.hash !== '#/jira') {
+          url.searchParams.set('view', 'jira');
+          window.history.replaceState({}, '', url.toString());
+        }
+      } else {
+        if (url.searchParams.get('view') === 'jira' || url.searchParams.get('tab') === 'jira') {
+          url.searchParams.delete('view');
+          url.searchParams.delete('tab');
+          window.history.replaceState({}, '', url.toString());
+        }
+        if (url.hash === '#jira' || url.hash === '#/jira') {
+          url.hash = '';
+          window.history.replaceState({}, '', url.toString());
+        }
+      }
+    } catch {}
+  }, [tab]);
+
+  useEffect(() => {
+    const onPop = () => {
+      const isJira = isJiraStandaloneUrl();
+      if (isJira) {
+        setTab('jira');
+      } else {
+        setIsDirectStandaloneJira(false);
+        setTab((curr) => curr === 'jira' ? 'editor' : curr);
+      }
+    };
+    window.addEventListener('popstate', onPop);
+    window.addEventListener('hashchange', onPop);
+    return () => {
+      window.removeEventListener('popstate', onPop);
+      window.removeEventListener('hashchange', onPop);
+    };
   }, []);
 
   const handleConfluencePublished = useCallback((methodId: string, binding: ConfluenceBinding) => {
@@ -8250,87 +8304,101 @@ export default function App() {
 
       <Toast message={toastMessage} kind={toast.kind} />
 
-      <WorkbenchSidebar
-        disabled={confluenceBusy}
-        projectName={normalizedProjectName}
-        methods={methods}
-        groups={methodGroups}
-        activeMethodId={activeMethod?.id}
-        sections={sections}
-        selectedSectionId={selectedSection?.id}
-        serverProjects={serverProjects}
-        currentProjectId={serverProjectId}
-        switchingProjectId={switchingProjectId}
-        methodCounts={projectMethodCounts}
-        editingProjectName={editingProjectName}
-        editingProjectNameDraft={editingProjectNameDraft}
-        projectNameInputRef={projectNameInputRef}
-        editingMethodId={editingMethodId}
-        editingMethodNameDraft={editingMethodNameDraft}
-        methodNameInputRef={methodNameInputRef}
-        getMethodHttpMethod={getMethodHttpMethod}
-        onSwitchMethod={handleSwitchMethod}
-        onSelectSection={handleSelectSection}
-        resolveSectionTitle={(section) => resolveSectionTitle(section.title)}
-        onSelectProject={handleSelectProject}
-        onStartProjectRename={startProjectRename}
-        onProjectNameDraftChange={setEditingProjectNameDraft}
-        onFinishProjectRename={finishProjectRename}
-        onCancelProjectRename={cancelProjectRename}
-        onStartMethodRename={startMethodRename}
-        onMethodNameDraftChange={setEditingMethodNameDraft}
-        onFinishMethodRename={finishMethodRename}
-        onCancelMethodRename={cancelMethodRename}
-        onCreateMethod={createMethod}
-        onCreateProject={createProject}
-        onOpenSearch={handleOpenSearchPalette}
-        onDeleteActiveMethod={deleteActiveMethod}
-        canDeleteActiveMethod={methods.length > 1}
-      />
-
-      <div className="wb-shell-content">
-        <WorkbenchTopbar
-          disabled={confluenceBusy || jiraBusy}
-          topbarRef={topbarRef}
-          importInputRef={importInputRef}
-          methodName={activeMethod?.name ?? DEFAULT_METHOD_NAME}
-          methodPath={getMethodPath(activeMethod)}
-          methodHttpMethod={getMethodHttpMethod(activeMethod)}
-          authUserLogin={authUser?.login ?? null}
-          isLogoutBusy={authBusyKey === 'auth:logout'}
-          canUndo={canUndo}
-          canRedo={canRedo}
-          autosaveState={autosave.state}
-          autosaveAt={autosave.at}
-          onRenameMethod={() => {
-            if (activeMethod) {
-              startMethodRename(activeMethod);
-            }
-          }}
-          onDeleteMethod={deleteActiveMethod}
-          canDeleteMethod={methods.length > 1}
-          onOpenProjectImport={handleOpenProjectImport}
-          onImportProjectJson={handleImportProjectJsonFiles}
-          onExportHtml={handleOpenMethodHtmlPreview}
-          onExportWiki={handleOpenMethodWikiPreview}
-          onOpenConfluence={handleOpenConfluence}
-          confluenceBound={Boolean(activeMethod?.confluence)}
-          onOpenJira={handleOpenJira}
-          onExportFullProjectHtml={handleOpenProjectHtmlPreview}
-          onExportFullProjectWiki={handleOpenProjectWikiPreview}
-          onExportJson={exportProjectJson}
-          onToggleSidebar={handleToggleSidebar}
-          isSidebarHidden={isSidebarHidden}
+      {!isDirectStandaloneJira && (
+        <WorkbenchSidebar
+          disabled={confluenceBusy}
+          projectName={normalizedProjectName}
+          methods={methods}
+          groups={methodGroups}
+          activeMethodId={activeMethod?.id}
+          sections={sections}
+          selectedSectionId={selectedSection?.id}
+          serverProjects={serverProjects}
+          currentProjectId={serverProjectId}
+          switchingProjectId={switchingProjectId}
+          methodCounts={projectMethodCounts}
+          editingProjectName={editingProjectName}
+          editingProjectNameDraft={editingProjectNameDraft}
+          projectNameInputRef={projectNameInputRef}
+          editingMethodId={editingMethodId}
+          editingMethodNameDraft={editingMethodNameDraft}
+          methodNameInputRef={methodNameInputRef}
+          getMethodHttpMethod={getMethodHttpMethod}
+          onSwitchMethod={handleSwitchMethod}
+          onSelectSection={handleSelectSection}
+          resolveSectionTitle={(section) => resolveSectionTitle(section.title)}
+          onSelectProject={handleSelectProject}
+          onStartProjectRename={startProjectRename}
+          onProjectNameDraftChange={setEditingProjectNameDraft}
+          onFinishProjectRename={finishProjectRename}
+          onCancelProjectRename={cancelProjectRename}
+          onStartMethodRename={startMethodRename}
+          onMethodNameDraftChange={setEditingMethodNameDraft}
+          onFinishMethodRename={finishMethodRename}
+          onCancelMethodRename={cancelMethodRename}
+          onCreateMethod={createMethod}
+          onCreateProject={createProject}
           onOpenSearch={handleOpenSearchPalette}
-          onUndo={undoWorkspace}
-          onRedo={redoWorkspace}
-          onLogout={handleLogoutClick}
-          onOpenLogin={handleOpenLoginDialog}
-          onOpenRegister={handleOpenRegisterDialog}
+          onDeleteActiveMethod={deleteActiveMethod}
+          canDeleteActiveMethod={methods.length > 1}
         />
+      )}
+
+      <div className={`wb-shell-content ${isDirectStandaloneJira ? 'is-standalone-jira' : ''}`}>
+        {!isDirectStandaloneJira && (
+          <WorkbenchTopbar
+            disabled={confluenceBusy || jiraBusy}
+            topbarRef={topbarRef}
+            importInputRef={importInputRef}
+            methodName={activeMethod?.name ?? DEFAULT_METHOD_NAME}
+            methodPath={getMethodPath(activeMethod)}
+            methodHttpMethod={getMethodHttpMethod(activeMethod)}
+            authUserLogin={authUser?.login ?? null}
+            isLogoutBusy={authBusyKey === 'auth:logout'}
+            canUndo={canUndo}
+            canRedo={canRedo}
+            autosaveState={autosave.state}
+            autosaveAt={autosave.at}
+            onRenameMethod={() => {
+              if (activeMethod) {
+                startMethodRename(activeMethod);
+              }
+            }}
+            onDeleteMethod={deleteActiveMethod}
+            canDeleteMethod={methods.length > 1}
+            onOpenProjectImport={handleOpenProjectImport}
+            onImportProjectJson={handleImportProjectJsonFiles}
+            onExportHtml={handleOpenMethodHtmlPreview}
+            onExportWiki={handleOpenMethodWikiPreview}
+            onOpenConfluence={handleOpenConfluence}
+            confluenceBound={Boolean(activeMethod?.confluence)}
+            onOpenJira={handleOpenJira}
+            onExportFullProjectHtml={handleOpenProjectHtmlPreview}
+            onExportFullProjectWiki={handleOpenProjectWikiPreview}
+            onExportJson={exportProjectJson}
+            onToggleSidebar={handleToggleSidebar}
+            isSidebarHidden={isSidebarHidden}
+            onOpenSearch={handleOpenSearchPalette}
+            onUndo={undoWorkspace}
+            onRedo={redoWorkspace}
+            onLogout={handleLogoutClick}
+            onOpenLogin={handleOpenLoginDialog}
+            onOpenRegister={handleOpenRegisterDialog}
+          />
+        )}
 
         <div className="wb-content">
           <div className="wb-content-body">
+            {isDirectStandaloneJira ? (
+              <div style={{ maxWidth: '1040px', margin: '0 auto', width: '100%', padding: 'var(--space-6) var(--space-4)' }}>
+                <JiraStandaloneScreen
+                  onBack={handleReturnFromJira}
+                  onBusyChange={setJiraBusy}
+                  isDirectStandalone={true}
+                />
+              </div>
+            ) : (
+              <>
 
       {importError && <div className="alert error">Ошибка импорта: {importError}</div>}
       {serverSyncError && <div className="alert error">Ошибка синхронизации: {serverSyncError}</div>}
@@ -8714,6 +8782,7 @@ export default function App() {
                 <JiraStandaloneScreen
                   onBack={handleReturnFromJira}
                   onBusyChange={setJiraBusy}
+                  isDirectStandalone={false}
                 />
               )}
 
@@ -8744,8 +8813,10 @@ export default function App() {
           )}
         </main>
       </div>
+              </>
+            )}
+          </div>
         </div>
-      </div>
       <WorkbenchFooter />
     </div>
     </div>

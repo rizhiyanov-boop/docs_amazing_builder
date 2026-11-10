@@ -7,10 +7,11 @@ import type { JiraDraft, JiraDraftInput } from '../jiraDraft';
 import './ConfluenceScreen.css';
 
 export type JiraStandaloneScreenProps = {
-  onBack: () => void;
+  onBack?: () => void;
   onBusyChange?: (busy: boolean) => void;
   client?: JiraClient;
   prepareDraft?: (input: JiraDraftInput) => Promise<JiraDraft>;
+  isDirectStandalone?: boolean;
 };
 
 function standaloneTaskIdentity(key: string, renew = false) {
@@ -31,7 +32,8 @@ export function JiraStandaloneScreen({
   onBack,
   onBusyChange,
   client = jiraClient,
-  prepareDraft
+  prepareDraft,
+  isDirectStandalone = false
 }: JiraStandaloneScreenProps) {
   const [busy, setBusy] = useState(false);
   const [completedIdentity, setCompletedIdentity] = useState('');
@@ -39,6 +41,20 @@ export function JiraStandaloneScreen({
   const [status, setStatus] = useState<JiraStatus | null>(null);
   const [checking, setChecking] = useState(true);
   const [checkFeedback, setCheckFeedback] = useState<'success' | 'error' | null>(null);
+  const [shareFeedback, setShareFeedback] = useState(false);
+
+  const copyShareLink = useCallback(() => {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('view', 'jira');
+      url.hash = '';
+      void navigator.clipboard.writeText(url.toString());
+      setShareFeedback(true);
+      window.setTimeout(() => setShareFeedback(false), 2000);
+    } catch {
+      // ignore
+    }
+  }, []);
 
   const key = 'docbuilder:jira-standalone:v1';
   const storedIdentity = useMemo(() => {
@@ -90,18 +106,20 @@ export function JiraStandaloneScreen({
     <section className="cf-screen cf-jira-standalone-screen" aria-label="Jira">
       <header className="cf-header">
         <div>
-          <button
-            type="button"
-            className="cf-back"
-            aria-label="Назад в редактор"
-            title="Назад в редактор"
-            onClick={onBack}
-            disabled={busy}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M19 12H5m7-7-7 7 7 7" />
-            </svg>
-          </button>
+          {onBack && !isDirectStandalone && (
+            <button
+              type="button"
+              className="cf-back"
+              aria-label="Назад в редактор"
+              title="Назад в редактор"
+              onClick={onBack}
+              disabled={busy}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M19 12H5m7-7-7 7 7 7" />
+              </svg>
+            </button>
+          )}
           <h2>Jira · Произвольная задача</h2>
         </div>
         <div className="cf-connection">
@@ -141,6 +159,42 @@ export function JiraStandaloneScreen({
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" /><path d="M21 21v-5h-5" /></svg>
             )}
           </WBButton>
+
+          <WBButton
+            size="sm"
+            variant="ghost"
+            onClick={copyShareLink}
+            title={shareFeedback ? 'Прямая ссылка скопирована!' : 'Скопировать прямую ссылку на эту страницу'}
+            aria-label="Скопировать прямую ссылку"
+            className="cf-jira-share-link-btn"
+          >
+            {shareFeedback ? (
+              <span>✓ Скопировано</span>
+            ) : (
+              <span>🔗 Ссылка для коллег</span>
+            )}
+          </WBButton>
+
+          {isDirectStandalone && onBack && (
+            <button
+              type="button"
+              className="cf-jira-switch-editor-link"
+              onClick={onBack}
+              title="Перейти в полный редактор документации"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--wb-accent)',
+                fontSize: 'var(--font-size-xs)',
+                cursor: 'pointer',
+                textDecoration: 'underline',
+                padding: '0 4px',
+                marginLeft: 'var(--space-2)'
+              }}
+            >
+              В редактор методов →
+            </button>
+          )}
         </div>
       </header>
 

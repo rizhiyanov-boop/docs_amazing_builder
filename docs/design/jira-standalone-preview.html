@@ -353,5 +353,74 @@ h3. Бизнес-логика
     </div>
   </section>
 
+  <!-- =============================================================== -->
+  <!-- 4. DIRECT SHAREABLE LINK MODE (?view=jira) -->
+  <!-- =============================================================== -->
+  <section class="preview-section" style="border: 2px solid var(--wb-accent, #2563eb); background: var(--wb-bg-surface, #fff);">
+    <div class="preview-header">
+      <div style="display: flex; align-items: center; justify-content: space-between;">
+        <h2 class="preview-title" style="color: var(--wb-accent, #2563eb);">4. Прямой переход по ссылке: <code>?view=jira</code> (для коллег)</h2>
+        <span style="font-size: 11px; background: color-mix(in srgb, var(--wb-accent, #2563eb) 12%, transparent); color: var(--wb-accent, #2563eb); font-weight: 700; padding: 3px 8px; border-radius: 4px;">URL: /?view=jira</span>
+      </div>
+      <p class="preview-desc">Когда коллега открывает прямую ссылку, <strong>боковая панель методов и верхнее меню OpenAPI полностью скрыты</strong>. Отображается только чистая форма Jira с возможностью скопировать ссылку или при необходимости перейти в полный редактор.</p>
+    </div>
+
+    <!-- Centered Standalone Container -->
+    <div style="max-width: 980px; margin: 0 auto; background: var(--wb-bg-surface, #fff); border: 1px solid var(--wb-border, #e5e0d8); border-radius: 8px; padding: 20px; box-shadow: 0 1px 6px rgba(0,0,0,0.03);">
+      <header class="cf-header">
+        <div>
+          <!-- No back arrow in direct standalone mode -->
+          <h2 style="font-size: 18px; font-weight: 700;">Jira · Произвольная задача</h2>
+        </div>
+        <div class="cf-connection" style="display: flex; align-items: center; gap: 8px;">
+          <span class="cf-status-badge is-connected" role="status">
+            <span class="cf-status-dot" aria-hidden="true"></span>
+            <span class="cf-status-label">Jira</span>
+          </span>
+          <span class="cf-jira-project-name" style="font-size: 11px; color: var(--wb-text-muted);">
+            Department of Integration (DI)
+          </span>
+          <button type="button" class="wb-button wb-button-ghost wb-button-size-sm" style="display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; font-size: 11px; border: 1px solid var(--wb-border); border-radius: 4px; background: transparent; cursor: pointer;">
+            🔗 Ссылка для коллег
+          </button>
+          <a href="#" style="font-size: 11px; color: var(--wb-accent, #2563eb); text-decoration: underline; margin-left: 6px;">
+            В редактор методов →
+          </a>
+        </div>
+      </header>
+
+      <div class="cf-jira-header-bar" style="margin-top: 14px;">
+        <div class="cf-jira-header-left">
+          <a class="cf-jira-project-link is-connected">
+            <span class="cf-status-dot" aria-hidden="true"></span>
+            <span class="cf-jira-project-name">Department of Integration</span>
+            <span class="cf-jira-project-key">DI</span>
+          </a>
+          <a class="cf-jira-change-link" href="#">
+            <svg class="wb-shell-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m16 3 5 5-12 12-6 1 1-6zM14 5l5 5"/></svg>
+            <span>Изменить проект</span>
+          </a>
+        </div>
+      </div>
+
+      <label class="cf-field" style="margin-top: 16px;">
+        Что нужно сделать
+        <textarea rows="4" placeholder="Опишите задачу своими словами…" style="width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--wb-border);"></textarea>
+        <span class="cf-muted" style="font-size: 11px; color: var(--wb-text-muted);">ИИ подготовит заголовок, описание на трёх языках и рекомендации по эпикам на основе вашего текста.</span>
+      </label>
+
+      <div class="cf-jira-toolbar" style="margin-top: 12px; display: flex; align-items: center; gap: 12px;">
+        <label class="cf-field" style="margin: 0;">
+          Тип задачи
+          <select style="padding: 4px 8px; border-radius: 4px; border: 1px solid var(--wb-border);">
+            <option value="story" selected>User Story</option>
+            <option value="task">Задача · тестирование</option>
+          </select>
+        </label>
+        <button type="button" class="wb-button wb-button-primary" style="padding: 6px 14px; font-size: 12px; font-weight: 600; background: var(--wb-accent, #2563eb); color: #fff; border: none; border-radius: 4px;">Подготовить через ИИ</button>
+      </div>
+    </div>
+  </section>
+
 </body>
 </html>

@@ -89,4 +89,29 @@ describe('JiraStandaloneScreen', () => {
     expect(screen.queryByText(/Метод уже связан с задачей Jira/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Привязать к текущему методу/i })).not.toBeInTheDocument();
   });
+
+  it('supports direct standalone mode without back button and with switch-to-editor link', async () => {
+    const onBack = vi.fn();
+    const client = mockJiraClient();
+
+    render(<JiraStandaloneScreen onBack={onBack} client={client} isDirectStandalone={true} />);
+
+    // In direct standalone mode, the back arrow is omitted
+    expect(screen.queryByRole('button', { name: 'Назад в редактор' })).not.toBeInTheDocument();
+
+    // Link to full editor is provided
+    const switchLink = screen.getByRole('button', { name: /В редактор методов/i });
+    expect(switchLink).toBeInTheDocument();
+
+    await userEvent.setup().click(switchLink);
+    expect(onBack).toHaveBeenCalledOnce();
+  });
+
+  it('renders copy share link button for colleagues', async () => {
+    const client = mockJiraClient();
+    render(<JiraStandaloneScreen onBack={vi.fn()} client={client} />);
+
+    const shareBtn = screen.getByRole('button', { name: /Скопировать прямую ссылку/i });
+    expect(shareBtn).toBeInTheDocument();
+  });
 });

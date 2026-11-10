@@ -56,7 +56,8 @@ const client: JiraClient = {
   },
   issue: async (scope, id) => {
     const operation = operations.get(id) ?? { state: 'none', issue: null, linkedUrl: null };
-    const fields = issues.get(id) ?? { methodId: id, fingerprint: 'demo', summary: '', description: '', epic: '', labels: [], priorityId: '3' };
+    const defaultSummary = '[OpenAPI] Implement GET /api/organization/account/info routing to Account Domain';
+    const fields = issues.get(id) ?? { methodId: id, fingerprint: 'demo', summary: defaultSummary, description: '', epic: '', labels: [], priorityId: '3' };
     const meta = await client.metadata(scope, 'story');
     return { operation, metadata: meta, issue: { id: operation.issue?.id ?? id, key: operation.issue?.key ?? id, url: operation.issue?.url ?? `https://jira.example/browse/${id}`, ...fields, issueType: { id: '1', name: 'User Story' }, updated: '' } };
   },
@@ -77,7 +78,8 @@ const client: JiraClient = {
   acceptCurrent: async () => { throw new Error('Не используется в демонстрации'); }
 };
 function DemoPreview() {
-  const [jiraTicket, setJiraTicket] = React.useState('');
+  const initialTicket = new URLSearchParams(window.location.search).get('ticket') || '';
+  const [jiraTicket, setJiraTicket] = React.useState(initialTicket);
   return (
     <div className="wb-app-root" data-accent="warm">
       <main className="cf-screen">

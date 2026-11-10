@@ -494,11 +494,13 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
         const currentEpicKey = issue?.epic || epic;
         const currentEpicObj = currentEpicKey ? epics.items.find(e => e.key === currentEpicKey) : undefined;
         const currentEpicName = currentEpicObj?.name;
-        const statusTitle = createdInSession
+        const statusTitle = (createdInSession || Boolean(issue))
           ? ''
           : !createdInSession && onLinked && !jiraTicket && !issue
             ? 'В локальном журнале найдена ранее созданная задача'
-            : 'Метод уже связан с задачей Jira';
+            : source === 'method' && jiraTicket
+              ? 'Метод уже связан с задачей Jira'
+              : '';
 
         const copyTicketUrl = () => {
           if (!currentIssueUrl) return;

@@ -509,16 +509,16 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onBack, on
 
   return <section className="cf-screen" aria-label="Confluence">
     <header className="cf-header">
-      <div><button type="button" className="cf-back" aria-label="Назад в редактор" title="Назад в редактор" onClick={onBack} disabled={preparing || publishing || jiraBusy || Boolean(unknown)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5m7-7-7 7 7 7" /></svg></button><h2>Confluence & Jira</h2></div>
+      <div><button type="button" className="cf-back" aria-label="Назад в редактор" title="Назад в редактор" onClick={onBack} disabled={preparing || publishing || jiraBusy || Boolean(unknown)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5m7-7-7 7 7 7" /></svg></button><h2>Confluence</h2></div>
       <div className="cf-connection">
         <span
           className={`cf-status-badge ${connected ? 'is-connected' : 'is-disconnected'}`}
           role="status"
           aria-label={connectionBusy ? 'Проверка подключения' : connected ? 'Локальное подключение активно' : 'Нет подключения'}
-          title={connectionBusy ? 'Проверка подключения…' : connected ? 'Confluence подключен' : status === null ? 'Локальный мост не запущен' : 'Confluence не подключен'}
+          title={connectionBusy ? 'Проверка подключения…' : connected ? 'Подключено к Confluence' : status === null ? 'Локальный мост не запущен' : 'Не подключено'}
         >
           <span className="cf-status-dot" aria-hidden="true" />
-          <span className="cf-status-label">{connectionBusy ? 'Проверка…' : connected ? 'Confluence' : status === null ? 'Мост отключен' : 'Confluence не подключен'}</span>
+          <span className="cf-status-label">{connectionBusy ? 'Проверка…' : connected ? 'Подключено' : status === null ? 'Мост отключен' : 'Не подключено'}</span>
         </span>
         {status?.user && <span className="cf-status-user">{status.user}</span>}
         {connected && <span className="cf-muted">{baseUrl}</span>}

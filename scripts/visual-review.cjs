@@ -241,14 +241,28 @@ async function run() {
 
     await send('Page.enable');
     await send('Runtime.enable');
+    await send('Network.enable');
     send('Console.enable').catch(() => {});
     ws.addEventListener('message', evt => {
       const msg = JSON.parse(evt.data);
       if (msg.method === 'Runtime.exceptionThrown') {
         console.error('[browser-error]', msg.params?.exceptionDetails?.text, msg.params?.exceptionDetails?.exception?.description);
       }
+      if (msg.method === 'Runtime.consoleAPICalled') {
+        const text = (msg.params?.args || []).map(a => a.value ?? a.description ?? '').join(' ');
+        console.log('[browser-console]', text);
+      }
       if (msg.method === 'Console.messageAdded') {
         console.log('[browser-console]', msg.params?.message?.text);
+      }
+      if (msg.method === 'Network.responseReceived') {
+        const resp = msg.params?.response;
+        if (resp && resp.status >= 400) {
+          console.warn('[network-error]', resp.status, resp.url);
+        }
+      }
+      if (msg.method === 'Network.loadingFailed') {
+        console.warn('[network-failed]', msg.params?.errorText, msg.params?.type);
       }
     });
     await send('Page.navigate', { url: params.url });
@@ -261,11 +275,16 @@ async function run() {
 
     // Wait for page to finish loading / React to mount
     try {
+      const state = await send('Runtime.evaluate', {
+        expression: '({ readyState: document.readyState, href: window.location.href, scripts: Array.from(document.scripts).map(s => s.src) })',
+        returnByValue: true
+      });
+      console.log('[browser-state]', JSON.stringify(state.result?.value));
       await send('Runtime.evaluate', {
         expression: `new Promise((resolve) => {
           const start = Date.now();
           const check = () => {
-            if (document.querySelector('#root')?.children.length > 0 || Date.now() - start > 10000) {
+            if (document.querySelector('#root')?.children.length > 0 || Date.now() - start > 35000) {
               resolve(true);
             } else {
               setTimeout(check, 100);

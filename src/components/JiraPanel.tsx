@@ -463,7 +463,7 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
             title={status?.connected ? 'Jira подключена' : 'Jira не подключена'}
           >
             <span className="cf-status-dot" aria-hidden="true" />
-            <span className="cf-status-label">{status?.connected ? 'Jira' : 'Не подключено'}</span>
+            <span className="cf-status-label">{status?.connected ? 'Подключено' : 'Не подключено'}</span>
           </span>
         )}
         <a href={`${CONFLUENCE_BRIDGE_URL}/`} target="_blank" rel="noopener noreferrer" className="cf-jira-change-link">

@@ -173,7 +173,7 @@ export function JiraStandaloneScreen({
               download
               className="wb-button wb-button-secondary wb-button-size-sm cf-jira-connect-action-link"
             >
-              Скачать приложение (1.3.6)
+              Скачать приложение (1.3.7)
             </a>
             <WBButton
               size="sm"

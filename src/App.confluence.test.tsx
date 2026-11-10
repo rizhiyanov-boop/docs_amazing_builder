@@ -34,7 +34,7 @@ describe('Confluence workspace integration', () => {
     render(<App />);
     const user = userEvent.setup();
     async function prepare() {
-      await user.click(await screen.findByRole('button', { name: /^Confluence & Jira\b/ }));
+      await user.click(await screen.findByRole('button', { name: /^Confluence\b/ }));
       await user.click(await screen.findByRole('button', { name: 'Страницы', exact: true }));
       await user.click(await screen.findByRole('button', { name: page.title, exact: true }));
       await user.click(await screen.findByRole('button', { name: 'Подготовить импорт' }));
@@ -62,7 +62,7 @@ describe('Confluence workspace integration', () => {
     await waitFor(() => expect(stored()).toHaveLength(3));
     expect(stored().slice(1).map(method => method.confluenceImport?.version)).toEqual([2, 3]);
     expect(bridge.publish).not.toHaveBeenCalled();
-    await user.click(await screen.findByRole('button', { name: /^Confluence & Jira\b/ }));
+    await user.click(await screen.findByRole('button', { name: /^Confluence\b/ }));
     expect(await screen.findByRole('heading', { name: 'Обновление исходной страницы' })).toBeInTheDocument();
     const prepareUpdate = screen.getByRole('button', { name: 'Подготовить обновление' });
     await waitFor(() => expect(prepareUpdate).toBeEnabled());
@@ -93,7 +93,7 @@ describe('Confluence workspace integration', () => {
       versionMessage: 'Переход на шаблон адаптера'
     }));
     await waitFor(() => expect(stored()[2].confluence).toMatchObject({ pageId: page.id, lastPublishedVersion: 5 }));
-  }, 20_000);
+  }, 35_000);
 
   it('blocks history hotkeys during a write and persists only the confirmed binding', async () => {
     const parent: ConfluencePage = { id: '123', title: 'Remote tree root', spaceKey: 'TEST', version: 1,

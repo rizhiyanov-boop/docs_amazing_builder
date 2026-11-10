@@ -1100,7 +1100,7 @@ describe('App integration', () => {
   ])('rejects invalid import at %s without changing the current workspace', async (payload, path) => {
     seedSingleMethodWorkspace({ ...makeRequestSection() });
     renderApp();
-    await waitFor(() => expect(getStoredProject()?.methods).toBeDefined());
+    await screen.findByText('Сохранено', { exact: true }, { timeout: 4_000 });
     const originalMethods = getStoredProject()?.methods;
     fireEvent.change(getImportFileInput(), { target: { files: [new File([JSON.stringify(payload)], 'invalid.json', { type: 'application/json' })] } });
     await waitFor(() => {
@@ -1144,7 +1144,7 @@ describe('App integration', () => {
     payload.methods[0].sections[3].rows[0].examples = 'wrong field';
     seedSingleMethodWorkspace({ ...makeRequestSection() });
     renderApp();
-    await waitFor(() => expect(getStoredProject()?.methods).toBeDefined());
+    await screen.findByText('Сохранено', { exact: true }, { timeout: 4_000 });
     const original = getStoredProject()?.methods;
     fireEvent.change(getImportFileInput(), { target: { files: [new File([JSON.stringify(payload)], 'invalid-codex.json', { type: 'application/json' })] } });
     await waitFor(() => expect(document.querySelector('.alert.error')?.textContent).toContain('methods[0].sections[3].rows[0].examples'));

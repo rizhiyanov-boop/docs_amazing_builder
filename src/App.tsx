@@ -349,14 +349,10 @@ function getSectionWorkbenchMeta(section: DocSection): {
 
 function isJiraStandaloneUrl(): boolean {
   if (typeof window === 'undefined') return false;
-  try {
-    const params = new URLSearchParams(window.location.search);
-    const view = params.get('view') || params.get('tab');
-    if (view === 'jira') return true;
-    const hash = window.location.hash.toLowerCase();
-    if (hash === '#/jira' || hash === '#jira') return true;
-  } catch {}
-  return false;
+  const params = new URLSearchParams(window.location.search);
+  const view = params.get('view') || params.get('tab');
+  const hash = window.location.hash.toLowerCase();
+  return view === 'jira' || hash === '#/jira' || hash === '#jira';
 }
 
 type TabKey = 'editor' | 'html' | 'wiki' | 'confluence' | 'jira';
@@ -7196,7 +7192,9 @@ export default function App() {
           window.history.replaceState({}, '', url.toString());
         }
       }
-    } catch {}
+    } catch {
+      // Keep the selected screen if the browser rejects the URL update.
+    }
   }, [tab]);
 
   useEffect(() => {

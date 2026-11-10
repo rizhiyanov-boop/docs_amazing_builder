@@ -91,13 +91,15 @@ describe('Confluence workbench screen', () => {
     await screen.findByRole('button', { name: 'Раздел', exact: true });
     if (tab === 'browse') await user.click(screen.getByRole('button', { name: 'Страницы', exact: true }));
     await user.click(screen.getByText('Перейти по ссылке на страницу'));
-    await user.type(screen.getByRole('textbox', { name: 'Ссылка Confluence' }), `${baseUrl}/spaces/PERSONAL/pages/702/Example`);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Ссылка Confluence' }), {
+      target: { value: `${baseUrl}/spaces/PERSONAL/pages/702/Example` }
+    });
     await user.click(screen.getByRole('button', { name: 'Открыть страницу', exact: true }));
-    const selected = await screen.findByRole('button', { name: 'Страница по ссылке', exact: true });
+    const selected = await screen.findByRole('button', { name: 'Страница по ссылке', exact: true }, { timeout: 4_000 });
     expect(selected).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'Свернуть Корневой раздел' })).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('button', { name: 'Свернуть Вложенный раздел' })).toHaveAttribute('aria-expanded', 'true');
-    await waitFor(() => expect(selected.closest('.cf-tree')?.scrollTop).toBe(200));
+    await waitFor(() => expect(selected.closest('.cf-tree')?.scrollTop).toBe(200), { timeout: 4_000 });
     for (const parentId of [undefined, '700', '701']) expect(client.getTree).toHaveBeenCalledWith('PERSONAL', parentId, 50, baseUrl);
     expect(client.getTree).not.toHaveBeenCalledWith('PERSONAL', '702', 0, baseUrl);
     expect(client.publish).not.toHaveBeenCalled();

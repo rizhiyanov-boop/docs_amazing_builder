@@ -73,30 +73,54 @@ async function runDomAudit(send) {
             });
           }
 
-          // 1. Check Information Hierarchy (Title must not be below metadata chips)
+          // 1. Check Single-Line Containment & No-Wrap (Hub must never wrap onto multiple rows)
+          const isVisible = el => !el.closest('[hidden]') && (el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0);
           const hubs = document.querySelectorAll('.cf-jira-linked-hub');
           hubs.forEach(hub => {
-            const title = hub.querySelector('.cf-jira-hub-title-row, .cf-jira-hub-title-text, [data-role="title"]');
-            const chips = hub.querySelector('.cf-jira-hub-header-left');
-            if (title && chips) {
-              const titleRect = title.getBoundingClientRect();
-              const chipsRect = chips.getBoundingClientRect();
-              if (titleRect.top > chipsRect.bottom && chipsRect.height > 0) {
+            if (!isVisible(hub)) return;
+
+            // Height must not exceed 44px (expected 38px)
+            if (hub.offsetHeight > 44) {
+              issues.push({
+                type: 'line-wrapped',
+                message: 'Jira hub has wrapped onto multiple lines (height: ' + hub.offsetHeight + 'px > 44px)'
+              });
+            }
+
+            // Items must stay on a single horizontal row
+            const items = Array.from(hub.querySelectorAll('.cf-jira-hub-key-link, .cf-jira-hub-title-text, .cf-jira-hub-chip, .cf-jira-hub-actions'));
+            if (items.length > 1) {
+              const baseTop = items[0].getBoundingClientRect().top;
+              for (const item of items) {
+                const top = item.getBoundingClientRect().top;
+                if (Math.abs(top - baseTop) > 6) {
+                  issues.push({
+                    type: 'item-wrapped',
+                    message: 'Item in Jira hub wrapped to a secondary line: "' + (item.textContent || '').trim().slice(0, 30) + '"'
+                  });
+                  break;
+                }
+              }
+            }
+
+            // Title must have text-overflow ellipsis and nowrap
+            const title = hub.querySelector('.cf-jira-hub-title-text');
+            if (title) {
+              const comp = window.getComputedStyle(title);
+              if (comp.whiteSpace !== 'nowrap') {
                 issues.push({
-                  type: 'hierarchy-inverted',
-                  message: 'Entity title is physically rendered below secondary metadata chips row'
+                  type: 'title-nowrap-missing',
+                  message: 'Title element is missing white-space: nowrap'
                 });
               }
             }
           });
 
-          const isVisible = el => !el.closest('[hidden]') && (el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0);
-
           // 2. Check Badge Conciseness (> 20 chars in a single status/chip, > 50 for epic)
           const chips = Array.from(document.querySelectorAll('.cf-jira-hub-status-badge, .cf-jira-hub-chip, .cf-jira-workflow-mode-badge')).filter(isVisible);
           chips.forEach(chip => {
             const text = (chip.textContent || '').trim();
-            const limit = chip.classList.contains('epic') ? 50 : 20;
+            const limit = chip.classList.contains('epic') || chip.classList.contains('cf-jira-hub-status-badge') ? 60 : 20;
             if (text.length > limit) {
               issues.push({
                 type: 'badge-too-long',

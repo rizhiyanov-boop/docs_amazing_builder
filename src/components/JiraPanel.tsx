@@ -28,7 +28,6 @@ const tagGroups = [
 export function JiraPanel({ methodId, methodName, methodContext = '', confluenceUrl, jiraTicket, source = 'method', active = true, headerExtra, onBusyChange, onLinked, onCompletedChange, onConnectionScopeChange, client = jiraClient, prepareDraft = prepareJiraTaskWithAi }: Props) {
   const [sourceDescription, setSourceDescription] = useState('');
   const [unlinkRevision, setUnlinkRevision] = useState(0);
-  const standalone = methodId.startsWith('task-') && !onLinked;
   const [status, setStatus] = useState<JiraStatus>();
   const [metadata, setMetadata] = useState<JiraMetadata>();
   const [issueKind, setIssueKind] = useState<JiraIssueKind>('story');
@@ -495,8 +494,8 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
         const currentEpicKey = issue?.epic || epic;
         const currentEpicObj = currentEpicKey ? epics.items.find(e => e.key === currentEpicKey) : undefined;
         const currentEpicName = currentEpicObj?.name;
-        const statusTitle = createdInSession || standalone
-          ? 'Задача создана'
+        const statusTitle = createdInSession
+          ? ''
           : !createdInSession && onLinked && !jiraTicket && !issue
             ? 'В локальном журнале найдена ранее созданная задача'
             : 'Метод уже связан с задачей Jira';
@@ -568,10 +567,12 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
               )}
 
               <div className="cf-jira-hub-meta-chips">
-                <span className="cf-jira-hub-status-badge">
-                  <WorkbenchIcon name="check" />
-                  <span>{statusTitle}</span>
-                </span>
+                {!createdInSession && statusTitle && (
+                  <span className="cf-jira-hub-status-badge">
+                    <WorkbenchIcon name="check" />
+                    <span>{statusTitle}</span>
+                  </span>
+                )}
                 <span className="cf-jira-hub-chip">
                   {issue?.issueType?.name || (issueKind === 'story' ? 'User Story' : 'Задача · тестирование')}
                 </span>
@@ -582,7 +583,7 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
                 )}
                 {currentEpicKey && (
                   <span className="cf-jira-hub-chip epic" title={`Эпик: ${currentEpicName || currentEpicKey}`}>
-                    📁 {currentEpicKey}{currentEpicName ? ` · ${currentEpicName}` : ''}
+                    📁 {currentEpicKey}
                   </span>
                 )}
                 {operation?.linkedUrl && (

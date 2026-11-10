@@ -1109,13 +1109,18 @@ a.cf-jira-hub-open-btn:hover {
   padding-top: var(--space-0-5);
 }
 
+.cf-screen .cf-jira-hub-title-text,
+.cf-jira-linked-hub .cf-jira-hub-title-text,
 .cf-jira-hub-title-text {
   font-size: 14px;
   font-weight: 600;
   color: var(--wb-text);
-  line-height: 1.35;
-  margin: 0;
-  padding: 0;
+  line-height: normal;
+  margin: 0 !important;
+  padding: 0 !important;
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

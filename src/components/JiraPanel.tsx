@@ -563,9 +563,9 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
               )}
 
               {displaySummary && (
-                <h3 className="cf-jira-hub-title-text" title={displaySummary}>
+                <span className="cf-jira-hub-title-text" title={displaySummary} role="heading" aria-level={3}>
                   {displaySummary}
-                </h3>
+                </span>
               )}
 
               <div className="cf-jira-hub-meta-chips">

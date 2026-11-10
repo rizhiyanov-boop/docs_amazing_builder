@@ -114,6 +114,22 @@ async function runDomAudit(send) {
                 });
               }
             }
+
+            // Strict Vertical Center Alignment: Every element must be vertically centered in the line (diff <= 2.5px)
+            const hubRect = hub.getBoundingClientRect();
+            const hubCenterY = (hubRect.top + hubRect.bottom) / 2;
+            const alignCheckItems = Array.from(hub.querySelectorAll('.cf-jira-hub-key-link, .cf-jira-hub-title-text, .cf-jira-hub-chip, .cf-jira-hub-actions button, .cf-jira-hub-actions a'));
+            for (const item of alignCheckItems) {
+              const r = item.getBoundingClientRect();
+              const itemCenterY = (r.top + r.bottom) / 2;
+              const diff = Math.abs(itemCenterY - hubCenterY);
+              if (diff > 2.5) {
+                issues.push({
+                  type: 'vertical-alignment-off',
+                  message: 'Item in Jira hub is not vertically centered (diff: ' + diff.toFixed(1) + 'px > 2.5px): "' + (item.textContent || item.getAttribute('title') || '').trim().slice(0, 30) + '"'
+                });
+              }
+            }
           });
 
           // 2. Check Badge Conciseness (> 20 chars in a single status/chip, > 50 for epic)

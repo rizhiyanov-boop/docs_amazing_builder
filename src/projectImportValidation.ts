@@ -1,5 +1,6 @@
 import { getParsedRowKey, getValidClientMappings } from './requestHeaders';
 import type { DocSection, ParsedSection, WorkspaceProjectData } from './types';
+import { methodTemplateConflict, methodTemplateIds } from './methodTemplates';
 
 export type ImportIssue = { level: 'error' | 'warning'; path: string; message: string };
 type Shape = Record<string, Rule>;
@@ -29,7 +30,7 @@ const sectionBase: Shape = {
 };
 const sectionShapes: Record<string, Shape> = {
   text: { value: string, required: boolean },
-  diagram: { diagrams: array(object({ ...strings('id', 'title', 'code', 'description'), engine: choice('mermaid', 'plantuml') })) },
+  diagram: { diagrams: array(object({ ...strings('id', 'title', 'code', 'description'), engine: choice('mermaid', 'plantuml'), sourceOnly: boolean })) },
   errors: {
     rows: array(object({
       ...strings('clientHttpStatus', 'clientResponse', 'clientResponseCode', 'trigger', 'serverHttpStatus', 'internalCode', 'message', 'responseCode'),
@@ -54,6 +55,8 @@ const sectionShapes: Record<string, Shape> = {
 };
 const methodShape: Shape = {
   ...strings('id', 'name', 'updatedAt', 'jiraTicket', 'epic', 'initiators', 'responsible', 'externalUrl'),
+  confluenceImport: object({ baseUrl: { ...string, required: true }, pageId: { ...string, required: true }, version: { ...number, required: true } }),
+  templateId: choice(...methodTemplateIds),
   status: choice('draft', 'review', 'done'), sections: array(object(sectionBase), true)
 };
 const fieldRef = (target = false): Rule => object({
@@ -183,7 +186,12 @@ export function validateImportedWorkspace(workspace: WorkspaceProjectData): Impo
   uniqueIds(workspace.groups, 'groups', issues);
   uniqueIds(workspace.projectSections ?? [], 'projectSections', issues);
   uniqueIds(workspace.flows ?? [], 'flows', issues);
-  workspace.methods.forEach((method, index) => issues.push(...validateImportedSections(method.sections, `methods[${index}].sections`)));
+  workspace.methods.forEach((method, index) => {
+    const base = `methods[${index}]`;
+    issues.push(...validateImportedSections(method.sections, `${base}.sections`));
+    const conflict = method.templateId && methodTemplateConflict(method, method.templateId);
+    if (conflict) issues.push({ level: 'error', path: `${base}.templateId`, message: conflict });
+  });
   const methods = new Map(workspace.methods.map(method => [method.id, method]));
   workspace.groups.forEach((group, index) => {
     group.methodIds.forEach((id, idIndex) => { if (!methods.has(id)) warning(`groups[${index}].methodIds[${idIndex}]`, 'Метод не существует'); });

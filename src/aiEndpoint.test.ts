@@ -119,6 +119,42 @@ describe('ai endpoint auth', () => {
     expect(invalid.statusCode).toBe(400); expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('ranks only whitelisted Confluence facts and renders the note from selected indexes', async () => {
+    process.env.OPENAI_API_KEY = 'test-key';
+    dbMock.getUserBySessionToken.mockResolvedValue({ id: 'confluence-note-user' });
+    const completion = (output: unknown) => ({ ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify(output) } }] }) });
+    const fetchMock = vi.fn().mockResolvedValueOnce(completion({ selected: [1, 0] }))
+      .mockResolvedValueOnce(completion({ selected: [9], note: 'Invented status' }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { default: aiHandler } = await import('../api/ai');
+    const facts = [
+      { kind: 'fields-added', section: 'Response', count: 2 },
+      { kind: 'statuses-changed', section: 'ошибки', count: 1 },
+      { kind: 'migration' }
+    ];
+    const submit = async (payload: unknown) => {
+      const res = createResponse();
+      await aiHandler({ method: 'POST', body: { task: 'suggest-confluence-version-note', payload } }, res);
+      return res;
+    };
+    for (const payload of [
+      { facts, storage: 'PRIVATE_CONTENT' },
+      { facts: [{ ...facts[0], field: 'PRIVATE_FIELD' }] },
+      { facts: [{ ...facts[0], section: 'PRIVATE_SECTION' }] },
+      { facts: [{ ...facts[0], count: 'PRIVATE_VALUE' }] },
+      { facts: [{ ...facts[0], count: 10_001 }] },
+      { facts: [facts[0], facts[0]] }
+    ]) expect((await submit(payload)).statusCode).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+    const res = await submit({ facts });
+    expect(res.statusCode).toBe(200);
+    expect(res.payload).toEqual({ data: { note: 'Переход на шаблон DocBuilder. В разделе «Ошибки» изменён HTTP-статус в 1 строке. В разделе «Response» добавлено 2 поля' } });
+    const request = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(request.messages[1].content.split('\n').at(-1)).toBe(JSON.stringify(facts));
+    expect(request.max_completion_tokens).toBe(800);
+    expect((await submit({ facts })).statusCode).toBe(500);
+  });
+
   it('supports generate-examples task', async () => {
     const { default: aiHandler } = await import('../api/ai');
     process.env.OPENAI_API_KEY = 'test-key';
@@ -152,6 +188,24 @@ describe('ai endpoint auth', () => {
         examples: [{ field: 'orderId', example: '12345' }]
       }
     });
+  });
+
+  it('applies approved template instructions and rejects a mapping request from a simple method', async () => {
+    const { default: aiHandler } = await import('../api/ai');
+    process.env.OPENAI_API_KEY = 'test-key';
+    dbMock.getUserBySessionToken.mockResolvedValue({ id: 'template-prompt-user' });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true, json: async () => ({ choices: [{ message: { content: '{"examples":[]}' } }] })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const res = createResponse();
+    await aiHandler({ method: 'POST', body: { task: 'generate-examples', payload: { templateId: 'orchestration', rows: [] } } }, res);
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).messages[1].content).toContain('Подбирай значения для контракта Server');
+    const rejected = createResponse();
+    await aiHandler({ method: 'POST', body: { task: 'suggest-mappings', payload: { templateId: 'simple' } } }, rejected);
+    expect(rejected.statusCode).toBe(400);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it('preserves numeric and boolean examples returned by the model as strings', async () => {

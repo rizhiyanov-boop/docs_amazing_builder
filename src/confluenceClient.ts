@@ -22,7 +22,7 @@ export interface ConfluenceClient {
   getStatus(): Promise<ConfluenceStatus>;
   getSpaces(start: number, baseUrl: string): Promise<ConfluenceCollection<ConfluenceSpace>>;
   getTree(spaceKey: string, parentId: string | undefined, start: number, baseUrl: string): Promise<ConfluenceCollection<ConfluencePageSummary>>;
-  getPage(id: string, baseUrl: string): Promise<ConfluencePage>;
+  getPage(id: string, baseUrl: string, version?: number): Promise<ConfluencePage>;
   prepare(wiki: string, diagrams: ConfluenceDiagram[], baseUrl: string): Promise<{ storage: string }>;
   publish(request: ConfluencePublishRequest): Promise<ConfluencePage>;
   getOperation(id: string, baseUrl: string): Promise<ConfluenceOperation>;
@@ -74,7 +74,7 @@ export const confluenceClient: ConfluenceClient = {
   getStatus: () => request('status'),
   getSpaces: (start, baseUrl) => request(`spaces?${new URLSearchParams({ start: String(start), limit: '100' })}`, undefined, false, baseUrl),
   getTree: (spaceKey, parentId, start, baseUrl) => request(`tree?${new URLSearchParams({ spaceKey, start: String(start), limit: '25', ...(parentId ? { parentId } : {}) })}`, undefined, false, baseUrl),
-  getPage: (id, baseUrl) => request(`page?${new URLSearchParams({ id })}`, undefined, false, baseUrl),
+  getPage: (id, baseUrl, version) => request(`page?${new URLSearchParams({ id, ...(version === undefined ? {} : { version: String(version) }) })}`, undefined, false, baseUrl),
   prepare: async (wiki, diagrams, baseUrl) => request('prepare', { wiki, diagrams, baseUrl: confluenceOrigin(baseUrl) }, false, baseUrl),
   publish: value => request('publish', value, true, value.baseUrl),
   getOperation: (id, baseUrl) => request(`operation?${new URLSearchParams({ id })}`, undefined, false, baseUrl),

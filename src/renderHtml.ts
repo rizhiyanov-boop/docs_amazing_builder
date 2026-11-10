@@ -410,14 +410,14 @@ function renderDiagramSection(
       const effectiveEngine = resolveDiagramEngine(diagram.code, diagram.engine);
       const localFileName = getDiagramExportFileName(title, section.id, diagram.title, index, 'jpeg');
       const embeddedImage = diagramImageMap?.[localFileName];
-      const remoteUrl = getDiagramImageUrl(effectiveEngine, diagram.code, 'jpeg');
+      const remoteUrl = diagram.sourceOnly ? '' : getDiagramImageUrl(effectiveEngine, diagram.code, 'jpeg');
       const hasLocalFile = Boolean(diagramLocalFiles?.[localFileName]);
-      const imageUrl = embeddedImage ?? (diagramImageSource === 'local-jpeg' && hasLocalFile ? localFileName : remoteUrl);
+      const imageUrl = diagram.sourceOnly ? '' : embeddedImage ?? (diagramImageSource === 'local-jpeg' && hasLocalFile ? localFileName : remoteUrl);
 
       return [
         '<details open>',
         `<summary>${escapeHtml(diagramTitle)} <span class="sumhint">${escapeHtml(effectiveEngine.toUpperCase())}</span></summary>`,
-        interactive
+        !imageUrl ? '' : interactive
           ? [
               '<div class="diagram-viewer" data-diagram-viewer>',
               '<div class="diagram-viewer-toolbar">',

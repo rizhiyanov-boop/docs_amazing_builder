@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ConfluenceClientError, type ConfluenceClient } from '../confluenceClient';
@@ -7,7 +7,7 @@ import type { ConfluencePage, ConfluencePublishRequest } from '../confluenceType
 import type { MethodDocument } from '../types';
 import { ConfluenceScreen } from './ConfluenceScreen';
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); localStorage.clear(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); });
 const baseUrl = 'https://confluence.example';
 const otherBaseUrl = 'https://other.example';
 const method: MethodDocument = { id: 'method-1', name: 'Example method', updatedAt: '2026-10-02T12:00:00Z', sections: [{ id: 'purpose', title: 'Цель', enabled: true, kind: 'text', value: 'Test document' }] };
@@ -40,6 +40,19 @@ it('shows selected parent content beside the new page form without preparing or 
   expect(screen.getByText('Новая страница будет создана внутри: Раздел')).toBeInTheDocument();
   expect(client.prepare).not.toHaveBeenCalled();
   expect(client.publish).not.toHaveBeenCalled();
+});
+it('requires reviewing the prepared storage before creating a copy of an imported page', async () => {
+  const client = mockClient();
+  vi.mocked(client.prepare).mockResolvedValue({ storage: '<table><tbody><tr><td>Prepared cell</td></tr></tbody></table>' });
+  const imported = { ...method, confluenceImport: { baseUrl, pageId: '126', version: 1 } };
+  const { user } = setup(client, imported);
+  await user.click(await screen.findByRole('button', { name: 'Опубликовать как новую страницу' }));
+  await user.click(await screen.findByRole('button', { name: 'Раздел', exact: true }));
+  await user.click(screen.getByRole('button', { name: 'Подготовить публикацию' }));
+  expect(await screen.findByRole('cell', { name: 'Prepared cell' })).toBeInTheDocument();
+  expect(client.publish).not.toHaveBeenCalled();
+  await user.click(screen.getByRole('button', { name: 'Создать страницу' }));
+  await waitFor(() => expect(client.publish).toHaveBeenCalledWith(expect.objectContaining({ mode: 'create', parentId: '123' })));
 });
 function linkedMethod(): MethodDocument {
   return { ...method, confluence: { baseUrl, pageId: '126', spaceKey: 'TEST', lastPublishedVersion: 1, publishedAt: '2026-10-02T12:00:00Z', publishedFingerprint: renderConfluenceDocument(method).fingerprint } };
@@ -78,13 +91,15 @@ describe('Confluence workbench screen', () => {
     await screen.findByRole('button', { name: 'Раздел', exact: true });
     if (tab === 'browse') await user.click(screen.getByRole('button', { name: 'Страницы', exact: true }));
     await user.click(screen.getByText('Перейти по ссылке на страницу'));
-    await user.type(screen.getByRole('textbox', { name: 'Ссылка Confluence' }), `${baseUrl}/spaces/PERSONAL/pages/702/Example`);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Ссылка Confluence' }), {
+      target: { value: `${baseUrl}/spaces/PERSONAL/pages/702/Example` }
+    });
     await user.click(screen.getByRole('button', { name: 'Открыть страницу', exact: true }));
-    const selected = await screen.findByRole('button', { name: 'Страница по ссылке', exact: true });
+    const selected = await screen.findByRole('button', { name: 'Страница по ссылке', exact: true }, { timeout: 4_000 });
     expect(selected).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'Свернуть Корневой раздел' })).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('button', { name: 'Свернуть Вложенный раздел' })).toHaveAttribute('aria-expanded', 'true');
-    await waitFor(() => expect(selected.closest('.cf-tree')?.scrollTop).toBe(200));
+    await waitFor(() => expect(selected.closest('.cf-tree')?.scrollTop).toBe(200), { timeout: 4_000 });
     for (const parentId of [undefined, '700', '701']) expect(client.getTree).toHaveBeenCalledWith('PERSONAL', parentId, 50, baseUrl);
     expect(client.getTree).not.toHaveBeenCalledWith('PERSONAL', '702', 0, baseUrl);
     expect(client.publish).not.toHaveBeenCalled();
@@ -191,6 +206,66 @@ describe('Confluence workbench screen', () => {
     await screen.findByRole('heading', { name: 'Страница обновлена' });
     expect(client.publish).toHaveBeenCalledWith(expect.objectContaining({ mode: 'update', pageId: '126', expectedVersion: 2 }));
     expect(onPublished).toHaveBeenCalledWith(method.id, expect.objectContaining({ pageId: '126', lastPublishedVersion: 3 }));
+  });
+
+  it('suggests a reviewable history comment before a regular update when the bridge supports it', async () => {
+    const client = mockClient();
+    vi.mocked(client.getStatus).mockResolvedValue({ connected: true, baseUrl, versionComments: true });
+    vi.mocked(client.getPage).mockResolvedValue({ ...page('126'), storage: '<h2>Запрос</h2><p>Old field description</p>' });
+    vi.mocked(client.prepare).mockResolvedValue({ storage: '<h2>Request</h2><p>New field description</p>' });
+    vi.mocked(client.publish).mockResolvedValue(page('126', 2));
+    const { user } = setup(client, changedMethod());
+    const prepare = await screen.findByRole('button', { name: 'Подготовить обновление' });
+    await waitFor(() => expect(prepare).toBeEnabled());
+    await user.click(prepare);
+    const comment = await screen.findByRole('textbox', { name: 'Комментарий к версии' });
+    expect(comment).toHaveValue('Изменены разделы: Request');
+    expect(client.publish).not.toHaveBeenCalled();
+    await user.clear(comment);
+    await user.type(comment, 'Уточнено описание поля');
+    await user.click(screen.getByRole('button', { name: 'Обновить страницу', exact: true }));
+    await screen.findByRole('heading', { name: 'Страница обновлена' });
+    expect(client.publish).toHaveBeenCalledWith(expect.objectContaining({ pageId: '126', expectedVersion: 1, versionMessage: 'Уточнено описание поля' }));
+  });
+
+  it.each(['success', 'manual edit', 'failure', 'publish while waiting'] as const)('keeps the AI comment optional on %s', async scenario => {
+    const client = mockClient();
+    vi.mocked(client.getStatus).mockResolvedValue({ connected: true, baseUrl, versionComments: true });
+    vi.mocked(client.getPage).mockResolvedValue({ ...page('126'), storage: '<h2>Response</h2><p>PRIVATE BEFORE</p>' });
+    vi.mocked(client.prepare).mockResolvedValue({ storage: '<h2>Response</h2><p>PRIVATE AFTER</p>' });
+    vi.mocked(client.publish).mockResolvedValue(page('126', 2));
+    let resolveAi!: (response: Response) => void;
+    const fetchAi = vi.fn(() => new Promise<Response>(resolve => { resolveAi = resolve; }));
+    vi.stubGlobal('fetch', fetchAi);
+    const { user } = setup(client, changedMethod());
+    const prepare = await screen.findByRole('button', { name: 'Подготовить обновление' });
+    await waitFor(() => expect(prepare).toBeEnabled());
+    await user.click(prepare);
+    const note = await screen.findByRole('textbox', { name: 'Комментарий к версии' });
+    const initialNote = 'Изменены разделы: Response';
+    expect(note).toHaveValue(initialNote);
+    expect(fetchAi).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Сформулировать с ИИ' }));
+    expect(fetchAi).toHaveBeenCalledWith('/api/ai', expect.objectContaining({
+      body: JSON.stringify({ task: 'suggest-confluence-version-note', payload: { facts: [{ kind: 'section-changed', section: 'Response' }] } })
+    }));
+    const publishButton = screen.getByRole('button', { name: 'Обновить страницу', exact: true });
+    expect(publishButton).toBeEnabled();
+    if (scenario === 'manual edit') fireEvent.change(note, { target: { value: 'Моя правка' } });
+    const generated = 'В разделе «Response» изменено содержимое';
+    if (scenario === 'publish while waiting') {
+      await user.click(publishButton);
+      await screen.findByRole('heading', { name: 'Страница обновлена' });
+      await act(async () => resolveAi(Response.json({ data: { note: generated } })));
+      expect(client.publish).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ versionMessage: initialNote }));
+      return;
+    }
+    await act(async () => resolveAi(scenario === 'failure' ? Response.json({ error: 'Unavailable' }, { status: 503 })
+      : Response.json({ data: { note: generated } })));
+    expect(note).toHaveValue(scenario === 'manual edit' ? 'Моя правка' : scenario === 'failure' ? initialNote : generated);
+    expect(publishButton).toBeEnabled();
+    expect(client.publish).not.toHaveBeenCalled();
+    if (scenario === 'failure') expect(await screen.findByRole('alert')).toHaveTextContent('Текущий комментарий можно использовать');
   });
 
   it('checks the version again immediately before writing', async () => {

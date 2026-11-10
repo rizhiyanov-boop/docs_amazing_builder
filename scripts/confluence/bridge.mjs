@@ -3,7 +3,9 @@ import { createJira, JiraError } from './jira.mjs';
 import { jiraForm } from './jira-form.mjs';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 
-export const BRIDGE_VERSION = '1.3.6';
+export const BRIDGE_VERSION = '1.3.8';
+const VERSION_MESSAGE_LIMIT = 255;
+const VERSION_MESSAGE_DIGEST = Symbol('versionMessageDigest');
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const MAX_TIMER_DELAY = 2_147_483_647;
 export const DEFAULT_ORIGINS = ['https://docsamazingbuilder.vercel.app', 'http://localhost:5173', 'http://127.0.0.1:5173'];
@@ -105,6 +107,9 @@ function storageDigest(value) {
   const normalized = value.replace(/\r\n?/g, '\n').replace(/<!\[CDATA\[[\s\S]*?\]\]>|<ac:structured-macro\b[^>]*>|&nbsp;/g, tag => tag.startsWith('<![CDATA[') ? tag : tag.replace(/\s+ac:macro-id="[^"]*"/g, '').replace(/&nbsp;/g, '\u00a0')).trim();
   return createHash('sha256').update(normalized).digest('hex');
 }
+function versionMessageDigest(value) {
+  return typeof value === 'string' ? createHash('sha256').update(value.trim()).digest('hex') : undefined;
+}
 function summary(value, parentId = undefined) {
   if (!isRecord(value) || typeof value.id !== 'string' || !/^[1-9]\d{0,19}$/.test(value.id) || typeof value.title !== 'string') throw new BridgeError(502, 'UPSTREAM_INVALID', 'Confluence вернул некорректную страницу.');
   const ancestors = Array.isArray(value.ancestors) ? value.ancestors : [];
@@ -114,6 +119,7 @@ function fullPage(value, baseUrl) {
   const page = summary(value);
   if (!isRecord(value.space) || typeof value.space.key !== 'string' || !Number.isSafeInteger(value.version?.number) || value.version.number < 1 || !Array.isArray(value.ancestors) || typeof value.body?.storage?.value !== 'string') throw new BridgeError(502, 'UPSTREAM_INVALID', 'Confluence вернул неполные данные страницы.');
   return { ...page, spaceKey: value.space.key, version: value.version.number, url: `${baseUrl}/pages/viewpage.action?pageId=${page.id}`, ancestors: value.ancestors.map(value => summary(value)), storage: value.body.storage.value,
+    [VERSION_MESSAGE_DIGEST]: versionMessageDigest(value.version.message),
     ...(typeof value.body?.view?.value === 'string' ? { view: value.body.view.value } : {}) };
 }
 /** A complete successful POST/PUT response acknowledges the write without comparing rewritten storage. */
@@ -202,7 +208,7 @@ export function createBridge(options = {}) {
     expiryTimer?.unref?.();
   }
   function renewSession(connection) { if (session === connection) { session.expiresAt = now() + SESSION_TTL_MS; scheduleExpiry(); } }
-  function status() { const current = activeSession(); return { connected: Boolean(current), baseUrl: current?.baseUrl ?? '', expiresAt: current ? new Date(current.expiresAt).toISOString() : null, bridgeVersion: BRIDGE_VERSION, remembered }; }
+  function status() { const current = activeSession(); return { connected: Boolean(current), baseUrl: current?.baseUrl ?? '', expiresAt: current ? new Date(current.expiresAt).toISOString() : null, bridgeVersion: BRIDGE_VERSION, versionComments: true, remembered }; }
   async function clearSavedConnection() {
     if (credentialStore) await credentialStore.clear();
     remembered = false;
@@ -303,7 +309,11 @@ export function createBridge(options = {}) {
       && (expected.mode === 'update' ? page.id === expected.pageId : (page.parentId ?? null) === expected.parentId);
   }
   function matchesOperation(operation, page) {
-    return matchesDestination(operation, page) && storageDigest(page.storage) === operation.expected.storageDigest;
+    return matchesDestination(operation, page) && storageDigest(page.storage) === operation.expected.storageDigest
+      && matchesVersionMessage(operation, page[VERSION_MESSAGE_DIGEST]);
+  }
+  function matchesVersionMessage(operation, actual) {
+    return operation.expected.versionMessageDigest === undefined || operation.expected.versionMessageDigest === actual;
   }
   async function reconcileOperation(operation, id, connection, explicit = false) {
     assertOperationOrigin(operation, connection);
@@ -322,7 +332,7 @@ export function createBridge(options = {}) {
     }
     operation.reconciling = (async () => {
       const page = await readPage(id, connection);
-      if (!matchesOperation(operation, page)) throw new BridgeError(409, 'VERIFICATION_MISMATCH', 'Страница не совпадает с отправленной публикацией. Проверьте адрес, родителя, версию и содержимое.');
+      if (!matchesOperation(operation, page)) throw new BridgeError(409, 'VERIFICATION_MISMATCH', 'Страница не совпадает с отправленной публикацией. Проверьте адрес, версию, содержимое и комментарий к версии.');
       operation.page = pageWithoutStorage(page);
       operation.state = 'success';
       delete operation.message;
@@ -348,18 +358,27 @@ export function createBridge(options = {}) {
     const targetId = mode === 'update' ? pageId(body.pageId) : null;
     const parentId = mode === 'create' && body.parentId !== undefined ? pageId(body.parentId) : null;
     if (mode === 'update' && (!Number.isSafeInteger(body.expectedVersion) || body.expectedVersion < 1 || body.expectedVersion >= Number.MAX_SAFE_INTEGER)) throw invalid('Укажите ожидаемую версию страницы.');
+    let versionMessage;
+    if (body.versionMessage !== undefined) {
+      if (mode !== 'update') throw invalid('Комментарий к версии можно указать при обновлении страницы.');
+      versionMessage = text(body.versionMessage, VERSION_MESSAGE_LIMIT, 'versionMessage').trim();
+      if (/[\r\n\t]/u.test(versionMessage)) throw invalid('Комментарий к версии должен быть одной строкой.');
+    }
     const contentDigest = storageDigest(storage);
     const digest = createHash('sha256').update(JSON.stringify({ baseUrl: connection.baseUrl, mode, title, key, contentDigest, targetId, parentId, expectedVersion: body.expectedVersion })).digest('hex');
-    return { id, mode, title, key, storage, targetId, parentId, digest,
-      expected: { mode, title, spaceKey: key, pageId: targetId, parentId, version: mode === 'update' ? body.expectedVersion + 1 : 1, storageDigest: contentDigest } };
+    return { id, mode, title, key, storage, targetId, parentId, digest, versionMessage,
+      expected: { mode, title, spaceKey: key, pageId: targetId, parentId, version: mode === 'update' ? body.expectedVersion + 1 : 1,
+        storageDigest: contentDigest, versionMessageDigest: versionMessageDigest(versionMessage) } };
   }
   async function publish(body, connection) {
     assertConnection(connection);
-    const { id, mode, title, key, storage, targetId, parentId, digest, expected } = publicationIntent(body, connection);
+    const { id, mode, title, key, storage, targetId, parentId, digest, expected, versionMessage } = publicationIntent(body, connection);
     const previous = operations.get(id);
     if (previous) {
       assertOperationOrigin(previous, connection);
-      if (previous.digest !== digest) throw invalid('Идентификатор операции уже использован для другого содержимого.');
+      if (previous.digest !== digest || previous.expected.versionMessageDigest !== expected.versionMessageDigest) {
+        throw invalid('Идентификатор операции уже использован для другой публикации.');
+      }
       if (previous.state === 'success') { await readPage(previous.page.id, connection); return previous.page; }
       if (previous.state === 'pending') throw new BridgeError(409, 'OPERATION_PENDING', 'Публикация ещё выполняется. Проверьте результат операции.', { operationId: id });
       if (previous.state === 'unknown') throw new BridgeError(409, 'OUTCOME_UNKNOWN', previous.message, { operationId: id });
@@ -367,7 +386,12 @@ export function createBridge(options = {}) {
     }
     const existingId = operationByDocument.get(digest);
     const existing = operations.get(existingId);
-    if (existing && ['pending', 'unknown'].includes(existing.state)) throw new BridgeError(409, existing.state === 'pending' ? 'OPERATION_PENDING' : 'OUTCOME_UNKNOWN', existing.message ?? 'Такая публикация уже выполняется. Проверьте исходную операцию.', { operationId: existingId });
+    if (existing && ['pending', 'unknown'].includes(existing.state)) {
+      if (existing.expected.versionMessageDigest !== expected.versionMessageDigest) {
+        throw new BridgeError(409, 'VERIFICATION_MISMATCH', 'Уже есть неподтверждённая публикация с другим комментарием. Проверьте её результат.');
+      }
+      throw new BridgeError(409, existing.state === 'pending' ? 'OPERATION_PENDING' : 'OUTCOME_UNKNOWN', existing.message ?? 'Такая публикация уже выполняется. Проверьте исходную операцию.', { operationId: existingId });
+    }
     if (operations.size >= maxOperations) {
       const evictable = [...operations.entries()].find(([, operation]) => ['success', 'failed'].includes(operation.state) && !operation.reconciling);
       if (!evictable) throw new BridgeError(429, 'OPERATION_LIMIT', 'Журнал заполнен выполняющимися и неопределёнными публикациями. Сначала проверьте их результаты.');
@@ -389,7 +413,7 @@ export function createBridge(options = {}) {
       else { const space = await upstream(`/rest/api/space/${encodeURIComponent(key)}`, { connection }); if (space.key !== key) throw new BridgeError(502, 'UPSTREAM_INVALID', 'Confluence вернул другое пространство.'); }
       const payload = { type: 'page', title, body: { storage: { value: storage, representation: 'storage' } } };
       if (mode === 'create') { payload.space = { key }; if (parentId) payload.ancestors = [{ id: parentId }]; }
-      else { payload.id = targetId; payload.version = { number: version, message: 'Опубликовано из DocBuilder' }; }
+      else { payload.id = targetId; payload.version = { number: version, message: versionMessage ?? 'Опубликовано из DocBuilder' }; }
       assertConnection(connection); writeStarted = true;
       const writePath = mode === 'create' ? '/rest/api/content' : `/rest/api/content/${targetId}`;
       const written = await upstream(`${writePath}?expand=space,version,ancestors`, { method: mode === 'create' ? 'POST' : 'PUT', body: payload, connection });
@@ -398,6 +422,12 @@ export function createBridge(options = {}) {
       const confirmed = writeConfirmation(written, connection.baseUrl);
       if (confirmed) {
         if (!matchesDestination(operation, confirmed)) throw new BridgeError(502, 'UPSTREAM_INVALID', 'Ответ Confluence не подтвердил назначение и версию публикации.');
+        if (!matchesVersionMessage(operation, versionMessageDigest(written.version?.message))) {
+          const verified = await readPage(written.id, connection);
+          if (!matchesDestination(operation, verified) || !matchesVersionMessage(operation, verified[VERSION_MESSAGE_DIGEST])) {
+            throw new BridgeError(502, 'UPSTREAM_INVALID', 'Confluence не подтвердил комментарий к версии.');
+          }
+        }
         knownPage = confirmed;
       } else {
         const verified = await readPage(written.id, connection); knownPage = pageWithoutStorage(verified);
@@ -531,7 +561,21 @@ export function createBridge(options = {}) {
         const path = parent === null ? `/rest/api/space/${encodeURIComponent(key)}/content/page?depth=root&expand=ancestors&start=${start}&limit=${limit}` : `/rest/api/content/${parent}/child/page?expand=ancestors&start=${start}&limit=${limit}`;
         send(200, collection(await upstream(path, { connection }), path, start, value => { if (parent === null && (!isRecord(value) || !Array.isArray(value.ancestors) || value.ancestors.length !== 0)) throw new BridgeError(502, 'UPSTREAM_INVALID', 'Confluence не подтвердил корневые страницы пространства.'); return summary(value, parent); }, connection)); return;
       }
-      if (url.pathname === '/api/page' && req.method === 'GET') { send(200, await readPage(pageId(url.searchParams.get('id')), connection, true)); return; }
+      if (url.pathname === '/api/page' && req.method === 'GET') {
+        const id = pageId(url.searchParams.get('id'));
+        const requested = url.searchParams.get('version');
+        if (requested === null) { send(200, await readPage(id, connection, true)); return; }
+        const version = Number(requested);
+        if (!/^[1-9]\d*$/u.test(requested) || !Number.isSafeInteger(version)) throw invalid('Некорректная версия страницы.');
+        const current = await readPage(id, connection);
+        if (current.version === version) { send(200, current); return; }
+        const historic = await upstream(`/rest/api/content/${id}?status=historical&version=${version}&expand=version,body.storage`, { connection });
+        if (historic.version?.number !== version || typeof historic.body?.storage?.value !== 'string') {
+          throw new BridgeError(502, 'UPSTREAM_INVALID', 'Confluence не вернул исходную версию страницы.');
+        }
+        send(200, { ...current, title: typeof historic.title === 'string' ? historic.title : current.title, version, storage: historic.body.storage.value });
+        return;
+      }
       if (url.pathname === '/api/prepare' && req.method === 'POST') { send(200, await prepare(await readJsonBody(req), connection)); return; }
       if (url.pathname === '/api/publish' && req.method === 'POST') { send(200, await publish(await readJsonBody(req), connection)); return; }
       throw new BridgeError(404, 'NOT_FOUND', 'Маршрут не найден.');

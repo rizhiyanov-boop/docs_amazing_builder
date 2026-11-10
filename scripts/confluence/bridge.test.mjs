@@ -49,6 +49,9 @@ async function fixture(t, options = {}) {
       if (state.mode === 'hold-read') await new Promise(resolve => { state.release = resolve; });
       const existing = pages.get(url.pathname.split('/').at(-1));
       if (!existing) { json(res, 404, {}); return; }
+      if (url.searchParams.get('status') === 'historical' && state.mode === 'historical') {
+        json(res, 200, page(existing.id, 'Previous title', null, 2, '<p>Previous content</p>')); return;
+      }
       if (state.mode === 'readback-fail' && state.writes) { json(res, 503, { message: TEST_TOKEN }); return; }
       const value = structuredClone(existing);
       if (state.mode === 'readback-nbsp') value.body.storage.value = value.body.storage.value.replace(/&nbsp;/g, '\u00a0');
@@ -73,6 +76,7 @@ async function fixture(t, options = {}) {
       state.writes += 1;
       const existing = pages.get(body.id);
       existing.title = body.title; existing.version.number = body.version.number; existing.body.storage.value = body.body.storage.value;
+      existing.version.message = body.version.message;
       json(res, 200, state.writeResponse(structuredClone(existing))); return;
     }
     json(res, 404, {});
@@ -313,6 +317,43 @@ test('update checks current version and does not write stale requests', async t 
   const request = { ...updateRequest(2), operationId: 'operation_000000000002' };
   const success = await f.api('/api/publish', request);
   assert.equal(success.status, 200); assert.equal(success.body.version, 3); assert.equal(f.state.writes, 1);
+  assert.equal(f.pages.get('20').version.message, 'Опубликовано из DocBuilder');
+});
+
+test('stores the reviewed note in the same page version and rejects invalid or reused intent', async t => {
+  const f = await fixture(t); await f.connect();
+  const status = await f.api('/api/status');
+  assert.equal(status.body.versionComments, true);
+  for (const versionMessage of ['x'.repeat(256), 'line\nbreak', 12]) {
+    const invalid = await f.api('/api/publish', { ...updateRequest(), versionMessage });
+    assert.equal(invalid.status, 400);
+  }
+  assert.equal((await f.api('/api/publish', { ...createRequest(), versionMessage: 'Only on updates' })).status, 400);
+  assert.equal(f.state.writes, 0);
+  f.state.writeResponse = value => value;
+  const request = { ...updateRequest(), versionMessage: 'Уточнён Request' };
+  const result = await f.api('/api/publish', request);
+  assert.equal(result.status, 200);
+  assert.equal(result.body.version, 2);
+  assert.equal(f.pages.get('20').version.message, request.versionMessage);
+  assert.equal((await f.api('/api/publish', request)).status, 200);
+  assert.equal((await f.api('/api/publish', { ...request, versionMessage: 'Другой комментарий' })).status, 400);
+  assert.equal(f.state.writes, 1);
+});
+
+test('does not reconcile an uncertain update as the reviewed version when the note differs', async t => {
+  const f = await fixture(t); await f.connect();
+  f.state.mode = 'readback-fail';
+  const request = { ...updateRequest(), versionMessage: 'Изменён Request' };
+  assert.equal((await f.api('/api/publish', request)).body.code, 'OUTCOME_UNKNOWN');
+  f.state.mode = 'normal';
+  f.pages.get('20').version.message = 'Другой комментарий';
+  const replay = await f.api('/api/publish', { ...request, operationId: 'operation_000000000002', versionMessage: 'Другой комментарий' });
+  assert.equal(replay.status, 409);
+  assert.equal((await f.api('/api/operation?id=' + OPERATION)).body.state, 'unknown');
+  f.pages.get('20').version.message = request.versionMessage;
+  assert.equal((await f.api('/api/operation?id=' + OPERATION)).body.state, 'success');
+  assert.equal(f.state.writes, 1);
 });
 
 test('Confluence optimistic-lock conflict is a known failure with no automatic PUT retry', async t => {
@@ -465,6 +506,19 @@ test('page inspection returns Confluence view without publishing or following as
   assert.equal(f.state.requests.at(-1).expand, 'space,version,ancestors,body.storage,body.view');
   assert.equal(f.state.writes, 0);
   assert.ok(f.state.requests.every(request => !request.path.includes('image')));
+});
+
+test('page inspection can read the imported version and rejects a different revision', async t => {
+  const f = await fixture(t); await f.connect();
+  f.pages.get('10').version.number = 3;
+  f.state.mode = 'historical';
+  const previous = await f.api('/api/page?id=10&version=2');
+  assert.equal(previous.status, 200);
+  assert.deepEqual([previous.body.version, previous.body.title, previous.body.storage], [2, 'Previous title', '<p>Previous content</p>']);
+  assert.equal((await f.api('/api/page?id=10&version=3')).body.version, 3);
+  assert.equal((await f.api('/api/page?id=10&version=1')).body.code, 'UPSTREAM_INVALID');
+  assert.equal((await f.api('/api/page?id=10&version=0')).status, 400);
+  assert.equal(f.state.writes, 0);
 });
 
 test('uncertain native diagram publication is also blocked with newly generated macro ids', async t => {

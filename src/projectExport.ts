@@ -254,11 +254,12 @@ function renderSectionHtml(section: DocSection, methodDiagramImageMap?: Record<s
     const items = diagrams.map((diagram, index) => {
       const fileName = getDiagramExportFileName(title, section.id, diagram.title, index, 'svg');
       const embedded = methodDiagramImageMap?.[fileName] || '';
-      const remote = getDiagramImageUrl(resolveDiagramEngine(diagram.code, diagram.engine), diagram.code, 'svg');
+      const remote = diagram.sourceOnly ? '' : getDiagramImageUrl(resolveDiagramEngine(diagram.code, diagram.engine), diagram.code, 'svg');
       return [
         '<div class="project-diagram">',
         `<h5>${escapeHtml(diagram.title || `Диаграмма ${index + 1}`)}</h5>`,
-        `<img src="${escapeHtml(embedded || remote)}" alt="${escapeHtml(diagram.title || `diagram-${index + 1}`)}" loading="lazy"/>`,
+        diagram.sourceOnly ? `<pre><code>${escapeHtml(diagram.code)}</code></pre>`
+          : `<img src="${escapeHtml(embedded || remote)}" alt="${escapeHtml(diagram.title || `diagram-${index + 1}`)}" loading="lazy"/>`,
         '</div>'
       ].join('');
     }).join('');
@@ -567,7 +568,8 @@ export function renderProjectWikiDocument(params: {
         {
           includeToc: false,
           includeTemplateIntro: false,
-          headingOffset: 2
+          headingOffset: 2,
+          templateId: method.templateId
         }
       );
       if (methodWiki.trim()) {

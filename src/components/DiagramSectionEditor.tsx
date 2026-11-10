@@ -54,6 +54,7 @@ export function DiagramSectionEditor({
         const effectiveEngine = resolveDiagramEngine(diagram.code, diagram.engine);
         const isOpen = isExpanderOpen(section.id, blockId);
         const hasDiagramCode = Boolean(diagram.code.trim());
+        const showCollapsedPreview = !isOpen && hasDiagramCode && !diagram.sourceOnly;
 
         return (
           <details
@@ -62,9 +63,9 @@ export function DiagramSectionEditor({
             open={isOpen}
             onToggle={(e) => setExpanderOpen(section.id, blockId, e.currentTarget.open)}
           >
-            <summary className={`expander-summary ${!isOpen && hasDiagramCode ? 'with-diagram-preview' : ''}`}>
+            <summary className={`expander-summary ${showCollapsedPreview ? 'with-diagram-preview' : ''}`}>
               <span className="expander-summary-title">{title}</span>
-              {!isOpen && hasDiagramCode && (
+              {showCollapsedPreview && (
                 <span className="diagram-collapsed-preview">
                   {effectiveEngine === 'mermaid' && <MermaidLivePreview code={diagram.code} />}
                   {effectiveEngine === 'plantuml' && (
@@ -106,14 +107,16 @@ export function DiagramSectionEditor({
                 />
               </label>
 
-              <div className="label">Предпросмотр</div>
-              {!hasDiagramCode && <div className="muted">Вставьте код диаграммы для предпросмотра</div>}
-              {hasDiagramCode && effectiveEngine === 'mermaid' && <MermaidLivePreview code={diagram.code} />}
-              {hasDiagramCode && effectiveEngine === 'plantuml' && (
-                <div className="diagram-preview">
-                  <img className="diagram-preview-image" src={getPlantUmlImageUrl(diagram.code, 'svg')} alt={title} loading="lazy" />
-                </div>
-              )}
+              {!diagram.sourceOnly && <>
+                <div className="label">Предпросмотр</div>
+                {!hasDiagramCode && <div className="muted">Вставьте код диаграммы для предпросмотра</div>}
+                {hasDiagramCode && effectiveEngine === 'mermaid' && <MermaidLivePreview code={diagram.code} />}
+                {hasDiagramCode && effectiveEngine === 'plantuml' && (
+                  <div className="diagram-preview">
+                    <img className="diagram-preview-image" src={getPlantUmlImageUrl(diagram.code, 'svg')} alt={title} loading="lazy" />
+                  </div>
+                )}
+              </>}
 
               <div className="diagram-description-block">
                 <div className="label">Текст под диаграммой</div>

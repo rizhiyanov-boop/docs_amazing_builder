@@ -5,6 +5,7 @@ import { validateImportedWorkspace, type ImportIssue } from './projectImportVali
 import { sanitizeSections } from './sectionTitles';
 import { parseToRows } from './parsers';
 import { buildInputFromRows } from './sourceSync';
+import { getMethodTemplate, isMethodTemplateId } from './methodTemplates';
 import type { ParseFormat, ParsedRow, ParsedSection, WorkspaceProjectData } from './types';
 
 export const CODEX_IMPORT_PROFILE = schema.properties.importProfile.const;
@@ -93,6 +94,9 @@ export function validateCodexProjectImport(payload: unknown): ImportIssue[] {
     for (const key of ['fromMethodId', 'toMethodId'] as const) if (!group.methodIds.includes(link[key])) error(`groups[${index}].links[${linkIndex}].${key}`, 'Связанный метод должен входить в эту группу');
   }));
   workspace.methods.forEach((method, methodIndex) => {
+    if (method.templateId !== undefined && !isMethodTemplateId(method.templateId)) {
+      error(`methods[${methodIndex}].templateId`, 'Неизвестный шаблон метода');
+    }
     const base = `methods[${methodIndex}].sections`;
     for (const id of ['request', 'response']) if (!method.sections.some(section => section.id === id && section.kind === 'parsed')) error(base, `Метод должен содержать каноническую секцию ${id}`);
     const rowIds = new Set<string>();
@@ -111,10 +115,12 @@ export function validateCodexProjectImport(payload: unknown): ImportIssue[] {
         });
       }
       if (section.kind !== 'parsed') return;
+      const domainModelEnabled = section.sectionType === 'generic' ? false
+        : getMethodTemplate(method.templateId)?.clientContract ?? section.domainModelEnabled;
       if (section.sectionType === 'generic' && ['request', 'response'].includes(section.id)) error(`${path}.sectionType`, 'Канонический ID не допускает generic');
       if (section.sectionType !== 'request') for (const field of requestFields) if (Object.hasOwn(section, field)) error(`${path}.${field}`, 'Поле допустимо только для request');
-      if (!section.domainModelEnabled && section.externalRequestUrl) error(`${path}.externalRequestUrl`, 'В простом режиме нет отдельного Client endpoint');
-      if (section.sectionType === 'request') validateAuth(section, path, error);
+      if (!domainModelEnabled && section.externalRequestUrl) error(`${path}.externalRequestUrl`, 'В простом режиме нет отдельного Client endpoint');
+      if (section.sectionType === 'request') validateAuth(section, path, error, domainModelEnabled);
       for (const side of ['rows', 'clientRows'] as const) {
         const sideIssueCount = issues.length;
         const rows = section[side] ?? [];
@@ -165,11 +171,11 @@ export function validateCodexProjectImport(payload: unknown): ImportIssue[] {
   return issues;
 }
 
-function validateAuth(section: ParsedSection, path: string, error: (path: string, message: string) => void): void {
+function validateAuth(section: ParsedSection, path: string, error: (path: string, message: string) => void, domainModelEnabled: boolean | undefined): void {
   const properties = section as unknown as Record<string, string>;
   for (const prefix of ['auth', 'externalAuth']) {
     const type = properties[`${prefix}Type`];
-    if (prefix === 'externalAuth' && !section.domainModelEnabled && type !== 'none') error(`${path}.${prefix}Type`, 'В простом режиме externalAuthType должен быть none');
+    if (prefix === 'externalAuth' && !domainModelEnabled && type !== 'none') error(`${path}.${prefix}Type`, 'В простом режиме externalAuthType должен быть none');
     const used = type === 'bearer' ? ['TokenExample'] : type === 'basic' ? ['Username', 'Password'] : type === 'api-key' ? ['HeaderName', 'ApiKeyExample'] : [];
     for (const suffix of ['HeaderName', 'TokenExample', 'Username', 'Password', 'ApiKeyExample']) {
       const field = `${prefix}${suffix}`;

@@ -9,12 +9,12 @@ type WorkspaceHomeProps = {
   groups: MethodGroup[];
   getMethodHttpMethod: (method: MethodDocument) => RequestMethod;
   onCreateMethod: () => void;
-  onImportOpenApi: () => void;
+  onImportJson: () => void;
   onCreateService: () => void;
   onOpenMethod: (method: MethodDocument) => void;
 };
 
-export function WorkspaceHome({ projectName, methods, groups, getMethodHttpMethod, onCreateMethod, onImportOpenApi, onCreateService, onOpenMethod }: WorkspaceHomeProps): ReactNode {
+export function WorkspaceHome({ projectName, methods, groups, getMethodHttpMethod, onCreateMethod, onImportJson, onCreateService, onOpenMethod }: WorkspaceHomeProps): ReactNode {
   return (
     <div className="wb-workspace-home">
       <div style={{ fontSize: 42, marginBottom: 8 }}>▣</div>
@@ -24,7 +24,7 @@ export function WorkspaceHome({ projectName, methods, groups, getMethodHttpMetho
       </p>
       <div style={{ display: 'flex', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
         <WBButton variant="accent" icon="+" onClick={onCreateMethod}>Новый метод</WBButton>
-        <WBButton variant="secondary" icon="↑" onClick={onImportOpenApi}>Импорт OpenAPI</WBButton>
+        <WBButton variant="secondary" icon="↑" onClick={onImportJson}>Импорт JSON</WBButton>
         {WORKBENCH_FEATURES.projects && <WBButton variant="ghost" icon="▣" onClick={onCreateService}>Новый сервис</WBButton>}
       </div>
 

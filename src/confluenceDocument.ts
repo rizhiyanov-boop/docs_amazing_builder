@@ -1,8 +1,10 @@
 import type { ConfluenceDiagram, ConfluenceDocument } from './confluenceTypes';
 import { resolveDiagramEngine } from './diagramUtils';
+import { importedPublicationSections } from './confluencePublicationStorage';
 import { renderWikiDocument } from './renderWiki';
 import type { WikiRenderMeta } from './renderWiki';
 import type { MethodDocument, ParsedSection } from './types';
+import { getMethodTemplate, methodTemplateExternalUrl } from './methodTemplates';
 
 // FNV-1a is a deterministic change indicator, not a security or integrity check.
 function contentFingerprint(value: string): string {
@@ -18,20 +20,23 @@ export function renderConfluenceDocument(method: MethodDocument, meta: WikiRende
   const request = method.sections.find((section): section is ParsedSection => (
     section.kind === 'parsed' && section.sectionType === 'request'
   ));
+  const goal = method.confluenceImport ? method.sections.find(section => section.kind === 'text' && section.id === 'goal') : undefined;
   const renderMeta: WikiRenderMeta = {
     httpMethod: request?.requestMethod ?? 'POST',
-    path: request?.requestUrl?.trim() || request?.externalRequestUrl?.trim() || '/',
+    path: request?.requestUrl?.trim() || (getMethodTemplate(method.templateId)?.clientContract !== false ? request?.externalRequestUrl?.trim() : '') || '/',
     jiraTicket: method.jiraTicket,
     epic: method.epic,
+    goal: goal?.kind === 'text' ? goal.value : undefined,
     initiators: method.initiators,
     responsible: method.responsible,
-    externalUrl: method.externalUrl,
+    externalUrl: methodTemplateExternalUrl(method) ?? (method.confluenceImport ? '' : undefined),
     updatedAt: method.updatedAt,
     ...meta
   };
   const source = JSON.stringify({ method, meta: renderMeta });
   const diagrams: ConfluenceDiagram[] = [];
   const wiki = renderWikiDocument(method.sections, renderMeta, {
+    templateId: method.templateId,
     renderDiagram: (diagram) => {
       let placeholder = `DOCBUILDER_DIAGRAM_${String(diagrams.length + 1).padStart(4, '0')}`;
       // User prose and diagram source must never be mistaken for a replacement marker.
@@ -47,6 +52,8 @@ export function renderConfluenceDocument(method: MethodDocument, meta: WikiRende
   return {
     wiki,
     diagrams,
-    fingerprint: contentFingerprint(JSON.stringify([method.name, wiki, diagrams]))
+    fingerprint: contentFingerprint(JSON.stringify(method.confluenceImport && importedPublicationSections(method).length
+      ? [method.name, wiki, diagrams, method.confluenceImport, 'structured-import-publication']
+      : [method.name, wiki, diagrams]))
   };
 }

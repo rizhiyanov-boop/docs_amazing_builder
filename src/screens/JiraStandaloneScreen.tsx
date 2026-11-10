@@ -44,6 +44,7 @@ export function JiraStandaloneScreen({
 
   const key = 'docbuilder:jira-standalone:v1';
   const storedIdentity = useMemo(() => {
+    void taskRevision;
     return standaloneTaskIdentity(key);
   }, [key, taskRevision]);
 
@@ -83,8 +84,24 @@ export function JiraStandaloneScreen({
   }, [client]);
 
   useEffect(() => {
-    void loadStatus();
-  }, [loadStatus]);
+    let active = true;
+    void client.status()
+      .then(s => {
+        if (!active) return;
+        setStatus(s);
+      })
+      .catch(() => {
+        if (!active) return;
+        setStatus(null);
+      })
+      .finally(() => {
+        if (!active) return;
+        setChecking(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [client]);
 
   const isConnected = Boolean(status?.connected);
 
@@ -173,7 +190,7 @@ export function JiraStandaloneScreen({
               download
               className="wb-button wb-button-secondary wb-button-size-sm cf-jira-connect-action-link"
             >
-              Скачать приложение (1.3.6)
+              Скачать приложение (1.3.7)
             </a>
             <WBButton
               size="sm"

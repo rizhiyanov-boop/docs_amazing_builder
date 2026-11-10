@@ -7,6 +7,12 @@ export interface ConfluenceBinding {
   publishedAt: string;
 }
 
+export interface ConfluenceImportSource {
+  baseUrl: string;
+  pageId: string;
+  version: number;
+}
+
 export interface ConfluenceSpace { key: string; name: string; type?: 'global' | 'personal'; categories?: string[] }
 export interface ConfluencePageSummary { id: string; title: string; parentId?: string | null }
 export interface ConfluenceCollection<T> { items: T[]; nextStart: number | null }
@@ -24,6 +30,7 @@ export interface ConfluenceStatus {
   expiresAt?: string | null;
   user?: string;
   bridgeVersion?: string;
+  versionComments?: boolean;
   remembered?: boolean;
 }
 export interface ConfluenceDiagram {
@@ -45,6 +52,7 @@ export interface ConfluencePublishRequest {
   parentId?: string;
   pageId?: string;
   expectedVersion?: number;
+  versionMessage?: string;
   storage: string;
 }
 export interface ConfluenceOperation {

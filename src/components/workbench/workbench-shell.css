@@ -86,9 +86,14 @@
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.4;
 }
 .wb-topbar-endpoint { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
-.wb-topbar-endpoint > span:last-child {
+.wb-topbar-endpoint > .wb-topbar-path {
   font-family: var(--wb-font-mono); font-size: var(--font-size-xs); color: var(--wb-text-muted);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.wb-topbar-template {
+  flex-shrink: 0;
+  color: var(--wb-text-muted);
+  font-size: var(--font-size-xs);
 }
 .wb-topbar-actions { display: flex; align-items: center; gap: var(--space-2); flex: 0 0 auto; }
 .wb-topbar-history { display: flex; gap: var(--space-0); padding-right: var(--space-2); border-right: 1px solid var(--wb-border-soft); }

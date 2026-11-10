@@ -8,6 +8,7 @@ import {
   replaceDocumentationUrls
 } from './documentationBaseUrl';
 import { normalizeArrayFieldPath } from './fieldPath';
+import { getMethodTemplate, sectionsForMethodTemplate, type MethodTemplateId } from './methodTemplates';
 import type { DiagramItem, DiagramSection, DocSection, ErrorsSection, ParseFormat, ParsedRow, ParsedSection, TextSection } from './types';
 
 const EMPTY_WIKI_CELL = '\u00A0';
@@ -17,6 +18,7 @@ export interface WikiRenderMeta {
   path?: string;
   jiraTicket?: string;
   epic?: string;
+  goal?: string;
   initiators?: string;
   responsible?: string;
   externalUrl?: string;
@@ -24,6 +26,7 @@ export interface WikiRenderMeta {
 }
 
 export interface WikiRenderOptions {
+  templateId?: MethodTemplateId;
   includeToc?: boolean;
   includeTemplateIntro?: boolean;
   headingOffset?: number;
@@ -406,8 +409,9 @@ function renderStructuredTable(rows: ParsedRow[], section: ParsedSection): strin
   return wrapWikiTable(lines);
 }
 
-function renderRequestBodyTable(rows: ParsedRow[]): string[] {
-  const lines = ['||Server request||Тип||Обяз.||Валидации||Описание||Пример||Client request||Маск.||'];
+function renderRequestBodyTable(rows: ParsedRow[], showClient: boolean): string[] {
+  const clientHeader = showClient ? 'Client request||' : '';
+  const lines = [`||Server request||Тип||Обяз.||Валидации||Описание||Пример||${clientHeader}Маск.||`];
   for (const row of rows) {
     const cells = [
       toWikiMappingCell(row.field),
@@ -416,7 +420,7 @@ function renderRequestBodyTable(rows: ParsedRow[]): string[] {
       toWikiCell(row.validations ?? ''),
       toWikiCell(row.description),
       toWikiExampleCell(row.example),
-      toWikiMappingCell(row.clientField),
+      ...(showClient ? [toWikiMappingCell(row.clientField)] : []),
       row.maskInLogs ? '***' : '   '
     ];
     lines.push(`|${cells.join('|')}|`);
@@ -424,15 +428,16 @@ function renderRequestBodyTable(rows: ParsedRow[]): string[] {
   return wrapWikiTable(lines);
 }
 
-function renderResponseTable(rows: ParsedRow[]): string[] {
-  const lines = ['||Server Response||Тип||Описание||Пример||Client Response||Маск.||'];
+function renderResponseTable(rows: ParsedRow[], showClient: boolean): string[] {
+  const clientHeader = showClient ? 'Client Response||' : '';
+  const lines = [`||Server Response||Тип||Описание||Пример||${clientHeader}Маск.||`];
   for (const row of rows) {
     const cells = [
       toWikiMappingCell(row.field),
       toWikiCell(row.type),
       toWikiCell(row.description),
       toWikiExampleCell(row.example),
-      toWikiMappingCell(row.clientField),
+      ...(showClient ? [toWikiMappingCell(row.clientField)] : []),
       row.maskInLogs ? '***' : '   '
     ];
     lines.push(`|${cells.join('|')}|`);
@@ -445,12 +450,12 @@ function renderTextSection(section: TextSection): string[] {
   return [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`, '', ...toWikiTextBlock(section.value)];
 }
 
-function renderRequestSection(section: ParsedSection): string[] {
+function renderRequestSection(section: ParsedSection, showClient: boolean): string[] {
   const lines: string[] = [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`];
 
   const { headers, otherRows } = splitRequestRows(getRequestRows(section));
-  const requestError = section.error || section.clientError;
-  const externalHeaders = (section.clientRows ?? []).filter((row) => row.source === 'header' && row.enabled !== false);
+  const requestError = section.error || (showClient ? section.clientError : '');
+  const externalHeaders = showClient ? (section.clientRows ?? []).filter((row) => row.source === 'header' && row.enabled !== false) : [];
 
   if (headers.length > 0) {
     lines.push('');
@@ -471,30 +476,31 @@ function renderRequestSection(section: ParsedSection): string[] {
     lines.push('');
     lines.push('h3. Body');
     lines.push('');
-    lines.push(...renderRequestBodyTable(otherRows));
+    lines.push(...renderRequestBodyTable(otherRows, showClient));
   }
 
   lines.push(...renderParsedSourceExamples(section));
 
   return lines;
 }
-function renderResponseSection(section: ParsedSection): string[] {
+function renderResponseSection(section: ParsedSection, showClient: boolean): string[] {
   const lines: string[] = [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`];
 
-  if (section.error || section.clientError) {
-    lines.push(`*Секция заблокирована:* ${toWikiCell(section.error || section.clientError || '')}`);
+  const responseError = section.error || (showClient ? section.clientError : '');
+  if (responseError) {
+    lines.push(`*Секция заблокирована:* ${toWikiCell(responseError)}`);
     lines.push(...renderParsedSourceExamples(section));
     return lines;
   }
 
-  lines.push(...renderResponseTable(getRequestRows(section)));
+  lines.push(...renderResponseTable(getRequestRows(section), showClient));
   lines.push(...renderParsedSourceExamples(section));
   return lines;
 }
 
-function renderParsedSection(section: ParsedSection): string[] {
-  if (section.sectionType === 'request') return renderRequestSection(section);
-  if (section.sectionType === 'response') return renderResponseSection(section);
+function renderParsedSection(section: ParsedSection, showClient: boolean): string[] {
+  if (section.sectionType === 'request') return renderRequestSection(section, showClient);
+  if (section.sectionType === 'response') return renderResponseSection(section, showClient);
 
   const lines: string[] = [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`];
 
@@ -520,7 +526,7 @@ function renderDiagramSection(section: DiagramSection, options: WikiRenderOption
       lines.push(`h3. ${escapeWiki(title)}`);
       if (options.renderDiagram) {
         lines.push(...options.renderDiagram(diagram));
-      } else {
+      } else if (!diagram.sourceOnly) {
         const imageUrl = getDiagramImageUrl(resolveDiagramEngine(diagram.code, diagram.engine), diagram.code, 'jpeg');
         lines.push(`!${escapeWiki(imageUrl)}!`);
       }
@@ -549,7 +555,7 @@ function renderProcessDiagramSection(section: DiagramSection, options: WikiRende
       lines.push('');
       if (options.renderDiagram) {
         lines.push(...options.renderDiagram(diagram));
-      } else {
+      } else if (!diagram.sourceOnly) {
         const imageUrl = getDiagramImageUrl(resolveDiagramEngine(diagram.code, diagram.engine), diagram.code, 'jpeg');
         lines.push(`!${escapeWiki(imageUrl)}!`);
       }
@@ -568,16 +574,18 @@ function renderProcessDiagramSection(section: DiagramSection, options: WikiRende
   return lines;
 }
 
-function renderErrorsSection(section: ErrorsSection): string[] {
+function renderErrorsSection(section: ErrorsSection, showClient: boolean): string[] {
   const lines: string[] = [`h2. ${escapeWiki(resolveSectionTitle(section.title))}`];
 
 
   if (section.rows.length > 0) {
     lines.push('');
-    const tableLines = ['||№||Client HTTP Status||Client Response||Trigger (условия возникновения)||Error Type||Server HTTP Status||Полный internalCode||Server Response||'];
+    const clientHeaders = showClient ? 'Client HTTP Status||Client Response||' : '';
+    const tableLines = [`||№||${clientHeaders}Trigger (условия возникновения)||Error Type||Server HTTP Status||Полный internalCode||Server Response||`];
     section.rows.forEach((row, index) => {
+      const client = showClient ? `${toWikiCell(row.clientHttpStatus)}|${renderErrorResponseCell(row.clientResponse, row.clientResponseCode)}|` : '';
       tableLines.push(
-        `|${toWikiCell(String(index + 1))}|${toWikiCell(row.clientHttpStatus)}|${renderErrorResponseCell(row.clientResponse, row.clientResponseCode)}|${toWikiCell(row.trigger)}|${toWikiCell(row.errorType)}|${toWikiCell(row.serverHttpStatus)}|${toWikiCell(row.internalCode)}|${renderErrorResponseCell(row.message, row.responseCode)}|`
+        `|${toWikiCell(String(index + 1))}|${client}${toWikiCell(row.trigger)}|${toWikiCell(row.errorType)}|${toWikiCell(row.serverHttpStatus)}|${toWikiCell(row.internalCode)}|${renderErrorResponseCell(row.message, row.responseCode)}|`
       );
     });
     lines.push(...wrapWikiTable(tableLines));
@@ -609,13 +617,13 @@ function renderWikiTemplateIntro(meta: WikiRenderMeta): string[] {
 
   const taskTable = wrapWikiTable([
     `|Epic|${toWikiCell(meta.epic ?? '')}|`,
-    `|Цель|${EMPTY_WIKI_CELL}|`,
+    `|Цель|${toWikiCell(meta.goal ?? '')}|`,
     `|Инициаторы|${toWikiCell(meta.initiators ?? '')}|`
   ]);
 
   const commonInfoTable = wrapWikiTable([
     `|Метод|${methodCell}|`,
-    `|Внешний URL|${toWikiCell(formatDocumentationUrl(meta.externalUrl ?? meta.path ?? ''))}|`
+    `|Внешний URL|${meta.externalUrl === '' ? '-' : toWikiCell(formatDocumentationUrl(meta.externalUrl ?? meta.path ?? ''))}|`
   ]);
 
   const linksTable = wrapWikiTable([
@@ -648,7 +656,9 @@ function shiftWikiHeadingLine(line: string, offset: number): string {
   return `h${level}. ${match[2]}`;
 }
 
-export function renderWikiDocument(sections: DocSection[], meta: WikiRenderMeta = {}, options: WikiRenderOptions = {}): string {
+export function renderWikiDocument(sourceSections: DocSection[], meta: WikiRenderMeta = {}, options: WikiRenderOptions = {}): string {
+  const sections = sectionsForMethodTemplate(sourceSections, options.templateId);
+  const showClient = getMethodTemplate(options.templateId)?.clientContract ?? true;
   const includeToc = options.includeToc ?? true;
   const includeTemplateIntro = options.includeTemplateIntro ?? true;
   const headingOffset = options.headingOffset ?? 0;
@@ -657,7 +667,7 @@ export function renderWikiDocument(sections: DocSection[], meta: WikiRenderMeta 
     lines.push('{toc}', '');
   }
   if (includeTemplateIntro) {
-    lines.push(...renderWikiTemplateIntro(meta));
+    lines.push(...renderWikiTemplateIntro(showClient ? meta : { ...meta, externalUrl: '' }));
   }
 
   const processDiagramSection = includeTemplateIntro
@@ -677,7 +687,7 @@ export function renderWikiDocument(sections: DocSection[], meta: WikiRenderMeta 
           : []
         : section.kind === 'parsed'
           ? shouldRenderParsedSection(section)
-            ? renderParsedSection(section)
+            ? renderParsedSection(section, showClient)
             : []
           : section.kind === 'diagram'
             ? shouldRenderDiagramSection(section)
@@ -686,7 +696,7 @@ export function renderWikiDocument(sections: DocSection[], meta: WikiRenderMeta 
                 : renderDiagramSection(section, options)
               : []
             : shouldRenderErrorsSection(section)
-              ? renderErrorsSection(section)
+              ? renderErrorsSection(section, showClient)
               : [];
 
     if (rendered.length > 0) {

@@ -3,7 +3,8 @@ import { parseToRows, wrapNonDomainResponseJson } from './parsers';
 import { sanitizeSections } from './sectionTitles';
 import { withSectionRowIds } from './sectionHelpers';
 import { createInitialSections } from './sectionFactories';
-import { normalizeConfluenceBinding } from './confluenceBinding';
+import { getMethodTemplate, isMethodTemplateId, methodTemplateSectionsForStorage, type MethodTemplateId } from './methodTemplates';
+import { normalizeConfluenceBinding, normalizeConfluenceImportSource } from './confluenceBinding';
 import type {
   DocSection,
   MethodDocument,
@@ -187,6 +188,7 @@ export function normalizeMethodDocument(
   index = 0,
   fallbackName = `Метод ${index + 1}`
 ): MethodDocument {
+  const templateId = isMethodTemplateId(method.templateId) ? method.templateId : undefined;
   return {
     id: typeof method.id === 'string' && method.id.trim() ? method.id.trim() : createMethodId(),
     name: typeof method.name === 'string' && method.name.trim() ? method.name.trim() : fallbackName,
@@ -198,7 +200,9 @@ export function normalizeMethodDocument(
     externalUrl: typeof method.externalUrl === 'string' ? method.externalUrl : undefined,
     status: method.status === 'draft' || method.status === 'review' || method.status === 'done' ? method.status : undefined,
     confluence: normalizeConfluenceBinding(method.confluence),
-    sections: sanitizeSections(method.sections as DocSection[]).map(withSectionRowIds)
+    confluenceImport: normalizeConfluenceImportSource(method.confluenceImport),
+    ...(templateId ? { templateId } : {}),
+    sections: methodTemplateSectionsForStorage(sanitizeSections(method.sections as DocSection[]).map(withSectionRowIds), templateId)
   };
 }
 
@@ -215,17 +219,31 @@ export function createMethodDocument(
   };
 }
 
+export function createTemplatedMethod(templateId: MethodTemplateId, name = DEFAULT_METHOD_NAME): MethodDocument {
+  const codes = getMethodTemplate(templateId)?.initialErrorCodes ?? [];
+  const sections = createInitialSections().map(section => {
+    if (section.kind !== 'errors' || !codes.length) return section;
+    const rows = codes.flatMap(code => {
+      const entry = ERROR_CATALOG_BY_CODE.get(code);
+      return entry ? [{
+        ...section.rows[0], internalCode: entry.internalCode, serverHttpStatus: entry.httpStatus,
+        message: entry.message
+      }] : [];
+    });
+    return rows.length ? { ...section, rows } : section;
+  });
+  return { ...createMethodDocument(name, methodTemplateSectionsForStorage(sections, templateId)), templateId };
+}
+
 export function createWorkspaceSeed(): WorkspaceProjectData {
-  const method = createMethodDocument();
   return {
     version: 3,
     projectName: DEFAULT_PROJECT_NAME,
     updatedAt: new Date().toISOString(),
-    activeMethodId: method.id,
-    methods: [method],
+    methods: [],
     groups: [],
     projectSections: createDefaultProjectSections(),
-    flows: [createDefaultFlow(method.id)]
+    flows: [createDefaultFlow()]
   };
 }
 
@@ -356,7 +374,10 @@ export function createOnboardingDemoWorkspace(): WorkspaceProjectData {
     return section;
   });
 
-  const method = createMethodDocument('Демо: Перевод между счетами', demoSections);
+  const method: MethodDocument = {
+    ...createMethodDocument('Демо: Перевод между счетами', methodTemplateSectionsForStorage(demoSections, 'orchestration')),
+    templateId: 'orchestration'
+  };
   return {
     version: 3,
     projectName: 'Демо проект',
@@ -370,7 +391,7 @@ export function createOnboardingDemoWorkspace(): WorkspaceProjectData {
 }
 
 export function normalizeWorkspaceForMode(workspace: WorkspaceProjectData, enableMultiMethods: boolean): WorkspaceProjectData {
-  if (enableMultiMethods) {
+  if (enableMultiMethods || workspace.methods.length === 0) {
     return {
       ...workspace,
       projectSections: sanitizeProjectSections(workspace.projectSections),
@@ -399,10 +420,10 @@ export function asWorkspaceProjectData(
   flows: ProjectFlow[] = [createDefaultFlow(methods[0]?.id)],
   enableMultiMethods = true
 ): WorkspaceProjectData {
-  const normalizedMethods = methods.length > 0 ? methods : [createMethodDocument()];
+  const normalizedMethods = methods;
   const resolvedActiveMethodId = normalizedMethods.some((method) => method.id === activeMethodId)
     ? activeMethodId
-    : normalizedMethods[0].id;
+    : normalizedMethods[0]?.id;
 
   const workspace: WorkspaceProjectData = {
     version: 3,
@@ -412,8 +433,9 @@ export function asWorkspaceProjectData(
     methods: normalizedMethods.map((method) => ({
       ...method,
       confluence: normalizeConfluenceBinding(method.confluence),
+      confluenceImport: normalizeConfluenceImportSource(method.confluenceImport),
       updatedAt: method.updatedAt || new Date().toISOString(),
-      sections: sanitizeSections(method.sections).map(withSectionRowIds)
+      sections: methodTemplateSectionsForStorage(sanitizeSections(method.sections).map(withSectionRowIds), method.templateId)
     })),
     groups,
     projectSections: sanitizeProjectSections(projectSections),

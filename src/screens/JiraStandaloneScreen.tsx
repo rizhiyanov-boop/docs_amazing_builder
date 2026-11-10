@@ -134,7 +134,7 @@ export function JiraStandaloneScreen({
           >
             <span className="cf-status-dot" aria-hidden="true" />
             <span className="cf-status-label">
-              {checking ? 'Проверка…' : isConnected ? 'Jira' : 'Не подключено'}
+              {checking ? 'Проверка…' : isConnected ? 'Подключено' : 'Не подключено'}
             </span>
           </span>
           {status?.project && (

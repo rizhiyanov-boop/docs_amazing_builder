@@ -73,6 +73,7 @@ async function fixture(t, options = {}) {
       state.writes += 1;
       const existing = pages.get(body.id);
       existing.title = body.title; existing.version.number = body.version.number; existing.body.storage.value = body.body.storage.value;
+      existing.version.message = body.version.message;
       json(res, 200, state.writeResponse(structuredClone(existing))); return;
     }
     json(res, 404, {});
@@ -313,6 +314,43 @@ test('update checks current version and does not write stale requests', async t 
   const request = { ...updateRequest(2), operationId: 'operation_000000000002' };
   const success = await f.api('/api/publish', request);
   assert.equal(success.status, 200); assert.equal(success.body.version, 3); assert.equal(f.state.writes, 1);
+  assert.equal(f.pages.get('20').version.message, 'Опубликовано из DocBuilder');
+});
+
+test('stores the reviewed note in the same page version and rejects invalid or reused intent', async t => {
+  const f = await fixture(t); await f.connect();
+  const status = await f.api('/api/status');
+  assert.equal(status.body.versionComments, true);
+  for (const versionMessage of ['x'.repeat(256), 'line\nbreak', 12]) {
+    const invalid = await f.api('/api/publish', { ...updateRequest(), versionMessage });
+    assert.equal(invalid.status, 400);
+  }
+  assert.equal((await f.api('/api/publish', { ...createRequest(), versionMessage: 'Only on updates' })).status, 400);
+  assert.equal(f.state.writes, 0);
+  f.state.writeResponse = value => value;
+  const request = { ...updateRequest(), versionMessage: 'Уточнён Request' };
+  const result = await f.api('/api/publish', request);
+  assert.equal(result.status, 200);
+  assert.equal(result.body.version, 2);
+  assert.equal(f.pages.get('20').version.message, request.versionMessage);
+  assert.equal((await f.api('/api/publish', request)).status, 200);
+  assert.equal((await f.api('/api/publish', { ...request, versionMessage: 'Другой комментарий' })).status, 400);
+  assert.equal(f.state.writes, 1);
+});
+
+test('does not reconcile an uncertain update as the reviewed version when the note differs', async t => {
+  const f = await fixture(t); await f.connect();
+  f.state.mode = 'readback-fail';
+  const request = { ...updateRequest(), versionMessage: 'Изменён Request' };
+  assert.equal((await f.api('/api/publish', request)).body.code, 'OUTCOME_UNKNOWN');
+  f.state.mode = 'normal';
+  f.pages.get('20').version.message = 'Другой комментарий';
+  const replay = await f.api('/api/publish', { ...request, operationId: 'operation_000000000002', versionMessage: 'Другой комментарий' });
+  assert.equal(replay.status, 409);
+  assert.equal((await f.api('/api/operation?id=' + OPERATION)).body.state, 'unknown');
+  f.pages.get('20').version.message = request.versionMessage;
+  assert.equal((await f.api('/api/operation?id=' + OPERATION)).body.state, 'success');
+  assert.equal(f.state.writes, 1);
 });
 
 test('Confluence optimistic-lock conflict is a known failure with no automatic PUT retry', async t => {

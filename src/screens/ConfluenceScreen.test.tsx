@@ -193,6 +193,26 @@ describe('Confluence workbench screen', () => {
     expect(onPublished).toHaveBeenCalledWith(method.id, expect.objectContaining({ pageId: '126', lastPublishedVersion: 3 }));
   });
 
+  it('suggests a reviewable history comment before a regular update when the bridge supports it', async () => {
+    const client = mockClient();
+    vi.mocked(client.getStatus).mockResolvedValue({ connected: true, baseUrl, versionComments: true });
+    vi.mocked(client.getPage).mockResolvedValue({ ...page('126'), storage: '<h2>Запрос</h2><p>Old field description</p>' });
+    vi.mocked(client.prepare).mockResolvedValue({ storage: '<h2>Request</h2><p>New field description</p>' });
+    vi.mocked(client.publish).mockResolvedValue(page('126', 2));
+    const { user } = setup(client, changedMethod());
+    const prepare = await screen.findByRole('button', { name: 'Подготовить обновление' });
+    await waitFor(() => expect(prepare).toBeEnabled());
+    await user.click(prepare);
+    const comment = await screen.findByRole('textbox', { name: 'Комментарий к версии' });
+    expect(comment).toHaveValue('Изменены разделы: Request');
+    expect(client.publish).not.toHaveBeenCalled();
+    await user.clear(comment);
+    await user.type(comment, 'Уточнено описание поля');
+    await user.click(screen.getByRole('button', { name: 'Обновить страницу', exact: true }));
+    await screen.findByRole('heading', { name: 'Страница обновлена' });
+    expect(client.publish).toHaveBeenCalledWith(expect.objectContaining({ pageId: '126', expectedVersion: 1, versionMessage: 'Уточнено описание поля' }));
+  });
+
   it('checks the version again immediately before writing', async () => {
     const client = mockClient();
     vi.mocked(client.getPage).mockResolvedValueOnce(page('126', 1)).mockResolvedValueOnce(page('126', 1)).mockResolvedValue(page('126', 2));

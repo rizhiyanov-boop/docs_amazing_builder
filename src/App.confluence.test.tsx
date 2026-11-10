@@ -18,7 +18,7 @@ afterEach(() => { cleanup(); localStorage.clear(); vi.resetAllMocks(); vi.unstub
 describe('Confluence workspace integration', () => {
   it('imports and reopens a draft, then updates the source only after reviewing its current version', async () => {
     let page = { ...templateImportPage(), view: '<p>Current page</p>' };
-    bridge.getStatus.mockResolvedValue({ connected: true, baseUrl: importTestOrigin });
+    bridge.getStatus.mockResolvedValue({ connected: true, baseUrl: importTestOrigin, versionComments: true });
     bridge.getSpaces.mockResolvedValue({ items: [{ key: 'TEST', name: 'Test space' }], nextStart: null });
     bridge.getTree.mockResolvedValue({ items: [{ id: page.id, title: page.title }], nextStart: null });
     bridge.getPage.mockImplementation(async () => page);
@@ -65,6 +65,9 @@ describe('Confluence workspace integration', () => {
     await screen.findByRole('heading', { name: 'Первое обновление после импорта' });
     expect(bridge.prepare).toHaveBeenCalledWith(expect.stringContaining('|Цель|Сохранить запрос|'), expect.any(Array), importTestOrigin);
     expect(bridge.prepare.mock.calls[0][0]).not.toContain('|Внешний URL|/api/example|');
+    const versionNote = screen.getByRole('textbox', { name: 'Комментарий к версии' });
+    expect((versionNote as HTMLInputElement).value).toContain('Переход на шаблон DocBuilder');
+    fireEvent.change(versionNote, { target: { value: 'Переход на шаблон адаптера' } });
     const replace = screen.getByRole('button', { name: 'Заменить содержимое' });
     expect(replace).toBeDisabled();
     expect(bridge.publish).not.toHaveBeenCalled();
@@ -74,13 +77,15 @@ describe('Confluence workspace integration', () => {
     await screen.findByRole('heading', { name: 'Страницу изменили в Confluence' });
     const confirm = await screen.findByRole('checkbox', { name: /Я проверил версию 4/ });
     expect(confirm).not.toBeChecked();
+    expect(screen.getByRole('textbox', { name: 'Комментарий к версии' })).toHaveValue('Переход на шаблон адаптера');
     expect(bridge.publish).not.toHaveBeenCalled();
     await user.click(confirm);
     await user.click(screen.getByRole('button', { name: 'Заменить содержимое' }));
     await screen.findByRole('heading', { name: 'Страница обновлена' });
     expect(bridge.publish).toHaveBeenCalledOnce();
     expect(bridge.publish).toHaveBeenCalledWith(expect.objectContaining({
-      baseUrl: importTestOrigin, pageId: page.id, spaceKey: page.spaceKey, expectedVersion: 4, mode: 'update'
+      baseUrl: importTestOrigin, pageId: page.id, spaceKey: page.spaceKey, expectedVersion: 4, mode: 'update',
+      versionMessage: 'Переход на шаблон адаптера'
     }));
     await waitFor(() => expect(stored()[2].confluence).toMatchObject({ pageId: page.id, lastPublishedVersion: 5 }));
   }, 20_000);

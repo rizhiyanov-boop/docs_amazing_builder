@@ -30,6 +30,7 @@ export interface ConfluenceStatus {
   expiresAt?: string | null;
   user?: string;
   bridgeVersion?: string;
+  versionComments?: boolean;
   remembered?: boolean;
 }
 export interface ConfluenceDiagram {
@@ -51,6 +52,7 @@ export interface ConfluencePublishRequest {
   parentId?: string;
   pageId?: string;
   expectedVersion?: number;
+  versionMessage?: string;
   storage: string;
 }
 export interface ConfluenceOperation {

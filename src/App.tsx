@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import './tokens.css';
 import './tokens-workbench.css';
@@ -138,6 +138,7 @@ import { TableClassic, TableGallery, TableMiniCards } from './components/tables/
 import { HtmlExportScreen } from './screens/HtmlExportScreen';
 import { WikiScreen } from './screens/WikiScreen';
 import { ConfluenceScreen } from './screens/ConfluenceScreen';
+import { JiraStandaloneScreen } from './screens/JiraStandaloneScreen';
 import { normalizeConfluenceBinding } from './confluenceBinding';
 import type { ConfluenceBinding } from './confluenceTypes';
 import { useRemoteProjectAutosave } from './hooks/useRemoteProjectAutosave';
@@ -341,7 +342,7 @@ function getSectionWorkbenchMeta(section: DocSection): {
   return { emoji: '□', eyebrow: 'Текст' };
 }
 
-type TabKey = 'editor' | 'html' | 'wiki' | 'confluence';
+type TabKey = 'editor' | 'html' | 'wiki' | 'confluence' | 'jira';
 type WorkspaceScope = 'methods' | 'project-docs' | 'flows';
 type WikiReturnTarget = {
   tab: TabKey;
@@ -634,6 +635,7 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string>(() => initialWorkspace.methods[0]?.sections[0]?.id ?? createInitialSections()[0].id);
   const [tab, setTab] = useState<TabKey>('editor');
   const [confluenceBusy, setConfluenceBusy] = useState(false);
+  const [jiraBusy, setJiraBusy] = useState(false);
   const confluenceWorkspaceRef = useRef(0);
   const confluenceWorkspaceGeneration = confluenceWorkspaceRef.current;
   const [exportPreviewScope, setExportPreviewScope] = useState<'method' | 'project'>('method');
@@ -978,7 +980,7 @@ export default function App() {
     if (!current) return [];
     return validateProjectFlow(current, methods);
   }, [flows, activeFlowId, methods]);
-  const canRenderWorkspace = workspaceScope !== 'methods' || sections.length > 0;
+  const canRenderWorkspace = tab === 'jira' || workspaceScope !== 'methods' || sections.length > 0;
 
   useEffect(() => {
     if (!serverProjectId) return;
@@ -7167,6 +7169,28 @@ export default function App() {
     if (isCompactLayout) setIsSidebarHidden(true);
   }, [isCompactLayout]);
 
+  const jiraReturnTargetRef = useRef<{ tab: TabKey; workspaceScope: WorkspaceScope; isSidebarHidden: boolean } | null>(null);
+
+  const handleOpenJira = useCallback(() => {
+    if (tab !== 'jira') {
+      jiraReturnTargetRef.current = { tab, workspaceScope, isSidebarHidden };
+    }
+    setTab('jira');
+    if (isCompactLayout) setIsSidebarHidden(true);
+  }, [isCompactLayout, isSidebarHidden, tab, workspaceScope]);
+
+  const handleReturnFromJira = useCallback(() => {
+    const target = jiraReturnTargetRef.current;
+    if (target) {
+      setWorkspaceScope(target.workspaceScope);
+      setTab(target.tab);
+      setIsSidebarHidden(target.isSidebarHidden);
+      jiraReturnTargetRef.current = null;
+      return;
+    }
+    setTab('editor');
+  }, []);
+
   const handleConfluencePublished = useCallback((methodId: string, binding: ConfluenceBinding) => {
     const normalized = normalizeConfluenceBinding(binding);
     if (!normalized) return;
@@ -8266,7 +8290,7 @@ export default function App() {
 
       <div className="wb-shell-content">
         <WorkbenchTopbar
-          disabled={confluenceBusy}
+          disabled={confluenceBusy || jiraBusy}
           topbarRef={topbarRef}
           importInputRef={importInputRef}
           methodName={activeMethod?.name ?? DEFAULT_METHOD_NAME}
@@ -8291,6 +8315,7 @@ export default function App() {
           onExportWiki={handleOpenMethodWikiPreview}
           onOpenConfluence={handleOpenConfluence}
           confluenceBound={Boolean(activeMethod?.confluence)}
+          onOpenJira={handleOpenJira}
           onExportFullProjectHtml={handleOpenProjectHtmlPreview}
           onExportFullProjectWiki={handleOpenProjectWikiPreview}
           onExportJson={exportProjectJson}
@@ -8682,6 +8707,13 @@ export default function App() {
                     if (confluenceWorkspaceRef.current === confluenceWorkspaceGeneration) handleJiraLinked(methodId, issueUrl);
                   }}
                   onBack={() => setTab('editor')}
+                />
+              )}
+
+              {tab === 'jira' && (
+                <JiraStandaloneScreen
+                  onBack={handleReturnFromJira}
+                  onBusyChange={setJiraBusy}
                 />
               )}
 

@@ -119,6 +119,15 @@ describe('WorkbenchTopbar', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Сохранено');
   });
 
+  it('opens Jira standalone subpage from topbar action', async () => {
+    const onOpenJira = vi.fn();
+    renderTopbar({ onOpenJira });
+    const jiraBtn = screen.getByRole('button', { name: /Jira/i });
+    expect(jiraBtn).toBeInTheDocument();
+    await userEvent.setup().click(jiraBtn);
+    expect(onOpenJira).toHaveBeenCalledOnce();
+  });
+
   it('keeps profile auth controls without accent controls', async () => {
     const user = userEvent.setup();
     renderTopbar();

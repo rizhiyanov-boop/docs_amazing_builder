@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Jira Standalone Screen (Variant B) - Visual Review</title>
+  <link rel="stylesheet" href="../../src/tokens.css">
+  <link rel="stylesheet" href="../../src/tokens-workbench.css">
+  <link rel="stylesheet" href="../../src/App.css">
+  <link rel="stylesheet" href="../../src/screens/ConfluenceScreen.css">
+  <link rel="stylesheet" href="../../src/components/workbench/workbench-shell.css">
+  <style>
+    body {
+      background: var(--wb-bg-surface, #f8f6f0);
+      color: var(--wb-text, #2c2523);
+      font-family: var(--wb-font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+      padding: var(--space-6, 24px);
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .preview-section {
+      background: var(--wb-bg-surface, #fff);
+      border: 1px solid var(--wb-border, #e5e0d8);
+      border-radius: var(--wb-radius-lg, 12px);
+      padding: var(--space-6, 24px);
+      margin-bottom: var(--space-8, 32px);
+      box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+    }
+
+    .preview-header {
+      border-bottom: 1px solid var(--wb-border, #e5e0d8);
+      padding-bottom: 14px;
+      margin-bottom: 20px;
+    }
+    .preview-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--wb-text, #2c2523);
+      margin: 0 0 4px;
+    }
+    .preview-desc {
+      font-size: 13px;
+      color: var(--wb-text-muted, #7c7267);
+      margin: 0;
+    }
+
+    /* Mock Topbar Container */
+    .mock-topbar-wrapper {
+      background: var(--wb-bg-surface, #f8f6f0);
+      border: 1px solid var(--wb-border, #e5e0d8);
+      border-radius: var(--wb-radius, 8px);
+      padding: 6px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+
+    .mock-topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .mock-topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Strict alignment helper for card */
+    .cf-jira-linked-hub {
+      margin-top: 16px !important;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- =============================================================== -->
+  <!-- 1. TOPBAR INTEGRATION (VARIANT B) -->
+  <!-- =============================================================== -->
+  <section class="preview-section">
+    <div class="preview-header">
+      <h2 class="preview-title">1. Верхняя панель (Topbar) — Вариант Б</h2>
+      <p class="preview-desc">Выделенные независимые кнопки для <code>Confluence</code> и <code>Jira</code>. Кнопка Jira открывает самостоятельную статичную подстраницу создания задач без привязки к методам.</p>
+    </div>
+
+    <div class="mock-topbar-wrapper">
+      <div class="mock-topbar-left">
+        <strong style="font-size: 13px; font-weight: 600;">Account Domain Routing</strong>
+        <span style="font-size: 11px; font-family: var(--wb-font-mono); background: #eee; padding: 2px 6px; border-radius: 4px;">GET /api/organization/account/info</span>
+      </div>
+      <div class="mock-topbar-actions">
+        <button type="button" class="wb-topbar-action" style="cursor: pointer;">
+          <svg class="wb-shell-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4"/></svg>
+          <span class="wb-topbar-action-label">Экспорт</span>
+        </button>
+
+        <!-- Confluence Button -->
+        <button type="button" class="wb-topbar-action wb-topbar-publish is-connected" style="cursor: pointer;">
+          <svg class="wb-shell-icon" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" stroke="none"><path d="M3 17c2-4 4-6 7-6 3 0 5 3 11 6l-3 5c-5-3-7-6-9-6-1 0-2 1-3 3zM21 7c-2 4-4 6-7 6-3 0-5-3-11-6l3-5c5 3 7 6 9 6 1 0 2-1 3-3z"/></svg>
+          <span class="wb-topbar-action-label">Confluence</span>
+          <span class="wb-connection-dot" aria-hidden="true"></span>
+        </button>
+
+        <!-- Dedicated Jira Button (Variant B) -->
+        <button type="button" class="wb-topbar-action wb-topbar-jira is-connected" style="cursor: pointer; background: color-mix(in srgb, var(--wb-accent, #2563eb) 12%, transparent); border-color: var(--wb-accent, #2563eb); font-weight: 600;">
+          <svg class="wb-shell-icon" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" stroke="none"><path d="M11.53 2c0 2.4 1.97 4.35 4.35 4.35h1.78v1.7c0 2.4 1.94 4.34 4.34 4.35V2.02L11.53 2zM6.77 6.8a4.36 4.36 0 0 0 4.34 4.34h1.8v1.72a4.36 4.36 0 0 0 4.34 4.34V6.8H6.77zM2 11.6a4.35 4.35 0 0 0 4.35 4.35h1.78v1.7c.01 2.4 1.95 4.34 4.35 4.35v-10.4H2z"/></svg>
+          <span class="wb-topbar-action-label">Jira</span>
+          <span class="wb-connection-dot" aria-hidden="true"></span>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- =============================================================== -->
+  <!-- 2. STANDALONE JIRA SCREEN (INITIAL / PREPARATION STATE) -->
+  <!-- =============================================================== -->
+  <section class="preview-section">
+    <div class="preview-header">
+      <h2 class="preview-title">2. Статичная подстраница Jira · Заведение задачи (Произвольная задача)</h2>
+      <p class="preview-desc">Полностью очищенный интерфейс: НЕТ переключателей между методами, НЕТ статуса связи с методом, НЕТ лишних кнопок Confluence.</p>
+    </div>
+
+    <div class="cf-screen cf-jira-standalone-screen">
+      <!-- Screen Header with Back Button and Jira Connection Status -->
+      <header class="cf-header">
+        <div>
+          <button type="button" class="cf-back" aria-label="Назад в редактор" title="Назад в редактор">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M19 12H5m7-7-7 7 7 7" />
+            </svg>
+          </button>
+          <h2>Jira · Произвольная задача</h2>
+        </div>
+        <div class="cf-connection">
+          <span class="cf-status-badge is-connected" role="status" aria-label="Jira подключена">
+            <span class="cf-status-dot" aria-hidden="true"></span>
+            <span class="cf-status-label">Jira</span>
+          </span>
+          <span class="cf-jira-project-name" style="font-size: var(--font-size-xs); color: var(--wb-text-muted);">
+            Department of Integration (DI)
+          </span>
+          <button type="button" class="wb-button wb-button-ghost wb-button-size-sm cf-connection-refresh-btn" title="Проверить подключение">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" /><path d="M21 21v-5h-5" /></svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- JiraPanel in Standalone Freeform Mode -->
+      <section class="cf-jira-panel">
+        <div class="cf-jira-header-bar">
+          <div class="cf-jira-header-left">
+            <a class="cf-jira-project-link is-connected" title="Проект Jira: Department of Integration (DI)">
+              <span class="cf-status-dot" aria-hidden="true"></span>
+              <span class="cf-jira-project-name">Department of Integration</span>
+              <span class="cf-jira-project-key">DI</span>
+            </a>
+            <a class="cf-jira-change-link" href="#">
+              <svg class="wb-shell-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m16 3 5 5-12 12-6 1 1-6zM14 5l5 5"/></svg>
+              <span>Изменить проект</span>
+            </a>
+          </div>
+          <!-- Notice: NO method switcher buttons on the right! -->
+        </div>
+
+        <!-- Clean Freeform Input without awkward method references -->
+        <label class="cf-field">
+          Что нужно сделать
+          <textarea rows="5" placeholder="Опишите задачу своими словами…">Реализовать асинхронную выгрузку отчётов по расчётам в формате CSV с сохранением в S3 и уведомлением через WebSocket.</textarea>
+          <span class="cf-muted">ИИ подготовит заголовок, описание на трёх языках и рекомендации по эпикам на основе вашего текста.</span>
+        </label>
+
+        <div class="cf-jira-toolbar">
+          <label class="cf-field">
+            Тип задачи
+            <select>
+              <option value="story" selected>User Story</option>
+              <option value="task">Задача · тестирование</option>
+            </select>
+          </label>
+          <button type="button" class="wb-button wb-button-primary">Подготовить заново</button>
+        </div>
+
+        <div class="cf-grid">
+          <!-- Left Column -->
+          <section>
+            <h3>Назначение задачи</h3>
+            <div class="cf-field">
+              <span>Привязать к эпику · необязательно</span>
+              <div class="cf-jira-epic-selection-bar" style="display: flex; gap: 8px; align-items: center;">
+                <button type="button" class="cf-jira-epic-choice-btn is-active" style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; font-size: 12px; border: 1px solid var(--wb-border); background: var(--wb-bg-surface);">
+                  <span>✓</span> 📁 DI-1083 Data Sync
+                </button>
+                <button type="button" class="cf-jira-epic-spotlight-btn" style="padding: 4px 10px; border-radius: 6px; font-size: 12px; border: 1px solid var(--wb-border); background: var(--wb-bg-surface);">
+                  🔍 Все эпики (12) ▾
+                </button>
+              </div>
+            </div>
+
+            <div class="cf-field">
+              <span>Теги · основной обязателен</span>
+              <div style="display: flex; gap: 6px; align-items: center;">
+                <span class="cf-jira-hub-chip" style="background: var(--wb-accent-subtle); color: var(--wb-accent); font-weight: 600;">+ reports ✕</span>
+                <span class="cf-jira-hub-chip">+ async ✕</span>
+              </div>
+            </div>
+
+            <div class="cf-field">
+              <span>Приоритет задачи</span>
+              <!-- Modern Compact 30px Priority Pills Group -->
+              <div class="cf-jira-priority-pill-group" role="radiogroup" aria-label="Приоритет задачи">
+                <button type="button" role="radio" aria-checked="false" class="cf-jira-priority-pill tier-low">
+                  <span class="cf-jira-pill-icon">🌱</span>
+                  <span class="cf-jira-pill-label">Низкий</span>
+                </button>
+                <button type="button" role="radio" aria-checked="true" class="cf-jira-priority-pill tier-medium is-selected">
+                  <span class="cf-jira-pill-icon">⚡</span>
+                  <span class="cf-jira-pill-label">Средний</span>
+                </button>
+                <button type="button" role="radio" aria-checked="false" class="cf-jira-priority-pill tier-high">
+                  <span class="cf-jira-pill-icon">🔥</span>
+                  <span class="cf-jira-pill-label">Высокий</span>
+                </button>
+                <button type="button" role="radio" aria-checked="false" class="cf-jira-priority-pill tier-critical">
+                  <span class="cf-jira-pill-icon">🚨</span>
+                  <span class="cf-jira-pill-label">Критический</span>
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <!-- Right Column -->
+          <section>
+            <h3>Данные для Jira</h3>
+            <label class="cf-field">
+              Название · английский, глагол действия
+              <input type="text" value="[Reporting] Implement asynchronous CSV export with S3 storage" style="width: 100%; box-sizing: border-box; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--wb-border);">
+            </label>
+
+            <div class="cf-tabs" style="margin-top: 12px; margin-bottom: 8px;">
+              <button type="button" class="cf-tab is-active" aria-pressed="true" style="padding: 4px 10px; font-size: 12px;">Русский •</button>
+              <button type="button" class="cf-tab" aria-pressed="false" style="padding: 4px 10px; font-size: 12px;">English •</button>
+              <button type="button" class="cf-tab" aria-pressed="false" style="padding: 4px 10px; font-size: 12px;">O'zbek •</button>
+            </div>
+
+            <label class="cf-field">
+              Описание · русский
+              <textarea rows="5" style="width: 100%; box-sizing: border-box; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--wb-border);">h3. Цель
+Реализация сервиса фоновой выгрузки отчётов расчётов в CSV.
+
+h3. Бизнес-логика
+1. При запросе формировать задачу в очереди.
+2. Загружать готовый файл в S3 хранилище.
+3. Отправлять событие готовности через WebSocket.</textarea>
+            </label>
+          </section>
+        </div>
+
+        <div style="margin-top: 20px; display: flex; justify-content: flex-end;">
+          <button type="button" class="wb-button wb-button-primary" style="padding: 8px 20px; font-size: 13px; font-weight: 600; background: var(--wb-accent, #2563eb); color: #fff; border: none; border-radius: 6px; cursor: pointer;">
+            Создать задачу
+          </button>
+        </div>
+      </section>
+    </div>
+  </section>
+
+  <!-- =============================================================== -->
+  <!-- 3. STANDALONE JIRA SCREEN (CREATED / COMPLETED STATE) -->
+  <!-- =============================================================== -->
+  <section class="preview-section">
+    <div class="preview-header">
+      <h2 class="preview-title">3. Созданная задача — Компактная карточка без лишних привязок</h2>
+      <p class="preview-desc">После создания задачи отображается чистая карточка: ключ, название, тип, приоритет, эпик, копирование и ссылка на задачу. Справа сверху — кнопка «+ Завести ещё задачу» для перехода к новой произвольной задаче.</p>
+    </div>
+
+    <div class="cf-screen cf-jira-standalone-screen">
+      <!-- Screen Header -->
+      <header class="cf-header">
+        <div>
+          <button type="button" class="cf-back" aria-label="Назад в редактор" title="Назад в редактор">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M19 12H5m7-7-7 7 7 7" />
+            </svg>
+          </button>
+          <h2>Jira · Произвольная задача</h2>
+        </div>
+        <div class="cf-connection">
+          <span class="cf-status-badge is-connected">
+            <span class="cf-status-dot" aria-hidden="true"></span>
+            <span class="cf-status-label">Jira</span>
+          </span>
+          <span class="cf-jira-project-name" style="font-size: var(--font-size-xs); color: var(--wb-text-muted);">
+            Department of Integration (DI)
+          </span>
+        </div>
+      </header>
+
+      <!-- Panel Header Bar with Next Task Button -->
+      <div class="cf-jira-header-bar">
+        <div class="cf-jira-header-left">
+          <a class="cf-jira-project-link is-connected">
+            <span class="cf-status-dot" aria-hidden="true"></span>
+            <span class="cf-jira-project-name">Department of Integration</span>
+            <span class="cf-jira-project-key">DI</span>
+          </a>
+          <a class="cf-jira-change-link" href="#">
+            <svg class="wb-shell-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m16 3 5 5-12 12-6 1 1-6zM14 5l5 5"/></svg>
+            <span>Изменить проект</span>
+          </a>
+        </div>
+        <!-- Primary Action for Standalone Flow -->
+        <div class="cf-jira-header-right">
+          <button type="button" class="wb-button wb-button-secondary wb-button-size-sm" style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; font-weight: 600; cursor: pointer; border-radius: 6px; border: 1px solid var(--wb-border); background: var(--wb-bg-soft);">
+            + Завести ещё задачу
+          </button>
+        </div>
+      </div>
+
+      <!-- Single-Line Clean Linked Card (Zero Method Clutter) -->
+      <div class="cf-jira-linked-hub">
+        <div class="cf-jira-hub-main">
+          <a href="https://jira.example/browse/DI-22501" target="_blank" rel="noopener noreferrer" class="cf-jira-hub-key-link" title="Открыть DI-22501 в Jira">
+            <span>DI-22501</span>
+          </a>
+
+          <span class="cf-jira-hub-title-text" title="[Reporting] Implement asynchronous CSV export with S3 storage" role="heading" aria-level="3">
+            [Reporting] Implement asynchronous CSV export with S3 storage
+          </span>
+
+          <div class="cf-jira-hub-meta-chips">
+            <span class="cf-jira-hub-chip">User Story</span>
+            <span class="cf-jira-hub-chip priority tier-medium">⚡ Средний</span>
+            <span class="cf-jira-hub-chip epic" title="Эпик: Data Sync">📁 DI-1083</span>
+          </div>
+        </div>
+
+        <div class="cf-jira-hub-actions">
+          <button type="button" class="cf-jira-hub-icon-action" title="Скопировать ссылку на задачу" aria-label="Скопировать ссылку на задачу">
+            <svg class="wb-shell-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+          <a href="https://jira.example/browse/DI-22501" target="_blank" rel="noopener noreferrer" class="cf-jira-hub-icon-action" title="Открыть DI-22501 в Jira" aria-label="Открыть DI-22501 в Jira">
+            <svg class="wb-shell-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 9v4H3V4h4" />
+              <path d="M9.5 2.5H13.5V6.5" />
+              <path d="M6.5 9.5L13.5 2.5" />
+            </svg>
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</body>
+</html>

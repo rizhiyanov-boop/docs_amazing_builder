@@ -2,6 +2,7 @@ import React, { useEffect, useId, useRef, useState, type KeyboardEvent, type Rea
 import type { RequestMethod } from '../../types';
 import { HttpChip, WBButton } from '../primitives/WorkbenchPrimitives';
 import { confluenceClient } from '../../confluenceClient';
+import { jiraClient } from '../../jiraClient';
 import { WORKBENCH_FEATURES } from '../../workbenchFeatures';
 import { WorkbenchIcon, type WorkbenchIconName } from './WorkbenchIcon';
 
@@ -27,6 +28,7 @@ type WorkbenchTopbarProps = {
   onExportWiki: () => void;
   onOpenConfluence?: () => void;
   confluenceBound?: boolean;
+  onOpenJira?: () => void;
   onExportFullProjectHtml: () => void;
   onExportFullProjectWiki: () => void;
   onExportJson: () => void;
@@ -63,12 +65,13 @@ function IconButton({ label, icon, onClick, disabled, expanded, controls }: {
 export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
   disabled, topbarRef, importInputRef, methodName, methodPath, methodHttpMethod, authUserLogin, isLogoutBusy,
   canUndo, canRedo, autosaveState, autosaveAt, onOpenProjectImport, onImportProjectJson, onExportHtml,
-  onExportWiki, onOpenConfluence, confluenceBound, onExportFullProjectHtml, onExportFullProjectWiki,
+  onExportWiki, onOpenConfluence, confluenceBound, onOpenJira, onExportFullProjectHtml, onExportFullProjectWiki,
   onExportJson, onToggleSidebar, onRenameMethod, onDeleteMethod, canDeleteMethod, onUndo, onRedo,
   onLogout, onOpenLogin, onOpenRegister, onOpenSearch, isSidebarHidden = false
 }: WorkbenchTopbarProps): ReactNode {
   const [openMenu, setOpenMenu] = useState<'export' | 'more' | 'profile' | null>(null);
   const [confluenceConnected, setConfluenceConnected] = useState(false);
+  const [jiraConnected, setJiraConnected] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
   const overflowRef = useRef<HTMLDivElement>(null);
   const exportRef = useRef<HTMLDivElement>(null);
@@ -100,6 +103,22 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
     const timer = window.setInterval(() => void check(), 5000);
     return () => { active = false; window.clearInterval(timer); };
   }, [onOpenConfluence]);
+
+  useEffect(() => {
+    if (!onOpenJira) return;
+    let active = true;
+    let pending = false;
+    const check = async () => {
+      if (pending) return;
+      pending = true;
+      try { const status = await jiraClient.status(); if (active) setJiraConnected(status.connected); }
+      catch { if (active) setJiraConnected(false); }
+      finally { pending = false; }
+    };
+    void check();
+    const timer = window.setInterval(() => void check(), 5000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [onOpenJira]);
 
   useEffect(() => {
     if (!openMenu) return;
@@ -137,7 +156,7 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
       : autosaveState === 'saved' ? 'Сохранено' : 'Автосохранение';
   const autosaveTitle = autosaveState === 'error' ? 'Не удалось сохранить изменения в этом браузере'
     : `${autosaveLabel} в этом браузере${autosaveAt ? ` · ${autosaveAt}` : ''}`;
-  const confluenceLabel = `Confluence & Jira${confluenceConnected ? ' · подключено' : ''}${confluenceBound ? ' · страница привязана' : ''}`;
+  const confluenceLabel = `Confluence${confluenceConnected ? ' · подключено' : ''}${confluenceBound ? ' · страница привязана' : ''}`;
   const runAction = (action: () => void) => { setOpenMenu(null); action(); };
   const toggleMenu = (menu: NonNullable<typeof openMenu>) => setOpenMenu((current) => current === menu ? null : menu);
 
@@ -181,8 +200,22 @@ export const WorkbenchTopbar = React.memo(function WorkbenchTopbar({
 
         {onOpenConfluence && (
           <button type="button" className={`wb-topbar-action wb-topbar-publish${confluenceConnected ? ' is-connected' : ''}`} aria-label={confluenceLabel} title={confluenceLabel} onClick={onOpenConfluence}>
-            <WorkbenchIcon name="confluence" /><span className="wb-topbar-action-label">Confluence & Jira</span>
+            <WorkbenchIcon name="confluence" /><span className="wb-topbar-action-label">Confluence</span>
             {confluenceConnected && <span className="wb-connection-dot" aria-hidden="true" />}
+          </button>
+        )}
+
+        {onOpenJira && (
+          <button
+            type="button"
+            className={`wb-topbar-action wb-topbar-jira${jiraConnected ? ' is-connected' : ''}`}
+            aria-label={`Jira: создание задач${jiraConnected ? ' · подключено' : ''}`}
+            title={`Jira: создание задач${jiraConnected ? ' · подключено' : ''}`}
+            onClick={onOpenJira}
+          >
+            <WorkbenchIcon name="jira" />
+            <span className="wb-topbar-action-label">Jira</span>
+            {jiraConnected && <span className="wb-connection-dot" aria-hidden="true" />}
           </button>
         )}
 

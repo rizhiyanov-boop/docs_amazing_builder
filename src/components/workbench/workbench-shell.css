@@ -118,11 +118,13 @@
 @media (min-width: 781px) {
   .wb-app-root.wb-sidebar-hidden .wb-sidebar { display: none; }
 }
-.wb-app-root .wb-topbar-publish.is-connected {
+.wb-app-root .wb-topbar-publish.is-connected,
+.wb-app-root .wb-topbar-jira.is-connected {
   color: var(--wb-text-soft); background: transparent;
   border-color: var(--wb-border);
 }
-.wb-app-root .wb-topbar-publish.is-connected:hover { background: var(--wb-bg-hover); color: var(--wb-text); }
+.wb-app-root .wb-topbar-publish.is-connected:hover,
+.wb-app-root .wb-topbar-jira.is-connected:hover { background: var(--wb-bg-hover); color: var(--wb-text); }
 .wb-connection-dot { width: 5px; height: 5px; border-radius: var(--radius-pill); background: var(--success); }
 .wb-app-root .wb-topbar-profile {
   width: var(--wb-shell-control-height); height: var(--wb-shell-control-height); padding: 0;

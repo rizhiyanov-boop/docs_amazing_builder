@@ -3,6 +3,8 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import type { ConfluencePage } from './confluenceTypes';
+import type { MethodDocument } from './types';
+import { importTestOrigin, templateImportPage } from './test/confluenceImportFixtures';
 
 const bridge = vi.hoisted(() => ({
   getStatus: vi.fn(), getSpaces: vi.fn(), getTree: vi.fn(), getPage: vi.fn(),
@@ -14,6 +16,47 @@ vi.mock('./confluenceClient', async importOriginal => ({
 afterEach(() => { cleanup(); localStorage.clear(); vi.resetAllMocks(); vi.unstubAllGlobals(); });
 
 describe('Confluence workspace integration', () => {
+  it('previews, cancels, saves and reopens a Confluence version without creating a publication binding', async () => {
+    let page = templateImportPage();
+    bridge.getStatus.mockResolvedValue({ connected: true, baseUrl: importTestOrigin });
+    bridge.getSpaces.mockResolvedValue({ items: [{ key: 'TEST', name: 'Test space' }], nextStart: null });
+    bridge.getTree.mockResolvedValue({ items: [{ id: page.id, title: page.title }], nextStart: null });
+    bridge.getPage.mockImplementation(async () => page);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({}) }));
+    localStorage.setItem('doc-builder-onboarding-entry-suppressed-v1', '1');
+    localStorage.setItem('doc-builder-project-v2', JSON.stringify({ version: 3, activeMethodId: 'existing', methods: [{
+      id: 'existing', name: 'Existing method', updatedAt: '2026-10-02T10:00:00Z',
+      sections: [{ id: 'goal', kind: 'text', title: 'Цель', enabled: true, value: 'Original' }]
+    }], groups: [] }));
+    const stored = () => (JSON.parse(localStorage.getItem('doc-builder-project-v2') ?? '{}') as { methods: MethodDocument[] }).methods;
+    render(<App />);
+    const user = userEvent.setup();
+    async function prepare() {
+      await user.click(await screen.findByRole('button', { name: /^Confluence & Jira\b/ }));
+      await user.click(await screen.findByRole('button', { name: 'Страницы', exact: true }));
+      await user.click(await screen.findByRole('button', { name: page.title, exact: true }));
+      await user.click(await screen.findByRole('button', { name: 'Подготовить импорт' }));
+    }
+    await prepare();
+    await user.click(screen.getByRole('button', { name: 'Отмена', exact: true }));
+    expect(stored()).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: 'Подготовить импорт' }));
+    await user.click(screen.getByRole('button', { name: 'Добавить метод' }));
+    await waitFor(() => expect(stored()).toHaveLength(2));
+    expect(stored()[1]).toMatchObject({ status: 'draft', confluenceImport: { pageId: page.id, version: 2 } });
+    expect(stored()[1].confluence).toBeUndefined();
+    expect(document.querySelector('img[src*="plantuml.com"]')).not.toBeInTheDocument();
+    await prepare();
+    expect(screen.queryByRole('button', { name: 'Добавить метод' })).not.toBeInTheDocument();
+    expect(stored()).toHaveLength(2);
+    page = { ...page, version: 3 };
+    await prepare();
+    await user.click(screen.getByRole('button', { name: 'Добавить метод' }));
+    await waitFor(() => expect(stored()).toHaveLength(3));
+    expect(stored().slice(1).map(method => method.confluenceImport?.version)).toEqual([2, 3]);
+    expect(bridge.publish).not.toHaveBeenCalled();
+  }, 20_000);
+
   it('blocks history hotkeys during a write and persists only the confirmed binding', async () => {
     const parent: ConfluencePage = { id: '123', title: 'Remote tree root', spaceKey: 'TEST', version: 1,
       url: 'https://confluence.example/pages/viewpage.action?pageId=123', ancestors: [], storage: '<p>Parent</p>' };

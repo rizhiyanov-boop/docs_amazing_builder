@@ -1,4 +1,4 @@
-import type { ConfluenceBinding } from './confluenceTypes';
+import type { ConfluenceBinding, ConfluenceImportSource } from './confluenceTypes';
 
 export type ParseFormat = 'json' | 'curl' | 'xml';
 export type RequestColumnKey = 'field' | 'type' | 'required' | 'validations' | 'clientField' | 'description' | 'maskInLogs' | 'example';
@@ -18,6 +18,7 @@ export interface DiagramItem {
   engine: DiagramEngine;
   code: string;
   description?: string;
+  sourceOnly?: boolean;
 }
 
 export interface ParsedRow {
@@ -133,6 +134,7 @@ export interface MethodDocument {
   externalUrl?: string;
   status?: MethodStatus;
   confluence?: ConfluenceBinding;
+  confluenceImport?: ConfluenceImportSource;
 }
 
 export interface MethodGroupLink {

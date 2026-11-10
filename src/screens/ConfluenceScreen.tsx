@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { WBButton, WBInput } from '../components/primitives/WorkbenchPrimitives';
 import { ConfluenceSpacePicker } from '../components/ConfluenceSpacePicker';
 import { ConfluencePagePreview } from '../components/ConfluencePagePreview';
+import { ConfluencePageImport } from '../components/ConfluencePageImport';
 import { JiraTaskWorkflow } from '../components/JiraTaskWorkflow';
 import { jiraMethodContext } from '../jiraMethodContext';
 import { isPersonalSpace, loadConfluenceSpaces, rememberSpace } from '../confluenceSpaces';
@@ -11,7 +12,7 @@ import {
 } from '../confluenceClient';
 import { renderConfluenceDocument } from '../confluenceDocument';
 import type {
-  ConfluenceBinding, ConfluenceCollection, ConfluenceDocument, ConfluencePage,
+  ConfluenceBinding, ConfluenceCollection, ConfluenceDocument, ConfluenceImportSource, ConfluencePage,
   ConfluencePageSummary, ConfluencePublishRequest, ConfluenceSpace, ConfluenceStatus
 } from '../confluenceTypes';
 import type { MethodDocument } from '../types';
@@ -21,6 +22,8 @@ export type ConfluenceScreenProps = {
   method: MethodDocument;
   onPublished: (methodId: string, binding: ConfluenceBinding) => void;
   onJiraLinked?: (methodId: string, issueUrl: string) => void;
+  onImportMethod?: (method: MethodDocument) => void;
+  onOpenImported?: (source: ConfluenceImportSource) => boolean;
   onBack: () => void;
   onBusyChange?: (busy: boolean) => void;
   client?: ConfluenceClient;
@@ -166,7 +169,7 @@ function PageTree({ spaceKey, baseUrl, client, selectedId, revealPage, onSelect 
   return <div ref={treeElement} className="cf-tree" aria-label="Дерево доступных страниц Confluence">{renderLevel()}</div>;
 }
 
-export function ConfluenceScreen({ method, onPublished, onJiraLinked, onBack, onBusyChange, client = confluenceClient }: ConfluenceScreenProps): ReactNode {
+export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMethod, onOpenImported, onBack, onBusyChange, client = confluenceClient }: ConfluenceScreenProps): ReactNode {
   const binding = method.confluence;
   const rememberedSpaces = navigationState(client).spaces;
   const bindingBaseUrl = binding?.baseUrl;
@@ -553,7 +556,14 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onBack, on
     {error && <p className="cf-notice cf-error" role="alert">{error}</p>}
     {!connected && !connectionBusy && tab !== 'jira' && <div className="cf-notice"><h3>Подключите Confluence</h3><p>Токен вводится в локальном приложении и передаётся только вашему Confluence. Проект сохраняется в DocBuilder как прежде.</p><p><a href="/docbuilder-confluence-local.zip" download>Скачать локальное приложение</a> · Распакуйте и запустите start-confluence.cmd.</p></div>}
     {connected && tab === 'browse' && <div className="cf-grid">{treeControls()}<section><h3>Просмотр страницы</h3>
-      {pageBusy ? <p role="status">Чтение страницы…</p> : browsePage ? <><p className="cf-destination">{pagePath(browsePage)}</p><p className="cf-muted">Версия {browsePage.version}</p><a href={confluencePageUrl(browsePage.id, baseUrl)} target="_blank" rel="noopener noreferrer">Открыть в Confluence</a><pre className="cf-content">{confluenceContentText(browsePage.storage ?? '')}</pre><p className="cf-muted">Показан текст страницы. Диаграммы и макросы просматриваются в Confluence. Обратный импорт в редактируемый метод пока не реализован.</p></> : <p className="cf-muted">Выберите страницу в дереве. Просмотр не изменяет проект и место публикации.</p>}
+      {pageBusy ? <p role="status">Чтение страницы…</p> : browsePage ? <>
+        <p className="cf-destination">{pagePath(browsePage)}</p>
+        <p className="cf-muted">Версия {browsePage.version}</p>
+        <a href={confluencePageUrl(browsePage.id, baseUrl)} target="_blank" rel="noopener noreferrer">Открыть в Confluence</a>
+        {onImportMethod && <ConfluencePageImport key={baseUrl + '/' + browsePage.id + '/' + browsePage.version}
+          page={browsePage} baseUrl={baseUrl} onOpenExisting={onOpenImported} onImport={onImportMethod} />}
+        <pre className="cf-content">{confluenceContentText(browsePage.storage ?? '')}</pre>
+      </> : <p className="cf-muted">Выберите страницу в дереве. Просмотр не изменяет проект и место публикации.</p>}
     </section></div>}
     {tab === 'publish' && <>
       <p className="cf-publication-state">{result ? newerChanges ? 'Опубликован снимок документа · есть более новые изменения' : 'Опубликовано в Confluence' : binding ? binding.publishedFingerprint !== document.fingerprint || updateTitle !== undefined && boundPage && updateTitle.trim() !== boundPage.title ? 'Есть изменения в DocBuilder' : 'Последняя публикация соответствует документу' : 'Метод ещё не опубликован'}</p>

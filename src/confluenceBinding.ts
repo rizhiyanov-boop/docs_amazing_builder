@@ -1,4 +1,21 @@
-import type { ConfluenceBinding } from './confluenceTypes';
+import type { ConfluenceBinding, ConfluenceImportSource } from './confluenceTypes';
+
+export function normalizeConfluenceImportSource(value: unknown): ConfluenceImportSource | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+  const { baseUrl, pageId, version } = value as Record<string, unknown>;
+  if (typeof baseUrl !== 'string' || typeof pageId !== 'string' || !/^[1-9]\d{0,19}$/.test(pageId)
+    || typeof version !== 'number' || !Number.isSafeInteger(version) || version < 1) return;
+  try {
+    const url = new URL(baseUrl);
+    if (url.protocol === 'https:' && !url.username && !url.password && url.pathname === '/' && !url.search && !url.hash) {
+      return { baseUrl: url.origin, pageId, version };
+    }
+  } catch { return undefined; }
+}
+
+export function sameConfluenceImportSource(left: ConfluenceImportSource | undefined, right: ConfluenceImportSource) {
+  return left?.baseUrl === right.baseUrl && left.pageId === right.pageId && left.version === right.version;
+}
 
 /** Persist only publication metadata; never retain remote content or credentials. */
 export function normalizeConfluenceBinding(value: unknown): ConfluenceBinding | undefined {

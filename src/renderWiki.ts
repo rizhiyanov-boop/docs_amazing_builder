@@ -520,7 +520,7 @@ function renderDiagramSection(section: DiagramSection, options: WikiRenderOption
       lines.push(`h3. ${escapeWiki(title)}`);
       if (options.renderDiagram) {
         lines.push(...options.renderDiagram(diagram));
-      } else {
+      } else if (!diagram.sourceOnly) {
         const imageUrl = getDiagramImageUrl(resolveDiagramEngine(diagram.code, diagram.engine), diagram.code, 'jpeg');
         lines.push(`!${escapeWiki(imageUrl)}!`);
       }
@@ -549,7 +549,7 @@ function renderProcessDiagramSection(section: DiagramSection, options: WikiRende
       lines.push('');
       if (options.renderDiagram) {
         lines.push(...options.renderDiagram(diagram));
-      } else {
+      } else if (!diagram.sourceOnly) {
         const imageUrl = getDiagramImageUrl(resolveDiagramEngine(diagram.code, diagram.engine), diagram.code, 'jpeg');
         lines.push(`!${escapeWiki(imageUrl)}!`);
       }

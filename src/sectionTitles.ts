@@ -138,7 +138,8 @@ export function sanitizeSections(sections: DocSection[]): DocSection[] {
           title: diagram.title ?? '',
           engine: diagram.engine === 'plantuml' ? 'plantuml' : 'mermaid',
           code: diagram.code ?? '',
-          description: diagram.description ?? ''
+          description: diagram.description ?? '',
+          ...(diagram.sourceOnly === true ? { sourceOnly: true } : {})
         }))
       };
     }

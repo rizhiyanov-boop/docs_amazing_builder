@@ -93,6 +93,7 @@ import {
   createDefaultProjectSections,
   createMethodDocument,
   createMethodId,
+  normalizeMethodDocument,
   createOnboardingDemoWorkspace,
   createProjectSectionId,
   createWorkspaceSeed,
@@ -138,8 +139,8 @@ import { TableClassic, TableGallery, TableMiniCards } from './components/tables/
 import { HtmlExportScreen } from './screens/HtmlExportScreen';
 import { WikiScreen } from './screens/WikiScreen';
 import { ConfluenceScreen } from './screens/ConfluenceScreen';
-import { normalizeConfluenceBinding } from './confluenceBinding';
-import type { ConfluenceBinding } from './confluenceTypes';
+import { normalizeConfluenceBinding, sameConfluenceImportSource } from './confluenceBinding';
+import type { ConfluenceBinding, ConfluenceImportSource } from './confluenceTypes';
 import { useRemoteProjectAutosave } from './hooks/useRemoteProjectAutosave';
 import { useServerSync } from './hooks/useServerSync';
 import { useWorkspaceHistory } from './hooks/useWorkspaceHistory';
@@ -3826,6 +3827,7 @@ export default function App() {
 
       for (let index = 0; index < diagrams.length; index += 1) {
         const diagram = diagrams[index];
+        if (diagram.sourceOnly) continue;
         const fileName = getDiagramExportFileName(resolveSectionTitle(section.title), section.id, diagram.title, index, 'svg');
         try {
           const imageUrl = getDiagramImageUrl(resolveDiagramEngine(diagram.code, diagram.engine), diagram.code, 'svg');
@@ -3896,6 +3898,7 @@ export default function App() {
           const diagrams = section.diagrams.filter((diagram) => diagram.code.trim());
           for (let index = 0; index < diagrams.length; index += 1) {
             const diagram = diagrams[index];
+            if (diagram.sourceOnly) continue;
             const fileName = getDiagramExportFileName(resolveSectionTitle(section.title), section.id, diagram.title, index, 'svg');
             if (methodDiagramImageMap[fileName]) continue;
             try {
@@ -7175,6 +7178,30 @@ export default function App() {
       : method));
   }, []);
 
+  function openImportedConfluenceMethod(source: ConfluenceImportSource): boolean {
+    if (confluenceWorkspaceRef.current !== confluenceWorkspaceGeneration) return false;
+    const existing = methods.find(method => sameConfluenceImportSource(method.confluenceImport, source));
+    if (!existing) return false;
+    switchMethod(existing);
+    setTab('editor');
+    return true;
+  }
+
+  function addImportedConfluenceMethod(draft: MethodDocument): void {
+    if (confluenceWorkspaceRef.current !== confluenceWorkspaceGeneration || !draft.confluenceImport) return;
+    if (openImportedConfluenceMethod(draft.confluenceImport)) return;
+    const names = new Set(methods.map(method => method.name.trim().toLowerCase()));
+    const baseName = draft.name.trim();
+    let name = baseName;
+    for (let suffix = 2; names.has(name.toLowerCase()); suffix++) name = baseName + ' (' + suffix + ')';
+    const imported = normalizeMethodDocument({ ...draft, name });
+    markWorkspaceChanged();
+    setMethodsState(current => current.some(method => sameConfluenceImportSource(method.confluenceImport, draft.confluenceImport!))
+      ? current : [...current, imported]);
+    switchMethod(imported);
+    setTab('editor');
+  }
+
   const handleJiraLinked = useCallback((methodId: string, issueUrl: string) => {
     setMethodsState((current) => current.map((method) => method.id === methodId && method.jiraTicket !== issueUrl
       ? { ...method, jiraTicket: issueUrl || undefined, updatedAt: new Date().toISOString() }
@@ -7402,7 +7429,9 @@ export default function App() {
                   )}
                 </div>
                 {!code && <div style={{ color: 'var(--wb-text-muted)', fontSize: 13 }}>Код диаграммы не заполнен.</div>}
-                {code && <WorkbenchDiagramPreview code={code} engine={engine} title={title} />}
+                {code && (diagram.sourceOnly
+                  ? <details><summary>Код диаграммы</summary><pre className="source-edit" style={{ minHeight: 0, maxHeight: '20rem', resize: 'none' }}>{diagram.code}</pre></details>
+                  : <WorkbenchDiagramPreview code={code} engine={engine} title={title} />)}
                 {diagram.description?.trim() && (
                   <div
                     className="wb-rich-preview"
@@ -8678,6 +8707,8 @@ export default function App() {
                     }
                   }}
                   onBusyChange={setConfluenceBusy}
+                  onImportMethod={addImportedConfluenceMethod}
+                  onOpenImported={openImportedConfluenceMethod}
                   onJiraLinked={(methodId, issueUrl) => {
                     if (confluenceWorkspaceRef.current === confluenceWorkspaceGeneration) handleJiraLinked(methodId, issueUrl);
                   }}

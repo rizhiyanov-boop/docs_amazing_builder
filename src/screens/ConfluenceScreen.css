@@ -43,6 +43,15 @@
 .cf-notice.cf-error { border-left-color: var(--wb-danger); }
 .cf-publication-state { color: var(--wb-accent); font-size: var(--font-size-xs); }
 .cf-content { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 30rem; overflow: auto; padding: var(--space-6); border: 1px solid var(--wb-border); border-radius: var(--wb-radius); background: var(--wb-bg-soft); font: inherit; line-height: 1.55; }
+.cf-import-review { display: grid; gap: var(--space-4); }
+.cf-import-review > :is(h3, p, ul, .cf-actions), .cf-import-warnings > ul { margin: 0; }
+.cf-import-review ul { padding-inline-start: var(--space-8); }
+.cf-import-title { font-weight: 600; overflow-wrap: anywhere; }
+.cf-import-warnings { color: var(--wb-text); padding: var(--space-4); border: 1px solid var(--wb-border); border-radius: var(--wb-radius); }
+.cf-import-example, .cf-import-choice { display: grid; gap: var(--space-2); min-width: 0; }
+.cf-import-choice select { min-width: 0; width: 100%; }
+.cf-import-extra summary, .cf-import-example summary { cursor: pointer; }
+.cf-import-extra > details { margin-block-start: var(--space-3); padding-inline-start: var(--space-4); }
 .cf-check-list { padding-left: var(--space-7); line-height: 1.8; }
 .cf-overwrite-confirm { display: flex; align-items: flex-start; gap: var(--space-2); padding: var(--space-6); border: 1px solid var(--wb-border); border-radius: var(--wb-radius); background: var(--wb-bg-soft); cursor: pointer; line-height: 1.55; }
 .cf-overwrite-confirm input { flex-shrink: 0; accent-color: var(--wb-accent); }

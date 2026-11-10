@@ -29,7 +29,7 @@ const sectionBase: Shape = {
 };
 const sectionShapes: Record<string, Shape> = {
   text: { value: string, required: boolean },
-  diagram: { diagrams: array(object({ ...strings('id', 'title', 'code', 'description'), engine: choice('mermaid', 'plantuml') })) },
+  diagram: { diagrams: array(object({ ...strings('id', 'title', 'code', 'description'), engine: choice('mermaid', 'plantuml'), sourceOnly: boolean })) },
   errors: {
     rows: array(object({
       ...strings('clientHttpStatus', 'clientResponse', 'clientResponseCode', 'trigger', 'serverHttpStatus', 'internalCode', 'message', 'responseCode'),
@@ -54,6 +54,7 @@ const sectionShapes: Record<string, Shape> = {
 };
 const methodShape: Shape = {
   ...strings('id', 'name', 'updatedAt', 'jiraTicket', 'epic', 'initiators', 'responsible', 'externalUrl'),
+  confluenceImport: object({ baseUrl: { ...string, required: true }, pageId: { ...string, required: true }, version: { ...number, required: true } }),
   status: choice('draft', 'review', 'done'), sections: array(object(sectionBase), true)
 };
 const fieldRef = (target = false): Rule => object({

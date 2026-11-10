@@ -7,6 +7,12 @@ export interface ConfluenceBinding {
   publishedAt: string;
 }
 
+export interface ConfluenceImportSource {
+  baseUrl: string;
+  pageId: string;
+  version: number;
+}
+
 export interface ConfluenceSpace { key: string; name: string; type?: 'global' | 'personal'; categories?: string[] }
 export interface ConfluencePageSummary { id: string; title: string; parentId?: string | null }
 export interface ConfluenceCollection<T> { items: T[]; nextStart: number | null }

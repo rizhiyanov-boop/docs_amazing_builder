@@ -41,20 +41,6 @@ export function JiraStandaloneScreen({
   const [status, setStatus] = useState<JiraStatus | null>(null);
   const [checking, setChecking] = useState(true);
   const [checkFeedback, setCheckFeedback] = useState<'success' | 'error' | null>(null);
-  const [shareFeedback, setShareFeedback] = useState(false);
-
-  const copyShareLink = useCallback(() => {
-    try {
-      const url = new URL(window.location.href);
-      url.searchParams.set('view', 'jira');
-      url.hash = '';
-      void navigator.clipboard.writeText(url.toString());
-      setShareFeedback(true);
-      window.setTimeout(() => setShareFeedback(false), 2000);
-    } catch {
-      // ignore
-    }
-  }, []);
 
   const key = 'docbuilder:jira-standalone:v1';
   const storedIdentity = useMemo(() => {
@@ -120,7 +106,7 @@ export function JiraStandaloneScreen({
               </svg>
             </button>
           )}
-          <h2>Jira · Произвольная задача</h2>
+          <h2>Jira</h2>
         </div>
         <div className="cf-connection">
           <span
@@ -139,11 +125,6 @@ export function JiraStandaloneScreen({
               {status.project.name} ({status.project.key})
             </span>
           )}
-          {!isConnected && !checking && (
-            <a href={`${CONFLUENCE_BRIDGE_URL}/`} target="_blank" rel="noopener noreferrer" className="cf-confluence-bridge-link">
-              Открыть локальное подключение
-            </a>
-          )}
           <WBButton
             size="sm"
             variant="ghost"
@@ -159,62 +140,52 @@ export function JiraStandaloneScreen({
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" /><path d="M21 21v-5h-5" /></svg>
             )}
           </WBButton>
-
-          <WBButton
-            size="sm"
-            variant="ghost"
-            onClick={copyShareLink}
-            title={shareFeedback ? 'Прямая ссылка скопирована!' : 'Скопировать прямую ссылку на эту страницу'}
-            aria-label="Скопировать прямую ссылку"
-            className="cf-jira-share-link-btn"
-          >
-            {shareFeedback ? (
-              <span>✓ Скопировано</span>
-            ) : (
-              <span>🔗 Ссылка для коллег</span>
-            )}
-          </WBButton>
-
-          {isDirectStandalone && onBack && (
-            <button
-              type="button"
-              className="cf-jira-switch-editor-link"
-              onClick={onBack}
-              title="Перейти в полный редактор документации"
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: 'var(--wb-accent)',
-                fontSize: 'var(--font-size-xs)',
-                cursor: 'pointer',
-                textDecoration: 'underline',
-                padding: '0 4px',
-                marginLeft: 'var(--space-2)'
-              }}
-            >
-              В редактор методов →
-            </button>
-          )}
         </div>
       </header>
 
-      {!checking && !isConnected && (
-        <div className="cf-notice">
-          <h3>Подключите Jira</h3>
-          <p>Для создания задач запустите локальное приложение с подключением к Jira.</p>
-          <p>
-            <a href={`${CONFLUENCE_BRIDGE_URL}/`} target="_blank" rel="noopener noreferrer">
-              Открыть локальное подключение
-            </a>{' '}
-            ·{' '}
-            <a href="/docbuilder-confluence-local.zip" download>
-              Скачать локальное приложение
-            </a>
-          </p>
+      {checking && !status ? (
+        <div className="cf-jira-connect-card is-loading">
+          <div className="cf-jira-connect-spinner" aria-hidden="true" />
+          <p className="cf-muted" style={{ margin: 0 }}>Проверка подключения к Jira…</p>
         </div>
-      )}
-
-      {storedIdentity.error ? (
+      ) : !isConnected ? (
+        <div className="cf-jira-connect-card">
+          <div className="cf-jira-connect-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
+              <path d="M11.53 2c0 2.4 1.97 4.35 4.35 4.35h1.78v1.7c0 2.4 1.94 4.34 4.34 4.35V2.02L11.53 2zM6.77 6.8a4.36 4.36 0 0 0 4.34 4.34h1.8v1.72a4.36 4.36 0 0 0 4.34 4.34V6.8H6.77zM2 11.6a4.35 4.35 0 0 0 4.35 4.35h1.78v1.7c.01 2.4 1.95 4.34 4.35 4.35v-10.4H2z" />
+            </svg>
+          </div>
+          <h3 className="cf-jira-connect-title">Подключите Jira</h3>
+          <p className="cf-jira-connect-desc">
+            Для заведения задач запустите локальное приложение DocBuilder с настроенным доступом к Jira.
+          </p>
+          <div className="cf-jira-connect-actions">
+            <a
+              href={`${CONFLUENCE_BRIDGE_URL}/`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="wb-button wb-button-primary wb-button-size-sm cf-jira-connect-action-link"
+            >
+              Открыть подключение
+            </a>
+            <a
+              href="/docbuilder-confluence-local.zip"
+              download
+              className="wb-button wb-button-secondary wb-button-size-sm cf-jira-connect-action-link"
+            >
+              Скачать приложение (1.3.6)
+            </a>
+            <WBButton
+              size="sm"
+              variant="ghost"
+              disabled={checking}
+              onClick={() => void loadStatus()}
+            >
+              Проверить снова
+            </WBButton>
+          </div>
+        </div>
+      ) : storedIdentity.error ? (
         <p role="alert" className="cf-notice cf-error">{storedIdentity.error}</p>
       ) : (
         <JiraPanel

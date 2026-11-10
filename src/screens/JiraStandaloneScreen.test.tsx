@@ -67,7 +67,7 @@ describe('JiraStandaloneScreen', () => {
 
     render(<JiraStandaloneScreen onBack={onBack} client={client} />);
 
-    expect(screen.getByRole('heading', { level: 2, name: /Jira · Произвольная задача/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: /^Jira$/i })).toBeInTheDocument();
     const backBtn = screen.getByRole('button', { name: 'Назад в редактор' });
     expect(backBtn).toBeInTheDocument();
 
@@ -90,28 +90,37 @@ describe('JiraStandaloneScreen', () => {
     expect(screen.queryByRole('button', { name: /Привязать к текущему методу/i })).not.toBeInTheDocument();
   });
 
-  it('supports direct standalone mode without back button and with switch-to-editor link', async () => {
+  it('supports direct standalone mode without back button and without clutter', async () => {
     const onBack = vi.fn();
     const client = mockJiraClient();
 
     render(<JiraStandaloneScreen onBack={onBack} client={client} isDirectStandalone={true} />);
 
-    // In direct standalone mode, the back arrow is omitted
+    // In direct standalone mode, back arrow and method switchers are omitted
     expect(screen.queryByRole('button', { name: 'Назад в редактор' })).not.toBeInTheDocument();
-
-    // Link to full editor is provided
-    const switchLink = screen.getByRole('button', { name: /В редактор методов/i });
-    expect(switchLink).toBeInTheDocument();
-
-    await userEvent.setup().click(switchLink);
-    expect(onBack).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('button', { name: /В редактор методов/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Ссылка для коллег/i })).not.toBeInTheDocument();
   });
 
-  it('renders copy share link button for colleagues', async () => {
+  it('renders modern connect card when Jira is disconnected', async () => {
     const client = mockJiraClient();
+    vi.mocked(client.status).mockResolvedValue({
+      connected: false,
+      remembered: false,
+      baseUrl: '',
+      expiresAt: null,
+      user: null,
+      project: null
+    });
+
     render(<JiraStandaloneScreen onBack={vi.fn()} client={client} />);
 
-    const shareBtn = screen.getByRole('button', { name: /Скопировать прямую ссылку/i });
-    expect(shareBtn).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 3, name: 'Подключите Jira' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Открыть подключение' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Скачать приложение/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Проверить снова' })).toBeInTheDocument();
+
+    // Does NOT render task creation form when disconnected
+    expect(screen.queryByRole('textbox', { name: 'Что нужно сделать' })).not.toBeInTheDocument();
   });
 });

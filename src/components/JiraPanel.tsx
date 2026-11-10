@@ -473,7 +473,6 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
       </div>
       {headerExtra && <div className="cf-jira-header-right">{headerExtra}</div>}
     </div>
-    {!status?.connected && <p className="cf-notice">Подключите Jira в той же локальной форме, что и Confluence. Ссылка на любую задачу определит проект. Нужна версия локального приложения 1.3.4 или новее. <a href="/docbuilder-confluence-local.zip" download>Скачать</a></p>}
     {error && <p role="alert" className="cf-notice cf-error">{error}</p>}
     {cacheWarning && <p role="alert" className="cf-notice">Браузер не смог сохранить черновик локально. Не закрывайте форму до сохранения в Jira.</p>}
     {generating && <div className="cf-notice"><AiRequestProgress message={preparationPhase === 'epics' ? 'Подготовка ИИ: загружаем эпики проекта…' : 'ИИ: готовим название, описание и рекомендации…'} /></div>}

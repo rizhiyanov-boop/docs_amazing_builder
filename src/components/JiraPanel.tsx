@@ -543,127 +543,123 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
 
         return (
           <div className="cf-jira-linked-hub">
-            {/* ROW 1: PRIMARY ENTITY (Key + Title + Actions) */}
-            <div className="cf-jira-hub-primary-row">
-              <div className="cf-jira-hub-primary-main">
-                {currentIssueKey && (
-                  currentIssueUrl ? (
-                    <a
-                      href={currentIssueUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="cf-jira-hub-key-link"
-                      aria-label={currentIssueKey}
-                      title={`Открыть ${currentIssueKey} в Jira`}
-                    >
-                      <span>{currentIssueKey}</span>
-                    </a>
-                  ) : (
-                    <span className="cf-jira-hub-key-link">{currentIssueKey}</span>
-                  )
-                )}
-                {displaySummary && (
-                  <h3 className="cf-jira-hub-title-text" title={displaySummary}>
-                    {displaySummary}
-                  </h3>
-                )}
-              </div>
-
-              <div className="cf-jira-hub-header-right">
-                {!createdInSession && onLinked && !jiraTicket && !issue && (
-                  <WBButton
-                    size="sm"
-                    disabled={disabled}
-                    onClick={() => void readCurrent()}
-                  >
-                    Привязать к текущему методу
-                  </WBButton>
-                )}
-                {confluenceUrl && operation?.issue && operation.linkedUrl !== confluenceUrl && (
-                  <WBButton
-                    size="sm"
-                    disabled={disabled}
-                    onClick={() => void act(() => client.link(scope, methodId, confluenceUrl))}
-                  >
-                    Добавить ссылку Confluence
-                  </WBButton>
-                )}
-                {currentIssueUrl && (
-                  <button
-                    type="button"
-                    className={`cf-jira-hub-icon-action${copied ? ' is-copied' : ''}`}
-                    onClick={copyTicketUrl}
-                    aria-label={copied ? 'Ссылка скопирована' : 'Скопировать ссылку на задачу'}
-                    title={copied ? 'Ссылка скопирована!' : 'Скопировать ссылку на задачу'}
-                  >
-                    <WorkbenchIcon name={copied ? 'check' : 'copy'} />
-                  </button>
-                )}
-                {currentIssueUrl && (
+            <div className="cf-jira-hub-main">
+              {currentIssueKey && (
+                currentIssueUrl ? (
                   <a
                     href={currentIssueUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="cf-jira-hub-icon-action"
-                    title={`Открыть ${currentIssueKey || 'задачу'} в Jira`}
-                    aria-label={`Открыть ${currentIssueKey || 'задачу'} в Jira`}
+                    className="cf-jira-hub-key-link"
+                    aria-label={currentIssueKey}
+                    title={`Открыть ${currentIssueKey} в Jira`}
                   >
-                    <svg className="wb-shell-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M12 9v4H3V4h4" />
-                      <path d="M9.5 2.5H13.5V6.5" />
-                      <path d="M6.5 9.5L13.5 2.5" />
-                    </svg>
+                    <span>{currentIssueKey}</span>
                   </a>
+                ) : (
+                  <span className="cf-jira-hub-key-link">{currentIssueKey}</span>
+                )
+              )}
+
+              {displaySummary && (
+                <h3 className="cf-jira-hub-title-text" title={displaySummary}>
+                  {displaySummary}
+                </h3>
+              )}
+
+              <div className="cf-jira-hub-meta-chips">
+                <span className="cf-jira-hub-status-badge">
+                  <WorkbenchIcon name="check" />
+                  <span>{statusTitle}</span>
+                </span>
+                <span className="cf-jira-hub-chip">
+                  {issue?.issueType?.name || (issueKind === 'story' ? 'User Story' : 'Задача · тестирование')}
+                </span>
+                {activeTier && (
+                  <span className={`cf-jira-hub-chip priority tier-${activeTier.isCritical ? 'critical' : activeTier.name?.toLowerCase()}`}>
+                    {activeTier.icon} {activeTier.russianName || activeTier.name}
+                  </span>
                 )}
-                {onLinked && (
-                  <button
-                    type="button"
-                    className="cf-jira-hub-icon-action is-danger"
-                    disabled={disabled || operation?.updateState === 'unknown'}
-                    onClick={() => void unlink()}
-                    aria-label="Отвязать задачу"
-                    title="Отвязать задачу от метода (задача в Jira остаётся)"
+                {currentEpicKey && (
+                  <span className="cf-jira-hub-chip epic" title={`Эпик: ${currentEpicName || currentEpicKey}`}>
+                    📁 {currentEpicKey}{currentEpicName ? ` · ${currentEpicName}` : ''}
+                  </span>
+                )}
+                {operation?.linkedUrl && (
+                  <a
+                    href={operation.linkedUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="cf-jira-hub-chip cf-jira-hub-chip-confluence"
+                    title="Документация Confluence"
                   >
-                    <WorkbenchIcon name="trash" />
-                  </button>
+                    📄 Confluence <span aria-hidden="true">↗</span>
+                  </a>
                 )}
               </div>
             </div>
 
-            {/* ROW 2: SUBORDINATE METADATA CHIPS */}
-            <div className="cf-jira-hub-meta-row">
-              <span className="cf-jira-hub-status-badge">
-                <WorkbenchIcon name="check" />
-                <span>{statusTitle}</span>
-              </span>
-              <span className="cf-jira-hub-chip">
-                {issue?.issueType?.name || (issueKind === 'story' ? 'User Story' : 'Задача · тестирование')}
-              </span>
-              {activeTier && (
-                <span className={`cf-jira-hub-chip priority tier-${activeTier.isCritical ? 'critical' : activeTier.name?.toLowerCase()}`}>
-                  {activeTier.icon} {activeTier.russianName || activeTier.name}
-                </span>
+            <div className="cf-jira-hub-actions">
+              {!createdInSession && onLinked && !jiraTicket && !issue && (
+                <WBButton
+                  size="sm"
+                  disabled={disabled}
+                  onClick={() => void readCurrent()}
+                >
+                  Привязать к текущему методу
+                </WBButton>
               )}
-              {currentEpicKey && (
-                <span className="cf-jira-hub-chip epic" title={`Эпик: ${currentEpicName || currentEpicKey}`}>
-                  📁 {currentEpicKey}{currentEpicName ? ` · ${currentEpicName}` : ''}
-                </span>
+              {confluenceUrl && operation?.issue && operation.linkedUrl !== confluenceUrl && (
+                <WBButton
+                  size="sm"
+                  disabled={disabled}
+                  onClick={() => void act(() => client.link(scope, methodId, confluenceUrl))}
+                >
+                  Добавить ссылку Confluence
+                </WBButton>
               )}
-              {operation?.linkedUrl && (
+              {currentIssueUrl && (
+                <button
+                  type="button"
+                  className={`cf-jira-hub-icon-action${copied ? ' is-copied' : ''}`}
+                  onClick={copyTicketUrl}
+                  aria-label={copied ? 'Ссылка скопирована' : 'Скопировать ссылку на задачу'}
+                  title={copied ? 'Ссылка скопирована!' : 'Скопировать ссылку на задачу'}
+                >
+                  <WorkbenchIcon name={copied ? 'check' : 'copy'} />
+                </button>
+              )}
+              {currentIssueUrl && (
                 <a
-                  href={operation.linkedUrl}
+                  href={currentIssueUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="cf-jira-hub-chip cf-jira-hub-chip-confluence"
-                  title="Документация Confluence"
+                  className="cf-jira-hub-icon-action"
+                  title={`Открыть ${currentIssueKey || 'задачу'} в Jira`}
+                  aria-label={`Открыть ${currentIssueKey || 'задачу'} в Jira`}
                 >
-                  📄 Confluence <span aria-hidden="true">↗</span>
+                  <svg className="wb-shell-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M12 9v4H3V4h4" />
+                    <path d="M9.5 2.5H13.5V6.5" />
+                    <path d="M6.5 9.5L13.5 2.5" />
+                  </svg>
                 </a>
+              )}
+              {onLinked && (
+                <button
+                  type="button"
+                  className="cf-jira-hub-icon-action is-danger"
+                  disabled={disabled || operation?.updateState === 'unknown'}
+                  onClick={() => void unlink()}
+                  aria-label="Отвязать задачу"
+                  title="Отвязать задачу от метода (задача в Jira остаётся)"
+                >
+                  <WorkbenchIcon name="trash" />
+                </button>
               )}
             </div>
 
             {operation?.message && <div className="cf-jira-hub-subtext">{operation.message}</div>}
-
           </div>
         );
       })()}

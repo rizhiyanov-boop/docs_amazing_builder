@@ -417,11 +417,6 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
   })();
 
   const activeTier = priorityTiers.find(t => t.level === activeLevel) || priorityTiers.find(t => t.level === 2) || priorityTiers[0];
-  const stepsCount = priorityTiers.length || 4;
-  const fillRatio = stepsCount > 1 ? (activeLevel - 1) / (stepsCount - 1) : 0;
-  const fillWidth = activeLevel === stepsCount
-    ? '100%'
-    : `calc(10px + ${fillRatio} * (100% - 20px))`;
   const disabled = busy || generating || loading;
   const hasPrimaryLabel = labels.some(key => JIRA_LABELS.some(label => label.key === key && label.role !== 'Дополнительный'));
   const editing = Boolean(issue); const updateUnknown = operation?.updateState === 'unknown';
@@ -1064,54 +1059,58 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
           )}
                     {priorities.length > 0 && (
             <div className="cf-jira-priority-block">
-              <div className="cf-jira-boost-container">
-                <div className="cf-jira-range-track-wrap">
-                  <div className="cf-jira-range-track-bg" />
-                  <div
-                    className={`cf-jira-range-fill lvl-${activeLevel}`}
-                    style={{
-                      width: fillWidth
-                    }}
-                  />
-                  <input
-                    type="range"
-                    aria-label="Приоритет"
-                    className="cf-jira-range-input"
-                    min={1}
-                    max={priorityTiers.length || 4}
-                    step={1}
-                    value={activeLevel}
-                    disabled={disabled || (editing && !metadata?.editableFields?.includes('priority'))}
-                    style={{
-                      '--thumb-color': activeTier?.color || '#eab308'
-                    } as React.CSSProperties}
-                    onChange={event => {
-                      const lvl = Number(event.target.value);
-                      const targetTier = priorityTiers.find(t => t.level === lvl);
-                      if (targetTier) { setPriorityId(targetTier.id); setPriorityExplicit(true); }
-                    }}
-                  />
-                  <div className="cf-jira-range-steps" role="group" aria-label="Уровень приоритета">
-                    {priorityTiers.map(tier => {
-                      const isCurrent = activeLevel === tier.level;
-                      const isRecommended = recommendedPriorities.some(r => r.id === tier.id);
-                      return (
-                        <button
-                          key={tier.id}
-                          type="button"
-                          className={`cf-jira-range-step-btn ${isCurrent ? 'active' : ''} tier-${tier.level} ${isRecommended ? 'recommended' : ''}`}
-                          disabled={disabled || (editing && !metadata?.editableFields?.includes('priority'))}
-                          onClick={() => { setPriorityId(tier.id); setPriorityExplicit(true); }}
-                          title={`${tier.name} (${tier.russianName})${isRecommended ? ' · Рекомендуется правилами тегов' : ''}`}
-                        >
-                          <span className="cf-jira-range-step-name">{tier.name}</span>
-                          <span className="cf-jira-range-step-sub">{tier.russianName}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+              <span className="cf-jira-priority-label">
+                Приоритет{metadata?.priorityRequired ? ' · обязательно' : ''}
+              </span>
+              <div className="cf-jira-pills-row cf-jira-priority-pills-row" role="group" aria-label="Выбор приоритета">
+                {priorityTiers.map(tier => {
+                  const isCurrent = activeLevel === tier.level;
+                  const isRecommended = recommendedPriorities.some(r => r.id === tier.id);
+                  return (
+                    <button
+                      key={tier.id}
+                      type="button"
+                      className={`cf-jira-pill cf-jira-priority-pill tier-${tier.name.toLowerCase()} tier-${tier.level} ${isCurrent ? 'active cf-jira-pill-active' : ''} ${isRecommended ? 'recommended' : ''}`}
+                      disabled={disabled || (editing && !metadata?.editableFields?.includes('priority'))}
+                      onClick={() => { setPriorityId(tier.id); setPriorityExplicit(true); }}
+                      title={`${tier.name} (${tier.russianName})${isRecommended ? ' · Рекомендуется правилами тегов' : ''}`}
+                    >
+                      {isCurrent && (
+                        <span className="cf-jira-pill-check">
+                          <WorkbenchIcon name="check" />
+                        </span>
+                      )}
+                      <span className="cf-jira-priority-pill-icon">{tier.icon}</span>
+                      <span className="cf-jira-priority-pill-name">{tier.russianName || tier.name}</span>
+                      {tier.name !== tier.russianName && (
+                        <span className="cf-visually-hidden"> {tier.name}</span>
+                      )}
+                      {isRecommended && (
+                        <span className="cf-jira-pill-badge" title="Рекомендация по правилам тегов">
+                          <WorkbenchIcon name="ai-describe" />
+                          <span>ИИ</span>
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
+
+              <input
+                type="range"
+                aria-label="Приоритет"
+                className="cf-visually-hidden"
+                min={1}
+                max={priorityTiers.length || 4}
+                step={1}
+                value={activeLevel}
+                disabled={disabled || (editing && !metadata?.editableFields?.includes('priority'))}
+                onChange={event => {
+                  const lvl = Number(event.target.value);
+                  const targetTier = priorityTiers.find(t => t.level === lvl);
+                  if (targetTier) { setPriorityId(targetTier.id); setPriorityExplicit(true); }
+                }}
+              />
 
               <select
                 id="cf-jira-priority-select"

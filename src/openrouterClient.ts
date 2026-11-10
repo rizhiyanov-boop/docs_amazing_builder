@@ -1,5 +1,6 @@
 import type { ValidationRuleRow } from './types';
 import { normalizeJiraDraft, normalizeJiraDraftInput, type JiraDraft, type JiraDraftInput } from './jiraDraft';
+import { CONFLUENCE_VERSION_NOTE_LIMIT, validateConfluenceVersionFacts, type ConfluenceVersionFact } from './confluenceVersionFacts';
 
 type RepairJsonResponse = {
   fixedJson: string;
@@ -46,7 +47,8 @@ type BuildValidationRulesResponse = {
   rules: ValidationRuleRow[];
 };
 
-type ApiTask = 'repair-json' | 'fill-descriptions' | 'generate-examples' | 'suggest-mappings' | 'mask-fields' | 'build-validation-rules' | 'prepare-jira-task';
+type ApiTask = 'repair-json' | 'fill-descriptions' | 'generate-examples' | 'suggest-mappings' | 'mask-fields' | 'build-validation-rules'
+  | 'prepare-jira-task' | 'suggest-confluence-version-note';
 
 type ApiRequestBody = {
   task: ApiTask;
@@ -59,6 +61,15 @@ const AI_REQUEST_TIMEOUT_MS = 90_000;
 export async function prepareJiraTaskWithAi(payload: JiraDraftInput): Promise<JiraDraft> {
   const input = normalizeJiraDraftInput(payload);
   return normalizeJiraDraft(await callAiApi<unknown>('prepare-jira-task', input), input);
+}
+
+export async function suggestConfluenceVersionNoteWithAi(facts: ConfluenceVersionFact[]): Promise<string> {
+  const data = await callAiApi<{ note?: unknown }>('suggest-confluence-version-note', { facts: validateConfluenceVersionFacts({ facts }) });
+  const note = typeof data?.note === 'string' ? data.note.trim() : '';
+  if (!note || note.length > CONFLUENCE_VERSION_NOTE_LIMIT || /[\r\n]/u.test(note)) {
+    throw new Error('ИИ вернул некорректный комментарий');
+  }
+  return note;
 }
 
 function isAbortError(error: unknown): boolean {

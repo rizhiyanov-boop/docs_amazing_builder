@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ConfluenceClientError, type ConfluenceClient } from '../confluenceClient';
@@ -7,7 +7,7 @@ import type { ConfluencePage, ConfluencePublishRequest } from '../confluenceType
 import type { MethodDocument } from '../types';
 import { ConfluenceScreen } from './ConfluenceScreen';
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); localStorage.clear(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); });
 const baseUrl = 'https://confluence.example';
 const otherBaseUrl = 'https://other.example';
 const method: MethodDocument = { id: 'method-1', name: 'Example method', updatedAt: '2026-10-02T12:00:00Z', sections: [{ id: 'purpose', title: 'Цель', enabled: true, kind: 'text', value: 'Test document' }] };
@@ -224,6 +224,46 @@ describe('Confluence workbench screen', () => {
     await user.click(screen.getByRole('button', { name: 'Обновить страницу', exact: true }));
     await screen.findByRole('heading', { name: 'Страница обновлена' });
     expect(client.publish).toHaveBeenCalledWith(expect.objectContaining({ pageId: '126', expectedVersion: 1, versionMessage: 'Уточнено описание поля' }));
+  });
+
+  it.each(['success', 'manual edit', 'failure', 'publish while waiting'] as const)('keeps the AI comment optional on %s', async scenario => {
+    const client = mockClient();
+    vi.mocked(client.getStatus).mockResolvedValue({ connected: true, baseUrl, versionComments: true });
+    vi.mocked(client.getPage).mockResolvedValue({ ...page('126'), storage: '<h2>Response</h2><p>PRIVATE BEFORE</p>' });
+    vi.mocked(client.prepare).mockResolvedValue({ storage: '<h2>Response</h2><p>PRIVATE AFTER</p>' });
+    vi.mocked(client.publish).mockResolvedValue(page('126', 2));
+    let resolveAi!: (response: Response) => void;
+    const fetchAi = vi.fn(() => new Promise<Response>(resolve => { resolveAi = resolve; }));
+    vi.stubGlobal('fetch', fetchAi);
+    const { user } = setup(client, changedMethod());
+    const prepare = await screen.findByRole('button', { name: 'Подготовить обновление' });
+    await waitFor(() => expect(prepare).toBeEnabled());
+    await user.click(prepare);
+    const note = await screen.findByRole('textbox', { name: 'Комментарий к версии' });
+    const initialNote = 'Изменены разделы: Response';
+    expect(note).toHaveValue(initialNote);
+    expect(fetchAi).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Сформулировать с ИИ' }));
+    expect(fetchAi).toHaveBeenCalledWith('/api/ai', expect.objectContaining({
+      body: JSON.stringify({ task: 'suggest-confluence-version-note', payload: { facts: [{ kind: 'section-changed', section: 'Response' }] } })
+    }));
+    const publishButton = screen.getByRole('button', { name: 'Обновить страницу', exact: true });
+    expect(publishButton).toBeEnabled();
+    if (scenario === 'manual edit') fireEvent.change(note, { target: { value: 'Моя правка' } });
+    const generated = 'В разделе «Response» изменено содержимое';
+    if (scenario === 'publish while waiting') {
+      await user.click(publishButton);
+      await screen.findByRole('heading', { name: 'Страница обновлена' });
+      await act(async () => resolveAi(Response.json({ data: { note: generated } })));
+      expect(client.publish).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ versionMessage: initialNote }));
+      return;
+    }
+    await act(async () => resolveAi(scenario === 'failure' ? Response.json({ error: 'Unavailable' }, { status: 503 })
+      : Response.json({ data: { note: generated } })));
+    expect(note).toHaveValue(scenario === 'manual edit' ? 'Моя правка' : scenario === 'failure' ? initialNote : generated);
+    expect(publishButton).toBeEnabled();
+    expect(client.publish).not.toHaveBeenCalled();
+    if (scenario === 'failure') expect(await screen.findByRole('alert')).toHaveTextContent('Текущий комментарий можно использовать');
   });
 
   it('checks the version again immediately before writing', async () => {

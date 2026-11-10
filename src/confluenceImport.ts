@@ -71,6 +71,8 @@ function column(title: string): Column | undefined {
   return alias(qualified ?? key, columnAliases);
 }
 
+export { column as confluenceStorageColumn, fieldValue as isConfluenceFieldName };
+
 function headingRole(block: StorageBlock, roles: SectionRole[]) {
   return [...block.path].reverse().find(heading => {
     const kind = role(heading.title);

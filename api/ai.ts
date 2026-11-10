@@ -2,6 +2,7 @@ import { getUserBySessionToken } from './_lib/db.js';
 import { getSessionToken } from './_lib/http.js';
 import { openAiCompletionOptions, resolveOpenAiModel } from './_lib/aiModel.js';
 import { buildJiraDraftPrompt, normalizeJiraDraft, normalizeJiraDraftInput } from '../src/jiraDraft.js';
+import { renderConfluenceAiNote, validateConfluenceVersionFacts } from '../src/confluenceVersionFacts.js';
 
 type VercelRequest = {
   method?: string;
@@ -19,7 +20,11 @@ type VercelResponse = {
   setHeader: (name: string, value: string) => void;
 };
 
-type RequestTask = 'repair-json' | 'fill-descriptions' | 'generate-examples' | 'suggest-mappings' | 'mask-fields' | 'build-validation-rules' | 'prepare-jira-task';
+const requestTasks = [
+  'repair-json', 'fill-descriptions', 'generate-examples', 'suggest-mappings', 'mask-fields', 'build-validation-rules',
+  'prepare-jira-task', 'suggest-confluence-version-note'
+] as const;
+type RequestTask = typeof requestTasks[number];
 
 type RequestBody = {
   task?: RequestTask;
@@ -110,6 +115,7 @@ function isAbortError(error: unknown): boolean {
 }
 
 function getMaxOutputTokens(task: RequestTask): number {
+  if (task === 'suggest-confluence-version-note') return readPositiveIntegerEnv('OPENAI_MAX_OUTPUT_TOKENS', 800, 800);
   const fallback = task === 'build-validation-rules' || task === 'prepare-jira-task'
     ? DEFAULT_VALIDATION_RULES_MAX_OUTPUT_TOKENS
     : DEFAULT_OPENAI_MAX_OUTPUT_TOKENS;
@@ -165,6 +171,10 @@ function getManualContext(payload: Record<string, unknown>): string {
 }
 
 function normalizePayloadForTask(task: RequestTask, payload: Record<string, unknown>): Record<string, unknown> {
+  if (task === 'suggest-confluence-version-note') {
+    try { return { facts: validateConfluenceVersionFacts(payload) }; }
+    catch (error) { throw new AiBadRequestError(error instanceof Error ? error.message : 'Некорректный список изменений'); }
+  }
   if (task === 'prepare-jira-task') {
     try { return normalizeJiraDraftInput(payload); }
     catch (error) { throw new AiBadRequestError(error instanceof Error ? error.message : 'Некорректные данные Jira.'); }
@@ -196,6 +206,12 @@ function extractJsonObject(raw: string): unknown {
 }
 
 function buildTaskPrompt(task: RequestTask, payload: Record<string, unknown>): string {
+  if (task === 'suggest-confluence-version-note') return [
+    'Выбери от одного до четырёх наиболее важных событий для комментария к версии документа API.',
+    'Ставь изменения контракта, маскирования и ошибок выше правок текста и структуры. Учитывай количества.',
+    'Верни только JSON вида {"selected":[0,2]}. Индексы начинаются с нуля, порядок отражает важность. Используй только данные индексы, без повторов и комментариев.',
+    JSON.stringify(payload.facts)
+  ].join('\n');
   if (task === 'prepare-jira-task') return buildJiraDraftPrompt(normalizeJiraDraftInput(payload));
   if (task === 'repair-json') {
     return [
@@ -500,7 +516,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       provider: 'openai',
       model: resolveOpenAiModel(process.env.OPENAI_MODEL),
       message: 'Use POST with JSON body: { task, payload }',
-      tasks: ['repair-json', 'fill-descriptions', 'generate-examples', 'suggest-mappings', 'mask-fields', 'build-validation-rules', 'prepare-jira-task']
+      tasks: requestTasks
     });
     return;
   }
@@ -515,7 +531,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const task = body.task;
     const payload = body.payload ?? {};
 
-    if (!task || !['repair-json', 'fill-descriptions', 'generate-examples', 'suggest-mappings', 'mask-fields', 'build-validation-rules', 'prepare-jira-task'].includes(task)) {
+    if (!task || !requestTasks.includes(task)) {
       res.status(400).json({ error: 'Некорректный task' });
       return;
     }
@@ -524,6 +540,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     checkAiRateLimit(user.id);
     const prompt = buildTaskPrompt(task, normalizedPayload);
     const raw = await callOpenAi(task, prompt);
+
+    if (task === 'suggest-confluence-version-note') {
+      res.status(200).json({ data: { note: renderConfluenceAiNote(raw, validateConfluenceVersionFacts(normalizedPayload)) } });
+      return;
+    }
 
     if (task === 'prepare-jira-task') {
       res.status(200).json({ data: normalizeJiraDraft(raw, normalizeJiraDraftInput(normalizedPayload)) });

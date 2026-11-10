@@ -12,7 +12,8 @@ import {
 } from '../confluenceClient';
 import { renderConfluenceDocument } from '../confluenceDocument';
 import { importedPublicationSections, restoreConfluencePublication } from '../confluencePublicationStorage';
-import { CONFLUENCE_VERSION_NOTE_LIMIT, suggestConfluenceVersionNote } from '../confluenceVersionNote';
+import { collectConfluenceVersionFacts, CONFLUENCE_VERSION_NOTE_LIMIT, suggestConfluenceVersionNote } from '../confluenceVersionNote';
+import { suggestConfluenceVersionNoteWithAi } from '../openrouterClient';
 import type {
   ConfluenceBinding, ConfluenceCollection, ConfluenceDocument, ConfluenceImportSource, ConfluencePage,
   ConfluencePageSummary, ConfluencePublishRequest, ConfluenceSpace, ConfluenceStatus
@@ -38,6 +39,7 @@ type Prepared = {
   versionNote?: { value: string; edited: boolean };
 };
 type Attempt = { operationId: string; prepared: Prepared };
+type AiNoteRequest = { draft: Prepared; error?: string };
 
 function publicationRequest(attempt: Attempt): ConfluencePublishRequest {
   const { operationId, prepared } = attempt;
@@ -227,6 +229,7 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMe
   const [link, setLink] = useState('');
   const [revealTarget, setRevealTarget] = useState<{ tab: Tab; page: ConfluencePage }>();
   const [prepared, setPrepared] = useState<Prepared>();
+  const [aiNoteRequest, setAiNoteRequest] = useState<AiNoteRequest>();
   const [preparing, setPreparing] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [jiraBusy, setJiraBusy] = useState(false);
@@ -242,6 +245,7 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMe
   const pageSequence = useRef(0);
   const boundPageSequence = useRef({ value: 0 });
   const preparationSequence = useRef(0);
+  const aiNoteSequence = useRef(0);
   const currentOrigin = useRef('');
   const previousOrigin = useRef(targetBaseUrl ?? '');
   const writeLock = useRef(false);
@@ -249,6 +253,16 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMe
   const baseUrl = status?.baseUrl ?? '';
   const connected = status?.connected === true && Boolean(baseUrl);
   const supportsVersionComments = status?.versionComments === true;
+  const noteTarget = prepared?.target;
+  const noteStorage = prepared?.storage;
+  const noteTitle = prepared?.title;
+  const hasVersionNote = Boolean(prepared?.versionNote);
+  const migration = Boolean(importedTarget);
+  const noteFacts = useMemo(() => hasVersionNote && noteTarget && noteStorage !== undefined && noteTitle !== undefined
+    ? collectConfluenceVersionFacts(noteTarget, { storage: noteStorage, title: noteTitle }, migration) : [],
+  [hasVersionNote, noteTarget, noteStorage, noteTitle, migration]);
+  const activeAiNote = aiNoteRequest?.draft === prepared ? aiNoteRequest : undefined;
+  const aiNotePending = Boolean(activeAiNote && !activeAiNote.error);
   const targetMatches = targetBaseUrl === baseUrl;
   const unknownMatches = connected && unknown?.prepared.baseUrl === baseUrl;
   const busy = preparing || publishing || pageBusy || boundPageBusy || jiraBusy;
@@ -439,6 +453,28 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMe
       publishedAt: new Date().toISOString()
     });
   }
+  async function suggestVersionComment() {
+    if (!prepared?.versionNote || !connected || !supportsVersionComments || publishing || jiraBusy || aiNotePending || !noteFacts.length) return;
+    const draft = prepared;
+    const request: AiNoteRequest = { draft };
+    const sequence = ++aiNoteSequence.current;
+    setAiNoteRequest(request);
+    try {
+      const value = await suggestConfluenceVersionNoteWithAi(noteFacts);
+      if (!alive.current || aiNoteSequence.current !== sequence) return;
+      if (currentOrigin.current === draft.baseUrl) {
+        setPrepared(current => current === draft ? { ...current, versionNote: { value, edited: false } } : current);
+      }
+      setAiNoteRequest(current => current === request ? undefined : current);
+    } catch (error) {
+      if (!alive.current || aiNoteSequence.current !== sequence) return;
+      const authRequired = error instanceof Error && error.message.includes('только после входа');
+      const errorMessage = authRequired ? 'Войдите в аккаунт, чтобы использовать ИИ'
+        : 'Не удалось сформулировать с ИИ. Текущий комментарий можно использовать или отредактировать';
+      setAiNoteRequest(current => current === request
+        ? currentOrigin.current === draft.baseUrl ? { draft, error: errorMessage } : undefined : current);
+    }
+  }
   async function publish(draft: Prepared | undefined = prepared) {
     const publication = draft;
     if (!publication || (conflict || publication.mode === 'update' && importedTarget) && !overwriteConfirmed
@@ -448,6 +484,8 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMe
       return;
     }
     const prepared = publication;
+    aiNoteSequence.current++;
+    setAiNoteRequest(undefined);
     writeLock.current = true; setPublishing(true); setError('');
     const attempt: Attempt = { operationId: crypto.randomUUID(), prepared };
     try {
@@ -636,15 +674,24 @@ export function ConfluenceScreen({ method, onPublished, onJiraLinked, onImportMe
       </>}
       {prepared && !result && !unknown && <section><h3>{prepared.mode === 'update' ? 'Проверка обновления' : 'Проверка новой страницы'}</h3><p className="cf-destination">{prepared.baseUrl}<br />{shownPage ? pagePath(shownPage) : `${prepared.spaceKey} / Корень пространства`}<br /><strong>{prepared.title}</strong></p>
         {prepared.versionNote && <div className="cf-version-note">
-          <WBInput label="Комментарий к версии" value={prepared.versionNote.value} placeholder="Опубликовано из DocBuilder"
-            maxLength={CONFLUENCE_VERSION_NOTE_LIMIT} disabled={publishing || jiraBusy || !supportsVersionComments}
-            aria-describedby="cf-version-note-help" onChange={event => {
-              const value = event.target.value;
-              setPrepared(current => current ? { ...current, versionNote: { value, edited: true } } : current);
-            }} />
+          <div className="cf-version-note-controls">
+            <WBInput label="Комментарий к версии" value={prepared.versionNote.value} placeholder="Опубликовано из DocBuilder"
+              maxLength={CONFLUENCE_VERSION_NOTE_LIMIT} disabled={publishing || jiraBusy || !supportsVersionComments}
+              aria-describedby="cf-version-note-help" onChange={event => {
+                const value = event.target.value;
+                setPrepared(current => current ? { ...current, versionNote: { value, edited: true } } : current);
+                aiNoteSequence.current++;
+                setAiNoteRequest(undefined);
+              }} />
+            {noteFacts.length > 0 && <WBButton disabled={!connected || publishing || jiraBusy || !supportsVersionComments || aiNotePending}
+              aria-busy={aiNotePending} onClick={() => void suggestVersionComment()}>
+              {aiNotePending ? 'ИИ выбирает изменения…' : 'Сформулировать с ИИ'}
+            </WBButton>}
+          </div>
           <p id="cf-version-note-help" className="cf-muted">{conflict && prepared.versionNote.edited
             ? 'Проверьте комментарий с учётом новой версии страницы.'
             : 'Комментарий появится в истории страницы Confluence.'}</p>
+          {activeAiNote?.error && <p className="cf-error" role="alert">{activeAiNote.error}</p>}
         </div>}
         {reviewRequired ? <><div className={conflict ? 'cf-notice cf-error' : 'cf-notice'} role={conflict ? 'alert' : undefined}>
           <h3>{conflict ? 'Страницу изменили в Confluence' : 'Первое обновление после импорта'}</h3>

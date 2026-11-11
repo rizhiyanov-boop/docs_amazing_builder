@@ -1,0 +1,6 @@
+{
+  "rewrites": [
+    { "source": "/jira", "destination": "/index.html" },
+    { "source": "/jira/", "destination": "/index.html" }
+  ]
+}

@@ -88,7 +88,7 @@ async function callAiApi<T>(task: ApiTask, payload: Record<string, unknown>): Pr
       try {
         const response = await fetch(endpoint, {
           method: 'POST',
-          credentials: 'include',
+          credentials: task === 'prepare-jira-task' ? 'omit' : 'include',
           headers: {
             'Content-Type': 'application/json'
           },
@@ -119,7 +119,7 @@ async function callAiApi<T>(task: ApiTask, payload: Record<string, unknown>): Pr
         }
 
         if (!response.ok) {
-          if (response.status === 401) {
+          if (response.status === 401 && task !== 'prepare-jira-task') {
             throw new Error('AI доступен только после входа в аккаунт. Войдите и повторите запрос.');
           }
           if (response.status === 404) {

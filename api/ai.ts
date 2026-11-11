@@ -1,3 +1,4 @@
+import { isIP } from 'node:net';
 import { getUserBySessionToken } from './_lib/db.js';
 import { getSessionToken } from './_lib/http.js';
 import { openAiCompletionOptions, resolveOpenAiModel } from './_lib/aiModel.js';
@@ -69,6 +70,7 @@ const DEFAULT_OPENAI_MAX_OUTPUT_TOKENS = 2_500;
 const DEFAULT_VALIDATION_RULES_MAX_OUTPUT_TOKENS = 6_000;
 const MAX_MANUAL_CONTEXT_LENGTH = 20_000;
 const DEFAULT_AI_DAILY_LIMIT = 60;
+const JIRA_AI_DAILY_LIMIT = 100;
 const DEFAULT_AI_WINDOW_LIMIT = 10;
 const DEFAULT_AI_WINDOW_MS = 5 * 60 * 1000;
 const MAX_AI_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -80,7 +82,7 @@ type AiUsageBucket = {
   windowCount: number;
 };
 
-const aiUsageByUser = new Map<string, AiUsageBucket>();
+const aiUsageByCaller = new Map<string, AiUsageBucket>();
 
 class AiTimeoutError extends Error {
   constructor(timeoutMs: number) {
@@ -127,33 +129,43 @@ function getDailyKey(now: number): string {
   return new Date(now).toISOString().slice(0, 10);
 }
 
-function checkAiRateLimit(userId: string): void {
+function jiraAiCaller(req: VercelRequest): string {
+  const forwarded = req.headers?.['x-vercel-forwarded-for'] ?? req.headers?.['x-forwarded-for'];
+  const value = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+  const ip = value?.split(',')[0].trim() ?? '';
+  return `jira:${isIP(ip) ? ip : 'unknown'}`;
+}
+
+function checkAiRateLimit(caller: string, publicJiraDraft: boolean): void {
   const now = Date.now();
-  const dailyLimit = readPositiveIntegerEnv('AI_DAILY_LIMIT', DEFAULT_AI_DAILY_LIMIT, 10_000);
-  const windowLimit = readPositiveIntegerEnv('AI_WINDOW_LIMIT', DEFAULT_AI_WINDOW_LIMIT, 1_000);
-  const windowMs = readPositiveIntegerEnv('AI_WINDOW_MS', DEFAULT_AI_WINDOW_MS, MAX_AI_WINDOW_MS);
+  const dailyLimit = publicJiraDraft
+    ? JIRA_AI_DAILY_LIMIT
+    : readPositiveIntegerEnv('AI_DAILY_LIMIT', DEFAULT_AI_DAILY_LIMIT, 10_000);
   const dailyKey = getDailyKey(now);
-  const current = aiUsageByUser.get(userId);
+  const current = aiUsageByCaller.get(caller);
   const bucket: AiUsageBucket = current && current.dailyKey === dailyKey
     ? current
     : { dailyKey, dailyCount: 0, windowStart: now, windowCount: 0 };
-
-  if (now - bucket.windowStart >= windowMs) {
-    bucket.windowStart = now;
-    bucket.windowCount = 0;
-  }
 
   if (bucket.dailyCount >= dailyLimit) {
     throw new AiRateLimitError(`Превышен дневной лимит AI: ${dailyLimit} запросов.`);
   }
 
-  if (bucket.windowCount >= windowLimit) {
-    throw new AiRateLimitError(`Превышен краткосрочный лимит AI: ${windowLimit} запросов за ${Math.round(windowMs / 1000)} секунд.`);
+  if (!publicJiraDraft) {
+    const windowLimit = readPositiveIntegerEnv('AI_WINDOW_LIMIT', DEFAULT_AI_WINDOW_LIMIT, 1_000);
+    const windowMs = readPositiveIntegerEnv('AI_WINDOW_MS', DEFAULT_AI_WINDOW_MS, MAX_AI_WINDOW_MS);
+    if (now - bucket.windowStart >= windowMs) {
+      bucket.windowStart = now;
+      bucket.windowCount = 0;
+    }
+    if (bucket.windowCount >= windowLimit) {
+      throw new AiRateLimitError(`Превышен краткосрочный лимит AI: ${windowLimit} запросов за ${Math.round(windowMs / 1000)} секунд.`);
+    }
+    bucket.windowCount += 1;
   }
 
   bucket.dailyCount += 1;
-  bucket.windowCount += 1;
-  aiUsageByUser.set(userId, bucket);
+  aiUsageByCaller.set(caller, bucket);
 }
 
 function getManualContext(payload: Record<string, unknown>): string {
@@ -519,8 +531,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
-  const user = await getUserBySessionToken(getSessionToken(req));
-  if (!user) {
+  const body = (req.body ?? {}) as RequestBody;
+  const publicJiraDraft = req.method === 'POST' && body.task === 'prepare-jira-task';
+  const user = publicJiraDraft ? null : await getUserBySessionToken(getSessionToken(req));
+  if (!publicJiraDraft && !user) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }
@@ -543,7 +557,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   }
 
   try {
-    const body = (req.body ?? {}) as RequestBody;
     const task = body.task;
     const payload = body.payload ?? {};
 
@@ -553,7 +566,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     }
 
     const normalizedPayload = normalizePayloadForTask(task, payload);
-    checkAiRateLimit(user.id);
+    checkAiRateLimit(user ? `user:${user.id}` : jiraAiCaller(req), publicJiraDraft);
     const prompt = buildTaskPrompt(task, normalizedPayload);
     const raw = await callOpenAi(task, prompt);
 

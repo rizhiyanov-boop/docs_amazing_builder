@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { suggestMappingsWithAi } from './openrouterClient';
+import { prepareJiraTaskWithAi, suggestMappingsWithAi } from './openrouterClient';
 
 function makeJsonResponse(status: number, payload: unknown): Response {
   return {
@@ -39,5 +39,21 @@ describe('openrouterClient', () => {
       .toThrow('AI доступен только после входа в аккаунт');
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('prepares a Jira draft without DocBuilder cookies', async () => {
+    const output = { summary: 'Fix search', descriptionRu: 'Исправить поиск.', descriptionEn: 'Fix search.', descriptionUz: 'Qidiruvni tuzatish.' };
+    const fetchMock = vi.fn().mockResolvedValue(makeJsonResponse(200, { data: output }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(prepareJiraTaskWithAi({
+      source: { kind: 'freeform', description: 'Исправить поиск' },
+      method: { name: '', context: '' },
+      project: { key: 'IN', name: 'Integration' },
+      issueType: 'Task',
+      epics: [],
+      priorities: []
+    })).resolves.toMatchObject(output);
+    expect(fetchMock).toHaveBeenCalledWith('/api/ai', expect.objectContaining({ credentials: 'omit' }));
   });
 });

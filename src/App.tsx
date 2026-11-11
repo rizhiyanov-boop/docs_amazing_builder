@@ -347,12 +347,22 @@ function getSectionWorkbenchMeta(section: DocSection): {
   return { emoji: '□', eyebrow: 'Текст' };
 }
 
+const JIRA_STANDALONE_PATH = '/jira';
+
+function isJiraStandalonePath(pathname: string): boolean {
+  return pathname === JIRA_STANDALONE_PATH || pathname === JIRA_STANDALONE_PATH + '/';
+}
+
+function isJiraStandaloneHash(hash: string): boolean {
+  return ['#/jira', '#jira'].includes(hash.toLowerCase());
+}
+
 function isJiraStandaloneUrl(): boolean {
   if (typeof window === 'undefined') return false;
   const params = new URLSearchParams(window.location.search);
-  const view = params.get('view') || params.get('tab');
-  const hash = window.location.hash.toLowerCase();
-  return view === 'jira' || hash === '#/jira' || hash === '#jira';
+  return isJiraStandalonePath(window.location.pathname)
+    || params.get('view') === 'jira' || params.get('tab') === 'jira'
+    || isJiraStandaloneHash(window.location.hash);
 }
 
 type TabKey = 'editor' | 'html' | 'wiki' | 'confluence' | 'jira';
@@ -7176,26 +7186,18 @@ export default function App() {
   useEffect(() => {
     try {
       const url = new URL(window.location.href);
-      if (tab === 'jira') {
-        if (url.searchParams.get('view') !== 'jira' && url.hash !== '#jira' && url.hash !== '#/jira') {
-          url.searchParams.set('view', 'jira');
-          window.history.replaceState({}, '', url.toString());
-        }
-      } else {
-        if (url.searchParams.get('view') === 'jira' || url.searchParams.get('tab') === 'jira') {
-          url.searchParams.delete('view');
-          url.searchParams.delete('tab');
-          window.history.replaceState({}, '', url.toString());
-        }
-        if (url.hash === '#jira' || url.hash === '#/jira') {
-          url.hash = '';
-          window.history.replaceState({}, '', url.toString());
-        }
+      if (tab === 'jira' || isDirectStandaloneJira) url.pathname = JIRA_STANDALONE_PATH;
+      else if (isJiraStandalonePath(url.pathname)) url.pathname = '/';
+      if (url.searchParams.get('view') === 'jira') url.searchParams.delete('view');
+      if (url.searchParams.get('tab') === 'jira') url.searchParams.delete('tab');
+      if (isJiraStandaloneHash(url.hash)) url.hash = '';
+      if (url.href !== window.location.href) {
+        window.history.replaceState(window.history.state, '', url);
       }
     } catch {
       // Keep the selected screen if the browser rejects the URL update.
     }
-  }, [tab]);
+  }, [tab, isDirectStandaloneJira]);
 
   useEffect(() => {
     const onPop = () => {
@@ -7730,7 +7732,7 @@ export default function App() {
 
   return (
     <div className={`wb-app-root ${isCompactLayout ? 'wb-compact' : ''} ${isSidebarHidden ? 'wb-sidebar-hidden' : ''}`} data-wb-accent={wbAccent}>
-      {ONBOARDING_FEATURES.onboardingV1 && showOnboardingEntry && (
+      {ONBOARDING_FEATURES.onboardingV1 && showOnboardingEntry && !isDirectStandaloneJira && tab !== 'jira' && (
         <div
           className="onboarding-entry-backdrop"
           role="dialog"

@@ -21,7 +21,7 @@ Backend endpoints live in `api/` and are consumed through `src/serverSyncClient.
 - Auth: login/register/session checks use cookie-backed API routes.
 - Server project sync: project list/load/save/delete goes through `/api/projects`.
 - Autosave: `useRemoteProjectAutosave` builds a `WorkspaceProjectData` snapshot and posts it to the backend after idle delay and hash dedupe.
-- AI: /api/ai requires an authenticated session and calls OpenAI Chat Completions directly. api/_lib/aiModel.ts defaults to gpt-6-luna, honors the server-side OPENAI_MODEL override and selects compatible request parameters. The /api/openrouter endpoint remains a compatibility alias.
+- AI: /api/ai calls OpenAI Chat Completions directly. Jira draft preparation accepts requests without a DocBuilder session and allows 100 requests per client IP per UTC day. Other actions require a session and apply limits by account. api/_lib/aiModel.ts defaults to gpt-6-luna, honors the server-side OPENAI_MODEL override and selects compatible request parameters. The /api/openrouter endpoint remains a compatibility alias.
 - Import/export: JSON import is handled client-side; HTML/Wiki renderers run in the client and downloads are triggered from preview screens.
 - Confluence: src/confluenceClient.ts calls the loopback bridge at 127.0.0.1:18771. The user enters the HTTPS Confluence origin and PAT only in the local form; scripts/confluence/bridge.mjs keeps the active session in process memory. With local remembering enabled, credential-store.mjs stores the origin and PAT together encrypted through Windows DPAPI CurrentUser in the local user profile and restores the session after checking Confluence authentication. Each request is scoped to the expected origin and captured session. The hosted backend never receives the PAT. Trees and remote page bodies remain ephemeral; method publication bindings use the existing workspace persistence.
 
@@ -45,6 +45,7 @@ The workspace is stored as `WorkspaceProjectData`:
 - `src/screens/HtmlExportScreen.tsx`: rendered HTML preview, TOC/search, copy and download actions.
 - `src/screens/WikiScreen.tsx`: Wiki source/preview modes with copy and download.
 - src/screens/ConfluenceScreen.tsx: connection status, fresh lazy page tree, read-only page inspection, method create/update, conflict handling and uncertain-outcome reconciliation.
+- src/screens/JiraStandaloneScreen.tsx: separate Jira task creation at /jira. Vercel serves the workbench entry point for this path on direct navigation and refresh.
 - The visible workspace focuses on methods. workbenchFeatures.ts disables the unfinished project switcher, project creation, Project Docs, Flows and project HTML/Wiki actions. Project metadata, sections, flows and the JSON import/export format remain compatible with existing documents.
 
 ### Workbench Shell

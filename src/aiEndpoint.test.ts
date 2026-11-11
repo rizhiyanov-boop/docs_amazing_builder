@@ -99,9 +99,8 @@ describe('ai endpoint auth', () => {
     expect(sent.response_format).toEqual({ type: 'json_object' });
   });
 
-  it('prepares Jira text and ranking without forwarding extra secrets', async () => {
+  it('prepares Jira text and ranking without a DocBuilder session or extra secrets', async () => {
     process.env.OPENAI_API_KEY = 'test-key';
-    dbMock.getUserBySessionToken.mockResolvedValue({ id: 'jira-ai-user', login: 'tester' });
     const output = { summary: '[OpenAPI] Implement CRIF integration', descriptionRu: 'Разработать метод CRIF через интеграционный адаптер.', descriptionEn: 'Implement the CRIF method through the integration adapter.', descriptionUz: 'Integratsiya adapteri orqali CRIF usulini ishlab chiqish.', rankedEpics: [{ key: 'IN-5', reason: 'Интеграция' }, { key: 'DI-5', reason: 'Другой проект' }], labels: [{ key: 'business', reason: 'Бизнес' }], priorityId: '3', priorityReason: 'Обычный приоритет' };
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify(output) } }] }) });
     vi.stubGlobal('fetch', fetchMock);
@@ -109,6 +108,7 @@ describe('ai endpoint auth', () => {
     const res = createResponse();
     await aiHandler({ method: 'POST', body: { task: 'prepare-jira-task', payload: { method: { name: 'CRIF', context: 'POST /api/crif', token: 'DO_NOT_FORWARD' }, project: { key: 'IN', name: 'Test' }, issueType: 'Задача', epics: [{ key: 'IN-5', name: 'Integration' }], priorities: [{ id: '3', name: 'Medium' }], token: 'DO_NOT_FORWARD' } } }, res);
     expect(res.statusCode).toBe(200);
+    expect(dbMock.getUserBySessionToken).not.toHaveBeenCalled();
     expect(res.payload).toMatchObject({ data: { summary: output.summary, descriptionUz: output.descriptionUz, rankedEpics: [{ key: 'IN-5', reason: 'Интеграция' }] } });
     const request = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(request.messages[1].content).not.toContain('DO_NOT_FORWARD');
@@ -117,6 +117,43 @@ describe('ai endpoint auth', () => {
     const invalid = createResponse();
     await aiHandler({ method: 'POST', body: { task: 'prepare-jira-task', payload: { method: { name: 'CRIF', context: '' }, project: { key: 'IN', name: 'Test' }, issueType: 'Task', epics: [{ key: 'DI-5', name: 'Other project' }], priorities: [] } } }, invalid);
     expect(invalid.statusCode).toBe(400); expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows 100 freeform Jira drafts per IP per day without login or a short-term limit', async () => {
+    process.env.OPENAI_API_KEY = 'test-key';
+    process.env.AI_WINDOW_LIMIT = '1';
+    process.env.AI_DAILY_LIMIT = '1';
+    const output = { summary: 'Fix search', descriptionRu: 'Исправить поиск.', descriptionEn: 'Fix search.', descriptionUz: 'Qidiruvni tuzatish.' };
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify(output) } }] }) });
+    vi.stubGlobal('fetch', fetchMock);
+    const { default: aiHandler } = await import('../api/ai');
+    const body = {
+      task: 'prepare-jira-task',
+      payload: {
+        source: { kind: 'freeform', description: 'Исправить поиск в каталоге' },
+        method: { name: 'Свободное описание', context: '' },
+        project: { key: 'IN', name: 'Integration' }, issueType: 'Task', epics: [], priorities: []
+      }
+    };
+    async function prepare(ip: string) {
+      const response = createResponse();
+      await aiHandler({ method: 'POST', headers: { 'x-vercel-forwarded-for': ip, 'x-forwarded-for': '192.0.2.3' }, body }, response);
+      return response;
+    }
+    const now = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-11T23:59:59Z'));
+    try {
+      for (let i = 0; i < 100; i += 1) {
+        expect(await prepare('192.0.2.1')).toMatchObject({ statusCode: 200, payload: { data: output } });
+      }
+      expect(await prepare('192.0.2.1')).toMatchObject({ statusCode: 429 });
+      expect(await prepare('192.0.2.2')).toMatchObject({ statusCode: 200 });
+      now.mockReturnValue(Date.parse('2026-11-12T00:00:00Z'));
+      expect(await prepare('192.0.2.1')).toMatchObject({ statusCode: 200 });
+    } finally {
+      now.mockRestore();
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(102);
+    expect(dbMock.getUserBySessionToken).not.toHaveBeenCalled();
   });
 
   it('ranks only whitelisted Confluence facts and renders the note from selected indexes', async () => {

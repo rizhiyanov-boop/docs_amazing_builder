@@ -11,6 +11,14 @@ type ReleaseNote = {
 /** Newest first. Keep descriptions user-facing and omit dates. */
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
+    version: '1.4.1',
+    title: 'Локальное подключение без установки Node.js',
+    changes: [
+      'Архив для Windows x64 и ARM64 включает Node.js и автоматически выбирает нужную версию',
+      'После запуска локального сервиса экран подключения открывается в браузере'
+    ]
+  },
+  {
     version: '1.4.0',
     title: 'Шаблоны методов и импорт из Confluence',
     changes: [

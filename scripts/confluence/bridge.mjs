@@ -3,7 +3,7 @@ import { createJira, JiraError } from './jira.mjs';
 import { jiraForm } from './jira-form.mjs';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 
-export const BRIDGE_VERSION = '1.3.8';
+export const BRIDGE_VERSION = '1.3.9';
 const VERSION_MESSAGE_LIMIT = 255;
 const VERSION_MESSAGE_DIGEST = Symbol('versionMessageDigest');
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;

@@ -121,6 +121,8 @@ import { EmptyState } from './components/EmptyState';
 import { ErrorsSectionEditor } from './components/ErrorsSectionEditor';
 import type { AddableBlockType } from './components/MethodSectionSidebar';
 import { ParsedSectionEditor } from './components/ParsedSectionEditor';
+import { RequestResponseToolbar, type RequestActiveSide } from './components/RequestResponseToolbar';
+import { RequestQuickImport, type QuickImportFormat } from './components/RequestQuickImport';
 import { ParsedTableFrame } from './components/tables/ParsedTableFrame';
 import { ProjectDocsEditor } from './components/ProjectDocsEditor';
 import { ProjectFlowsEditor } from './components/ProjectFlowsEditor';
@@ -721,6 +723,8 @@ export default function App() {
   const [aiExamplesPreview, setAiExamplesPreview] = useState<AiExamplesPreviewState | null>(null);
   const [inlineImportSectionId, setInlineImportSectionId] = useState<string | null>(null);
   const [inlineImportText, setInlineImportText] = useState('');
+  const [requestActiveSides, setRequestActiveSides] = useState<Record<string, RequestActiveSide>>({});
+  const [quickImportSectionId, setQuickImportSectionId] = useState<string | null>(null);
   const [inlineImportError, setInlineImportError] = useState('');
   const [authRequestStatus, setAuthRequestStatus] = useState<AuthRequestStatus | null>(null);
   const [authBusyKey, setAuthBusyKey] = useState<string | null>(null);
@@ -7136,8 +7140,92 @@ export default function App() {
       </>
     );
 
+    const activeSide = requestActiveSides[section.id] ?? 'server';
+    const isImportOpen = quickImportSectionId === section.id;
+    const mappedCount = section.rows.filter((row) => row.clientField).length;
+
+    const handleSideChange = (side: RequestActiveSide) => {
+      setRequestActiveSides((prev) => ({ ...prev, [section.id]: side }));
+      if (side === 'server') {
+        setExpanderOpen(section.id, 'contract-server', true);
+      } else if (side === 'client') {
+        setExpanderOpen(section.id, 'contract-client', true);
+      }
+    };
+
+    const handleQuickImportApply = (rawText: string, format: QuickImportFormat, target: ParseTarget) => {
+      try {
+        const isClient = target === 'client' && isDualModelSection(section);
+        const effectiveFormat: ParseFormat = format === 'schema' ? 'json' : format;
+        const shouldWrap = !activeTemplateId && section.sectionType === 'response' && !section.domainModelEnabled && effectiveFormat === 'json';
+        const inputToParse = shouldWrap ? wrapNonDomainResponseJson(rawText) : rawText;
+        const parsedRows = parseToRows(effectiveFormat, inputToParse);
+        const curlMeta = isRequestSection(section) && effectiveFormat === 'curl' ? parseCurlMeta(rawText) : null;
+        const requestMethod = isRequestSection(section) ? curlMeta?.method ?? (isClient ? section.externalRequestMethod : section.requestMethod) ?? 'POST' : undefined;
+        const rows = normalizeParsedRowsForSection(section, parsedRows, { requestMethod });
+
+        updateSection(section.id, (current) => {
+          if (current.kind !== 'parsed') return current;
+          if (isClient) {
+            return {
+              ...current,
+              clientFormat: effectiveFormat,
+              clientInput: rawText,
+              clientRows: mergeManualHeaders(current.clientRows ?? [], rows),
+              clientError: '',
+              clientLastSyncedFormat: effectiveFormat,
+              externalRequestUrl: isRequestSection(current) ? curlMeta?.url ?? current.externalRequestUrl ?? '' : current.externalRequestUrl,
+              externalRequestMethod: isRequestSection(current) ? curlMeta?.method ?? current.externalRequestMethod ?? 'POST' : current.externalRequestMethod,
+              requestProtocol: isRequestSection(current) ? inferRequestProtocol(effectiveFormat, current.requestProtocol) : current.requestProtocol
+            };
+          }
+          return {
+            ...current,
+            format: effectiveFormat,
+            input: rawText,
+            rows: mergeManualHeaders(current.rows, rows),
+            error: '',
+            lastSyncedFormat: effectiveFormat,
+            requestUrl: isRequestSection(current) ? curlMeta?.url ?? current.requestUrl ?? '' : current.requestUrl,
+            requestMethod: isRequestSection(current) ? curlMeta?.method ?? current.requestMethod ?? 'POST' : current.requestMethod,
+            requestProtocol: isRequestSection(current) ? inferRequestProtocol(effectiveFormat, current.requestProtocol) : current.requestProtocol
+          };
+        });
+
+        setToastMessage(`${format === 'schema' ? 'JSON Schema' : getFormatLabel(effectiveFormat)} импортирован в ${isClient ? 'Client' : 'Server'}`);
+        setQuickImportSectionId(null);
+      } catch (error) {
+        setToastMessage(error instanceof Error ? error.message : 'Ошибка парсинга', 'error');
+      }
+    };
+
     return (
       <div className="stack">
+        <RequestResponseToolbar
+          section={section}
+          activeSide={activeSide}
+          onSideChange={handleSideChange}
+          serverCount={serverParameterCount}
+          clientCount={clientParameterCount}
+          mappedCount={mappedCount}
+          isImportOpen={isImportOpen}
+          onToggleImport={() => setQuickImportSectionId((prev) => (prev === section.id ? null : section.id))}
+          onAddParameter={() => addManualRow(section, activeSide === 'client' ? 'client' : 'server')}
+          onAiDescriptions={() => openAiDescriptionContextDialog(section)}
+          onAiMasking={() => void runAiMasking(section, { target: activeSide === 'client' ? 'client' : 'both', scope: 'body' })}
+          aiBusy={Boolean(aiBusyKey)}
+          isDualModel={Boolean(section.domainModelEnabled)}
+        />
+
+        {isImportOpen && (
+          <RequestQuickImport
+            key={`${section.id}-${activeSide}`}
+            initialTarget={activeSide === 'client' ? 'client' : 'server'}
+            isDualModel={Boolean(section.domainModelEnabled)}
+            onApply={handleQuickImportApply}
+            onCancel={() => setQuickImportSectionId(null)}
+          />
+        )}
         {!section.domainModelEnabled && (
           <ContractSideAccordion
             side="contract"

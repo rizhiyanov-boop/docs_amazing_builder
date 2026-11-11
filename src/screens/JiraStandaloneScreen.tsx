@@ -126,22 +126,6 @@ export function JiraStandaloneScreen({
           <h2>Jira</h2>
         </div>
         <div className="cf-connection">
-          <span
-            className={`cf-status-badge ${isConnected ? 'is-connected' : 'is-disconnected'}`}
-            role="status"
-            aria-label={checking ? 'Проверка подключения' : isConnected ? 'Jira подключена' : 'Jira не подключена'}
-            title={checking ? 'Проверка подключения…' : isConnected ? 'Jira подключена' : 'Jira не подключена'}
-          >
-            <span className="cf-status-dot" aria-hidden="true" />
-            <span className="cf-status-label">
-              {checking ? 'Проверка…' : isConnected ? 'Подключено' : 'Не подключено'}
-            </span>
-          </span>
-          {status?.project && (
-            <span className="cf-jira-project-name" style={{ fontSize: 'var(--font-size-xs)', color: 'var(--wb-text-muted)' }}>
-              {status.project.name} ({status.project.key})
-            </span>
-          )}
           <WBButton
             size="sm"
             variant="ghost"

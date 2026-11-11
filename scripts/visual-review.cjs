@@ -169,6 +169,95 @@ async function runDomAudit(send) {
             }
           });
 
+          // 4. Toolbar Vertical Alignment & Height Uniformity (Strict 32px standard)
+          const toolbars = document.querySelectorAll('.cf-jira-toolbar');
+          toolbars.forEach(tb => {
+            if (!isVisible(tb)) return;
+            const items = Array.from(tb.querySelectorAll('.cf-jira-type-segments, .cf-jira-type-pill, .cf-jira-btn-ai, .cf-jira-synced-badge, .cf-jira-drift-badge, button:not([hidden]):not(.cf-jira-type-seg)')).filter(isVisible);
+            if (items.length > 1) {
+              const heights = items.map(el => el.offsetHeight);
+              const minH = Math.min(...heights);
+              const maxH = Math.max(...heights);
+              if (maxH - minH > 2) {
+                issues.push({
+                  type: 'toolbar-height-mismatch',
+                  message: 'Toolbar items have mismatched heights (' + heights.join('px, ') + 'px): expected uniform 32px'
+                });
+              }
+              const tbCenterY = items[0].getBoundingClientRect().top + items[0].offsetHeight / 2;
+              for (const el of items) {
+                const elCenterY = el.getBoundingClientRect().top + el.offsetHeight / 2;
+                if (Math.abs(elCenterY - tbCenterY) > 3) {
+                  issues.push({
+                    type: 'toolbar-vertical-misalignment',
+                    message: 'Toolbar element is vertically misaligned (diff: ' + Math.abs(elCenterY - tbCenterY).toFixed(1) + 'px): "' + (el.textContent || '').trim().slice(0, 20) + '"'
+                  });
+                  break;
+                }
+              }
+            }
+          });
+
+          // 5. Palette & Theme Integrity Check (Forbid off-palette blue or neon green in warm theme)
+          const coloredEls = Array.from(document.querySelectorAll('.cf-jira-panel *')).filter(isVisible);
+          for (const el of coloredEls) {
+            const cs = window.getComputedStyle(el);
+            const c = cs.color || '';
+            const bg = cs.backgroundColor || '';
+            const bc = cs.borderColor || '';
+            if (c.includes('37, 99, 235') || bg.includes('37, 99, 235') || bc.includes('37, 99, 235')) {
+              issues.push({
+                type: 'off-palette-blue-detected',
+                message: 'Hardcoded Tailwind blue rgb(37, 99, 235) detected on element: <' + el.tagName.toLowerCase() + ' class="' + el.className + '">'
+              });
+              break;
+            }
+            if (c.includes('34, 197, 94') || c.includes('rgb(34, 197, 94)')) {
+              issues.push({
+                type: 'neon-green-text-detected',
+                message: 'Hardcoded neon green text detected on element: <' + el.tagName.toLowerCase() + ' class="' + el.className + '">'
+              });
+              break;
+            }
+            // Check text clipping on visual text containers (excluding selects/options and hidden tags)
+            if (el.tagName !== 'OPTION' && el.tagName !== 'SELECT' && !el.closest('select') && !el.closest('.cf-visually-hidden')) {
+              if (el.children.length === 0 && el.textContent && el.textContent.trim().length > 0 && el.clientWidth > 0) {
+                if (el.scrollWidth > el.clientWidth + 1) {
+                  issues.push({
+                    type: 'text-clipped-detected',
+                    message: 'Text is overflowing/clipped in element: "' + el.textContent.trim() + '" (scrollWidth ' + el.scrollWidth + ' > clientWidth ' + el.clientWidth + ')'
+                  });
+                  break;
+                }
+              }
+            }
+          }
+
+          // 6. Check for unwanted horizontal dividers cutting across form
+          const unwantedDividers = document.querySelectorAll('.cf-jira-unfolded-results');
+          unwantedDividers.forEach(el => {
+            if (!isVisible(el)) return;
+            const cs = window.getComputedStyle(el);
+            if (cs.borderTopWidth && parseInt(cs.borderTopWidth, 10) > 0) {
+              issues.push({
+                type: 'unwanted-divider-detected',
+                message: 'Unwanted border-top divider detected on .cf-jira-unfolded-results'
+              });
+            }
+          });
+
+          // 7. Check for stray disabled button in folded state
+          const nextBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent && b.textContent.includes('Начать следующую задачу'));
+          if (nextBtn && isVisible(nextBtn) && nextBtn.disabled) {
+            const results = document.querySelector('.cf-jira-unfolded-results');
+            if (!results || !isVisible(results)) {
+              issues.push({
+                type: 'stray-button-visible',
+                message: '"Начать следующую задачу" is visible and disabled while results are folded'
+              });
+            }
+          }
+
           return issues;
         })()
       `
@@ -284,7 +373,7 @@ async function run() {
         expression: `new Promise((resolve) => {
           const start = Date.now();
           const check = () => {
-            if (document.querySelector('#root')?.children.length > 0 || Date.now() - start > 35000) {
+            if (document.querySelector('#root')?.children.length > 0 || (!document.querySelector('#root') && document.body?.children.length > 0) || Date.now() - start > 35000) {
               resolve(true);
             } else {
               setTimeout(check, 100);

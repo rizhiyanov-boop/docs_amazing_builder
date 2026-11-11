@@ -93,7 +93,9 @@ export function JiraTaskWorkflow(props: Props) {
     {source !== 'method' && connectionScope && <>
       {source === 'new-method' && <p className="cf-notice">Создаётся отдельная задача по текущему методу. Существующая связь метода с Jira сохраняется.</p>}
       {identity.error ? <p role="alert" className="cf-notice cf-error">{identity.error}</p> : <JiraPanel key={`${source}:${identity.id}`} headerExtra={headerActions} methodId={identity.id} methodName={source === 'freeform' ? 'Отдельная задача' : props.methodName} methodContext={source === 'freeform' ? '' : props.methodContext} confluenceUrl={source === 'freeform' ? undefined : props.confluenceUrl} source={source === 'freeform' ? 'freeform' : 'method'} active={props.active} onBusyChange={onBusyChange} onCompletedChange={setCompleted} client={props.client} prepareDraft={props.prepareDraft} />}
-      <WBButton disabled={busy || !completed} onClick={startNext}>Начать следующую задачу</WBButton>
+      <div className="cf-jira-workflow-footer">
+        <WBButton disabled={busy || !completed} onClick={startNext}>Начать следующую задачу</WBButton>
+      </div>
     </>}
   </>;
 }

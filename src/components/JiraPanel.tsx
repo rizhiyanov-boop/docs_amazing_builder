@@ -50,6 +50,8 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
   const [labels, setLabels] = useState<string[]>([]); const [priorityId, setPriorityId] = useState('');
   const [priorityExplicit, setPriorityExplicit] = useState(false);
   const [draft, setDraft] = useState<JiraDraft>(); const [operation, setOperation] = useState<JiraOperation>();
+  const [preparedPrompt, setPreparedPrompt] = useState<string>('');
+  const [preparedIssueKind, setPreparedIssueKind] = useState<JiraIssueKind | undefined>();
   const [createdInSession, setCreatedInSession] = useState(false);
   const [copied, setCopied] = useState(false);
   const copyTimerRef = useRef<number | null>(null);
@@ -80,6 +82,10 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
     setSourceDescription(value.sourceDescription ?? '');
     setSummary(value.summary); setDescriptionRu(value.descriptionRu); setDescriptionEn(value.descriptionEn); setDescriptionUz(value.descriptionUz); setDescription(value.description);
     setEpic(value.epic); setLabels(value.labels); setPriorityId(value.priorityId); setSearch(value.search); setEpicQuery(value.epicQuery); setDraft(value.draft); setFingerprint(value.fingerprint ?? '');
+    if (value.draft) {
+      setPreparedPrompt((value.sourceDescription ?? '').trim());
+      setPreparedIssueKind(value.issueKind);
+    }
   };
   const acceptIssue = (result: JiraIssueResult, cached?: JiraFormCache) => {
     setIssue(result.issue); setMetadata(result.metadata); setOperation(result.operation);
@@ -312,7 +318,10 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
       setPreparationPhase('ai');
       const result = await prepareDraft({ ...(source === 'freeform' ? { source: { kind: 'freeform' as const, description: sourceDescription.trim() } } : {}), method: source === 'freeform' ? { name: 'Свободное описание', context: '' } : { name: methodName, context: methodContext }, project: { key: status.project.key, name: status.project.name }, issueType: metadata.story.name, epics: items.map(({ key, name }) => ({ key, name })), priorities: metadata.priorities ?? [] });
       if (current !== epoch.current.value) return;
-      setDraft(result); setSummary(result.summary); setDescriptionRu(result.descriptionRu); setDescriptionEn(result.descriptionEn);
+      setDraft(result);
+      setPreparedPrompt(sourceDescription.trim());
+      setPreparedIssueKind(issueKind);
+      setSummary(result.summary); setDescriptionRu(result.descriptionRu); setDescriptionEn(result.descriptionEn);
       setDescriptionUz(result.descriptionUz);
       if (issue) setDescription(jiraDescription(result.descriptionRu, result.descriptionEn, result.descriptionUz));
       const cleanedResultLabels: string[] = [];
@@ -420,6 +429,20 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
   const disabled = busy || generating || loading;
   const hasPrimaryLabel = labels.some(key => JIRA_LABELS.some(label => label.key === key && label.role !== 'Дополнительный'));
   const editing = Boolean(issue); const updateUnknown = operation?.updateState === 'unknown';
+  const hasDraft = Boolean(draft);
+  const hasPromptDrift = hasDraft && !editing && (
+    (source === 'freeform' && sourceDescription.trim() !== preparedPrompt) ||
+    issueKind !== preparedIssueKind
+  );
+  const isUnfolded = Boolean(
+    editing ||
+    source !== 'freeform' ||
+    hasDraft ||
+    summary.trim() ||
+    descriptionRu.trim() ||
+    descriptionEn.trim() ||
+    descriptionUz.trim()
+  );
   const ready = (editing ? Boolean(metadata?.issueKind) : operation?.state === 'none' && !jiraTicket?.trim() && metadata?.issueKind === issueKind) && typeof metadata?.epicRequired === 'boolean' && metadata.story && !metadata.requiredFields.length;
   const canCreate = ready && status?.connected && metadata.labelsSupported && hasPrimaryLabel && (!metadata.epicRequired || epic) && summary.trim() && descriptionRu.trim() && descriptionEn.trim() && descriptionUz.trim() && (!metadata.priorityRequired || priorityId);
   const canUpdate = ready && status?.connected && changed && !localConflict && !updateUnknown && (!metadata.labelsSupported || hasPrimaryLabel) && (!metadata.epicRequired || epic) && summary.trim() && description.trim() && (!metadata.priorityRequired || priorityId);
@@ -451,7 +474,10 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
             className="cf-jira-project-link is-connected"
             title={`Проект Jira: ${status.project.name} (${status.project.key})`}
           >
-            <span className="cf-status-dot" aria-hidden="true" />
+            <span className="cf-jira-project-icon-badge" aria-hidden="true">
+              <WorkbenchIcon name="jira" />
+              <span className="cf-jira-project-status-dot" />
+            </span>
             <span className="cf-jira-project-name">{status.project.name}</span>
             <span className="cf-jira-project-key">{status.project.key}</span>
           </a>
@@ -667,11 +693,97 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
         {!editing && metadata?.story && metadata.labelsSupported === false && <p role="alert" className="cf-notice cf-error">В Jira недоступно поле тегов для выбранного типа задачи. Добавьте его на экран создания в Jira: основной тег обязателен.</p>}
         {!editing && metadata && (metadata.issueKind !== issueKind || typeof metadata.epicRequired !== 'boolean') && <p role="alert" className="cf-notice cf-error">Обновите локальный сервис до версии 1.3.4. <a href="/docbuilder-confluence-local.zip" download>Скачать</a></p>}
         {source === 'freeform' && !editing && <label className="cf-field">Что нужно сделать<textarea aria-label="Что нужно сделать" rows={6} maxLength={20000} disabled={disabled} value={sourceDescription} placeholder="Опишите задачу своими словами…" onChange={event => setSourceDescription(event.target.value)} /><span className="cf-muted">ИИ подготовит заголовок, описание на трёх языках и рекомендации по эпикам на основе вашего текста.</span></label>}
-        <div className="cf-jira-toolbar">{editing ? <span className="cf-muted">Тип задачи: {issue?.issueType.name}</span> : <label className="cf-field">Тип задачи<select value={issueKind} disabled={disabled} onChange={event => { const next = event.target.value as JiraIssueKind; if (cacheKey) writeJiraFormCache(cacheKey, { ...form, issueKind: next, issueKindExplicit: true }); setIssueKindExplicit(true); setIssueKind(next); }}><option value="task">Задача · тестирование</option><option value="story">User Story</option></select></label>}<WBButton disabled={disabled || !ready || updateUnknown || localConflict || source === 'freeform' && !sourceDescription.trim() || editing && (!metadata?.editableFields?.includes('summary') || !metadata?.editableFields?.includes('description'))} onClick={() => void prepare()}>{generating ? 'Подготовка через ИИ…' : draft ? 'Подготовить заново' : 'Подготовить через ИИ'}</WBButton></div>
+        <div className="cf-jira-toolbar">
+          {editing ? (
+            <span className="cf-muted">Тип задачи: {issue?.issueType.name}</span>
+          ) : (
+            <div className="cf-jira-type-row" role="group" aria-label="Тип задачи Jira">
+              <span className="cf-jira-type-caption">Тип задачи:</span>
+              <div className="cf-jira-type-segments">
+                <button
+                  type="button"
+                  className={`cf-jira-type-seg ${issueKind === 'story' ? 'is-active' : ''}`}
+                  disabled={disabled}
+                  onClick={() => {
+                    if (issueKind !== 'story') {
+                      if (cacheKey) writeJiraFormCache(cacheKey, { ...form, issueKind: 'story', issueKindExplicit: true });
+                      setIssueKindExplicit(true);
+                      setIssueKind('story');
+                    }
+                  }}
+                >
+                  User Story
+                </button>
+                <button
+                  type="button"
+                  className={`cf-jira-type-seg ${issueKind === 'task' ? 'is-active' : ''}`}
+                  disabled={disabled}
+                  title="Тестовый тип: Задача (для проверки интеграции)"
+                  onClick={() => {
+                    if (issueKind !== 'task') {
+                      if (cacheKey) writeJiraFormCache(cacheKey, { ...form, issueKind: 'task', issueKindExplicit: true });
+                      setIssueKindExplicit(true);
+                      setIssueKind('task');
+                    }
+                  }}
+                >
+                  Задача (тест)
+                </button>
+              </div>
+
+              <div className="cf-visually-hidden">
+                <label>
+                  Тип задачи
+                  <select
+                    value={issueKind}
+                    disabled={disabled}
+                    onChange={event => {
+                      const next = event.target.value as JiraIssueKind;
+                      if (cacheKey) writeJiraFormCache(cacheKey, { ...form, issueKind: next, issueKindExplicit: true });
+                      setIssueKindExplicit(true);
+                      setIssueKind(next);
+                    }}
+                  >
+                    <option value="task">Задача · тестирование</option>
+                    <option value="story">User Story</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          )}
+          <div className="cf-jira-toolbar-actions">
+            {(!hasDraft || hasPromptDrift || editing || generating) && (
+              <WBButton
+                variant={hasPromptDrift ? 'secondary' : 'accent'}
+                className={`cf-jira-btn-ai ${hasPromptDrift ? 'is-reupdate' : ''}`}
+                icon={generating ? <WorkbenchIcon name="spinner" /> : hasPromptDrift ? <WorkbenchIcon name="redo" /> : <WorkbenchIcon name="ai-describe" />}
+                disabled={
+                  disabled ||
+                  !ready ||
+                  updateUnknown ||
+                  localConflict ||
+                  (source === 'freeform' && !sourceDescription.trim()) ||
+                  (editing && (!metadata?.editableFields?.includes('summary') || !metadata?.editableFields?.includes('description')))
+                }
+                onClick={() => void prepare()}
+              >
+                {generating
+                  ? 'Подготовка через ИИ…'
+                  : hasPromptDrift
+                    ? 'Обновить через ИИ'
+                    : hasDraft
+                      ? 'Подготовить заново'
+                      : 'Подготовить через ИИ'}
+              </WBButton>
+            )}
+          </div>
+        </div>
         
-        {metadata?.epicRequired && <p className="cf-notice">В выбранном проекте Jira эпик обязателен. Выберите его вручную, если рекомендации не подходят.</p>}
-        {!loading && ready && !epics.items.length && <p className="cf-notice">{epicQuery ? 'По этому запросу эпики не найдены. Можно изменить поиск.' : 'В выбранном проекте нет доступных эпиков.'}{!metadata.epicRequired && ' Текст, теги и приоритет можно подготовить, а задачу — создать без эпика.'}</p>}
-        <div className="cf-grid"><section><h3>Назначение задачи</h3>
+        {isUnfolded && (
+          <div className="cf-jira-unfolded-results">
+            {metadata?.epicRequired && <p className="cf-notice">В выбранном проекте Jira эпик обязателен. Выберите его вручную, если рекомендации не подходят.</p>}
+            {!loading && ready && !epics.items.length && <p className="cf-notice">{epicQuery ? 'По этому запросу эпики не найдены. Можно изменить поиск.' : 'В выбранном проекте нет доступных эпиков.'}{!metadata.epicRequired && ' Текст, теги и приоритет можно подготовить, а задачу — создать без эпика.'}</p>}
+            <div className="cf-grid"><section><h3>Назначение задачи</h3>
           <div className="cf-jira-epic-block" ref={spotlightRef}>
             <span className="cf-jira-epic-label">Привязать к эпику{metadata?.epicRequired ? ' · обязательно в Jira' : ' · необязательно'}</span>
             <div className="cf-jira-pills-row" role="group" aria-label="Выбор эпика">
@@ -682,11 +794,6 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
                   disabled={disabled || !metadata?.epicField}
                   onClick={() => { setEpic(''); setIsSpotlightOpen(false); }}
                 >
-                  {!epic && (
-                    <span className="cf-jira-pill-check">
-                      <WorkbenchIcon name="check" />
-                    </span>
-                  )}
                   <span>Без эпика</span>
                 </button>
               )}
@@ -707,11 +814,6 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
                     </span>
                     <span className="cf-jira-pill-key">{item.key}</span>
                     <span className="cf-jira-pill-name">{item.name}</span>
-                    {isSelected && (
-                      <span className="cf-jira-pill-check">
-                        <WorkbenchIcon name="check" />
-                      </span>
-                    )}
                   </button>
                 );
               })}
@@ -1074,11 +1176,6 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
                       onClick={() => { setPriorityId(tier.id); setPriorityExplicit(true); }}
                       title={`${tier.name} (${tier.russianName})${isRecommended ? ' · Рекомендуется правилами тегов' : ''}`}
                     >
-                      {isCurrent && (
-                        <span className="cf-jira-pill-check">
-                          <WorkbenchIcon name="check" />
-                        </span>
-                      )}
                       <span className="cf-jira-priority-pill-icon">{tier.icon}</span>
                       <span className="cf-jira-priority-pill-name">{tier.russianName || tier.name}</span>
                       {tier.name !== tier.russianName && (
@@ -1247,6 +1344,8 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
           )}
         </section></div>
         <footer className="cf-footer"><span className="cf-muted">{editing ? changed ? 'Есть несохранённые изменения' : 'Задача загружена из Jira' : metadata?.epicRequired && !epic ? 'Выберите обязательный эпик для создания задачи' : ''}</span>{editing ? <WBButton variant="accent" disabled={disabled || !canUpdate} onClick={() => void update()}>{busy ? 'Обновление…' : 'Обновить задачу'}</WBButton> : <WBButton variant="accent" disabled={disabled || !canCreate} onClick={() => void act(() => client.create(scope, { methodId, issueKind, summary: summary.trim(), description: jiraDescription(descriptionRu, descriptionEn, descriptionUz), ...(epic ? { epic } : {}), labels, ...(priorityId ? { priorityId } : {}), ...(confluenceUrl ? { confluenceUrl } : {}) }), true)}>{busy ? 'Создание…' : issueKind === 'task' ? 'Создать задачу' : 'Создать User Story'}</WBButton>}</footer>
+          </div>
+        )}
       </>}
     </>}
   </section>;

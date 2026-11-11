@@ -80,12 +80,113 @@
 .cf-version-note p { margin-block: var(--space-2) 0; }
 .cf-jira-description { padding: var(--space-4); background: var(--wb-bg-soft); color: var(--wb-text); border: 1px solid var(--wb-border); border-radius: var(--wb-radius); font: inherit; resize: vertical; }
 .cf-jira-panel .cf-field + .cf-field { margin-top: var(--space-6); }
-.cf-jira-panel .cf-field select { padding: var(--space-1-5) var(--space-3); min-height: 32px; font-size: var(--font-size-xs); border-radius: var(--wb-button-radius); }
-.cf-jira-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-4); margin: var(--space-4) 0; }
-.cf-jira-toolbar .cf-field { min-width: 14rem; flex: 0 1 auto; gap: var(--space-1); }
-.cf-jira-toolbar .cf-field select { width: 100%; height: 32px; padding: 0 var(--space-3); background: var(--wb-bg-surface); color: var(--wb-text); border: 1px solid var(--wb-border); border-radius: var(--wb-button-radius); font: inherit; font-size: var(--font-size-xs); font-weight: 500; cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; }
-.cf-jira-toolbar .cf-field select:hover:not(:disabled) { border-color: var(--wb-border-strong); }
-.cf-jira-toolbar .cf-field select:focus-visible { outline: 2px solid var(--wb-accent); outline-offset: 1px; }
+.cf-jira-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+}
+/* Jira Issue Type - Natural Workbench Style */
+.cf-jira-type-row {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 32px;
+}
+.cf-jira-type-caption {
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  color: var(--wb-text-muted);
+  line-height: 1;
+}
+.cf-jira-type-segments {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--wb-bg-soft);
+  padding: 2px;
+  border-radius: var(--wb-radius-sm);
+  border: 1px solid var(--wb-border);
+  height: 32px;
+  box-sizing: border-box;
+}
+.cf-jira-type-seg {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--space-3);
+  height: 26px;
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  color: var(--wb-text-soft);
+  background: transparent;
+  border: 0;
+  border-radius: var(--wb-radius-xs, 4px);
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.cf-jira-type-seg:hover:not(:disabled) {
+  color: var(--wb-text);
+}
+.cf-jira-type-seg.is-active {
+  background: var(--wb-bg-surface);
+  color: var(--wb-text);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+.cf-jira-type-seg:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.cf-jira-toolbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+/* Prominent AI Action Button - Strictly 32px height matching Workbench standard */
+.cf-jira-btn-ai {
+  height: 32px !important;
+  padding: 0 var(--space-4) !important;
+  font-size: var(--font-size-xs) !important;
+  font-weight: 600 !important;
+  border-radius: var(--wb-radius-sm) !important;
+}
+.cf-jira-btn-ai.is-reupdate {
+  background: var(--wb-bg-surface) !important;
+  border-color: var(--wb-accent) !important;
+  color: var(--wb-accent) !important;
+}
+.cf-jira-btn-ai.is-reupdate:hover:not(:disabled) {
+  background: var(--wb-bg-hover) !important;
+}
+/* Downward Unfolded Results Section - Pure animation without unwanted dividers or voids */
+.cf-jira-unfolded-results {
+  animation: cfJiraFadeIn 0.25s ease-out;
+}
+@keyframes cfJiraUnfold {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes cfJiraFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
 .cf-jira-search { display: flex; align-items: flex-end; gap: var(--space-2); margin-bottom: var(--space-6); }
 .cf-jira-search > label { flex: 1; min-width: 0; }
 .cf-jira-description { min-width: 0; width: 100%; }
@@ -415,7 +516,8 @@
 .cf-jira-lang-tab-active { background: var(--wb-bg-surface); color: var(--wb-text); font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06); }
 .cf-jira-lang-indicator { display: inline-flex; align-items: center; justify-content: center; }
 .cf-jira-lang-indicator .wb-shell-icon { width: 12px; height: 12px; }
-.cf-jira-lang-filled { color: var(--success); }
+.cf-jira-lang-filled { color: #067647; }
+[data-theme="dark"] .cf-jira-lang-filled { color: #4ade80; }
 .cf-jira-lang-empty { width: 5px; height: 5px; border-radius: var(--radius-pill); background: var(--wb-text-muted); display: inline-block; }
 .cf-jira-lang-toggle { background: transparent; border: 0; color: var(--wb-accent); font-size: var(--font-size-xs); cursor: pointer; padding: var(--space-1) var(--space-2); border-radius: var(--wb-radius-sm); font-family: inherit; }
 .cf-jira-lang-toggle:hover { background: var(--wb-bg-soft); }
@@ -547,6 +649,14 @@
   border-radius: var(--wb-radius-sm);
   border: 1px solid var(--wb-border);
 }
+.cf-jira-workflow-footer {
+  margin-top: var(--space-4);
+  display: flex;
+  justify-content: flex-start;
+}
+.cf-jira-workflow-footer:has(button:disabled) {
+  display: none;
+}
 
 /* STATUS BADGES */
 .cf-status-badge {
@@ -576,22 +686,13 @@
   border-radius: 50%;
   flex-shrink: 0;
 }
-.cf-status-badge.is-connected .cf-status-dot,
-.cf-jira-project-link.is-connected .cf-status-dot,
-.cf-jira-project-link .cf-status-dot {
+.cf-status-badge.is-connected .cf-status-dot {
   background: var(--wb-success, var(--success));
   box-shadow: 0 0 6px var(--wb-success, var(--success));
 }
 .cf-status-badge.is-disconnected .cf-status-dot {
   background: var(--wb-text-subtle);
 }
-.cf-connection-refresh-btn {
-  padding: var(--space-1) !important;
-  color: var(--wb-text-muted) !important;
-}
-.cf-connection-refresh-btn:hover {
-  color: var(--wb-text) !important;
-}
 
 /* JIRA UNIFIED HEADER BAR */
 .cf-jira-header-bar {
@@ -655,6 +756,36 @@
   font-weight: 700;
   color: var(--wb-accent);
 }
+.cf-jira-project-icon-badge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: #0052cc;
+  flex-shrink: 0;
+}
+[data-theme="dark"] .cf-jira-project-icon-badge {
+  color: #2684ff;
+}
+.cf-jira-project-icon-badge .wb-shell-icon {
+  width: 14px;
+  height: 14px;
+}
+.cf-jira-project-status-dot {
+  position: absolute;
+  bottom: -1px;
+  right: -2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--wb-success, var(--success));
+  box-shadow: 0 0 0 1.5px var(--wb-bg-soft);
+}
+.cf-jira-project-link:hover .cf-jira-project-status-dot {
+  box-shadow: 0 0 0 1.5px var(--wb-bg-hover);
+}
 .cf-jira-change-link {
   gap: var(--space-1);
   color: var(--wb-text-soft);
@@ -673,7 +804,6 @@
   width: 12px;
   height: 12px;
 }
-
 .cf-connection-refresh-btn {
   padding: var(--space-1) !important;
   color: var(--wb-text-muted) !important;
@@ -682,86 +812,6 @@
   color: var(--wb-text) !important;
 }
 
-/* JIRA UNIFIED HEADER BAR */
-.cf-jira-header-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: 0 0 var(--space-3);
-  border-bottom: 1px solid var(--wb-border);
-  margin-bottom: var(--space-4);
-  flex-wrap: wrap;
-}
-.cf-jira-header-left {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-}
-.cf-jira-header-right {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin-left: auto;
-}
-/* Unified 28px height across all header items */
-.cf-status-badge,
-.cf-jira-project-link,
-.cf-jira-change-link {
-  display: inline-flex;
-  align-items: center;
-  height: 28px;
-  box-sizing: border-box;
-  border-radius: var(--wb-radius-sm);
-  font-size: var(--font-size-xs);
-  line-height: 1;
-}
-.cf-status-badge {
-  gap: var(--space-1-5);
-  padding: 0 var(--space-2-5);
-  font-weight: 600;
-  font-family: var(--wb-font-mono);
-}
-.cf-jira-project-link {
-  gap: var(--space-2);
-  padding: 0 var(--space-3);
-  background: var(--wb-bg-soft);
-  border: 1px solid var(--wb-border);
-  text-decoration: none;
-  color: var(--wb-text);
-  transition: all 0.15s ease;
-}
-.cf-jira-project-link:hover {
-  background: var(--wb-bg-hover);
-  border-color: var(--wb-border-strong);
-}
-.cf-jira-project-name {
-  font-weight: 500;
-}
-.cf-jira-project-key {
-  font-family: var(--wb-font-mono);
-  font-weight: 700;
-  color: var(--wb-accent);
-}
-.cf-jira-change-link {
-  gap: var(--space-1);
-  color: var(--wb-text-soft);
-  text-decoration: none;
-  padding: 0 var(--space-2);
-  border: 1px solid transparent;
-  transition: all 0.15s ease;
-}
-.cf-jira-change-link:hover {
-  color: var(--wb-accent);
-  background: var(--wb-bg-soft);
-  border-color: var(--wb-border);
-  text-decoration: none;
-}
-.cf-jira-change-link .wb-shell-icon {
-  width: 12px;
-  height: 12px;
-}
 
 /* PRIORITY PILLS */
 .cf-jira-priority-block {

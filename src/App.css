@@ -2816,6 +2816,26 @@ table {
   gap: var(--space-2, 8px);
 }
 
+/* True Segmented View Panels */
+.cf-segmented-panels {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 12px);
+}
+
+.cf-side-panel[hidden] {
+  display: none !important;
+}
+
+.cf-side-panel .contract-side > .contract-side-summary {
+  pointer-events: none;
+  cursor: default;
+}
+
+.cf-side-panel .contract-side > .contract-side-summary::after {
+  display: none;
+}
+
 /* Quick Inline Import Panel */
 .cf-quick-import-panel {
   background: var(--wb-bg-soft);

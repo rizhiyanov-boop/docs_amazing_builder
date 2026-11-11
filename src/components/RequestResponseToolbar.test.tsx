@@ -37,11 +37,11 @@ describe('RequestResponseToolbar', () => {
       />
     );
 
-    expect(screen.getByText('Сервер (Master)')).toBeInTheDocument();
-    expect(screen.getByText('Клиент (BFF)')).toBeInTheDocument();
+    expect(screen.getByText('Сервер')).toBeInTheDocument();
+    expect(screen.getByText('Клиент')).toBeInTheDocument();
     expect(screen.getByText('Маппинг')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText('Клиент (BFF)'));
+    fireEvent.click(screen.getByText('Клиент'));
     expect(onSideChange).toHaveBeenCalledWith('client');
 
     fireEvent.click(screen.getByText('Маппинг'));
@@ -66,7 +66,7 @@ describe('RequestResponseToolbar', () => {
 
     expect(screen.getByText('Контракт')).toBeInTheDocument();
     expect(screen.getByText('5')).toBeInTheDocument();
-    expect(screen.queryByText('Клиент (BFF)')).not.toBeInTheDocument();
+    expect(screen.queryByText('Клиент')).not.toBeInTheDocument();
   });
 
   it('triggers onToggleImport and onAddParameter', () => {
@@ -93,5 +93,30 @@ describe('RequestResponseToolbar', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Server параметр/i }));
     expect(onAddParameter).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders and triggers onAiMapping when in mapping mode', () => {
+    const onAiMapping = vi.fn();
+
+    render(
+      <RequestResponseToolbar
+        section={mockSection}
+        activeSide="mapping"
+        onSideChange={vi.fn()}
+        serverCount={5}
+        clientCount={4}
+        mappedCount={3}
+        isImportOpen={false}
+        onToggleImport={vi.fn()}
+        onAddParameter={vi.fn()}
+        onAiMapping={onAiMapping}
+        isDualModel={true}
+      />
+    );
+
+    const mappingBtn = screen.getByRole('button', { name: /Автомаппинг/i });
+    expect(mappingBtn).toBeInTheDocument();
+    fireEvent.click(mappingBtn);
+    expect(onAiMapping).toHaveBeenCalledTimes(1);
   });
 });

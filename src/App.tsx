@@ -7213,6 +7213,7 @@ export default function App() {
           onAddParameter={() => addManualRow(section, activeSide === 'client' ? 'client' : 'server')}
           onAiDescriptions={() => openAiDescriptionContextDialog(section)}
           onAiMasking={() => void runAiMasking(section, { target: activeSide === 'client' ? 'client' : 'both', scope: 'body' })}
+          onAiMapping={() => void suggestParameterMappingsWithAi(section)}
           aiBusy={Boolean(aiBusyKey)}
           isDualModel={Boolean(section.domainModelEnabled)}
         />
@@ -7226,6 +7227,9 @@ export default function App() {
             onCancel={() => setQuickImportSectionId(null)}
           />
         )}
+        {aiErrorMessage && <div className="alert error">AI: {aiErrorMessage}</div>}
+        {requestCellError && <div className="alert error">{requestCellError}</div>}
+
         {!section.domainModelEnabled && (
           <ContractSideAccordion
             side="contract"
@@ -7249,65 +7253,69 @@ export default function App() {
         )}
 
         {section.domainModelEnabled && (
-          <>
-            <ContractSideAccordion
-              side="server"
-              title={serverLabel}
-              parameterCount={serverParameterCount}
-              metadata={serverMetadata}
-              error={section.error}
-              open={isExpanderOpen(section.id, 'contract-server')}
-              onToggle={(open) => setExpanderOpen(section.id, 'contract-server', open)}
-              onboardingAnchor="prepare-source"
-            >
-              {renderServerContractContent(serverLabel)}
-            </ContractSideAccordion>
-            <ContractSideAccordion
-              side="client"
-              title={clientLabel}
-              parameterCount={clientParameterCount}
-              metadata={clientMetadata}
-              error={section.clientError}
-              open={isExpanderOpen(section.id, 'contract-client')}
-              onToggle={(open) => setExpanderOpen(section.id, 'contract-client', open)}
-            >
-              {isRequestSection(section) && (
-                <>
-                  <div className="contract-side-subsection">
-                    <div className="contract-side-subsection-title">Endpoint</div>
-                    {renderRequestMetaEditor(section, 'client')}
-                  </div>
-                  <div className="contract-side-subsection">
-                    <div className="contract-side-subsection-title">Авторизация</div>
-                    {renderRequestAuthEditor(section, 'client')}
-                  </div>
-                  <div className="contract-side-subsection">
-                    <div className="contract-side-subsection-title">Внешние headers</div>
-                    {renderRequestHeadersTable(section, 'client')}
-                  </div>
-                </>
-              )}
-              {renderSideSource('client', clientLabel)}
-              {section.clientError && <div className="alert error">{clientLabel}: {section.clientError}</div>}
-            </ContractSideAccordion>
-          </>
-        )}
-
-        {aiErrorMessage && <div className="alert error">AI: {aiErrorMessage}</div>}
-        {requestCellError && <div className="alert error">{requestCellError}</div>}
-        {section.domainModelEnabled && (
-          <section className="contract-mapping-section">
-            <div className="contract-mapping-head">
-              <div>
-                <div className="contract-mapping-eyebrow">Domain model</div>
-                <h4 className="contract-mapping-title">Маппинг Client ↔ Server</h4>
-              </div>
-              <div className="contract-mapping-count">
-                {`${serverParameterCount} Server · ${clientParameterCount} Client`}
-              </div>
+          <div className="cf-segmented-panels">
+            {/* Server Side Details Panel */}
+            <div hidden={activeSide !== 'server'} className="cf-side-panel cf-side-panel-server">
+              <ContractSideAccordion
+                side="server"
+                title={serverLabel}
+                parameterCount={serverParameterCount}
+                metadata={serverMetadata}
+                error={section.error}
+                open={isExpanderOpen(section.id, 'contract-server')}
+                onToggle={(open) => setExpanderOpen(section.id, 'contract-server', open)}
+                onboardingAnchor="prepare-source"
+              >
+                {renderServerContractContent(serverLabel)}
+              </ContractSideAccordion>
             </div>
-            {renderParsedTable(section)}
-          </section>
+
+            {/* Client Side Details Panel */}
+            <div hidden={activeSide !== 'client'} className="cf-side-panel cf-side-panel-client">
+              <ContractSideAccordion
+                side="client"
+                title={clientLabel}
+                parameterCount={clientParameterCount}
+                metadata={clientMetadata}
+                error={section.clientError}
+                open={isExpanderOpen(section.id, 'contract-client')}
+                onToggle={(open) => setExpanderOpen(section.id, 'contract-client', open)}
+              >
+                {isRequestSection(section) && (
+                  <>
+                    <div className="contract-side-subsection">
+                      <div className="contract-side-subsection-title">Endpoint</div>
+                      {renderRequestMetaEditor(section, 'client')}
+                    </div>
+                    <div className="contract-side-subsection">
+                      <div className="contract-side-subsection-title">Авторизация</div>
+                      {renderRequestAuthEditor(section, 'client')}
+                    </div>
+                    <div className="contract-side-subsection">
+                      <div className="contract-side-subsection-title">Внешние headers</div>
+                      {renderRequestHeadersTable(section, 'client')}
+                    </div>
+                  </>
+                )}
+                {renderSideSource('client', clientLabel)}
+                {section.clientError && <div className="alert error">{clientLabel}: {section.clientError}</div>}
+              </ContractSideAccordion>
+            </div>
+
+            {/* Parameters & Mapping Section */}
+            <section className="contract-mapping-section">
+              <div className="contract-mapping-head">
+                <div>
+                  <div className="contract-mapping-eyebrow">Domain model</div>
+                  <h4 className="contract-mapping-title">Маппинг Client ↔ Server</h4>
+                </div>
+                <div className="contract-mapping-count">
+                  {`${serverParameterCount} Server · ${clientParameterCount} Client`}
+                </div>
+              </div>
+              {renderParsedTable(section)}
+            </section>
+          </div>
         )}
       </div>
     );

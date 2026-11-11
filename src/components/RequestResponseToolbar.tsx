@@ -17,6 +17,7 @@ export type RequestResponseToolbarProps = {
   onAddParameter: () => void;
   onAiDescriptions?: () => void;
   onAiMasking?: () => void;
+  onAiMapping?: () => void;
   aiBusy?: boolean;
   isDualModel: boolean;
 };
@@ -32,6 +33,7 @@ export function RequestResponseToolbar({
   onAddParameter,
   onAiDescriptions,
   onAiMasking,
+  onAiMapping,
   aiBusy,
   isDualModel
 }: RequestResponseToolbarProps): ReactNode {
@@ -47,7 +49,7 @@ export function RequestResponseToolbar({
             className={`cf-request-seg ${activeSide === 'server' ? 'is-active' : ''}`}
             onClick={() => onSideChange('server')}
           >
-            <span>Сервер (Master)</span>
+            <span>Сервер</span>
             <span className="cf-request-seg-badge">{serverCount}</span>
           </button>
           <button
@@ -57,7 +59,7 @@ export function RequestResponseToolbar({
             className={`cf-request-seg ${activeSide === 'client' ? 'is-active' : ''}`}
             onClick={() => onSideChange('client')}
           >
-            <span>Клиент (BFF)</span>
+            <span>Клиент</span>
             <span className="cf-request-seg-badge">{clientCount}</span>
           </button>
           <button
@@ -117,15 +119,28 @@ export function RequestResponseToolbar({
           </WBButton>
         )}
 
-        <WBButton
-          size="sm"
-          variant="secondary"
-          onClick={onAddParameter}
-          icon={<WorkbenchIcon name="plus" />}
-          title={`Добавить параметр в ${activeSide === 'client' ? 'Client' : 'Server'}`}
-        >
-          {activeSide === 'client' ? 'Client параметр' : isDualModel && activeSide === 'server' ? 'Server параметр' : 'Параметр'}
-        </WBButton>
+        {activeSide === 'mapping' && onAiMapping ? (
+          <WBButton
+            size="sm"
+            variant="secondary"
+            onClick={onAiMapping}
+            disabled={aiBusy}
+            icon={<WorkbenchIcon name="check" />}
+            title="AI: подобрать сопоставление полей"
+          >
+            Автомаппинг
+          </WBButton>
+        ) : (
+          <WBButton
+            size="sm"
+            variant="secondary"
+            onClick={onAddParameter}
+            icon={<WorkbenchIcon name="plus" />}
+            title={`Добавить параметр в ${activeSide === 'client' ? 'Client' : 'Server'}`}
+          >
+            {activeSide === 'client' ? 'Client параметр' : isDualModel && activeSide === 'server' ? 'Server параметр' : 'Параметр'}
+          </WBButton>
+        )}
       </div>
     </div>
   );

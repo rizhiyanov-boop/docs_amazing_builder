@@ -87,6 +87,10 @@ function fieldValue(value: string) {
     || /^(?:\$|\$\[[0-9]*\](?:\.[\w$.[\]-]+)?)$/u.test(value);
 }
 
+function isEmptyContractField(value: string): boolean {
+  return /^(?:[-–—])?$/u.test(value.trim());
+}
+
 function httpMethod(value: string): RequestMethod | undefined {
   return new RegExp('^(?:' + verbs + ')$', 'i').test(value) ? value.toUpperCase() as RequestMethod : undefined;
 }
@@ -179,15 +183,15 @@ function toContractRows(
     if (!values.some(Boolean)) return;
     const serverField = server ? valueFor(columns, values, server) : '';
     const clientField = valueFor(columns, values, client) || (clientOnly && server ? serverField : '');
-    const onlyClient = clientOnly || ((!serverField || serverField === '-') && fieldValue(clientField));
+    const onlyClient = clientOnly || (isEmptyContractField(serverField) && fieldValue(clientField));
     const field = onlyClient ? clientField : serverField;
     const keyIndex = columns.indexOf(onlyClient && columns.includes(client) ? client : server ?? client);
     const keyCell = cells[keyIndex];
-    const linkedField = !onlyClient && clientField && clientField !== '-' ? clientField : '';
+    const linkedField = !onlyClient && !isEmptyContractField(clientField) ? clientField : '';
     const rowNumber = index + 2;
     const fallback = () => notes.push('Строка ' + rowNumber + '\n' + describeRow(headers, values));
     const target = onlyClient ? clientRows : serverRows;
-    if (!field || field === '-' || field.includes('\n') || !keyCell || keyCell.row !== index + 1 || keyCell.width > 1 || cells.length > columns.length
+    if (isEmptyContractField(field) || field.includes('\n') || !keyCell || keyCell.row !== index + 1 || keyCell.width > 1 || cells.length > columns.length
       || cells.some(cell => cell && cell.width > 1 && storageText(cell.element))
       || target.has(source === 'header' ? field.toLowerCase() : field)) { fallback(); return; }
     const mask = valueFor(columns, values, 'mask');

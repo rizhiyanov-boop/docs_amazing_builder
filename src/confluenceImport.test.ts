@@ -9,6 +9,28 @@ import { asWorkspaceProjectData, normalizeMethodDocument } from './workspaceBoot
 import { sectionsForMethodTemplate } from './methodTemplates';
 
 describe('Confluence method import', () => {
+  it.each(['-', '–', '—'])('imports Client-only response fields when Server uses %s', marker => {
+    const page = templateImportPage();
+    page.storage = page.storage!.replace(
+      '</tr></table>\n    <h4>Пример ответа (Server Response)</h4>',
+      '</tr><tr><td>' + marker + '</td><td>string</td><td>errorMessage</td><td>***</td></tr>'
+        + '<tr><td>' + marker + '</td><td>integer</td><td>code</td><td></td></tr>'
+        + '</table>\n    <h4>Пример ответа (Server Response)</h4>'
+    );
+    const preview = prepareConfluenceImport(page, importTestOrigin);
+    if (!preview.ok) throw new Error(preview.reasons.join(', '));
+    const method = normalizeMethodDocument(buildConfluenceImport(preview, {}));
+    expect(method.sections.find(section => section.id === 'response')).toMatchObject({
+      rows: [{ field: 'data.result' }],
+      clientRows: [
+        { field: 'result' },
+        { field: 'errorMessage', type: 'string', maskInLogs: true },
+        { field: 'code', type: 'integer' }
+      ],
+      clientMappings: { 'data.result': 'result' }
+    });
+  });
+
   it('imports the publication template with canonical rows, examples and a diagram', () => {
     const preview = prepareConfluenceImport(templateImportPage(), importTestOrigin);
     if (!preview.ok) throw new Error(preview.reasons.join(', '));

@@ -11,6 +11,13 @@ type ReleaseNote = {
 /** Newest first. Keep descriptions user-facing and omit dates. */
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
+    version: '1.4.2',
+    title: 'Поля Client при импорте из Confluence',
+    changes: [
+      'Дефис и тире в колонке Server обозначают пустое поле. Параметры Client сохраняются со своими свойствами'
+    ]
+  },
+  {
     version: '1.4.1',
     title: 'Локальное подключение без установки Node.js',
     changes: [

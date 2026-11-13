@@ -31,4 +31,4 @@ export function findMediumPriority(priorities?: readonly { id: string; name: str
     || priorities[0];
 }
 
-export function jiraDescription(ru: string, en: string, uz: string): string { return [ru.trim(), en.trim(), uz.trim()].join('\n\n'); }
+export function jiraDescription(ru: string, en: string, uz: string): string { return [ru.trim(), en.trim(), uz.trim()].filter(Boolean).join('\n\n'); }

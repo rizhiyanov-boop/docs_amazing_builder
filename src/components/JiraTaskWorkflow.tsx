@@ -4,9 +4,10 @@ import type { JiraClient } from '../jiraClient';
 import type { JiraDraft, JiraDraftInput } from '../jiraDraft';
 import { WBButton } from './primitives/WorkbenchPrimitives';
 import { CONFLUENCE_BRIDGE_URL } from '../confluenceClient';
+import type { RequestMethod } from '../types';
 
 type Props = {
-  methodId: string; methodName: string; methodContext: string; jiraTicket?: string; confluenceUrl?: string; active: boolean;
+  methodId: string; methodName: string; methodHttpMethod?: RequestMethod; methodContext: string; jiraTicket?: string; confluenceUrl?: string; active: boolean;
   onBusyChange: (busy: boolean) => void; onLinked?: (methodId: string, issueUrl: string) => void;
   client?: JiraClient; prepareDraft?: (input: JiraDraftInput) => Promise<JiraDraft>;
 };
@@ -92,7 +93,7 @@ export function JiraTaskWorkflow(props: Props) {
     {source !== 'method' && !connectionScope && <p className="cf-notice">Подключите Jira, чтобы подготовить задачу. <a href={`${CONFLUENCE_BRIDGE_URL}/`} target="_blank" rel="noopener noreferrer">Подключить Jira локально</a> · <a href="/docbuilder-confluence-local.zip" download>Скачать локальное приложение 1.3.6</a></p>}
     {source !== 'method' && connectionScope && <>
       {source === 'new-method' && <p className="cf-notice">Создаётся отдельная задача по текущему методу. Существующая связь метода с Jira сохраняется.</p>}
-      {identity.error ? <p role="alert" className="cf-notice cf-error">{identity.error}</p> : <JiraPanel key={`${source}:${identity.id}`} headerExtra={headerActions} methodId={identity.id} methodName={source === 'freeform' ? 'Отдельная задача' : props.methodName} methodContext={source === 'freeform' ? '' : props.methodContext} confluenceUrl={source === 'freeform' ? undefined : props.confluenceUrl} source={source === 'freeform' ? 'freeform' : 'method'} active={props.active} onBusyChange={onBusyChange} onCompletedChange={setCompleted} client={props.client} prepareDraft={props.prepareDraft} />}
+      {identity.error ? <p role="alert" className="cf-notice cf-error">{identity.error}</p> : <JiraPanel key={`${source}:${identity.id}`} headerExtra={headerActions} methodId={identity.id} methodName={source === 'freeform' ? 'Отдельная задача' : props.methodName} methodHttpMethod={props.methodHttpMethod} methodContext={source === 'freeform' ? '' : props.methodContext} confluenceUrl={source === 'freeform' ? undefined : props.confluenceUrl} source={source === 'freeform' ? 'freeform' : 'method'} active={props.active} onBusyChange={onBusyChange} onCompletedChange={setCompleted} client={props.client} prepareDraft={props.prepareDraft} />}
       <div className="cf-jira-workflow-footer">
         <WBButton disabled={busy || !completed} onClick={startNext}>Начать следующую задачу</WBButton>
       </div>

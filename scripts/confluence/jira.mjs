@@ -11,8 +11,8 @@ export class JiraError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
 }
 const fail = message => new JiraError(400, 'INVALID_REQUEST', message);
-function text(value, max = 255) {
-  if (typeof value !== 'string' || !value.trim() || value.length > max || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value)) throw fail('Некорректные данные Jira.');
+function text(value, max = 255, allowEmpty = false) {
+  if (typeof value !== 'string' || (!allowEmpty && !value.trim()) || value.length > max || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value)) throw fail('Некорректные данные Jira.');
   return value.trim();
 }
 export function parseJiraLink(value) {
@@ -196,7 +196,7 @@ export function createJira({ store = null, fetchImpl = globalThis.fetch, now = D
     if (item.update?.state === 'unknown') throw new JiraError(409, 'OUTCOME_UNKNOWN', 'Результат обновления не подтверждён. Сначала проверьте задачу.');
     if (body.fingerprint !== issue.fingerprint) throw new JiraError(409, 'ISSUE_CHANGED', 'Задача изменилась в Jira. Загрузите текущую версию; местный черновик сохранён.');
     if (!config.issueKind) throw fail('Этот тип задачи не поддерживает обновление из DocBuilder.');
-    const summary = text(body.summary); text(body.description, 100_000); const description = body.description;
+    const summary = text(body.summary); const description = text(body.description, 100_000, true) ? body.description : '';
     const fields = {};
     if (summary !== issue.summary) fields.summary = summary;
     if (description !== issue.description) fields.description = description;
@@ -248,7 +248,7 @@ export function createJira({ store = null, fetchImpl = globalThis.fetch, now = D
       if (item.state !== 'success') throw new JiraError(409, 'OUTCOME_UNKNOWN', 'Результат предыдущего создания не подтверждён. Укажите ссылку на созданную задачу.');
       return publicOperation(item);
     }
-    const summary = text(body.summary); const description = text(body.description, 100_000);
+    const summary = text(body.summary); const description = text(body.description, 100_000, true);
     const epic = body.epic == null || body.epic === '' ? null : text(body.epic);
     if (epic && !issuePattern.test(epic)) throw fail('Некорректный ключ эпика.');
     const config = await metadata(connection, body.issueKind ?? 'story');

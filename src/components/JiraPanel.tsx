@@ -8,13 +8,15 @@ import { jiraFormCacheKey, readJiraFormCache, writeJiraFormCache, type JiraFormC
 import { WBButton, WBInput } from './primitives/WorkbenchPrimitives';
 import { WorkbenchIcon } from './workbench/WorkbenchIcon';
 import { AiRequestProgress } from './AiRequestProgress';
+import { jiraEndpointLabel } from '../jiraMethodContext';
+import type { RequestMethod } from '../types';
 
 type Props = {
   source?: 'method' | 'freeform';
   onCompletedChange?: (completed: boolean) => void;
   onConnectionScopeChange?: (scope: string) => void;
   headerExtra?: ReactNode;
-  methodId: string; methodName: string; methodContext?: string; confluenceUrl?: string; jiraTicket?: string; active?: boolean;
+  methodId: string; methodName: string; methodHttpMethod?: RequestMethod; methodContext?: string; confluenceUrl?: string; jiraTicket?: string; active?: boolean;
   onBusyChange: (busy: boolean) => void; onLinked?: (methodId: string, issueUrl: string) => void;
   client?: JiraClient; prepareDraft?: (input: JiraDraftInput) => Promise<JiraDraft>;
 };
@@ -25,7 +27,9 @@ const tagGroups = [
   { title: 'Основные / дополнительные', role: 'Основной / дополнительный', hint: 'Подходит как основной тег' }
 ] as const;
 
-export function JiraPanel({ methodId, methodName, methodContext = '', confluenceUrl, jiraTicket, source = 'method', active = true, headerExtra, onBusyChange, onLinked, onCompletedChange, onConnectionScopeChange, client = jiraClient, prepareDraft = prepareJiraTaskWithAi }: Props) {
+export function JiraPanel({ methodId, methodName, methodHttpMethod, methodContext = '', confluenceUrl, jiraTicket, source = 'method', active = true, headerExtra, onBusyChange, onLinked, onCompletedChange, onConnectionScopeChange, client = jiraClient, prepareDraft = prepareJiraTaskWithAi }: Props) {
+  const methodDraftContext = { name: methodName, context: methodContext, httpMethod: methodHttpMethod };
+  const endpointLabel = source === 'method' ? jiraEndpointLabel(methodName, methodHttpMethod) : '';
   const [sourceDescription, setSourceDescription] = useState('');
   const [unlinkRevision, setUnlinkRevision] = useState(0);
   const [status, setStatus] = useState<JiraStatus>();
@@ -143,8 +147,8 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
           } : {
             issueKind,
             issueKindExplicit: false,
-            summary: '',
-            descriptionRu: '',
+            summary: endpointLabel.slice(0, 255),
+            descriptionRu: endpointLabel,
             descriptionEn: '',
             descriptionUz: '',
             description: '',
@@ -316,7 +320,7 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
       if (current !== epoch.current.value) return;
       setEpics({ items, nextStart: null });
       setPreparationPhase('ai');
-      const result = await prepareDraft({ ...(source === 'freeform' ? { source: { kind: 'freeform' as const, description: sourceDescription.trim() } } : {}), method: source === 'freeform' ? { name: 'Свободное описание', context: '' } : { name: methodName, context: methodContext }, project: { key: status.project.key, name: status.project.name }, issueType: metadata.story.name, epics: items.map(({ key, name }) => ({ key, name })), priorities: metadata.priorities ?? [] });
+      const result = await prepareDraft({ ...(source === 'freeform' ? { source: { kind: 'freeform' as const, description: sourceDescription.trim() } } : {}), method: source === 'freeform' ? { name: 'Свободное описание', context: '' } : methodDraftContext, project: { key: status.project.key, name: status.project.name }, issueType: metadata.story.name, epics: items.map(({ key, name }) => ({ key, name })), priorities: metadata.priorities ?? [] });
       if (current !== epoch.current.value) return;
       setDraft(result);
       setPreparedPrompt(sourceDescription.trim());
@@ -444,8 +448,8 @@ export function JiraPanel({ methodId, methodName, methodContext = '', confluence
     descriptionUz.trim()
   );
   const ready = (editing ? Boolean(metadata?.issueKind) : operation?.state === 'none' && !jiraTicket?.trim() && metadata?.issueKind === issueKind) && typeof metadata?.epicRequired === 'boolean' && metadata.story && !metadata.requiredFields.length;
-  const canCreate = ready && status?.connected && metadata.labelsSupported && hasPrimaryLabel && (!metadata.epicRequired || epic) && summary.trim() && descriptionRu.trim() && descriptionEn.trim() && descriptionUz.trim() && (!metadata.priorityRequired || priorityId);
-  const canUpdate = ready && status?.connected && changed && !localConflict && !updateUnknown && (!metadata.labelsSupported || hasPrimaryLabel) && (!metadata.epicRequired || epic) && summary.trim() && description.trim() && (!metadata.priorityRequired || priorityId);
+  const canCreate = ready && status?.connected && metadata.labelsSupported && hasPrimaryLabel && (!metadata.epicRequired || epic) && summary.trim() && (!metadata.priorityRequired || priorityId);
+  const canUpdate = ready && status?.connected && changed && !localConflict && !updateUnknown && (!metadata.labelsSupported || hasPrimaryLabel) && (!metadata.epicRequired || epic) && summary.trim() && (!metadata.priorityRequired || priorityId);
   const toggleLabel = (key: string) => {
     setLabels(old => {
       const def = JIRA_LABELS.find(l => l.key === key);

@@ -1,5 +1,18 @@
 import { richTextToPlainText } from './richText';
-import type { MethodDocument } from './types';
+import type { MethodDocument, ParsedSection, RequestMethod } from './types';
+
+export function jiraEndpointLabel(name: string, httpMethod?: RequestMethod): string {
+  const title = name.trim().replace(/\s+/gu, ' ');
+  if (!title || /^(?:Метод|Method)(?: \d+)?$/iu.test(title)
+    || /^(?:(?:GET|POST|PUT|PATCH|DELETE)\s+)?(?:\/|https?:\/\/)/iu.test(title)) return '';
+  if (!httpMethod) return title;
+  return httpMethod + ' ' + title.replace(/^(?:GET|POST|PUT|PATCH|DELETE)\s+/iu, '');
+}
+
+export function jiraMethodHttpMethod(method: MethodDocument): RequestMethod | undefined {
+  return method.sections.find((section): section is ParsedSection =>
+    section.kind === 'parsed' && section.sectionType === 'request')?.requestMethod;
+}
 
 function endpointOnly(value: string): string {
   try { const url = new URL(value); return url.pathname; }

@@ -25,6 +25,17 @@ describe('Jira AI and export boundary', () => {
     expect(buildJiraDraftPrompt(result)).not.toContain('Получить сведения CRIF');
     expect(() => normalizeJiraDraftInput({ ...input, source: { kind: 'freeform', description: ' ' } })).toThrow();
   });
+  it('requests the implementation template and passes the documented HTTP method', () => {
+    const normalized = normalizeJiraDraftInput({ ...input, method: { ...input.method, httpMethod: 'POST' } });
+    const prompt = buildJiraDraftPrompt(normalized);
+    expect(normalized.method.httpMethod).toBe('POST');
+    expect(prompt).toContain('[Adapter Name] Implement Method Name');
+    expect(prompt).toContain('[ASBT ADAPTER] Implement POST /v1/credit-info');
+    expect(prompt).toContain('[LOAN DOMAIN] Implement GET /v1/credit-info');
+    expect(prompt).toContain('The system analysis is complete.');
+    expect(prompt).toContain('The method is implemented.');
+    expect(prompt).toContain('Для исправлений, обновлений и прочих задач из свободного описания используй общий формат');
+  });
   it('whitelists input and rejects epics from another project', () => {
     expect(normalizeJiraDraftInput({ ...input, token: 'secret', baseUrl: 'https://secret.example', project: { ...input.project, token: 'secret' } })).toEqual(input);
     expect(() => normalizeJiraDraftInput({ ...input, epics: [{ key: 'DI-5', name: 'Other' }] })).toThrow('выбранному проекту');
@@ -35,8 +46,8 @@ describe('Jira AI and export boundary', () => {
     expect(normalizeJiraDraft(output, input)).toMatchObject({ rankedEpics: [{ key: 'IN-5', reason: 'Соответствует интеграции' }], labels: [{ key: 'business', reason: 'Задача бизнеса' }], priorityId: '' });
     expect(() => normalizeJiraDraft({ ...output, summary: 'Разработать CRIF' }, input)).toThrow('языки');
     expect(normalizeJiraDraft(output, input).descriptionUz).toBe(output.descriptionUz);
-    expect(() => normalizeJiraDraft({ ...output, descriptionUz: undefined }, input)).toThrow('узбекский перевод');
-    expect(() => normalizeJiraDraft({ ...output, descriptionUz: '   ' }, input)).toThrow('узбекский перевод');
+    expect(normalizeJiraDraft({ ...output, descriptionRu: undefined, descriptionEn: '', descriptionUz: '   ' }, input))
+      .toMatchObject({ descriptionRu: '', descriptionEn: '', descriptionUz: '' });
     expect(normalizeJiraDraft(output, input).labelsReason).toContain('Часть рекомендаций');
     expect(normalizeJiraDraft({ ...output, rankedEpics: [], labels: [], labelsReason: 'Не указан источник задачи.' }, { ...input, epics: [] })).toMatchObject({ rankedEpics: [], labels: [], labelsReason: 'Не указан источник задачи.' });
     expect(normalizeJiraDraft({ ...output, labels: [] }, input).labelsReason).toContain('нет рекомендаций тегов');

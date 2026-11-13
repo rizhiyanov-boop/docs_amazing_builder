@@ -66,6 +66,21 @@ function fixture(options = {}) {
   return { jira, store, fetchImpl, calls, connect, create, handle, saved: () => saved, postCount: () => postCount };
 }
 
+test('creates a Jira task with an empty description', async () => {
+  const f = fixture(); await f.connect();
+  await f.handle(f.jira, 'create', 'POST', { methodId: 'without-description', summary: 'Story', description: '', labels: ['business'] });
+  const post = f.calls.find(call => call.method === 'POST' && new URL(call.url).pathname.endsWith('/issue'));
+  assert.equal(JSON.parse(post.body).fields.description, '');
+});
+
+test('clears the description of an existing Jira task', async () => {
+  const f = editableFixture(); await f.connect();
+  const loaded = await f.load(f.jira);
+  const result = await f.handle(f.jira, 'update', 'POST', { ...f.body(loaded.issue), description: '' });
+  assert.equal(result.issue.description, '');
+  assert.deepEqual(JSON.parse(f.calls.find(call => call.method === 'PUT').body), { fields: { description: '' } });
+});
+
 test('unlink clears only the scoped journal and never calls Jira, including after restart', async () => {
   const f = fixture(); await f.connect();
   await f.handle(f.jira, 'create', 'POST', { methodId: 'method-1', summary: 'Story', description: 'Description', labels: ['business'] });

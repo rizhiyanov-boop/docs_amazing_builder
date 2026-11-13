@@ -9,6 +9,29 @@ import { asWorkspaceProjectData, normalizeMethodDocument } from './workspaceBoot
 import { sectionsForMethodTemplate } from './methodTemplates';
 
 describe('Confluence method import', () => {
+  it.each([true, false])('imports standard headers from a combined Request table (dividers: %s)', dividers => {
+    const page = templateImportPage();
+    const names = ['X-CLIENT-ID', 'X-USER-ID', 'X-SOURCE-SYSTEM', 'X-BP-ID', 'X-BP-NAME', 'traceparent'];
+    const headerRows = names.map(name => '<tr><td>' + name
+      + '</td><td>string</td><td>-</td><td>Example header</td><td></td><td>***</td></tr>').join('');
+    page.storage = page.storage!
+      .replace('<h4>Body</h4><table>', '<table>')
+      .replace('<tr><td>data.id</td>', (dividers ? '<tr><th colspan="6">Headers</th></tr>' : '')
+        + headerRows + (dividers ? '<tr><th colspan="6">Body</th></tr>' : '') + '<tr><td>data.id</td>');
+
+    const preview = prepareConfluenceImport(page, importTestOrigin);
+    if (!preview.ok) throw new Error(preview.reasons.join(', '));
+    const method = buildConfluenceImport(preview, {});
+    const request = method.sections.find(section => section.kind === 'parsed' && section.id === 'request');
+    if (request?.kind !== 'parsed') throw new Error('Expected Request');
+    for (const name of names) {
+      expect(request.rows.filter(row => row.field === name)).toEqual([
+        expect.objectContaining({ source: 'header', description: 'Example header', maskInLogs: true })
+      ]);
+    }
+    expect(request.rows).toContainEqual(expect.objectContaining({ field: 'data.id', source: 'body' }));
+  });
+
   it.each(['-', '–', '—'])('imports Client-only response fields when Server uses %s', marker => {
     const page = templateImportPage();
     page.storage = page.storage!.replace(

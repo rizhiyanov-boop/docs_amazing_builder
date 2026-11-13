@@ -169,7 +169,7 @@ function describeRow(headers: string[], cells: string[]) {
 
 function toContractRows(
   section: ParsedSection, table: ReturnType<typeof readStorageTable>, headers: string[], columns: (Column | undefined)[],
-  server: Column | undefined, client: Column, source: ParsedRow['source'], clientOnly: boolean
+  server: Column | undefined, client: Column, source: ParsedRow['source'], clientOnly: boolean, explicitSource: boolean
 ) {
   const notes: string[] = [];
   const extraKeys = new Set<Column>(['index', 'type', 'required', 'description', 'example', 'validations', 'mask', client]);
@@ -178,13 +178,30 @@ function toContractRows(
   const serverRows = new Map(section.rows.map(row => [keyOf(row), row]));
   const clientRows = new Map((section.clientRows ?? []).map(row => [keyOf(row), row]));
   const request = section.sectionType === 'request';
+  const fieldColumn = columns.indexOf(server ?? client);
+  let tableSource = source;
+  let hasDivider = false;
   table.grid.slice(1).forEach((cells, index) => {
     const values = valuesAt(cells);
     if (!values.some(Boolean)) return;
+    const divider = cells[fieldColumn];
+    if (request && !explicitSource && divider?.row === index + 1 && divider.width > 1
+      && divider.height === 1 && divider.column === 0 && divider.width === columns.length) {
+      const label = normalized(values[fieldColumn]);
+      if (['header', 'headers', 'заголовки', 'body', 'тело запроса', 'query', 'query parameters', 'параметры query'].includes(label)) {
+        tableSource = ['header', 'headers', 'заголовки'].includes(label) ? 'header'
+          : ['body', 'тело запроса'].includes(label) ? 'body' : 'query';
+        hasDivider = true;
+        return;
+      }
+    }
     const serverField = server ? valueFor(columns, values, server) : '';
     const clientField = valueFor(columns, values, client) || (clientOnly && server ? serverField : '');
     const onlyClient = clientOnly || (isEmptyContractField(serverField) && fieldValue(clientField));
     const field = onlyClient ? clientField : serverField;
+    const rowSource = request && !explicitSource && !hasDivider
+      && DEFAULT_REQUEST_HEADERS.some(header => header.field.toLowerCase() === field.toLowerCase())
+      ? 'header' : tableSource;
     const keyIndex = columns.indexOf(onlyClient && columns.includes(client) ? client : server ?? client);
     const keyCell = cells[keyIndex];
     const linkedField = !onlyClient && !isEmptyContractField(clientField) ? clientField : '';
@@ -193,10 +210,10 @@ function toContractRows(
     const target = onlyClient ? clientRows : serverRows;
     if (isEmptyContractField(field) || field.includes('\n') || !keyCell || keyCell.row !== index + 1 || keyCell.width > 1 || cells.length > columns.length
       || cells.some(cell => cell && cell.width > 1 && storageText(cell.element))
-      || target.has(source === 'header' ? field.toLowerCase() : field)) { fallback(); return; }
+      || target.has(rowSource === 'header' ? field.toLowerCase() : field)) { fallback(); return; }
     const mask = valueFor(columns, values, 'mask');
     const row: ParsedRow = {
-      field, sourceField: field, origin: 'manual', source,
+      field, sourceField: field, origin: 'manual', source: rowSource,
       type: valueFor(columns, values, 'type'),
       required: valueFor(columns, values, 'required'),
       validations: valueFor(columns, values, 'validations'),
@@ -205,16 +222,16 @@ function toContractRows(
       maskInLogs: ['***', '+', 'да', 'true'].includes(normalized(mask))
     };
     target.set(keyOf(row), row);
-    if (linkedField && source !== 'header' && fieldValue(linkedField)) {
+    if (linkedField && rowSource !== 'header' && fieldValue(linkedField)) {
       if (!clientRows.has(linkedField)) clientRows.set(linkedField, {
-        field: linkedField, sourceField: linkedField, origin: 'manual', type: '', required: '', description: '', example: '', source
+        field: linkedField, sourceField: linkedField, origin: 'manual', type: '', required: '', description: '', example: '', source: rowSource
       });
       section.clientMappings = Object.fromEntries([...Object.entries(section.clientMappings ?? {}), [getParsedRowKey(row), linkedField]]);
     }
     const extras = values.flatMap((text, i) => {
       const key = columns[i];
       const unmapped = !key || !extraKeys.has(key) || (key === 'required' && !request)
-        || (key === client && linkedField && (source === 'header' || !fieldValue(linkedField)))
+        || (key === client && linkedField && (rowSource === 'header' || !fieldValue(linkedField)))
         || (key === 'mask' && !['', '-', '***', '+', 'да', 'нет', 'true', 'false'].includes(normalized(mask)));
       return text && unmapped ? [(headers[i] || 'Колонка ' + (i + 1)) + ': ' + text] : [];
     });
@@ -393,7 +410,8 @@ export function prepareConfluenceImport(page: ConfluencePage, baseUrl: string, p
         const rowSource = isHeader ? 'header' : query ? 'query' : 'body';
         const correctRequestSource = kind !== 'request' || isHeader || (endpoint.method === 'GET') === query;
         if (correctRequestSource && (server || clientOnly) && (columns.includes('type') || isHeader) && !known.some(key => opposite.includes(key))) {
-          const notes = toContractRows(kind === 'request' ? request : response, table, headers, columns, server, clientRole, rowSource, clientOnly);
+          const notes = toContractRows(kind === 'request' ? request : response, table, headers, columns,
+            server, clientRole, rowSource, clientOnly, isHeader || isBody || isQuery);
           const headerNotes = headers.flatMap(header => header.includes('\n') ? [header] : []);
           if (notes.length || headerNotes.length) {
             extra(block, [...headerNotes, ...notes].join('\n\n'), (kind === 'request' ? 'Request' : 'Response') + ': примечания к таблице',
